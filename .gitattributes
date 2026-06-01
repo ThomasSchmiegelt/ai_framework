@@ -1,0 +1,35 @@
+# Zeilenenden normalisieren: Git speichert intern LF, checkt plattformgerecht aus.
+* text=auto
+
+# ── Windows-Skripte: MÜSSEN CRLF behalten (sonst brechen .bat-Labels/goto) ──
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# ── Unix-Shellskripte: LF ──
+*.sh   text eol=lf
+
+# ── Quellcode & Textdateien: LF im Repo ──
+*.py   text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.csv  text eol=lf
+
+# ── Binärdateien: niemals als Text behandeln/normalisieren ──
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.bmp  binary
+*.ico  binary
+*.pdf  binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.db   binary
+*.zip  binary

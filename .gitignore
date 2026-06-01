@@ -1,0 +1,48 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtuelle Umgebung
+venv/
+.venv/
+
+# Laufzeitdaten (lokal, nicht versionieren) – Wildcards, damit auch
+# umbenannte/alte Datenbanken & Logs niemals versehentlich committet werden.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.log
+data/uploads/*
+data/reports/*
+data/conversations/*
+data/code/*
+data/plans/*
+data/dossiers/*
+data/user_profile.json
+data/projects.json
+data/profile_assets/*
+
+# Verzeichnisstruktur erhalten (Inhalt ignoriert)
+!data/uploads/.gitkeep
+!data/reports/.gitkeep
+!data/code/.gitkeep
+!data/plans/.gitkeep
+!data/dossiers/.gitkeep
+!data/profile_assets/.gitkeep
+
+# Agenten (Standard-Vorlagen) werden versioniert -> NICHT ignorieren
+# data/agents/  bleibt eingecheckt
+
+# Laufzeit-/Dev-Artefakte
+/server.log
+/_test_*.py
+.claude/
+
+# Betriebssystem / Editor
+Thumbs.db
+.DS_Store
+*.tmp
+*~
+*.bak

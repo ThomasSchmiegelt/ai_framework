@@ -1,0 +1,1152 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🤖 AI_Framework_Thomas</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+
+  <!-- Marked.js für Markdown -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Highlight.js für Code -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/bash.min.js"></script>
+  <!-- Leaflet für OpenStreetMap-Routenanzeige -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- KaTeX für mathematische Formeln (Formelzeichen) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+  <link rel="stylesheet" href="/css/app.css?v=20260601" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+  <aside id="sidebar">
+    <div id="sidebar-brand">
+      <img src="/api/profile/asset/logo" alt="Logo" id="sidebar-logo"
+           onerror="this.style.display='none'" />
+      <span id="sidebar-wordmark">AI_Framework_Thomas</span>
+    </div>
+    <div id="sidebar-top">
+      <button id="btn-new-chat">＋ Neues Gespräch</button>
+    </div>
+
+    <div id="search-bar">
+      <input id="search-input" type="search" placeholder="🔍 Gespräche durchsuchen…" autocomplete="off" />
+    </div>
+
+    <!-- Projekt-Filter -->
+    <div id="project-filter-bar">
+      <select id="project-select" class="sidebar-select" title="Nach Projekt filtern">
+        <option value="">— Alle Projekte —</option>
+      </select>
+    </div>
+
+    <div id="conversations"></div>
+
+    <div id="sidebar-footer">
+      <div>
+        <div class="sidebar-label">Modell</div>
+        <select id="model-select" class="sidebar-select">
+          <option>Lade…</option>
+        </select>
+      </div>
+      <div>
+        <div class="sidebar-label">Agent</div>
+        <select id="agent-select" class="sidebar-select">
+          <option value="">— Kein Agent —</option>
+        </select>
+      </div>
+      <div>
+        <div class="sidebar-label">Aktuellen Chat Projekt zuordnen</div>
+        <select id="chat-project-select" class="sidebar-select">
+          <option value="">— Kein Projekt —</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button id="btn-manage-projects" class="btn-sidebar-action">📁 Projekte</button>
+        <button id="btn-agents" class="btn-sidebar-action">🤖 Agenten</button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button id="btn-import-conv" class="btn-sidebar-action" title="Gespräch importieren (JSON)">⬆ Gespräch</button>
+        <button id="btn-export-all-conv" class="btn-sidebar-action" title="Alle Gespräche exportieren (ZIP)">⬇ Gespräche</button>
+      </div>
+      <input type="file" id="conv-import-input" accept=".json" style="display:none" />
+      <div style="display:flex;gap:6px">
+        <button id="btn-backup-all" class="btn-sidebar-action" title="Alle Nutzerdaten exportieren (ZIP-Backup)">💾 Backup</button>
+        <button id="btn-restore-all" class="btn-sidebar-action" title="Nutzerdaten aus ZIP-Backup wiederherstellen">📥 Restore</button>
+      </div>
+      <input type="file" id="restore-input" accept=".zip" style="display:none" />
+      <button id="btn-profile" class="btn-sidebar-action" style="width:100%">👤 Profil bearbeiten</button>
+    </div>
+  </aside>
+
+  <!-- ── Hauptbereich ───────────────────────────────────────────────────── -->
+  <main id="main">
+
+    <!-- Tab-Leiste -->
+    <div id="tab-bar">
+      <button class="tab-btn active" data-tab="chat">💬 Chat</button>
+      <button class="tab-btn" data-tab="canvas">🖼️ Canvas</button>
+      <button class="tab-btn" data-tab="agents">🤖 Agenten</button>
+      <button class="tab-btn" data-tab="research">🔬 Recherche</button>
+      <button class="tab-btn" data-tab="rag">📚 RAG</button>
+      <button class="tab-btn" data-tab="docgen">📄 Dokumente</button>
+      <button class="tab-btn" data-tab="planner">🗂️ Planer</button>
+      <button class="tab-btn" data-tab="matrix">📊 Matrix</button>
+      <button class="tab-btn" data-tab="ide">💻 Code</button>
+      <button class="tab-btn" data-tab="logs">📋 Logs</button>
+    </div>
+
+    <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
+    <div id="chat-panel" class="panel active">
+
+      <!-- Nachrichten -->
+      <div id="messages">
+        <!-- Welcome-Screen -->
+        <div id="welcome">
+          <h2>🤖 AI_Framework_Thomas</h2>
+          <p>Dein lokaler KI-Assistent auf Basis von Ollama.<br/>
+             Stelle eine Frage, lade eine Datei hoch oder aktiviere die Websuche.</p>
+
+          <div class="suggestion-chips">
+            <div class="chip">🔍 Was ist der aktuelle Stand der E-Maschinen-Forschung?</div>
+            <div class="chip">📊 Erstelle eine Präsentation über FEM-Analyse</div>
+            <div class="chip">🧮 Berechne die Leistung: P = U × I mit U=400V, I=25A</div>
+            <div class="chip">📋 Erstelle eine Tabelle mit Motorkennwerten</div>
+            <div class="chip">📄 Analysiere ein hochgeladenes Dokument</div>
+            <div class="chip">⚙️ Erkläre den Unterschied zwischen FEM und CFD</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input-Bereich -->
+      <div id="input-area">
+        <div id="input-box">
+          <div id="file-preview-area"></div>
+
+          <textarea
+            id="message-input"
+            placeholder="Nachricht senden… (Enter = senden, Shift+Enter = neue Zeile)"
+            rows="1"
+          ></textarea>
+
+          <div id="input-toolbar">
+            <button id="btn-search-toggle" class="tool-toggle active" title="Websuche aktivieren/deaktivieren">
+              🔍 Websuche
+            </button>
+            <button id="btn-agent-presenter" class="tool-toggle" title="Präsentations-Agent aktivieren">
+              📊 Präsentation
+            </button>
+            <button id="btn-agent-coder" class="tool-toggle" title="Programmier-Agent aktivieren">
+              💻 Programmieren
+            </button>
+            <button id="btn-upload" class="tool-toggle" title="Datei anhängen (PDF, Bild, DOCX, XLSX…)">
+              📎 Datei
+            </button>
+            <button id="btn-rag-toggle" class="tool-toggle" title="Wissenssammlung (RAG) für die Antwort nutzen">
+              📚 RAG
+            </button>
+            <select id="rag-chat-select" class="sidebar-select" multiple size="1"
+              title="Sammlung(en) wählen" style="display:none;max-width:200px;height:32px"></select>
+
+            <!-- Export-Buttons (nur in Toolbar als kleine Optionen) -->
+            <button class="tool-toggle" id="btn-export-docx" title="Chat als Word exportieren">
+              📝 DOCX
+            </button>
+
+            <input type="file" id="file-input" style="display:none"
+              accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md,.py,.js,.json,.png,.jpg,.jpeg,.gif,.webp" multiple />
+
+            <button id="btn-send" title="Senden (Enter)">↑</button>
+          </div>
+        </div>
+
+        <div style="margin-top:6px;font-size:11.5px;color:var(--text-muted);text-align:center">
+          AI_Framework_Thomas · Lokal &amp; privat · Ctrl+K = Neues Gespräch
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Canvas-Panel ────────────────────────────────────────────────── -->
+    <div id="canvas-panel" class="panel">
+      <div id="canvas-toolbar">
+        <span id="canvas-title" style="color:var(--text-dim);font-size:13px">Kein Inhalt</span>
+
+        <div id="slide-nav" style="display:none">
+          <button class="nav-btn" id="btn-prev-slide" disabled>‹</button>
+          <span id="slide-counter" style="font-size:13px;color:var(--text-dim)">1 / 1</span>
+          <button class="nav-btn" id="btn-next-slide" disabled>›</button>
+        </div>
+
+        <button class="export-btn" id="btn-pres-assistant">🪄 Assistent</button>
+        <button class="export-btn" id="btn-illus-pres">🖼️ Bild-Präsentation</button>
+        <button class="export-btn" id="btn-export-pptx">📊 PPTX</button>
+        <button class="export-btn" id="btn-export-xlsx">📋 XLSX</button>
+      </div>
+
+      <div id="canvas-area" style="position:relative">
+        <canvas id="main-canvas"></canvas>
+      </div>
+
+      <!-- Präsentations-Assistent Seitenpanel -->
+      <div id="pres-assistant-panel" class="side-panel side-panel--wide" style="display:none">
+        <div class="side-panel-header">
+          <h3>🪄 Präsentations-Assistent</h3>
+          <button id="btn-pres-assistant-close">✕</button>
+        </div>
+        <!-- Konfigurationszeile -->
+        <div class="pres-config-row">
+          <input type="text" id="pres-name-input" placeholder="Präsentationstitel…" />
+          <select id="pres-theme-select">
+            <option value="dark">Dark</option>
+            <option value="blue">Blue</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+        <!-- Folientabelle -->
+        <div id="pres-table-container"></div>
+        <!-- Aktionsleiste -->
+        <div class="pres-action-bar">
+          <button id="btn-pres-add-slide" class="export-btn">＋ Folie</button>
+          <button id="btn-pres-generate" class="export-btn pres-generate-btn">▶ Erstellen</button>
+          <span id="pres-progress" style="display:none"></span>
+        </div>
+      </div>
+
+      <!-- Bebilderte Präsentation Seitenpanel -->
+      <div id="illus-pres-panel" class="side-panel side-panel--wide" style="display:none">
+        <div class="side-panel-header">
+          <h3>🖼️ Bebilderte Präsentation</h3>
+          <button id="btn-illus-close">✕</button>
+        </div>
+
+        <div class="pres-config-row">
+          <input type="text" id="illus-title" placeholder="Präsentationstitel…" />
+          <select id="illus-theme">
+            <option value="dark">Dark</option>
+            <option value="blue">Blue</option>
+            <option value="light">Light</option>
+          </select>
+        </div>
+
+        <label class="illus-label">Beschreibung der Präsentation</label>
+        <textarea id="illus-desc" rows="3"
+          placeholder="Worum geht es? (z.B. Aufbau elektrischer Maschinen – Rotor, Stator, Wicklungen). Daraus wird der Analyse-Experte abgeleitet."></textarea>
+
+        <div class="illus-row">
+          <button id="btn-illus-folder" class="export-btn">📁 Bilderordner wählen</button>
+          <span id="illus-folder-info" class="illus-muted">Kein Ordner gewählt</span>
+        </div>
+
+        <div class="illus-row">
+          <button id="btn-illus-persona" class="export-btn">🧠 Analyse-Experte ableiten</button>
+          <span id="illus-persona-name" class="illus-muted"></span>
+        </div>
+        <textarea id="illus-persona" rows="3"
+          placeholder="System-Prompt des Analyse-Experten (wird abgeleitet, hier editierbar)…"></textarea>
+
+        <div class="pres-action-bar">
+          <button id="btn-illus-generate" class="export-btn pres-generate-btn">▶ Präsentation erstellen</button>
+          <span id="illus-progress" style="display:none"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Agenten-Panel ──────────────────────────────────────────────── -->
+    <div id="agents-panel" class="panel">
+      <div id="agents-header">
+        <h2>🤖 Agenten</h2>
+        <button id="btn-new-agent">＋ Neuer Agent</button>
+      </div>
+
+      <p style="color:var(--text-dim);font-size:14px;max-width:600px;line-height:1.6">
+        Spezialisierte Assistenten mit eigenem System-Prompt, Modell und Tool-Auswahl.
+        In der Sidebar auswählen, um einen Agenten im Chat zu aktivieren.
+      </p>
+
+      <div id="agents-controls">
+        <input type="search" id="agents-search" placeholder="🔍 Agenten durchsuchen…" autocomplete="off" />
+        <div id="category-filter"></div>
+      </div>
+
+      <div id="agents-grid"></div>
+    </div>
+
+    <!-- ── Recherche-Panel ───────────────────────────────────────────────── -->
+    <div id="research-panel" class="panel">
+      <div id="research-config">
+        <div id="research-header-block">
+          <h2>🔬 Agentische Recherche</h2>
+          <p>Gib ein Thema und Aspekte ein. Für jeden Aspekt wird eine parallele Websuche gestartet – die KI fasst alle Ergebnisse in einem strukturierten Bericht zusammen.</p>
+        </div>
+
+        <div class="research-field">
+          <label>Thema</label>
+          <input type="text" id="research-topic" placeholder="z.B. Elektromotor, Wasserstoffantrieb, FEM-Analyse…" />
+        </div>
+
+        <div class="research-field">
+          <label>Aspekte <span class="label-hint">— Enter oder ＋ zum Hinzufügen</span></label>
+          <div id="aspect-tags-area">
+            <div id="aspect-tags"></div>
+            <div class="aspect-input-row">
+              <input type="text" id="aspect-input" placeholder="z.B. Physik, Kosten, Markt, KI …" />
+              <button id="btn-add-aspect">＋</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center">
+          <button id="btn-start-research">🔬 Recherche starten</button>
+          <button id="btn-reset-research" style="display:none">↺ Neue Recherche</button>
+          <button id="btn-research-export" class="export-btn" style="display:none">📄 Als Dokument</button>
+          <button id="btn-research-rag" class="export-btn" style="display:none">📚 In Wissensdatenbank</button>
+        </div>
+      </div>
+
+      <div id="research-output-area" style="display:none">
+        <div id="research-progress-list"></div>
+        <div id="research-report"></div>
+      </div>
+    </div>
+
+    <!-- ── RAG-Panel (Wissenssammlungen) ─────────────────────────────────── -->
+    <div id="rag-panel" class="panel">
+      <div id="rag-config">
+        <div id="research-header-block">
+          <h2>📚 Wissensdatenbanken (RAG)</h2>
+          <p>Lege Wissensdatenbanken an und lade Dokumente hoch. Im Chat aktivierst du den
+             📚-Umschalter und wählst eine Datenbank – passende Auszüge werden der Antwort
+             als Kontext vorangestellt. Embeddings: <span id="rag-embed-model">…</span>.</p>
+        </div>
+
+        <div class="research-field">
+          <label>Name der Wissensdatenbank</label>
+          <input type="text" id="rag-new-name" placeholder="z.B. Handbuch, Normen, Projektakte…" />
+        </div>
+
+        <div class="research-field" style="display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start">
+          <div>
+            <label>Suche: <span id="rag-speed-label" style="color:var(--accent)">ausgewogen</span></label>
+            <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted);margin-top:4px">
+              <span>schnell</span>
+              <input type="range" id="rag-speed" min="1" max="4" step="1" value="2" style="flex:1" />
+              <span>gründlich</span>
+            </div>
+            <div id="rag-speed-detail" class="planner-muted" style="font-size:11px;margin-top:4px"></div>
+          </div>
+          <div>
+            <label>Antwort: <span id="rag-strict-label" style="color:var(--accent)">ausgewogen</span></label>
+            <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted);margin-top:4px">
+              <span>kreativ</span>
+              <input type="range" id="rag-strict" min="1" max="3" step="1" value="2" style="flex:1" />
+              <span>korrekt</span>
+            </div>
+            <div id="rag-strict-detail" class="planner-muted" style="font-size:11px;margin-top:4px"></div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:14px;align-items:center;margin-top:8px">
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="rag-clean" checked /> Dokumente bereinigen
+          </label>
+          <button id="btn-rag-create"
+            style="background:var(--accent);color:#fff;border:none;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer">
+            📚 Wissensdatenbank anlegen
+          </button>
+        </div>
+      </div>
+
+      <!-- Gespräch in eine Sammlung übernehmen / verschieben -->
+      <div id="rag-from-chat" style="margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:8px">
+        <strong style="font-size:13px">💬 → 📚 Gespräch in Wissensdatenbank übernehmen</strong>
+        <div style="display:grid;grid-template-columns:1.3fr 1fr auto auto;gap:10px;align-items:end;margin-top:8px">
+          <div>
+            <label class="label-hint">Gespräch</label>
+            <select id="rag-conv-select" class="sidebar-select"></select>
+          </div>
+          <div>
+            <label class="label-hint">Ziel-Wissensdatenbank</label>
+            <select id="rag-target-select" class="sidebar-select"></select>
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px">
+            <input type="checkbox" id="rag-move-delete" /> Original danach löschen
+          </label>
+          <button id="btn-rag-from-chat" class="export-btn">übernehmen</button>
+        </div>
+      </div>
+
+      <div id="rag-collections-list" style="margin-top:18px"></div>
+      <input type="file" id="rag-file-input" style="display:none"
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md" multiple />
+    </div>
+
+    <!-- ── Dokumentengenerator-Panel ─────────────────────────────────────── -->
+    <div id="docgen-panel" class="panel">
+      <div id="research-config">
+        <div id="research-header-block">
+          <h2>📄 Dokumentengenerator</h2>
+          <p>Wähle einen <strong>Dokument-Agenten</strong> (im Tab 🤖 Agenten anlegen, Kategorie
+             „Dokumentation"), optional eine oder mehrere Wissensdatenbanken als Quelle, und
+             beschreibe das gewünschte Dokument (z. B. einen Antrag für ein Förderprogramm).</p>
+        </div>
+
+        <div class="research-field" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label>Dokument-Agent</label>
+            <select id="docgen-agent" class="sidebar-select"></select>
+          </div>
+          <div>
+            <label>Wissensdatenbank(en) als Quelle <span class="label-hint">— optional, Strg/Shift = mehrere</span></label>
+            <select id="docgen-rag" class="sidebar-select" multiple size="3"></select>
+          </div>
+        </div>
+
+        <div class="research-field">
+          <label>Auftrag — welches Dokument soll erstellt werden?</label>
+          <textarea id="docgen-brief" rows="4" placeholder="z. B. Erstelle einen Förderantrag für das Programm … auf Basis des Projekts. Gliederung: Zusammenfassung, Ausgangslage, Ziele, Arbeitspakete, Zeit- und Kostenplan, Wirkung."></textarea>
+        </div>
+
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <button id="btn-docgen-run">📄 Dokument erzeugen</button>
+          <button id="btn-docgen-export" class="export-btn" style="display:none">📝 Als DOCX</button>
+          <button id="btn-docgen-rag" class="export-btn" style="display:none">📚 In Wissensdatenbank</button>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px">
+            <input type="checkbox" id="docgen-science" /> quellengebunden (wissenschaftlich)
+          </label>
+          <span id="docgen-status" class="planner-muted" style="font-size:12px"></span>
+        </div>
+      </div>
+
+      <div id="docgen-output" style="margin-top:16px"></div>
+    </div>
+
+    <!-- ── Planer-Panel ──────────────────────────────────────────────────── -->
+    <div id="planner-panel" class="panel">
+      <div id="planner-toolbar">
+        <select id="planner-plan-select" class="sidebar-select" style="max-width:220px">
+          <option value="">— Plan laden —</option>
+        </select>
+        <button id="btn-new-plan" class="export-btn">＋ Neuer Plan</button>
+        <input type="text" id="planner-plan-name" placeholder="Planname…" style="flex:1;max-width:200px" class="sidebar-select" />
+        <button id="btn-save-plan" class="export-btn">💾 Speichern</button>
+        <button id="btn-delete-plan" class="export-btn btn-danger-sm" style="display:none">🗑</button>
+        <button id="btn-plan-export-csv" class="export-btn" style="font-size:12px">⬇ CSV</button>
+        <button id="btn-plan-import-csv" class="export-btn" style="font-size:12px">⬆ CSV</button>
+        <input type="file" id="plan-csv-input" accept=".csv" style="display:none" />
+        <select id="planner-model-select" class="sidebar-select" style="max-width:160px">
+          <option>Lade…</option>
+        </select>
+      </div>
+
+      <!-- Projektkontext + abgeleiteter Agent -->
+      <div id="planner-project-row">
+        <textarea id="planner-desc" rows="2"
+          placeholder="Projektbeschreibung & Ziel … daraus wird ein Projekt-Agent abgeleitet, der die KI-Vorschläge steuert"></textarea>
+        <div id="planner-project-actions">
+          <div class="planner-action-line">
+            <button id="btn-derive-agent" class="export-btn" style="font-size:12px">🧠 Projekt-Agent ableiten</button>
+            <button id="btn-generate-plan" class="export-btn" style="font-size:12px">🪄 KI-Projekt generieren</button>
+            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Gewünschte Aufgabenzahl. Große Pläne überfordern kleine lokale Modelle – dann ein größeres Modell verwenden.">
+              Aufgaben <input type="number" id="planner-task-count" min="5" max="200" value="12" class="sidebar-select" style="max-width:70px;font-size:12px" />
+            </label>
+          </div>
+          <div class="planner-action-line">
+            <select id="planner-res-mode" class="sidebar-select" style="max-width:170px;font-size:12px" title="Wie die KI mit dem Ressourcen-Katalog umgeht">
+              <option value="free">Ressourcen: frei</option>
+              <option value="extend">Katalog: erweitern (Zukauf)</option>
+              <option value="strict">Katalog: strikt</option>
+            </select>
+            <button id="btn-import-catalog" class="export-btn" style="font-size:12px" title="Ressourcen-Katalog (CSV: Typ;Name;Satz) importieren">📥 Katalog</button>
+            <input type="file" id="catalog-csv-input" accept=".csv" style="display:none" />
+            <button id="btn-export-resources" class="export-btn" style="font-size:12px" title="Verwendete Ressourcen als CSV exportieren">📤 Ressourcen</button>
+            <span id="planner-catalog-status" class="planner-muted"></span>
+            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Projektstart – legt fest, ab wann die Tage als Kalenderdaten gerechnet werden">
+              🗓 Start <input type="date" id="planner-start-date" class="sidebar-select" style="max-width:140px;font-size:12px" />
+            </label>
+            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Tage als Arbeitstage rechnen (Wochenenden überspringen)">
+              <input type="checkbox" id="planner-workdays" /> Arbeitstage
+            </label>
+          </div>
+          <span id="planner-warn" class="planner-warn"></span>
+          <span id="planner-agent-status" class="planner-muted"></span>
+          <span id="planner-rollup" class="planner-rollup"></span>
+        </div>
+      </div>
+
+      <div id="planner-main">
+        <!-- Linke Hälfte: Tabellen-Editor -->
+        <div id="planner-table-area">
+          <div id="planner-table-header">
+            <span>Aufgabenliste</span>
+            <button id="btn-add-task" class="export-btn" style="font-size:12px">＋ Aufgabe</button>
+            <button id="btn-recalc-cpm" class="export-btn" style="font-size:12px">⚙️ CPM</button>
+            <button id="btn-beautify" class="export-btn" style="font-size:12px" title="Verknüpfungen säubern, nach Ablaufreihenfolge sortieren und Netzplan neu zeichnen">✨ Mach schön</button>
+            <button id="btn-insert-between" class="export-btn" style="font-size:12px" title="Neuen Vorgang zwischen zwei Aufgaben einfügen – KI schlägt passende Tätigkeiten vor">➕ Dazwischen</button>
+            <button id="btn-schedule" class="export-btn" style="font-size:12px" title="Ressourcen-/Bestellplan: wann wird welche Ressource gebraucht und bis wann bestellt">📅 Bestellplan</button>
+            <button id="btn-research-all" class="export-btn" style="font-size:12px" title="Alle noch nicht recherchierten Tätigkeiten wissenschaftlich recherchieren → Dossiers ins Plan-RAG">🔬 Alle recherchieren</button>
+            <button id="btn-research-stop" class="export-btn" style="font-size:12px;display:none">⏹ Stop</button>
+            <progress id="planner-research-bar" max="100" value="0" style="display:none;width:140px;height:10px;vertical-align:middle"></progress>
+            <span id="planner-research-progress" class="planner-muted" style="font-size:11px"></span>
+          </div>
+          <div id="planner-table-scroll">
+            <table id="task-table">
+              <thead>
+                <tr>
+                  <th title="Ablaufreihenfolge (berechnet, unabhängig von der ID)">#</th>
+                  <th title="Eindeutige, stabile Aufgaben-ID – wird in Verknüpfungen verwendet">ID</th>
+                  <th>Name</th>
+                  <th>Dauer (d)</th>
+                  <th>Vorgänger</th>
+                  <th>Nachfolger</th>
+                  <th>Ressourcen / Kosten</th>
+                  <th>ES</th><th>EF</th><th>LS</th><th>LF</th><th>Puffer</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="task-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Rechte Hälfte: Netzplan-Canvas -->
+        <div id="planner-canvas-area">
+          <div id="planner-canvas-toolbar">
+            <span style="font-size:12px;color:var(--text-dim)">Netzplan</span>
+            <button id="btn-zoom-in" class="nav-btn">＋</button>
+            <button id="btn-zoom-out" class="nav-btn">−</button>
+            <button id="btn-zoom-fit" class="nav-btn" title="Einpassen">⊡</button>
+          </div>
+          <canvas id="planner-canvas"></canvas>
+        </div>
+      </div>
+
+      <!-- KI-Assistent für Planer -->
+      <div id="planner-ai-panel">
+        <div id="planner-ai-messages"></div>
+        <div id="planner-ai-input-row">
+          <textarea id="planner-ai-input" placeholder="KI-Frage: z.B. 'Welche Aufgaben fehlen?', 'Prüfe den Plan auf Konsistenz', 'Detailliere Aufgabe T2'…" rows="2"></textarea>
+          <button id="btn-planner-ai-send">↑</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Matrix-Recherche-Panel ────────────────────────────────────────── -->
+    <div id="matrix-panel" class="panel">
+      <div id="matrix-toolbar">
+        <h2 style="font-size:16px">📊 Tabellen-Recherche</h2>
+        <button id="btn-matrix-add-row" class="export-btn" style="font-size:12px">＋ Zeile</button>
+        <button id="btn-matrix-add-col" class="export-btn" style="font-size:12px">＋ Spalte</button>
+        <button id="btn-matrix-run-all" class="export-btn">▶ Alle ausführen</button>
+        <button id="btn-matrix-export" class="export-btn">📋 XLSX</button>
+        <button id="btn-matrix-export-csv" class="export-btn">⬇ CSV</button>
+        <button id="btn-matrix-rag" class="export-btn">📚 In Wissensdatenbank</button>
+        <button id="btn-matrix-import-csv" class="export-btn">⬆ CSV Import</button>
+        <input type="file" id="matrix-csv-input" accept=".csv" style="display:none" />
+        <button id="btn-matrix-clear" class="export-btn btn-danger-sm">✕ Leeren</button>
+        <select id="matrix-model-select" class="sidebar-select" style="max-width:160px">
+          <option>Lade…</option>
+        </select>
+      </div>
+      <div style="padding:8px 12px 4px;font-size:13px;color:var(--text-dim);display:flex;justify-content:space-between;align-items:center">
+        <span>Spalte 1 = Themen/Informationen · Kopfzeile ab Spalte 2 = Suchprompts · Zellen werden durch KI-Websuche befüllt</span>
+        <span id="matrix-autosave-label" style="font-size:11px;color:var(--text-muted);display:none">💾 Gespeichert</span>
+      </div>
+      <div id="matrix-table-wrap">
+        <table id="matrix-table">
+          <thead><tr id="matrix-header-row"></tr></thead>
+          <tbody id="matrix-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Code-Panel (IDE + JSON-Editor als Untertabs) ─────────────────── -->
+    <div id="ide-panel" class="panel">
+
+      <!-- Untertab-Leiste -->
+      <div id="code-subtabs">
+        <button class="code-subtab active" data-subtab="ide">💻 IDE</button>
+        <button class="code-subtab" data-subtab="json">🧩 JSON-Editor</button>
+      </div>
+
+      <!-- ── Untertab: IDE ── -->
+      <div id="code-view-ide" class="code-view active">
+
+      <!-- Obere Werkzeugleiste (für Entwickler) -->
+      <div id="ide-toolbar">
+        <button class="export-btn" id="btn-ide-new">＋ Neu</button>
+        <input type="text" id="ide-name" placeholder="Programmname…" autocomplete="off" />
+        <button class="export-btn" id="btn-ide-save">💾 Speichern</button>
+        <button class="export-btn ide-run-btn" id="btn-ide-run">▶ Ausführen</button>
+        <span class="ide-hint">Strg+Enter = Ausführen · Strg+S = Speichern</span>
+        <div id="ide-examples-group">
+          <span class="ide-hint">Beispiele:</span>
+          <button class="export-btn" id="btn-ide-example-toleranz">📐 Toleranzanalyse</button>
+          <button class="export-btn" id="btn-ide-example-kurve">📈 Federkennlinie</button>
+          <button class="export-btn" id="btn-ide-example-leer">📄 Leere Vorlage</button>
+        </div>
+      </div>
+
+      <!-- Hauptbereich: KI-Assistent links + Vorschau rechts -->
+      <div id="ide-body">
+
+        <!-- Linke Spalte: KI-Assistent (oben, prominent) + Editor (unten, für Fortgeschrittene) -->
+        <div id="ide-left">
+
+          <!-- ── KI-Assistent ── HAUPTEINSTIEG FÜR TECHNIKER ── -->
+          <div id="ide-ai-panel">
+            <div id="ide-ai-header">
+              <span id="ide-ai-title">🤖 KI-Assistent — Was soll das Programm zeigen?</span>
+              <span id="ide-chat-status"></span>
+            </div>
+            <div id="ide-chat-history"></div>
+            <div id="ide-ai-input-area">
+              <textarea id="ide-chat-input"
+                placeholder="Beschreiben Sie was das Programm tun soll — die KI schreibt den Code automatisch.
+
+Beispiele:
+• Zeige ein Balkendiagramm mit Zugfestigkeit für 4 Stähle
+• Erstelle eine Toleranzanalyse für 3 Bauteile
+• Zeichne ein Kraft-Weg-Diagramm mit Federkennlinie
+• Ändere die Farben auf Blau und mache den Titel größer"></textarea>
+              <button id="btn-ide-chat-send">
+                <span id="btn-ide-send-icon">▶</span>
+                <span id="btn-ide-send-label">Code erstellen</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Code-Editor (für Fortgeschrittene / Anpassungen) ── -->
+          <div id="ide-editor-panel">
+            <div id="ide-editor-bar">
+              <span style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Code-Editor</span>
+              <div id="ide-file-list-inline"></div>
+            </div>
+            <textarea id="ide-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"
+              placeholder="Der KI-generierte Code erscheint hier automatisch und kann manuell angepasst werden…"></textarea>
+          </div>
+        </div>
+
+        <!-- Rechte Spalte: Vorschau + Konsole -->
+        <div id="ide-right">
+          <div id="ide-preview-bar">
+            <span style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Vorschau</span>
+          </div>
+          <iframe id="ide-preview" sandbox="allow-scripts" title="Vorschau"></iframe>
+          <div id="ide-console-bar">
+            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Meldungen</span>
+            <div style="display:flex;gap:6px;align-items:center">
+              <button id="btn-ide-repair" style="display:none">🔧 Fehler automatisch beheben</button>
+              <button onclick="document.getElementById('ide-console').innerHTML='';document.getElementById('btn-ide-repair').style.display='none'" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:11px">✕</button>
+            </div>
+          </div>
+          <div id="ide-console"></div>
+        </div>
+      </div>
+      </div><!-- /code-view-ide -->
+
+      <!-- ── Untertab: JSON-Editor ─────────────────────────────────────── -->
+      <div id="code-view-json" class="code-view">
+        <div id="json-toolbar">
+          <button id="btn-json-open" class="export-btn">📂 Datei öffnen</button>
+          <input type="file" id="json-file-input" accept=".json,application/json" style="display:none" />
+          <span id="json-filename" class="planner-muted">Keine Datei</span>
+          <button id="btn-json-format" class="export-btn">✨ Formatieren</button>
+          <button id="btn-json-validate" class="export-btn">✓ Prüfen</button>
+          <button id="btn-json-download" class="export-btn">💾 Herunterladen</button>
+          <span id="json-status" class="json-status"></span>
+        </div>
+        <div style="padding:6px 14px;font-size:12px;color:var(--text-dim)">
+          JSON-Dateien öffnen, prüfen und reparieren. Fehler werden mit Zeile/Spalte angezeigt. Die korrigierte Datei lädst du wieder herunter.
+        </div>
+        <div id="json-editor-wrap">
+          <pre id="json-gutter" aria-hidden="true"></pre>
+          <textarea id="json-editor-area" spellcheck="false"
+            placeholder='{ "beispiel": true }  …  öffne eine Datei oder füge JSON ein'></textarea>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Diagnose-Log-Panel ───────────────────────────────────────────── -->
+    <div id="logs-panel" class="panel">
+
+      <div id="log-toolbar">
+        <button id="btn-log-toggle" class="export-btn">▶ Logging aktivieren</button>
+        <span id="log-status-dot" style="font-size:13px;color:var(--text-muted)">⏺ Inaktiv</span>
+        <button id="btn-log-reload" class="export-btn">↺ Aktualisieren</button>
+        <button id="btn-log-download" class="export-btn">⬇ Download</button>
+        <button id="btn-log-clear" class="export-btn btn-danger-sm">✕ Leeren</button>
+        <select id="log-filter-select" class="sidebar-select" style="max-width:140px">
+          <option value="all">Alle Typen</option>
+          <option value="chat">Chat</option>
+          <option value="tool">Tools</option>
+          <option value="export">Exports</option>
+          <option value="ide_run">IDE</option>
+          <option value="nav">Navigation</option>
+          <option value="error">Fehler</option>
+        </select>
+        <span id="log-count" style="font-size:12px;color:var(--text-muted)"></span>
+      </div>
+
+      <div style="padding:6px 14px 4px;font-size:12px;color:var(--text-dim)">
+        Protokolliert Chat-Anfragen, Tool-Aufrufe, Exports und Frontend-Ereignisse für Diagnose &amp; Verbesserung von AI_Framework_Thomas.
+      </div>
+
+      <div id="log-entries"></div>
+
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Modal (Agent bearbeiten / erstellen) ───────────────────────────────── -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h3 id="modal-title">Neuer Agent</h3>
+
+    <!-- Vorlagen (nur bei neuem Agent) -->
+    <div id="template-section">
+      <div class="form-group">
+        <label>Aus Vorlage starten <span class="label-hint">— optional, Felder werden befüllt</span></label>
+        <div id="template-chips"></div>
+      </div>
+      <div class="modal-divider"></div>
+    </div>
+
+    <!-- Name + Icon -->
+    <div style="display:grid;grid-template-columns:1fr 90px;gap:12px">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="field-agent-name" placeholder="z.B. Ingenieur-Assistent" />
+      </div>
+      <div class="form-group">
+        <label>Icon</label>
+        <input type="text" id="field-agent-icon" placeholder="🤖" style="text-align:center;font-size:22px" />
+      </div>
+    </div>
+
+    <!-- Beschreibung + Kategorie -->
+    <div style="display:grid;grid-template-columns:1fr 160px;gap:12px">
+      <div class="form-group">
+        <label>Beschreibung</label>
+        <input type="text" id="field-agent-desc" placeholder="Kurze Beschreibung des Agenten" />
+      </div>
+      <div class="form-group">
+        <label>Kategorie</label>
+        <select id="field-agent-category">
+          <option value="Sonstige">Sonstige</option>
+          <option value="Fertigung">Fertigung</option>
+          <option value="Qualität">Qualität</option>
+          <option value="Dokumentation">Dokumentation</option>
+          <option value="Kommunikation">Kommunikation</option>
+          <option value="Analyse">Analyse</option>
+          <option value="Recherche">Recherche</option>
+          <option value="Technik">Technik</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- KI-Prompt-Generator -->
+    <div class="form-group">
+      <label>KI-Assistent: Was soll der Agent tun?</label>
+      <textarea id="field-agent-task"
+        placeholder="Beschreibe kurz die Aufgabe des Agenten…&#10;z.B. 'Soll Wartungsprotokolle auf Vollständigkeit prüfen und Mängel benennen'"
+        style="min-height:72px"
+      ></textarea>
+      <button id="btn-generate-prompt" class="btn-generate">✨ System-Prompt automatisch generieren</button>
+    </div>
+
+    <!-- System-Prompt -->
+    <div class="form-group">
+      <label>System-Prompt <span class="label-hint">(automatisch befüllt oder manuell eingeben)</span></label>
+      <textarea id="field-agent-prompt"
+        placeholder="Du bist ein spezialisierter Assistent für…&#10;&#10;Antworte immer auf Deutsch."
+      ></textarea>
+    </div>
+
+    <!-- Modell -->
+    <div class="form-group">
+      <label>Modell <span class="label-hint">(leer = aktuell ausgewähltes)</span></label>
+      <input type="text" id="field-agent-model" placeholder="z.B. qwen3.6:27b oder leer lassen" />
+    </div>
+
+    <!-- Tools -->
+    <div class="form-group">
+      <label>Verfügbare Tools</label>
+      <div class="checkbox-group" id="field-agent-tools"></div>
+    </div>
+
+    <!-- JSON Copy/Paste -->
+    <div id="json-section" class="form-group" style="display:none">
+      <label>JSON <span class="label-hint">(zum Teilen per Copy-Paste)</span></label>
+      <textarea id="field-agent-json" readonly class="json-textarea"></textarea>
+      <button id="btn-copy-json" class="btn-generate" style="margin-top:6px">📋 JSON kopieren</button>
+    </div>
+    <button id="btn-toggle-json" class="btn-json-toggle" style="display:none">▶ JSON anzeigen</button>
+
+    <div class="modal-actions">
+      <button class="btn-danger" id="btn-delete-agent" style="display:none">🗑 Löschen</button>
+      <button class="btn-cancel" id="btn-modal-cancel">Abbrechen</button>
+      <button class="btn-save" id="btn-modal-save">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Profil-Modal ───────────────────────────────────────────────────────── -->
+<div id="profile-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base">
+    <h3>👤 Nutzerprofil</h3>
+
+    <div class="form-group" style="margin-top:14px;max-width:280px">
+      <label>🌐 Sprache / Language</label>
+      <select id="profile-lang" class="sidebar-select">
+        <option value="de">Deutsch</option>
+        <option value="en">Englisch</option>
+      </select>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+      <div class="form-group">
+        <label>Vorname</label>
+        <input type="text" id="profile-first-name" placeholder="Max" />
+      </div>
+      <div class="form-group">
+        <label>Nachname</label>
+        <input type="text" id="profile-last-name" placeholder="Mustermann" />
+      </div>
+      <div class="form-group">
+        <label>Firma</label>
+        <input type="text" id="profile-company" placeholder="Musterfirma GmbH" />
+      </div>
+      <div class="form-group">
+        <label>Abteilung</label>
+        <input type="text" id="profile-department" placeholder="Entwicklung" />
+      </div>
+      <div class="form-group">
+        <label>Position</label>
+        <input type="text" id="profile-position" placeholder="Ingenieur" />
+      </div>
+      <div class="form-group">
+        <label>Standard-Projekt</label>
+        <input type="text" id="profile-default-project" placeholder="P-2024-001" />
+      </div>
+      <div class="form-group">
+        <label>E-Mail</label>
+        <input type="email" id="profile-email" placeholder="max@firma.de" />
+      </div>
+      <div class="form-group">
+        <label>Telefon</label>
+        <input type="text" id="profile-phone" placeholder="+49 …" />
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <h4 style="margin-bottom:10px">🎨 Modus &amp; Branding</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>Modus (Fachausrichtung &amp; Farben)</label>
+        <select id="profile-mode" class="sidebar-select">
+          <option value="maschinenbau">🔧 Maschinenbau (Blau)</option>
+          <option value="ki">🤖 KI (Grün)</option>
+          <option value="soziales">🤝 Soziales (Braun)</option>
+          <option value="marketing">📣 Marketing (Rot)</option>
+          <option value="finanz">💰 Finanz (Grau)</option>
+          <option value="geschaeftsfuehrung">📈 Geschäftsführung (Gelb)</option>
+        </select>
+      </div>
+      <div class="form-group" style="align-self:end">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="profile-mode-prompt" checked />
+          Modus prägt die KI-Antworten
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-top:6px">
+          <input type="checkbox" id="profile-pure-llm" />
+          Keine Modi verwenden (LLM pur)
+        </label>
+      </div>
+      <div class="form-group">
+        <label>Antwortstil (Persona)</label>
+        <select id="profile-tone" class="sidebar-select">
+          <option value="">Neutral (Standard)</option>
+          <option value="roboter">🤖 Roboter (extrem sachlich)</option>
+          <option value="professor">🎓 Herr Professor (Sie, formell-distanziert)</option>
+          <option value="doktor">🩺 Frau Doktor (Sie, korrekt-distanziert)</option>
+          <option value="felix">😎 Felix (Du, kumpelhaft)</option>
+          <option value="sandra">😊 Sandra (Du, sehr korrekt & kumpelhaft)</option>
+        </select>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <h4 style="margin-bottom:10px">🧠 Modelle</h4>
+    <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
+      Standardmäßig läuft nur <strong>ministral-3:3b</strong>. Hier kannst du je Einsatzzweck ein
+      anderes installiertes Modell zuweisen – es wird bei Bedarf nachgeladen (jeweils nur eines aktiv).
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>Allgemein <span class="planner-muted" style="font-size:11px">Chat</span></label>
+        <select id="profile-model-general" class="sidebar-select"></select>
+      </div>
+      <div class="form-group">
+        <label>Programmieren <span class="planner-muted" style="font-size:11px">Code-IDE</span></label>
+        <select id="profile-model-coding" class="sidebar-select"></select>
+      </div>
+      <div class="form-group">
+        <label>Wissenschaftlich <span class="planner-muted" style="font-size:11px">Recherche</span></label>
+        <select id="profile-model-science" class="sidebar-select"></select>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <h4 style="margin-bottom:10px">🗜 Automatische Komprimierung</h4>
+    <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end">
+      <div class="form-group">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="profile-auto-compress" />
+          Aktiv
+        </label>
+      </div>
+      <div class="form-group">
+        <label>Überlauf ab <span class="planner-muted" style="font-size:11px">Zeichen</span></label>
+        <input type="number" id="profile-compress-overflow" min="2000" step="1000" placeholder="12000" />
+      </div>
+      <div class="form-group">
+        <label>Leerlauf nach <span class="planner-muted" style="font-size:11px">Minuten</span></label>
+        <input type="number" id="profile-compress-idle" min="1" step="1" placeholder="10" />
+      </div>
+    </div>
+    <p class="planner-muted" style="font-size:11.5px;margin:4px 0 0">
+      Lange Verläufe werden bei Überschreitung der Zeichenzahl bzw. nach Inaktivität
+      automatisch zusammengefasst (mit Hinweis). Komprimiert wird das gerade geöffnete Gespräch.
+    </p>
+
+    <p class="planner-muted" style="font-size:12px;margin:14px 0 4px">
+      Logo &amp; Vorlagenbilder (werden in Oberfläche, Folien und Dokumenten verwendet):
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>Logo<br><span class="planner-muted" style="font-size:11px">512×512 px · PNG transparent</span></label>
+        <img class="profile-asset-prev" id="prev-logo" alt="" />
+        <input type="file" id="file-logo" accept="image/*" />
+        <button class="export-btn profile-asset-del" data-kind="logo" style="font-size:11px">entfernen</button>
+      </div>
+      <div class="form-group">
+        <label>Vorlagen-Deckblatt<br><span class="planner-muted" style="font-size:11px">1920×1080 px · JPG</span></label>
+        <img class="profile-asset-prev" id="prev-cover" alt="" />
+        <input type="file" id="file-cover" accept="image/*" />
+        <button class="export-btn profile-asset-del" data-kind="cover" style="font-size:11px">entfernen</button>
+      </div>
+      <div class="form-group">
+        <label>Vorlagen-Kopfzeile<br><span class="planner-muted" style="font-size:11px">1920×240 px · PNG/JPG</span></label>
+        <img class="profile-asset-prev" id="prev-header" alt="" />
+        <input type="file" id="file-header" accept="image/*" />
+        <button class="export-btn profile-asset-del" data-kind="header" style="font-size:11px">entfernen</button>
+      </div>
+    </div>
+
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn-cancel" id="btn-profile-close">Abbrechen</button>
+      <button class="btn-save" id="btn-profile-save">💾 Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Projekt-Modal ──────────────────────────────────────────────────────── -->
+<div id="project-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base">
+    <h3>📁 Projekte verwalten</h3>
+    <div style="margin-top:12px">
+      <div style="display:grid;grid-template-columns:100px 1fr 1fr;gap:8px;margin-bottom:8px">
+        <input type="text" id="new-project-number" placeholder="Nr. (optional)" class="sidebar-select" style="font-size:13px;padding:7px 10px" />
+        <input type="text" id="new-project-name" placeholder="Projektname *" class="sidebar-select" style="font-size:13px;padding:7px 10px" />
+        <input type="text" id="new-project-desc" placeholder="Beschreibung" class="sidebar-select" style="font-size:13px;padding:7px 10px" />
+      </div>
+      <button id="btn-create-project" class="btn-save" style="font-size:13px;padding:7px 14px">＋ Projekt anlegen</button>
+    </div>
+    <div id="project-list" style="margin-top:14px;max-height:300px;overflow-y:auto"></div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn-cancel" id="btn-project-modal-close">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Ressourcen-Detail-Modal (Planer) ──────────────────────────────────── -->
+<div id="resource-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:720px">
+    <h3 id="resource-modal-title">🧰 Ressourcen</h3>
+    <p class="planner-muted" style="margin:4px 0 10px">
+      Typ, Name, Menge, Zeit (h), Kostensatz (€) und Lieferzeit (Tage Vorlauf für Bestellung).
+      Bei Hardware/Software ohne Zeit gilt der Satz pro Einheit.
+    </p>
+    <table id="resource-table">
+      <thead><tr>
+        <th>Typ</th><th>Name</th><th>Menge</th><th>Zeit (h)</th><th>Satz (€)</th>
+        <th title="Lieferzeit / Bestellvorlauf in Tagen">Lieferz. (d)</th><th>Summe (€)</th><th></th>
+      </tr></thead>
+      <tbody id="resource-tbody"></tbody>
+    </table>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <button id="btn-add-resource" class="export-btn" style="font-size:12px">＋ Ressource</button>
+      <span id="resource-rollup" class="planner-rollup"></span>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-resource-cancel">Abbrechen</button>
+      <button class="btn-save" id="btn-resource-save">💾 Übernehmen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Wissensdatenbank-Auswahl (wiederverwendbar) ───────────────────────── -->
+<div id="rag-pick-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:460px">
+    <h3>📚 In Wissensdatenbank übernehmen</h3>
+    <p class="planner-muted" id="rag-pick-info" style="margin:6px 0 10px"></p>
+    <div class="form-group">
+      <label>Zieldatenbank</label>
+      <select id="rag-pick-select" class="sidebar-select"></select>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-rag-pick-cancel">Abbrechen</button>
+      <button class="btn-save" id="btn-rag-pick-ok">Übernehmen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Plan-Dossier-Ansicht (Tätigkeits-Recherche) ───────────────────────── -->
+<div id="plan-doc-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:820px">
+    <h3 id="plan-doc-title">📄 Dossier</h3>
+    <div id="plan-doc-body" style="max-height:68vh;overflow-y:auto;margin-top:10px"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-plan-doc-close">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Vorschlags-Modal (Vorgänger/Nachfolger) ───────────────────────────── -->
+<div id="suggest-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:760px">
+    <h3 id="suggest-modal-title">✨ Vorschläge</h3>
+    <div id="suggest-modal-body" style="max-height:60vh;overflow-y:auto;margin-top:10px"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-suggest-cancel">Abbrechen</button>
+      <button class="btn-save" id="btn-suggest-apply">Auswahl übernehmen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Aufgabe-Detaillieren-Modal (Planer) ───────────────────────────────── -->
+<div id="detail-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:780px">
+    <h3 id="detail-modal-title">📝 Aufgabe detaillieren</h3>
+    <p class="planner-muted" style="margin:4px 0 8px">
+      KI-Vorschläge — wähle per Häkchen und bearbeite die Felder vor dem Übernehmen.
+    </p>
+    <div id="detail-modal-body" style="max-height:64vh;overflow-y:auto"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-detail-cancel">Abbrechen</button>
+      <button class="btn-save" id="btn-detail-apply">Übernehmen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Vorgang dazwischen einfügen (Planer) ──────────────────────────────── -->
+<div id="insert-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:760px">
+    <h3>➕ Vorgang zwischen zwei Aufgaben einfügen</h3>
+    <p class="planner-muted" style="margin:4px 0 10px">
+      Wähle Vorgänger (A) und Nachfolger (B). Die KI liest beide und schlägt passende Zwischenvorgänge vor.
+      Beim Übernehmen wird A → neu → B verdrahtet und eine direkte Kante A→B aufgelöst.
+    </p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <label class="planner-muted" style="font-size:12px">A (Vorgänger)
+        <select id="insert-sel-a" class="sidebar-select" style="max-width:220px"></select>
+      </label>
+      <span style="font-size:18px">→</span>
+      <label class="planner-muted" style="font-size:12px">B (Nachfolger)
+        <select id="insert-sel-b" class="sidebar-select" style="max-width:220px"></select>
+      </label>
+      <button id="btn-insert-fetch" class="export-btn" style="font-size:12px">✨ KI-Vorschläge holen</button>
+    </div>
+    <div id="insert-modal-body" style="max-height:50vh;overflow-y:auto"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-insert-cancel">Abbrechen</button>
+      <button class="btn-save" id="btn-insert-apply">Übernehmen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Aufgabe ersetzen (Planer) ─────────────────────────────────────────── -->
+<div id="replace-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:560px">
+    <h3 id="replace-modal-title">🔁 Aufgabe ersetzen</h3>
+    <div class="detail-section">
+      <div class="suggest-group-title">Durch bestehende Aufgabe ersetzen (z. B. T4 durch T10)</div>
+      <p class="planner-muted" style="margin:2px 0 6px;font-size:12px">
+        Die Verknüpfungen der ersetzten Aufgabe gehen auf die gewählte über; die ersetzte Aufgabe wird entfernt.
+      </p>
+      <select id="replace-sel-existing" class="sidebar-select" style="max-width:100%"></select>
+    </div>
+    <div class="detail-section">
+      <div class="suggest-group-title">oder durch neue Aufgabe ersetzen (Verknüpfungen bleiben)</div>
+      <label class="detail-field"><span>Name</span><input id="replace-new-name" /></label>
+      <label class="detail-field"><span>Dauer (Tage)</span><input id="replace-new-dur" type="number" min="0" /></label>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-replace-cancel">Abbrechen</button>
+      <button class="btn-save" id="btn-replace-apply">Übernehmen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Ressourcen-/Bestellplan (Planer) ──────────────────────────────────── -->
+<div id="schedule-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="max-width:860px">
+    <h3>📅 Ressourcen- &amp; Bestellplan</h3>
+    <p class="planner-muted" style="margin:4px 0 10px" id="schedule-hint">
+      Wann wird welche Ressource gebraucht (frühester Start der Aufgabe) und – bei hinterlegter Lieferzeit – bis wann sie bestellt sein muss.
+    </p>
+    <div id="schedule-modal-body" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" id="btn-schedule-close">Schließen</button>
+      <button class="btn-save" id="btn-schedule-export">⬇ Bestellplan CSV</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- Scripts (mit Versions-Stempel ?v= → erzwingt Neuladen nach Updates) -->
+<script src="/js/i18n.js?v=20260601"></script>
+<script src="/js/canvas.js?v=20260601"></script>
+<script src="/js/canvas_editor.js?v=20260601"></script>
+<script src="/js/agents.js?v=20260601"></script>
+<script src="/js/chat.js?v=20260601"></script>
+<script src="/js/research.js?v=20260601"></script>
+<script src="/js/rag.js?v=20260601"></script>
+<script src="/js/doc_generator.js?v=20260601"></script>
+<script src="/js/profile.js?v=20260601"></script>
+<script src="/js/projects.js?v=20260601"></script>
+<script src="/js/planner.js?v=20260601"></script>
+<script src="/js/matrix_research.js?v=20260601"></script>
+<script src="/js/presentation_assistant.js?v=20260601"></script>
+<script src="/js/illustrated_presentation.js?v=20260601"></script>
+<script src="/js/json_editor.js?v=20260601"></script>
+<script src="/js/logger.js?v=20260601"></script>
+<script src="/js/ide.js?v=20260601"></script>
+<script src="/js/app.js?v=20260601"></script>
+
+</body>
+</html>

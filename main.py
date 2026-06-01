@@ -1,0 +1,3792 @@
+﻿"""
+AI_Framework_Thomas — ChatGPT-ähnliches Interface für Ollama
+FastAPI-Backend mit agentic Tool-Loop und SSE-Streaming
+"""
+
+import asyncio
+import base64
+import io
+import json
+import re
+import sys
+import time
+import uuid
+from pathlib import Path
+from typing import List, Optional
+
+import aiofiles
+import httpx
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
+
+import db as _db
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+_CONFIG_FILE = Path("config.json")
+_CONFIG: dict = {}
+if _CONFIG_FILE.exists():
+    try:
+        _CONFIG = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+OLLAMA_BASE: str = _CONFIG.get("ollama_base", "http://localhost:11434")
+ALLOWED_MODELS: list[str] = _CONFIG.get("allowed_models", [])
+DEFAULT_MODEL: str = _CONFIG.get("default_model", "qwen3.6-16k:latest")
+
+
+# Platzhalter-Werte aus den Frontend-Selektoren (kein echtes Modell)
+_MODEL_PLACEHOLDERS = {
+    "Lade…", "Lade...", "Ollama nicht erreichbar", "Fehler beim Laden",
+    "qwen3.6-16k:latest",  # veralteter Default einiger Frontends
+}
+
+
+def _pick_model(m, fallback: Optional[str] = None) -> str:
+    """Wählt ein gültiges Modell: das angeforderte (jedes installierte Ollama-Modell
+    ist erlaubt), sonst den Fallback bzw. das Standardmodell. Verhindert 500er durch
+    Platzhalternamen (z.B. 'Lade…') aus dem Frontend-Selektor."""
+    m = (m or "").strip()
+    if m and m not in _MODEL_PLACEHOLDERS:
+        return m
+    return fallback or DEFAULT_MODEL
+
+DATA_DIR = Path(__file__).parent / "data"
+UPLOADS_DIR = DATA_DIR / "uploads"
+CONVERSATIONS_DIR = DATA_DIR / "conversations"
+AGENTS_DIR = DATA_DIR / "agents"
+REPORTS_DIR = DATA_DIR / "reports"
+PLANS_DIR = DATA_DIR / "plans"
+DOSSIERS_DIR = DATA_DIR / "dossiers"   # automatisch exportierte Planer-Recherche-Dossiers (.md)
+CODE_DIR = DATA_DIR / "code"
+BILDER_DIR = Path(__file__).parent / "bilder"
+PROFILE_FILE = DATA_DIR / "user_profile.json"
+PROFILE_ASSETS_DIR = DATA_DIR / "profile_assets"
+PROJECTS_FILE = DATA_DIR / "projects.json"
+LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
+
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, PROFILE_ASSETS_DIR]:
+    _d.mkdir(parents=True, exist_ok=True)
+
+# ── Modi (fachliche Ausrichtung) ──────────────────────────────────────────────
+# AI_Framework_Thomas kennt vier Modi; jeder prägt Farben (Frontend) und – wenn aktiv – die
+# fachliche Brille der KI (System-Prompt-Präfix).
+VALID_MODES = {"maschinenbau", "ki", "soziales", "marketing", "finanz", "geschaeftsfuehrung"}
+DEFAULT_MODE = "maschinenbau"
+_MODE_PROMPTS = {
+    "maschinenbau": (
+        "Fachlicher Kontext: Maschinenbau/Ingenieurwesen. Antworte technisch präzise "
+        "und normbewusst (z. B. VDI/DIN), mit Bezug zu Konstruktion, Werkstoffen, "
+        "Berechnung und Fertigung."
+    ),
+    "ki": (
+        "Fachlicher Kontext: Künstliche Intelligenz und Daten. Antworte mit Bezug zu "
+        "Machine Learning, Datenanalyse, lokalen LLMs, MLOps und praktischer Umsetzung."
+    ),
+    "soziales": (
+        "Fachlicher Kontext: Soziales/Gemeinwohl (Soziale Arbeit, Bildung, "
+        "gemeinnützige Organisationen). Antworte klar, empathisch und "
+        "adressatengerecht, mit Blick auf Wirkung und Teilhabe."
+    ),
+    "marketing": (
+        "Fachlicher Kontext: Marketing und Kommunikation. Antworte zielgruppen- und "
+        "wirkungsorientiert, mit Bezug zu Botschaft, Kanälen, Markenbild und Conversion."
+    ),
+    "finanz": (
+        "Fachlicher Kontext: Finanzen und Controlling. Antworte mit Bezug zu "
+        "Kennzahlen, Budgetierung, Wirtschaftlichkeit, Liquidität und Risiko. "
+        "Sei nüchtern, zahlenorientiert und nachvollziehbar."
+    ),
+    "geschaeftsfuehrung": (
+        "Fachlicher Kontext: Geschäftsführung und Management. Antworte strategisch, "
+        "entscheidungsorientiert und prägnant, mit Blick auf Ziele, Chancen/Risiken "
+        "und unternehmerische Wirkung."
+    ),
+}
+
+# ── Antwortstil-Personas (per Profil wählbar) ────────────────────────────────
+VALID_TONES = {"roboter", "professor", "doktor", "felix", "sandra"}
+_TONE_PROMPTS = {
+    "roboter": (
+        "Antwortstil »Roboter«: Extrem sachlich und nüchtern. Keine Höflichkeitsfloskeln, "
+        "keine persönliche Anrede, keine Emotionen. Nur Fakten – knapp, präzise und neutral."
+    ),
+    "professor": (
+        "Antwortstil »Herr Professor«: Sprich den Nutzer durchgehend mit »Sie« an. "
+        "Sehr korrekt, formell und distanziert, im souveränen Duktus eines Professors. "
+        "Gewählte, präzise Fachsprache, respektvoll und sachlich."
+    ),
+    "doktor": (
+        "Antwortstil »Frau Doktor«: Sprich den Nutzer durchgehend mit »Sie« an. "
+        "Korrekt, höflich und sachlich-distanziert, professionell und klar verständlich."
+    ),
+    "felix": (
+        "Antwortstil »Felix«: Sprich den Nutzer durchgehend mit »Du« an. Locker und "
+        "kumpelhaft, aber fachlich korrekt. Freundlich, direkt und unkompliziert."
+    ),
+    "sandra": (
+        "Antwortstil »Sandra«: Sprich den Nutzer durchgehend mit »Du« an. Herzlich und "
+        "kumpelhaft, dabei sehr korrekt und sorgfältig. Nahbar, freundlich und genau."
+    ),
+}
+
+_log_active: bool = False
+_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB Rotation
+
+
+def _write_log(entry: dict) -> None:
+    if not _log_active:
+        return
+    try:
+        if LOG_FILE.exists() and LOG_FILE.stat().st_size > _LOG_MAX_BYTES:
+            LOG_FILE.rename(LOG_FILE.with_suffix(".1.log"))
+        with open(LOG_FILE, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": time.time(), **entry}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# ── VRAM-Schutz: nur EIN Modell gleichzeitig im Speicher (6-GB-Grenze) ────────
+# Wechselt der Nutzer zwischen Modellen (z.B. Allgemein- vs. Programmier-Rolle aus
+# dem Profil), wird das vorherige Modell zuerst aus dem VRAM entladen, bevor das neue lädt.
+# Der Lock serialisiert zugleich alle Ollama-Generierungen, sodass nie zwei
+# Modelle parallel geladen werden.
+import contextlib as _contextlib
+
+_model_lock = asyncio.Lock()
+_loaded_model: Optional[str] = None
+
+
+async def _unload_model(name: str) -> None:
+    """Entlädt ein Modell sofort aus dem VRAM (Ollama keep_alive=0)."""
+    if not name:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            await client.post(
+                f"{OLLAMA_BASE}/api/generate",
+                json={"model": name, "keep_alive": 0},
+            )
+    except Exception:
+        pass
+
+
+@_contextlib.asynccontextmanager
+async def _model_session(model: str):
+    """Hält den Modell-Lock für die Dauer einer Ollama-Generierung und stellt
+    sicher, dass nur ein Modell im VRAM liegt. Beim Modellwechsel wird das
+    zuvor geladene Modell zuerst entladen."""
+    global _loaded_model
+    async with _model_lock:
+        if _loaded_model and _loaded_model != model:
+            await _unload_model(_loaded_model)
+        _loaded_model = model
+        yield
+
+
+def _to_slug(name: str, max_len: int = 40) -> str:
+    """Erstellt einen sicheren, lesbaren Dateinamen aus einem beliebigen Namen."""
+    import re as _re
+    s = name.lower().strip()
+    s = s.translate(str.maketrans({'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss', 'Ä': 'ae', 'Ö': 'oe', 'Ü': 'ue'}))
+    s = _re.sub(r'[^a-z0-9]+', '_', s)
+    s = s.strip('_')[:max_len]
+    return s or 'datei'
+
+
+def _unique_agent_path(name: str, exclude_id: str = "") -> Path:
+    """Gibt einen eindeutigen Dateipfad für einen Agenten zurück."""
+    slug = _to_slug(name)
+    candidate = AGENTS_DIR / f"{slug}.json"
+    if not candidate.exists():
+        return candidate
+    # Prüfen ob die existierende Datei vom selben Agenten stammt
+    if exclude_id:
+        try:
+            existing = json.loads(candidate.read_text(encoding="utf-8"))
+            if existing.get("id") == exclude_id:
+                return candidate
+        except Exception:
+            pass
+    # Kollision → Nummer anhängen
+    for i in range(2, 999):
+        candidate = AGENTS_DIR / f"{slug}_{i}.json"
+        if not candidate.exists():
+            return candidate
+    return AGENTS_DIR / f"{slug}_{uuid.uuid4().hex[:4]}.json"
+
+
+def _agent_path_by_id(aid: str) -> Optional[Path]:
+    """Findet die Datei eines Agenten anhand seiner ID (unabhängig vom Dateinamen)."""
+    for fp in AGENTS_DIR.glob("*.json"):
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+            if data.get("id") == aid:
+                return fp
+        except Exception:
+            pass
+    # Fallback: alte ID-basierte Benennung
+    legacy = AGENTS_DIR / f"{aid}.json"
+    return legacy if legacy.exists() else None
+
+
+def _load_profile() -> dict:
+    if PROFILE_FILE.exists():
+        try:
+            return json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _active_mode() -> str:
+    """Aktiver Modus aus dem Profil (Fallback DEFAULT_MODE)."""
+    m = str(_load_profile().get("mode", "") or "").lower().strip()
+    return m if m in VALID_MODES else DEFAULT_MODE
+
+
+# Drei Modell-Rollen im Profil: Allgemein / Programmieren / Wissenschaftlich.
+# Jede Rolle kann ein eigenes (bei Bedarf nachgeladenes) LLM zugewiesen bekommen;
+# leer → Standardmodell (ministral-3:3b).
+_MODEL_ROLES = {
+    "general": "model_general",
+    "coding":  "model_coding",
+    "science": "model_science",
+}
+
+
+def _model_for(role: str) -> str:
+    """Das im Profil der Rolle zugewiesene Modell, sonst das Standardmodell."""
+    key = _MODEL_ROLES.get(role)
+    val = str(_load_profile().get(key, "") or "").strip() if key else ""
+    return val or DEFAULT_MODEL
+
+
+# Immer aktive Grundregel gegen Halluzinationen (unabhängig vom Modus)
+_BASE_GUARD = (
+    "Erfinde niemals Fakten, Zahlen, Normen (z. B. DIN/VDI), Quellen oder technische "
+    "Daten. Stütze dich ausschließlich auf gesichertes Wissen und auf die Ergebnisse "
+    "aufgerufener Tools. Fehlt dir eine Information, sage das offen – rate nicht."
+)
+
+# Formeln/Gleichungen als LaTeX mit Formelzeichen ausgeben (im Frontend gerendert)
+_FORMULA_RULE = (
+    "Gib Berechnungen und Gleichungen als LaTeX-Formeln mit den üblichen Formelzeichen "
+    "aus – inline mit $…$ und abgesetzt mit $$…$$ (z. B. $\\sigma = \\dfrac{F}{A}$). "
+    "Benenne die verwendeten Formelzeichen kurz mit Einheit und setze konkrete Werte "
+    "ein, statt nur Zahlen ohne Symbole zu schreiben."
+)
+
+# Zitate von Normen/Gesetzen/Quellen als Link (Detail-URLs ergänzt die App selbst)
+_CITATION_RULE = (
+    "Wenn du eine Norm (DIN/EN/ISO/IEC/VDI/VDE), einen Gesetzes- oder Paragrafenverweis "
+    "(z. B. § 433 BGB) oder die Quelle einer Formel nennst, benenne sie eindeutig "
+    "(Bezeichnung samt Nummer). Erfinde keine URLs – die Anwendung verlinkt erkannte "
+    "Norm- und Gesetzesangaben automatisch auf maßgebliche Quellen."
+)
+
+
+# Wissenschaftsmodus – fest für Recherche/Matrix/Planer-Recherche (Korrektheit zuerst)
+_SCIENCE_PROMPT = (
+    "WISSENSCHAFTSMODUS – höchste Sorgfalt und Korrektheit. Stütze JEDE Aussage auf die "
+    "vorliegenden Quellen bzw. Suchergebnisse und kennzeichne Unsicherheiten ausdrücklich. "
+    "Unterscheide klar zwischen gesicherten Fakten, herrschender Meinung und Annahmen. "
+    "Erfinde nichts und gib keine Behauptung ohne Beleg wieder. Nenne Quellen mit Titel und "
+    "Link. Bei Normen/Gesetzen die genaue Bezeichnung angeben. Strukturiere sachlich "
+    "(Überblick, Befunde mit Belegen, offene Fragen)."
+)
+
+
+_LANG_RULE_EN = (
+    "Always respond in English, regardless of the language of the question, "
+    "unless the user explicitly asks for a reply in another language."
+)
+
+
+def _lang_rule() -> str:
+    """Sprachanweisung für die Antwort, abhängig von der Profil-Sprache.
+    Leer für Deutsch (Standardverhalten der Modelle)."""
+    if str(_load_profile().get("lang", "de")).lower().strip() == "en":
+        return _LANG_RULE_EN
+    return ""
+
+
+def _augment_prefix(user_text: str = "") -> str:
+    """Baut den automatischen System-Prompt-Vorspann (Grundregel, Modus-Brille,
+    Persona/Profil, Formel- und Zitatregeln). Bei „LLM pur" (keine Modi) entfällt
+    alles bis auf die Sprachregel – die gewählte Antwortsprache gilt immer."""
+    if _load_profile().get("pure_llm"):
+        return _lang_rule()
+    parts = [_BASE_GUARD, _mode_prefix(user_text), _persona_prefix(),
+             _FORMULA_RULE, _CITATION_RULE, _lang_rule()]
+    return "\n\n".join(p for p in parts if p)
+
+# Stichwörter je Modus: Die Fachbrille wird nur angewandt, wenn die aktuelle
+# Frage thematisch dazu passt (siehe _mode_prefix). So bekommt z. B. eine
+# Routenfrage im Maschinenbau-Modus keine erzwungenen VDI/DIN-Bezüge.
+_MODE_KEYWORDS = {
+    "maschinenbau": [
+        "schraube", "schrauben", "welle", "lager", "getriebe", "konstruktion",
+        "fertigung", "werkstoff", "stahl", "aluminium", "titan", "festigkeit",
+        "spannung", "biegung", "torsion", "drehmoment", "belastung", "toleranz",
+        "passung", "bauteil", "maschine", "antrieb", "zahnrad", "feder", "niet",
+        "schweißen", "fräsen", "drehen", "bohren", "statik", "dynamik",
+        "kinematik", "ingenieur", "vdi", "din", "iso", "cad", "kn", "mpa", "nm",
+    ],
+    "ki": [
+        "ki", "künstliche intelligenz", "machine learning", "ml", "deep learning",
+        "neuronales netz", "neuronale", "llm", "training", "trainieren",
+        "datensatz", "klassifikation", "regression", "feature", "embedding",
+        "transformer", "datenanalyse", "mlops", "algorithmus", "overfitting",
+        "tensor", "gradient", "modell",
+    ],
+    "soziales": [
+        "sozial", "soziale arbeit", "betreuung", "klient", "jugend", "senioren",
+        "pflege", "bildung", "teilhabe", "inklusion", "gemeinwohl", "ehrenamt",
+        "beratung", "förderung", "integration", "gemeinnützig", "träger", "kita",
+    ],
+    "marketing": [
+        "marketing", "kampagne", "zielgruppe", "marke", "branding", "conversion",
+        "social media", "content", "seo", "werbung", "anzeige", "positionierung",
+        "botschaft", "reichweite", "funnel", "newsletter", "slogan", "kanal",
+    ],
+    "finanz": [
+        "budget", "kosten", "umsatz", "gewinn", "marge", "liquidität", "cashflow",
+        "bilanz", "controlling", "kennzahl", "roi", "rendite", "investition",
+        "finanzierung", "kredit", "zins", "abschreibung", "kalkulation", "ebit",
+        "rentabilität", "steuer", "buchhaltung", "euro",
+    ],
+    "geschaeftsfuehrung": [
+        "strategie", "geschäftsmodell", "vision", "kpi", "management", "führung",
+        "entscheidung", "wettbewerb", "wachstum", "stakeholder", "roadmap", "swot",
+        "geschäftsführung", "unternehmen", "expansion", "marktanteil",
+    ],
+}
+
+
+def _mode_matches(text: str, mode: str) -> bool:
+    """True, wenn der Text ein Stichwort des Modus als ganzes Wort enthält."""
+    import re
+    kws = _MODE_KEYWORDS.get(mode, [])
+    t = (text or "").lower()
+    return any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in kws)
+
+
+def _mode_prefix(user_text: str = "") -> str:
+    """System-Prompt-Präfix für den aktiven Modus.
+
+    Leer, wenn der Modus abgeschaltet ist oder – sofern ein ``user_text``
+    übergeben wird – die Frage thematisch nicht zum Modus passt (frageabhängige
+    Fachbrille). Ohne ``user_text`` wird der Modus immer angewandt."""
+    prof = _load_profile()
+    if prof.get("mode_prompt") is False:   # ausdrücklich abgeschaltet
+        return ""
+    mode = _active_mode()
+    mp = _MODE_PROMPTS.get(mode, "")
+    if not mp:
+        return ""
+    if user_text and not _mode_matches(user_text, mode):
+        return ""
+    return mp
+
+
+def _tone_prompt() -> str:
+    """Antwortstil-Präfix für die im Profil gewählte Persona (leer = neutral)."""
+    t = str(_load_profile().get("tone", "") or "").lower().strip()
+    return _TONE_PROMPTS.get(t, "")
+
+
+def _profile_context() -> str:
+    """Beschreibt den Nutzer für passende Anrede und Kontext (Name, Position,
+    Abteilung, Firma) – u. a. für Recherche und Präsentationen. Leer, wenn das
+    Profil keine verwertbaren Angaben enthält."""
+    p = _load_profile()
+    name = " ".join(x for x in (
+        str(p.get("first_name", "")).strip(), str(p.get("last_name", "")).strip()) if x)
+    role = ", ".join(x for x in (
+        str(p.get("position", "")).strip(), str(p.get("department", "")).strip()) if x)
+    company = str(p.get("company", "")).strip()
+    facts = []
+    if name:
+        facts.append(f"Name: {name}")
+    if role:
+        facts.append(f"Funktion: {role}")
+    if company:
+        facts.append(f"Organisation: {company}")
+    if not facts:
+        return ""
+    return (
+        "Angaben zum Nutzer (für persönliche Anrede sowie als Kontext bei Recherche "
+        "und Präsentationen) – " + "; ".join(facts) + "."
+    )
+
+
+def _persona_prefix() -> str:
+    """Kombiniert Profil-Kontext und Antwortstil zu einem System-Prompt-Präfix."""
+    return "\n\n".join(p for p in (_profile_context(), _tone_prompt()) if p)
+
+
+def _load_projects() -> list:
+    if PROJECTS_FILE.exists():
+        try:
+            return json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return []
+
+app = FastAPI(title="AI_Framework_Thomas")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+async def _startup():
+    await _db.init()
+    await _db.migrate_json(CONVERSATIONS_DIR)
+
+# ── Tool-Definitionen für Ollama ──────────────────────────────────────────────
+
+TOOL_DEFS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Sucht im Internet nach aktuellen Informationen, Fakten, News oder technischen Inhalten. "
+                "Verwende dieses Tool immer, wenn aktuelle oder unbekannte Informationen benötigt werden."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Die Suchanfrage"},
+                    "num_results": {"type": "integer", "default": 6, "description": "Anzahl Ergebnisse"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": (
+                "Führt Python-Code für Berechnungen aus. Gibt numerische Ergebnisse, Statistiken "
+                "oder Tabellen aus. Nutze print() für Ausgaben. math und numpy sind verfügbar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Auszuführender Python-Code"}
+                },
+                "required": ["code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_presentation",
+            "description": (
+                "Erstellt eine Präsentation mit mehreren Folien. "
+                "Die Folien werden auf dem HTML5-Canvas gerendert und können als PPTX exportiert werden."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "theme": {
+                        "type": "string",
+                        "enum": ["dark", "blue", "light", "green"],
+                        "default": "dark",
+                    },
+                    "slides": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "layout": {
+                                    "type": "string",
+                                    "enum": ["title", "bullets", "two-column", "section", "blank"],
+                                },
+                                "title": {"type": "string"},
+                                "content": {"type": "string"},
+                                "bullets": {"type": "array", "items": {"type": "string"}},
+                                "left": {"type": "string"},
+                                "right": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+                "required": ["title", "slides"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "unit_convert",
+            "description": (
+                "Rechnet physikalische Einheiten um. Unterstützt Länge, Masse, Kraft, Druck, "
+                "Energie, Temperatur, Drehmoment, Leistung, Fläche, Volumen und mehr."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "value": {"type": "number", "description": "Zahlenwert"},
+                    "from_unit": {"type": "string", "description": "Quelleinheit (z.B. 'MPa', 'kN', 'inch', 'lbf')"},
+                    "to_unit": {"type": "string", "description": "Zieleinheit (z.B. 'Pa', 'N', 'mm', 'N')"},
+                },
+                "required": ["value", "from_unit", "to_unit"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "solve_equation",
+            "description": (
+                "Löst algebraische Gleichungen oder Gleichungssysteme symbolisch. "
+                "Gibt exakte und numerische Lösungen zurück. Beispiel: '2*x**2 + 3*x - 5 = 0'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Gleichung als String, z.B. 'x**2 - 4 = 0' oder 'sin(x) - 0.5'"
+                    },
+                    "variable": {
+                        "type": "string",
+                        "default": "x",
+                        "description": "Variable nach der aufgelöst wird"
+                    },
+                },
+                "required": ["expression"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plot_chart",
+            "description": (
+                "Erstellt ein 2D-Diagramm (Linien-, Balken- oder Streudiagramm) und zeigt es direkt an. "
+                "Ideal für Kraft-Weg-Kurven, Spannungs-Dehnungs-Diagramme, Kennlinien etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x_data": {"type": "array", "items": {"type": "number"}, "description": "X-Werte"},
+                    "y_data": {"type": "array", "items": {"type": "number"}, "description": "Y-Werte (Hauptreihe)"},
+                    "title": {"type": "string", "description": "Diagrammtitel"},
+                    "x_label": {"type": "string", "description": "Bezeichnung X-Achse"},
+                    "y_label": {"type": "string", "description": "Bezeichnung Y-Achse"},
+                    "chart_type": {
+                        "type": "string",
+                        "enum": ["line", "bar", "scatter"],
+                        "default": "line",
+                    },
+                    "series_label": {"type": "string", "description": "Legende Hauptreihe"},
+                    "y2_data": {"type": "array", "items": {"type": "number"}, "description": "Optional: zweite Y-Reihe (gestrichelt)"},
+                    "y2_label": {"type": "string", "description": "Legende zweite Reihe"},
+                },
+                "required": ["x_data", "y_data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "material_lookup",
+            "description": (
+                "Sucht Werkstoffeigenschaften in der integrierten Datenbank: E-Modul, Streckgrenze, "
+                "Zugfestigkeit, Dichte, Wärmeausdehnung etc. Unterstützt Stähle, Alu, Titan, "
+                "Gusseisen, Kunststoffe, NE-Metalle."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Werkstoffbezeichnung, z.B. 'S355', '42CrMo4', '1.4301', 'AlMg3', 'PEEK'"
+                    },
+                    "prop": {
+                        "type": "string",
+                        "description": "Optionale spezifische Eigenschaft, z.B. 'E_GPa', 'Rm_MPa', 'density'"
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bolt_calculator",
+            "description": (
+                "Schraubenauslegung nach VDI 2230 (vereinfacht): berechnet Spannungsquerschnitt, "
+                "Zugspannung, Vergleichsspannung, Anzugsmoment und Auslastung."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "d_nom": {"type": "number", "description": "Nenndurchmesser [mm], z.B. 12 für M12"},
+                    "pitch": {"type": "number", "description": "Gewindesteigung [mm], z.B. 1.75 für M12"},
+                    "f_axial": {"type": "number", "description": "Axialkraft / Betriebskraft [kN]"},
+                    "mu": {"type": "number", "default": 0.15, "description": "Reibungszahl (Standard: 0,15)"},
+                    "material_class": {
+                        "type": "string",
+                        "enum": ["4.6", "5.6", "6.8", "8.8", "10.9", "12.9"],
+                        "default": "8.8",
+                        "description": "Festigkeitsklasse der Schraube",
+                    },
+                    "f_transverse": {"type": "number", "default": 0, "description": "Querkraft [kN] (optional)"},
+                },
+                "required": ["d_nom", "pitch", "f_axial"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_report",
+            "description": (
+                "Erstellt einen formatierten Ingenieurbericht als PDF (LaTeX) oder DOCX. "
+                "Enthält Titelseite, Inhaltsverzeichnis, Abschnitte mit Text, Gleichungen und Tabellen. "
+                "Gibt einen Download-Link zurück."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Berichtstitel"},
+                    "author": {"type": "string", "description": "Autor (optional)"},
+                    "sections": {
+                        "type": "array",
+                        "description": "Abschnitte des Berichts",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "heading": {"type": "string"},
+                                "content": {"type": "string", "description": "Fließtext (Absätze mit Leerzeile trennen)"},
+                                "equations": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "LaTeX-Gleichungen (ohne $), z.B. ['\\\\sigma = F/A']"
+                                },
+                                "table": {
+                                    "type": "object",
+                                    "properties": {
+                                        "headers": {"type": "array", "items": {"type": "string"}},
+                                        "rows": {"type": "array", "items": {"type": "array"}},
+                                    },
+                                },
+                                "subsections": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "heading": {"type": "string"},
+                                            "content": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                "required": ["title", "sections"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_spreadsheet",
+            "description": (
+                "Erstellt eine Tabelle/Spreadsheet mit Spaltenüberschriften und Datenzeilen. "
+                "Wird im Canvas gerendert und kann als XLSX exportiert werden."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "headers": {"type": "array", "items": {"type": "string"}},
+                    "rows": {"type": "array", "items": {"type": "array"}},
+                },
+                "required": ["headers", "rows"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "route_planner",
+            "description": (
+                "Berechnet eine Route von einem Ort A zu einem Ort B über OpenStreetMap "
+                "(Geocoding via Nominatim, Routing via OSRM) und zeigt sie als interaktive "
+                "Karte an. Verwende dieses Tool immer, wenn nach dem Weg, der Strecke, "
+                "der Fahrzeit oder der Route zwischen zwei Orten gefragt wird."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {"type": "string", "description": "Startort, z.B. 'Stuttgart' oder 'Hauptbahnhof München'"},
+                    "destination": {"type": "string", "description": "Zielort, z.B. 'Berlin' oder 'Marienplatz München'"},
+                    "profile": {
+                        "type": "string",
+                        "enum": ["driving", "walking", "cycling"],
+                        "default": "driving",
+                        "description": "Fortbewegungsart (Auto, zu Fuß, Fahrrad)",
+                    },
+                },
+                "required": ["origin", "destination"],
+            },
+        },
+    },
+]
+
+ALL_TOOL_NAMES = {t["function"]["name"] for t in TOOL_DEFS}
+
+
+# ── Pydantic-Modelle ──────────────────────────────────────────────────────────
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+    files: Optional[List[str]] = None
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    model: str = DEFAULT_MODEL
+    agent_id: Optional[str] = None
+    use_tools: bool = True
+    conversation_id: Optional[str] = None
+    rag_collections: List[str] = []
+    science: bool = False   # Wissenschaftsmodus (z. B. Matrix-Recherche)
+
+
+class AgentDef(BaseModel):
+    id: Optional[str] = None
+    name: str
+    description: str
+    system_prompt: str
+    tools: List[str] = ["web_search", "calculate"]
+    model: Optional[str] = None
+    icon: str = "🤖"
+    category: str = "Sonstige"
+    favorite: bool = False   # nur Favoriten erscheinen im Sidebar-Agentenselektor
+
+
+class ResearchRequest(BaseModel):
+    topic: str
+    aspects: List[str]
+    model: str = ""   # leer → Wissenschafts-Modell aus dem Profil
+
+
+# ── Routen ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/models")
+async def get_models():
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(f"{OLLAMA_BASE}/api/tags")
+            data = resp.json()
+            # Alle installierten Modelle zurückgeben (kein harter Filter mehr),
+            # damit beliebige nachgeladene Modelle im Profil wählbar sind.
+            # allowed_models dient nur noch als weiche Sortier-Reihenfolge.
+            if ALLOWED_MODELS:
+                order = {n: i for i, n in enumerate(ALLOWED_MODELS)}
+                data["models"] = sorted(
+                    data.get("models", []),
+                    key=lambda m: order.get(m["name"], 999),
+                )
+            return data
+        except Exception as e:
+            return {"models": [], "error": str(e)}
+
+
+@app.post("/api/research")
+async def research(request: ResearchRequest):
+    return StreamingResponse(
+        _research_generator(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _research_generator(request: ResearchRequest):
+    import re
+    from tools.search import search_with_sources
+
+    aspects = [a.strip() for a in request.aspects if a.strip()]
+    if not aspects:
+        yield _sse({"type": "error", "message": "Keine Aspekte angegeben"})
+        return
+
+    # Recherche ist immer wissenschaftlich → Wissenschafts-Modell (sofern nicht
+    # explizit ein gültiges Modell angefordert wurde).
+    _r_model = _pick_model(request.model, _model_for("science"))
+
+    yield _sse({"type": "research_start", "topic": request.topic, "aspects": aspects})
+    tasks = [search_with_sources(f"{request.topic} {aspect}", 5) for aspect in aspects]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    aspect_data = []
+    all_sources = []
+    for aspect, raw in zip(aspects, raw_results):
+        if isinstance(raw, Exception):
+            sources, text = [], f"Suchfehler: {raw}"
+        else:
+            sources, text = raw
+        yield _sse({"type": "search_done", "aspect": aspect})
+        aspect_data.append((aspect, text))
+        all_sources.append({"aspect": aspect, "sources": sources})
+
+    yield _sse({"type": "sources", "data": all_sources})
+
+    yield _sse({"type": "synthesizing"})
+
+    synthesis_parts = [f"Thema: {request.topic}\n"]
+    for aspect, result in aspect_data:
+        synthesis_parts.append(f"### Suchergebnisse – {aspect}\n{result[:2500]}\n")
+
+    synthesis_prompt = "\n".join(synthesis_parts) + (
+        f"\n\nErstelle jetzt einen strukturierten, informativen Recherchebericht über **{request.topic}** "
+        f"basierend auf den obigen Suchergebnissen. Gliederung:\n"
+        f"1. Kurze Übersicht über {request.topic}\n"
+        + "".join(f"{i+2}. Abschnitt: {a}\n" for i, (a, _) in enumerate(aspect_data))
+        + f"{len(aspect_data)+2}. Fazit / Zusammenfassung\n\n"
+        f"Schreibe auf Deutsch. Verwende Markdown (## Überschriften, **Fett**, Aufzählungen). "
+        f"Sei informativ, präzise und stütze dich auf die Suchergebnisse."
+    )
+
+    try:
+        _r_msgs: list = []
+        _r_topic = request.topic + " " + " ".join(a for a, _ in aspect_data)
+        _r_sys = "\n\n".join(p for p in (_SCIENCE_PROMPT, _augment_prefix(_r_topic)) if p)
+        if _r_sys:
+            _r_msgs.append({"role": "system", "content": _r_sys})
+        _r_msgs.append({"role": "user", "content": synthesis_prompt})
+        async with _model_session(_r_model), httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": _r_model,
+                "think": False,
+                "messages": _r_msgs,
+                "stream": False,
+            })
+            resp.raise_for_status()
+            llm_result = resp.json()
+    except Exception as e:
+        yield _sse({"type": "error", "message": str(e)})
+        return
+
+    content = llm_result.get("message", {}).get("content", "")
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+    words = content.split(" ")
+    for i, word in enumerate(words):
+        yield _sse({"type": "text", "content": word + (" " if i < len(words) - 1 else "")})
+        await asyncio.sleep(0.004)
+
+    yield _sse({"type": "done"})
+
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
+    return StreamingResponse(
+        _chat_generator(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── RAG-API (Wissenssammlungen) ───────────────────────────────────────────────
+
+EMBED_MODEL: str = _CONFIG.get("embed_model", "nomic-embed-text")
+
+
+class RagCollectionCreate(BaseModel):
+    name: str
+    tier: str = "6gb"          # frei wählbares Label (z. B. Regler-Stufe)
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
+    top_k: Optional[int] = None
+    char_limit: Optional[int] = None
+    strictness: str = "ausgewogen"   # kreativ | ausgewogen | korrekt
+    clean: bool = True
+
+
+@app.get("/api/rag/tiers")
+async def rag_tiers():
+    from tools.rag import TIERS, DEFAULT_TIER
+    return {"tiers": TIERS, "default": DEFAULT_TIER, "embed_model": EMBED_MODEL}
+
+
+@app.get("/api/rag/collections")
+async def rag_collections():
+    return await _db.rag_list_collections()
+
+
+@app.post("/api/rag/collections")
+async def rag_create_collection(body: RagCollectionCreate):
+    from tools.rag import tier_config
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name fehlt")
+    tc = tier_config(body.tier)
+    strictness = body.strictness if body.strictness in ("kreativ", "ausgewogen", "korrekt") else "ausgewogen"
+    coll = {
+        "id": f"rag_{uuid.uuid4().hex[:12]}",
+        "name": name,
+        "embed_model": EMBED_MODEL,
+        "tier": (body.tier or "regler").strip()[:24],   # freies Anzeige-Label (Regler-Stufe)
+        "chunk_size": int(body.chunk_size or tc["chunk_size"]),
+        "chunk_overlap": int(body.chunk_overlap if body.chunk_overlap is not None else tc["chunk_overlap"]),
+        "top_k": int(body.top_k or tc["top_k"]),
+        "embed_gpu": False,   # auf kleinen Karten immer CPU (verdrängt das Chat-Modell nicht)
+        "clean": bool(body.clean),
+        "char_limit": int(body.char_limit or tc["char_limit"]),
+        "strictness": strictness,
+        "created_at": time.time(),
+    }
+    await _db.rag_create_collection(coll)
+    return coll
+
+
+@app.delete("/api/rag/collections/{cid}")
+async def rag_delete_collection(cid: str):
+    await _db.rag_delete_collection(cid)
+    return {"ok": True}
+
+
+@app.get("/api/rag/collections/{cid}/documents")
+async def rag_documents(cid: str):
+    return await _db.rag_list_documents(cid)
+
+
+@app.post("/api/rag/collections/{cid}/documents")
+async def rag_add_document(cid: str, file: UploadFile = File(...)):
+    from tools.rag import ingest_file
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Sammlung nicht gefunden")
+    # Upload temporär ablegen, Text extrahieren
+    tmp = UPLOADS_DIR / f"rag_{uuid.uuid4().hex}_{file.filename}"
+    async with aiofiles.open(tmp, "wb") as fh:
+        await fh.write(await file.read())
+    try:
+        text = _extract_text(tmp)
+    finally:
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+    if not text or text.startswith("[Lesefehler"):
+        raise HTTPException(status_code=400, detail=f"Text konnte nicht extrahiert werden: {text}")
+    try:
+        n = await ingest_file(coll, text, file.filename, f"doc_{uuid.uuid4().hex[:12]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "filename": file.filename, "n_chunks": n}
+
+
+@app.delete("/api/rag/documents/{did}")
+async def rag_delete_document(did: str):
+    await _db.rag_delete_document(did)
+    return {"ok": True}
+
+
+@app.post("/api/rag/collections/{cid}/from-conversation")
+async def rag_from_conversation(cid: str, req: Request):
+    """Übernimmt ein gespeichertes Gespräch als Dokument in eine RAG-Sammlung
+    (optional wird das Original-Gespräch danach gelöscht = „verschieben")."""
+    from tools.rag import ingest_file
+    body = await req.json()
+    conv_id = body.get("conversation_id")
+    delete_after = bool(body.get("delete_after"))
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Sammlung nicht gefunden")
+    conv = await _db.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Gespräch nicht gefunden")
+    lines = []
+    for m in conv["messages"]:
+        if m["role"] == "system":
+            continue
+        label = "Benutzer" if m["role"] == "user" else "Assistent"
+        lines.append(f"{label}: {str(m.get('content', '')).strip()}")
+    text = "\n\n".join(l for l in lines if l.strip())
+    if not text:
+        raise HTTPException(status_code=400, detail="Gespräch enthält keinen Text")
+    title = conv.get("title") or conv_id
+    try:
+        n = await ingest_file(coll, text, f"Chat: {title}", f"doc_{uuid.uuid4().hex[:12]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    if delete_after:
+        await _db.delete_conversation(conv_id)
+    return {"ok": True, "n_chunks": n, "deleted": delete_after}
+
+
+@app.post("/api/rag/collections/{cid}/from-text")
+async def rag_from_text(cid: str, req: Request):
+    """Übernimmt beliebigen Text (z. B. Recherchebericht, Matrix-Ergebnis) als
+    Dokument in eine Wissensdatenbank."""
+    from tools.rag import ingest_file
+    body = await req.json()
+    text = str(body.get("text", "")).strip()
+    title = (str(body.get("title", "")).strip() or "Notiz")[:120]
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Wissensdatenbank nicht gefunden")
+    if not text:
+        raise HTTPException(status_code=400, detail="Kein Text übergeben")
+    try:
+        n = await ingest_file(coll, text, title, f"doc_{uuid.uuid4().hex[:12]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "n_chunks": n}
+
+
+async def _derive_adaptive_prompt(user_text: str, model: str):
+    """Leitet aus der Nutzerfrage einen fragespezifischen Experten-System-Prompt ab.
+    Rückgabe: (rolle, system_prompt) – bei Fehler ("", "")."""
+    if not (user_text or "").strip():
+        return "", ""
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": model,
+                "think": False,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": (
+                        "Bestimme den am besten geeigneten Fach-Experten, um die Frage des Nutzers "
+                        "zu beantworten. Antworte NUR mit JSON in genau diesem Format, ohne weiteren "
+                        'Text: {"rolle":"Kurzbezeichnung des Experten","system_prompt":"Du bist ein '
+                        '... und antwortest ... auf Deutsch."}'
+                    )},
+                    {"role": "user", "content": f"Frage des Nutzers:\n{(user_text or '')[:1500]}"},
+                ],
+            })
+            resp.raise_for_status()
+            raw = resp.json().get("message", {}).get("content", "")
+    except Exception:
+        return "", ""
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return "", ""
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return "", ""
+    return (data.get("rolle") or "Experte").strip(), (data.get("system_prompt") or "").strip()
+
+
+async def _chat_generator(request: ChatRequest):
+    system_prompt: Optional[str] = None
+    active_tools = TOOL_DEFS
+    model = request.model
+    _agent_fixed_model = False   # Agent gibt explizit ein Modell vor
+    code_capable = False   # Programmier-Agent → Code aus der Antwort in die IDE übernehmen
+    _log_t0 = time.time()
+    _tools_called: list = []
+    _last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+
+    # Adaptiver Agent: erst die Frage analysieren, dann einen fragespezifischen
+    # Experten-System-Prompt ableiten, der anschließend die Antwort erzeugt.
+    if request.agent_id == "__adaptive__":
+        role, derived = await _derive_adaptive_prompt(_last_user, model)
+        if derived:
+            system_prompt = derived
+            yield _sse({"type": "adaptive", "role": role})
+    # Agenten-Konfiguration laden (sucht nach ID unabhängig vom Dateinamen)
+    elif request.agent_id:
+        agent_file = _agent_path_by_id(request.agent_id)
+        if agent_file and agent_file.exists():
+            agent = json.loads(agent_file.read_text(encoding="utf-8"))
+            system_prompt = agent.get("system_prompt") or None
+            if agent.get("model"):
+                model = agent["model"]
+                _agent_fixed_model = True
+            allowed = set(agent.get("tools", list(ALL_TOOL_NAMES)))
+            active_tools = [t for t in TOOL_DEFS if t["function"]["name"] in allowed]
+            # Marker-„Tool" code_ide kennzeichnet den Programmier-Agenten (kein echtes
+            # Ollama-Tool, daher nicht in active_tools — nur Fähigkeits-Flag).
+            code_capable = "code_ide" in allowed
+
+    # Rollen-Modell wählen, sofern der Agent keines fest vorgibt:
+    #  • Programmier-Agent (code_ide) → Programmier-Modell
+    #  • Wissenschaftsmodus → Wissenschafts-Modell (außer der Nutzer wählte gezielt
+    #    ein anderes als das Allgemein-/Standardmodell)
+    #  • sonst → angefordertes/Allgemein-Modell
+    if not _agent_fixed_model:
+        _req = _pick_model(request.model)
+        if code_capable:
+            model = _model_for("coding")
+        elif request.science and _req in (DEFAULT_MODEL, _model_for("general")):
+            model = _model_for("science")
+        else:
+            model = _req
+
+    # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
+    messages: list = []
+    _sci = _SCIENCE_PROMPT if request.science else ""
+    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt) if p)
+    if _sys:
+        messages.append({"role": "system", "content": _sys})
+
+    # RAG: relevante Passagen aus den gewählten Sammlungen vorab einblenden
+    if request.rag_collections:
+        try:
+            from tools.rag import query_collections
+            hits = await query_collections(request.rag_collections, _last_user)
+        except Exception as e:
+            hits = []
+            yield _sse({"type": "error", "message": f"RAG-Suche fehlgeschlagen: {e}"})
+        if hits:
+            ctx = "\n\n".join(
+                f"[Quelle {i + 1}: {h['filename']}]\n{h['text']}" for i, h in enumerate(hits)
+            )
+            # Strengste Vorgabe unter den gewählten Sammlungen anwenden (Regler „kreativ↔korrekt")
+            _rank = {"kreativ": 0, "ausgewogen": 1, "korrekt": 2}
+            _strict = "ausgewogen"
+            for _cid in request.rag_collections:
+                _c = await _db.rag_get_collection(_cid)
+                if _c and _rank.get(_c.get("strictness", "ausgewogen"), 1) > _rank.get(_strict, 1):
+                    _strict = _c["strictness"]
+            _rag_instr = {
+                "korrekt": (
+                    "Beantworte die Frage AUSSCHLIESSLICH anhand der folgenden Auszüge aus den "
+                    "Wissensdatenbanken des Nutzers und nenne die Quelle (Dateiname). Steht die "
+                    "Antwort nicht in den Auszügen, sage das klar und rate nicht."),
+                "ausgewogen": (
+                    "Beantworte die Frage vorrangig anhand der folgenden Auszüge aus den "
+                    "Wissensdatenbanken des Nutzers und nenne die Quelle (Dateiname); ergänze nur "
+                    "bei Bedarf mit gesichertem Wissen."),
+                "kreativ": (
+                    "Nutze die folgenden Auszüge aus den Wissensdatenbanken des Nutzers als "
+                    "Grundlage und ergänze sie bei Bedarf mit eigenem Wissen. Nenne die Quelle "
+                    "(Dateiname), wenn du dich darauf stützt."),
+            }[_strict]
+            messages.append({"role": "system", "content": _rag_instr + "\n\n" + ctx})
+            yield _sse({"type": "rag", "sources": [
+                {"filename": h["filename"], "collection": h["collection_name"], "score": h["score"]}
+                for h in hits
+            ]})
+
+    for msg in request.messages:
+        content = msg.content
+        images: list = []
+
+        if msg.files:
+            for fid in msg.files:
+                fp = UPLOADS_DIR / fid
+                if not fp.exists():
+                    continue
+                if _is_image(fp):
+                    images.append(base64.b64encode(fp.read_bytes()).decode())
+                else:
+                    extracted = _extract_text(fp)
+                    content += f"\n\n[Datei: {fp.name}]\n{extracted}"
+
+        entry: dict = {"role": msg.role, "content": content}
+        if images:
+            entry["images"] = images
+        messages.append(entry)
+
+    # Ist der aktive Agent präsentationsfähig? (für den Canvas-Fallback)
+    presentation_capable = any(
+        t.get("function", {}).get("name") == "create_presentation" for t in active_tools
+    )
+    canvas_emitted = False   # über alle Loop-Iterationen: wurde schon ein Canvas gesendet?
+
+    # Agentic Loop
+    for _iter in range(8):
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "tools": active_tools if request.use_tools else [],
+        }
+
+        try:
+            async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+                resp.raise_for_status()
+                result = resp.json()
+        except Exception as e:
+            yield _sse({"type": "error", "message": str(e)})
+            return
+
+        msg_obj = result.get("message", {})
+        tool_calls = msg_obj.get("tool_calls") or []
+
+        # Auch <call_tool> Inline-Format parsen (manche Modelle nutzen dies)
+        content_raw = msg_obj.get("content", "")
+        if not tool_calls:
+            inline_calls = _extract_inline_tool_calls(content_raw)
+            if inline_calls:
+                tool_calls = inline_calls
+                content_raw = _strip_inline_tool_calls(content_raw)
+                msg_obj["content"] = content_raw
+
+        if not tool_calls:
+            content = content_raw
+
+            # Canvas-Daten extrahieren falls vorhanden
+            canvas_data = _extract_canvas_json(content)
+            if canvas_data:
+                yield _sse({"type": "canvas", "data": canvas_data})
+                canvas_emitted = True
+                content = _strip_canvas_json(content)
+
+            # Text wortweise streamen
+            words = content.split(" ")
+            for i, word in enumerate(words):
+                yield _sse({"type": "text", "content": word + (" " if i < len(words) - 1 else "")})
+                await asyncio.sleep(0.004)
+
+            # Fallback: präsentationsfähiger Agent lieferte nur Fließtext (kein Tool-Aufruf)
+            # → Text per zweitem Aufruf in Folien umwandeln, damit dennoch eine
+            #   Canvas-Präsentation entsteht.
+            if (not canvas_emitted and presentation_capable and len(content) > 300
+                    and re.search(r"(?i)folie|slide|präsentation|agenda|gliederung|inhaltsverzeichnis", content)):
+                conv = await _text_to_presentation(content, model)
+                if conv:
+                    canvas_data = conv
+                    yield _sse({"type": "canvas", "data": canvas_data})
+                    canvas_emitted = True
+
+            # Programmier-Agent: Code aus der Antwort als Basis in die Code-IDE übernehmen
+            if code_capable:
+                code_block = _extract_code_block(content)
+                if code_block:
+                    _cname = re.sub(r"\s+", " ", _last_user).strip()[:40] or "Chat-Programm"
+                    yield _sse({"type": "code", "code": code_block, "name": _cname})
+
+            # Konversation in DB speichern (inkl. Canvas-JSON)
+            if request.conversation_id:
+                messages.append({"role": "assistant", "content": content})
+                await _db.save_conversation(
+                    request.conversation_id,
+                    messages,
+                    model=model,
+                    agent_id=request.agent_id,
+                    canvas_json=json.dumps(canvas_data, ensure_ascii=False) if canvas_data else None,
+                )
+
+            _write_log({
+                "type": "chat", "model": model,
+                "msg_count": len(request.messages),
+                "resp_len": len(content),
+                "tools_called": _tools_called,
+                "ms": int((time.time() - _log_t0) * 1000),
+            })
+            yield _sse({"type": "done"})
+            return
+
+        # Tool-Calls ausführen
+        messages.append({
+            "role": "assistant",
+            "content": msg_obj.get("content", ""),
+            "tool_calls": tool_calls,
+        })
+
+        for tc in tool_calls:
+            fn = tc["function"]["name"]
+            args = tc["function"]["arguments"]
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+
+            yield _sse({"type": "tool_start", "tool": fn, "args": args})
+            _tool_t0 = time.time()
+            tool_result = await _execute_tool(fn, args)
+            _tool_ms = int((time.time() - _tool_t0) * 1000)
+            _tools_called.append(fn)
+            _write_log({"type": "tool", "name": fn, "ms": _tool_ms, "result_len": len(tool_result)})
+            yield _sse({"type": "tool_done", "tool": fn, "preview": tool_result[:300]})
+
+            # Canvas sofort streamen wenn es ein Präsentations-/Tabellen-Tool ist
+            if fn in ("create_presentation", "create_spreadsheet"):
+                try:
+                    canvas_data = json.loads(tool_result)
+                    yield _sse({"type": "canvas", "data": canvas_data})
+                    canvas_emitted = True
+                    # Canvas in DB speichern (auch wenn das Modell danach noch Text schreibt)
+                    if request.conversation_id:
+                        await _db.update_canvas(
+                            request.conversation_id,
+                            json.dumps(canvas_data, ensure_ascii=False),
+                        )
+                except Exception:
+                    pass
+
+            # Diagramm-Bild sofort streamen
+            if fn == "plot_chart":
+                try:
+                    img_data = json.loads(tool_result)
+                    if img_data.get("type") == "image":
+                        yield _sse({"type": "image", "data": img_data["data"]})
+                        tool_result = "Diagramm wurde erstellt und wird angezeigt."
+                except Exception:
+                    pass
+
+            # Route sofort als interaktive Karte streamen
+            if fn == "route_planner":
+                try:
+                    map_data = json.loads(tool_result)
+                    if map_data.get("type") == "map":
+                        yield _sse({"type": "map", "data": map_data})
+                        # Modell erhält nur die Kennzahlen, nicht die ganze Geometrie
+                        tool_result = (
+                            f"Route von {map_data['start']['name']} nach "
+                            f"{map_data['end']['name']} wird dem Nutzer bereits als "
+                            f"interaktive Karte angezeigt. "
+                            f"Strecke: {map_data['distance_km']} km, "
+                            f"Fahrzeit: {map_data['duration_text']} "
+                            f"(Profil: {map_data['profile']}). "
+                            f"Fasse dem Nutzer NUR diese Eckdaten knapp zusammen und "
+                            f"verweise auf die Karte. Erfinde KEINE Wegbeschreibung, "
+                            f"keine Straßennamen, Ausfahrten, Brücken, Normen, "
+                            f"Tempolimits oder technischen Analysen – diese Angaben "
+                            f"liegen dir nicht vor."
+                        )
+                except Exception:
+                    pass
+
+            messages.append({"role": "tool", "content": tool_result})
+
+    yield _sse({"type": "error", "message": "Maximale Iterationen erreicht"})
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+# ── Tool-Ausführung ───────────────────────────────────────────────────────────
+
+
+async def _execute_tool(name: str, args: dict) -> str:
+    if name == "web_search":
+        from tools.search import search
+        return await search(args.get("query", ""), int(args.get("num_results", 6)))
+
+    if name == "calculate":
+        return _safe_exec(args.get("code", ""))
+
+    if name in ("create_presentation", "create_spreadsheet"):
+        canvas_type = name.replace("create_", "")
+        data = {"type": canvas_type, **args}
+        if canvas_type == "presentation":
+            data = _normalize_presentation(data)
+        return json.dumps(data, ensure_ascii=False)
+
+    if name == "unit_convert":
+        from tools.engineering import unit_convert
+        return unit_convert(
+            float(args.get("value", 0)),
+            str(args.get("from_unit", "")),
+            str(args.get("to_unit", "")),
+        )
+
+    if name == "solve_equation":
+        from tools.engineering import solve_equation
+        return solve_equation(
+            str(args.get("expression", "")),
+            str(args.get("variable", "x")),
+        )
+
+    if name == "plot_chart":
+        from tools.engineering import plot_chart
+        return plot_chart(
+            x_data=args.get("x_data", []),
+            y_data=args.get("y_data", []),
+            title=args.get("title", ""),
+            x_label=args.get("x_label", ""),
+            y_label=args.get("y_label", ""),
+            chart_type=args.get("chart_type", "line"),
+            series_label=args.get("series_label", ""),
+            y2_data=args.get("y2_data"),
+            y2_label=args.get("y2_label", ""),
+        )
+
+    if name == "material_lookup":
+        from tools.materials import material_lookup
+        return material_lookup(
+            str(args.get("name", "")),
+            str(args.get("prop", "")),
+        )
+
+    if name == "bolt_calculator":
+        from tools.engineering import bolt_calculator
+        return bolt_calculator(
+            d_nom=float(args.get("d_nom", 0)),
+            pitch=float(args.get("pitch", 0)),
+            f_axial=float(args.get("f_axial", 0)),
+            mu=float(args.get("mu", 0.15)),
+            material_class=str(args.get("material_class", "8.8")),
+            f_transverse=float(args.get("f_transverse", 0)),
+        )
+
+    if name == "generate_report":
+        from tools.report import generate_report
+        return generate_report(
+            title=str(args.get("title", "Bericht")),
+            author=str(args.get("author", "")),
+            sections=args.get("sections", []),
+        )
+
+    if name == "route_planner":
+        from tools.routing import plan_route
+        return await plan_route(
+            origin=str(args.get("origin", "")),
+            destination=str(args.get("destination", "")),
+            profile=str(args.get("profile", "driving")),
+        )
+
+    return f"Unbekanntes Tool: {name}"
+
+
+def _safe_exec(code: str) -> str:
+    import math
+
+    safe_builtins = {
+        "print": print, "range": range, "len": len, "abs": abs, "round": round,
+        "min": min, "max": max, "sum": sum, "int": int, "float": float,
+        "str": str, "bool": bool, "list": list, "dict": dict, "tuple": tuple,
+        "set": set, "enumerate": enumerate, "zip": zip, "sorted": sorted,
+        "reversed": reversed, "map": map, "filter": filter, "type": type,
+        "__import__": __import__,
+    }
+
+    safe_globals: dict = {"__builtins__": safe_builtins, "math": math}
+
+    try:
+        import numpy as np  # type: ignore
+        safe_globals["np"] = np
+        safe_globals["numpy"] = np
+    except ImportError:
+        pass
+
+    try:
+        import scipy  # type: ignore
+        safe_globals["scipy"] = scipy
+        import scipy.optimize as _opt  # type: ignore
+        import scipy.linalg as _linalg  # type: ignore
+        safe_globals["scipy_optimize"] = _opt
+        safe_globals["scipy_linalg"] = _linalg
+    except ImportError:
+        pass
+
+    try:
+        import sympy as _sym  # type: ignore
+        safe_globals["sympy"] = _sym
+        safe_globals["sp"] = _sym
+    except ImportError:
+        pass
+
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buf
+    try:
+        exec(code, safe_globals)  # noqa: S102
+    except Exception as exc:
+        sys.stdout = old_stdout
+        return f"Fehler: {exc}"
+    sys.stdout = old_stdout
+    return buf.getvalue() or "OK (kein Output)"
+
+
+# ── Hilfsfunktionen ───────────────────────────────────────────────────────────
+
+
+def _is_image(fp: Path) -> bool:
+    return fp.suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+
+def _extract_text(fp: Path) -> str:
+    try:
+        from tools.files import extract
+        return extract(fp)
+    except Exception as e:
+        return f"[Lesefehler: {e}]"
+
+
+def _extract_canvas_json(content: str) -> Optional[dict]:
+    import re
+
+    for m in re.finditer(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+        except Exception:
+            continue
+
+        # Wrapper-Formate auflösen:
+        # {"tool": "create_presentation", "parameters": {...}}
+        # {"function": "...", "arguments": {...}}
+        tool_name = data.get("tool") or data.get("function") or data.get("name")
+        if tool_name in ("create_presentation", "create_spreadsheet"):
+            inner = data.get("parameters") or data.get("arguments") or data.get("input") or {}
+            canvas_type = tool_name.replace("create_", "")
+            data = {"type": canvas_type, **inner}
+
+        # Expliziter type-Header
+        if data.get("type") in ("presentation", "spreadsheet"):
+            if data["type"] == "presentation":
+                return _normalize_presentation(data)
+            return data
+
+        # Präsentation anhand von "slides"-Feld erkennen
+        if "slides" in data and isinstance(data["slides"], list):
+            data["type"] = "presentation"
+            return _normalize_presentation(data)
+
+        # Spreadsheet anhand von "headers"+"rows" erkennen
+        if "headers" in data and "rows" in data:
+            data["type"] = "spreadsheet"
+            return data
+
+    return None
+
+
+def _strip_canvas_json(content: str) -> str:
+    import re
+
+    return re.sub(
+        r'```(?:json)?\s*\{.*?\}\s*```',
+        "",
+        content,
+        flags=re.DOTALL,
+    ).strip()
+
+
+def _extract_inline_tool_calls(content: str) -> list:
+    """Parst <call_tool>{...}</call_tool> und ähnliche Inline-Formate."""
+    import re
+    calls = []
+
+    # Format: <call_tool>{"name": "...", "arguments": {...}}</call_tool>
+    for m in re.finditer(r'<call_tool>\s*(\{.*?\})\s*</call_tool>', content, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+            name = data.get("name") or data.get("function")
+            args = data.get("arguments") or data.get("parameters") or {}
+            if name:
+                calls.append({"function": {"name": name, "arguments": args}})
+        except Exception:
+            pass
+
+    # Format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+    for m in re.finditer(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', content, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+            name = data.get("name") or data.get("function")
+            args = data.get("arguments") or data.get("parameters") or {}
+            if name:
+                calls.append({"function": {"name": name, "arguments": args}})
+        except Exception:
+            pass
+
+    return calls
+
+
+def _strip_inline_tool_calls(content: str) -> str:
+    import re
+    content = re.sub(r'<call_tool>.*?</call_tool>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<tool_call>.*?</tool_call>', '', content, flags=re.DOTALL)
+    return content.strip()
+
+
+def _extract_code_block(text: str) -> Optional[str]:
+    """Extrahiert den größten ```-Codeblock aus einer Antwort — für den Programmier-
+    Agenten, dessen Code in die Code-IDE übernommen wird. Gibt None zurück, wenn
+    kein nennenswerter Codeblock enthalten ist."""
+    blocks = re.findall(r"```[ \t]*[a-zA-Z0-9_+-]*[ \t]*\n?([\s\S]*?)```", text)
+    blocks = [b.strip() for b in blocks if b.strip()]
+    if not blocks:
+        return None
+    code = max(blocks, key=len)
+    return code if len(code) > 10 else None
+
+
+def _normalize_presentation(data: dict) -> dict:
+    """Normalisiert unterschiedliche Slide-Strukturen auf unser einheitliches Format."""
+    for slide in data.get("slides", []):
+        # subtitle → content (title-Layout)
+        if "subtitle" in slide and not slide.get("content"):
+            slide["content"] = slide.pop("subtitle")
+
+        # content als Dict → Felder hochziehen
+        c = slide.get("content")
+        if isinstance(c, dict):
+            if "title" in c and not slide.get("title"):
+                slide["title"] = c["title"]
+            if "bullets" in c and not slide.get("bullets"):
+                slide["bullets"] = c["bullets"]
+            if "left" in c:
+                slide["left"] = c["left"]
+            if "right" in c:
+                slide["right"] = c["right"]
+            slide["content"] = c.get("subtitle") or c.get("content") or c.get("text") or ""
+        elif isinstance(c, list):
+            # Liste wird zu bullets, wenn kein bullets-Feld vorhanden
+            if not slide.get("bullets"):
+                slide["bullets"] = [str(x) for x in c]
+            slide["content"] = ""
+
+        # bullets normalisieren
+        bullets = slide.get("bullets")
+        if isinstance(bullets, list):
+            normalized = []
+            for x in bullets:
+                if isinstance(x, str):
+                    normalized.append(x)
+                elif isinstance(x, dict):
+                    normalized.append(x.get("text") or x.get("content") or str(x))
+                else:
+                    normalized.append(str(x))
+            slide["bullets"] = normalized
+
+        # theme lowercase
+    if "theme" in data:
+        data["theme"] = data["theme"].lower()
+
+    return data
+
+
+def _parse_prose_presentation(text: str) -> Optional[dict]:
+    """Wandelt einen vom Modell als Markdown/Fließtext gelieferten Präsentations-
+    entwurf DETERMINISTISCH in Folien um — ohne zweiten LLM-Aufruf, damit der
+    Inhalt (Überschriften, Aufzählungen, Texte) 1:1 erhalten bleibt. Erkennt
+    Folien-Marker (Markdown-Überschriften #/##, »Folie/Slide/Seite N«, **Fettzeilen**)
+    sowie Aufzählungen (-, *, •, –, 1.). Gibt None zurück, wenn zu wenig Inhalt
+    erkennbar ist (dann übernimmt der LLM-Fallback)."""
+    lines = text.replace("\r\n", "\n").split("\n")
+
+    heading_re = re.compile(r"^\s{0,3}(#{1,4})\s+(.*\S)\s*$")
+    marker_re = re.compile(
+        r"^\s*\*{0,2}_{0,2}\s*(?:Folie|Slide|Seite|Chart)\s*[:#]?\s*\d+\s*[:.\)\-–]?\s*(.*?)\s*\*{0,2}\s*$",
+        re.IGNORECASE)
+    bold_title_re = re.compile(r"^\s*\*\*(.+?)\*\*\s*:?\s*$")
+    bullet_re = re.compile(r"^\s*(?:[-*•–·▪]|\d+[\.\)])\s+(.*\S)\s*$")
+
+    slides: list = []
+    cur: Optional[dict] = None
+
+    def _clean(s: str) -> str:
+        # Markdown-Hervorhebung/Restzeichen aus Zeileninhalt entfernen
+        return re.sub(r"(\*\*|__|[*_`])", "", s).strip()
+
+    def _new(title: str) -> None:
+        nonlocal cur
+        t = (title or "").strip()
+        # Folien-Marker (»Folie 1:« usw.) am Anfang entfernen
+        t = re.sub(
+            r"^\**\s*(?:Folie|Slide|Seite|Chart)\s*[:#]?\s*\d+\s*[:.\)\-–]?\s*",
+            "", t, flags=re.IGNORECASE)
+        # Markdown-Hervorhebung (**…**, __…__) und Restzeichen abstreifen
+        t = re.sub(r"[*_`]+", "", t).strip().strip(":").strip()
+        cur = {"title": t, "bullets": [], "_text": []}
+        slides.append(cur)
+
+    for raw in lines:
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        mm = marker_re.match(line)
+        mh = heading_re.match(line)
+        mb = bullet_re.match(line)
+        mbold = bold_title_re.match(line)
+        if mm:
+            _new(mm.group(1))
+        elif mh:
+            _new(mh.group(2))
+        elif cur is None:
+            # Inhalt vor der ersten Überschrift → erste (Titel-)Folie
+            _new(re.sub(r"^[*_#\s]+", "", line).strip())
+        elif mb:
+            cur["bullets"].append(_clean(mb.group(1)))
+        elif mbold and not cur["bullets"] and not cur["_text"]:
+            # Fettzeile direkt nach einer Überschrift = Untertitel
+            cur["_text"].append(_clean(mbold.group(1)))
+        else:
+            cur["_text"].append(_clean(line.strip()))
+
+    if len(slides) < 2:
+        return None
+
+    out: list = []
+    for i, s in enumerate(slides):
+        title = s["title"]
+        bullets = [b for b in s["bullets"] if b]
+        body = " ".join(s["_text"]).strip()
+        if i == 0 and not bullets:
+            out.append({"layout": "title", "title": title or "Präsentation",
+                        "content": body})
+        elif bullets:
+            sl = {"layout": "bullets", "title": title, "bullets": bullets}
+            if body:
+                sl["content"] = body
+            out.append(sl)
+        elif body:
+            # kein Aufzählungszeichen, aber Textzeilen → als Bullets übernehmen
+            out.append({"layout": "bullets", "title": title,
+                        "bullets": [t for t in s["_text"] if t]})
+        else:
+            out.append({"layout": "section", "title": title})
+
+    # Mindestens eine Folie muss echten Inhalt tragen, sonst lohnt der Parser nicht
+    if not any(sl.get("bullets") or sl.get("content") for sl in out):
+        return None
+
+    data = {"type": "presentation", "title": slides[0]["title"] or "Präsentation",
+            "theme": "dark", "slides": out}
+    return _normalize_presentation(data)
+
+
+async def _text_to_presentation(text: str, model: str) -> Optional[dict]:
+    """Wandelt einen vom Modell als Fließtext gelieferten Präsentationsentwurf in
+    eine Canvas-Präsentation um. Versucht ZUERST den deterministischen Parser
+    (`_parse_prose_presentation`, bewahrt den Inhalt vollständig); nur wenn der
+    keine brauchbaren Folien liefert, wird per zweitem LLM-Aufruf umgewandelt.
+    Gibt None zurück, wenn keine gültigen Folien entstehen."""
+    # 1. Deterministischer Parser — verliert keinen Inhalt
+    parsed = _parse_prose_presentation(text)
+    if parsed and sum(
+            1 for s in parsed["slides"] if s.get("bullets") or s.get("content")) >= 2:
+        return parsed
+
+    # 2. LLM-Fallback (für unstrukturierten Fließtext)
+    user = (
+        "Wandle den folgenden Präsentationsentwurf in strukturierte Folien um. "
+        "Antworte NUR mit JSON in genau diesem Format, ohne Markdown, ohne Erklärung:\n"
+        '{"title":"Titel der Präsentation","theme":"dark","slides":['
+        '{"layout":"title","title":"Titel","content":"Untertitel"},'
+        '{"layout":"bullets","title":"Abschnitt","bullets":["Punkt 1","Punkt 2","Punkt 3"]}]}\n'
+        "layout ist eines von: title, section, bullets, two-column. Erzeuge 5–10 Folien, "
+        "erste Folie layout=title. Behalte Sprache und Inhalt des Entwurfs bei.\n\n"
+        "Entwurf:\n" + text[:6000]
+    )
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": model,
+                "think": False,
+                "format": "json",
+                "messages": [
+                    {"role": "system", "content": "Du formatierst Präsentationsentwürfe als gültiges JSON."},
+                    {"role": "user", "content": user},
+                ],
+                "stream": False,
+            })
+            resp.raise_for_status()
+            raw = resp.json().get("message", {}).get("content", "")
+    except Exception:
+        return parsed
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return parsed
+    try:
+        d = json.loads(m.group(0))
+    except Exception:
+        return parsed
+    slides = d.get("slides")
+    if not isinstance(slides, list) or len(slides) < 2:
+        return parsed
+    data = {"type": "presentation", "title": str(d.get("title", "Präsentation")),
+            "theme": str(d.get("theme", "dark")), "slides": slides}
+    return _normalize_presentation(data)
+
+
+# ── Konversations-API ─────────────────────────────────────────────────────────
+
+
+@app.get("/api/conversations")
+async def list_conversations(project_id: Optional[str] = None):
+    return await _db.list_conversations(project_id=project_id)
+
+
+@app.get("/api/conversations/{cid}")
+async def get_conversation(cid: str):
+    data = await _db.get_conversation(cid)
+    if not data:
+        raise HTTPException(404, "Nicht gefunden")
+    return data
+
+
+@app.delete("/api/conversations/{cid}")
+async def delete_conversation(cid: str):
+    await _db.delete_conversation(cid)
+    return {"ok": True}
+
+
+@app.post("/api/conversations/{cid}/compress")
+async def compress_conversation(cid: str):
+    import re
+    data = await _db.get_conversation(cid)
+    if not data:
+        raise HTTPException(404, "Nicht gefunden")
+
+    msgs = data["messages"]
+    model = data.get("model") or "qwen3.6-16k:latest"
+
+    full_text = ""
+    for m in msgs:
+        if m["role"] == "system":
+            continue
+        label = "Benutzer" if m["role"] == "user" else "Assistent"
+        full_text += f"{label}: {str(m.get('content', ''))[:600]}\n\n"
+
+    prompt = (
+        "Fasse das folgende Gespräch zu einer kompakten Zusammenfassung zusammen. "
+        "Die Zusammenfassung soll alle wichtigen Informationen, Erkenntnisse, Ergebnisse und "
+        "offenen Punkte enthalten, sodass das Gespräch nahtlos fortgesetzt werden kann. "
+        "Antworte NUR mit der Zusammenfassung, keine Einleitung.\n\n"
+        f"--- GESPRÄCH ---\n{full_text[:10000]}"
+    )
+
+    async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": model,
+            "think": False,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        result = resp.json()
+
+    summary = result.get("message", {}).get("content", "").strip()
+    summary = re.sub(r"<think>.*?</think>", "", summary, flags=re.DOTALL).strip()
+
+    # System-Nachricht mit Zusammenfassung + letzte 2 Austausche behalten
+    compressed: list = [
+        {"role": "system", "content": f"[ZUSAMMENFASSUNG DES BISHERIGEN GESPRÄCHS]\n\n{summary}"}
+    ]
+    exchanges = []
+    i = 0
+    while i < len(msgs):
+        if msgs[i]["role"] == "user" and i + 1 < len(msgs) and msgs[i + 1]["role"] == "assistant":
+            exchanges.append((msgs[i], msgs[i + 1]))
+            i += 2
+        else:
+            i += 1
+    for u, a in exchanges[-2:]:
+        compressed.append(u)
+        compressed.append(a)
+
+    await _db.save_conversation(cid, compressed, model=model, agent_id=data.get("agent_id"))
+    return {"ok": True, "summary": summary, "messages": compressed}
+
+
+@app.post("/api/conversations/{cid}/to-skill")
+async def conversation_to_skill(cid: str):
+    import re
+    data = await _db.get_conversation(cid)
+    if not data:
+        raise HTTPException(404, "Nicht gefunden")
+
+    msgs = data["messages"]
+    model = data.get("model") or "qwen3.6-16k:latest"
+
+    full_text = ""
+    for m in msgs:
+        if m["role"] == "system":
+            continue
+        label = "Benutzer" if m["role"] == "user" else "Assistent"
+        full_text += f"{label}: {str(m.get('content', ''))[:600]}\n\n"
+
+    prompt = (
+        "Analysiere das folgende Gespräch und erstelle daraus einen spezialisierten KI-Agenten.\n\n"
+        "Antworte NUR mit einem JSON-Objekt, ohne Markdown-Blöcke, ohne Erklärung:\n"
+        "{\n"
+        '  "name": "Kurzname des Agenten (max 30 Zeichen)",\n'
+        '  "icon": "Ein passendes Emoji",\n'
+        '  "description": "Was der Agent kann (max 100 Zeichen)",\n'
+        '  "category": "Genau eine aus: Fertigung, Qualität, Dokumentation, Kommunikation, Analyse, Recherche, Technik, Sonstige",\n'
+        '  "system_prompt": "Detaillierter System-Prompt der das Wissen aus dem Gespräch einbettet. Beginnt mit Du bist ein... Enthält wichtige Erkenntnisse, Methoden und Fachkontext. Maximal 300 Wörter. Auf Deutsch.",\n'
+        '  "tools": ["Sinnvolle Tools aus: web_search, calculate, create_presentation, create_spreadsheet"]\n'
+        "}\n\n"
+        f"--- GESPRÄCH ---\n{full_text[:10000]}"
+    )
+
+    async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": model,
+            "think": False,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        result = resp.json()
+
+    content = result.get("message", {}).get("content", "").strip()
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    content = re.sub(r"```(?:json)?", "", content).replace("```", "").strip()
+
+    try:
+        m = re.search(r'\{.*\}', content, re.DOTALL)
+        skill_data = json.loads(m.group() if m else content)
+    except Exception:
+        skill_data = {
+            "name": data["title"][:30],
+            "icon": "🧠",
+            "description": "Aus Chat generierter Agent",
+            "category": "Sonstige",
+            "system_prompt": f"Du bist ein spezialisierter Assistent basierend auf folgendem Gespräch.\n\n{full_text[:500]}",
+            "tools": [],
+        }
+
+    return skill_data
+
+
+@app.patch("/api/conversations/{cid}/rename")
+async def rename_conversation(cid: str, req: Request):
+    body = await req.json()
+    new_title = str(body.get("title", "")).strip()
+    if not new_title:
+        raise HTTPException(400, "Kein Titel angegeben")
+    await _db.rename_conversation(cid, new_title)
+    return {"ok": True, "title": new_title}
+
+
+@app.get("/api/conversations/{cid}/export")
+async def export_conversation(cid: str):
+    data = await _db.get_conversation(cid)
+    if not data:
+        raise HTTPException(404, "Nicht gefunden")
+    slug = _to_slug(data.get("title", cid))
+    filename = f"{slug}.json"
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    from fastapi.responses import Response
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/conversations/import")
+async def import_conversation(req: Request):
+    body = await req.json()
+    conv_id = body.get("id") or f"conv_{int(time.time() * 1000)}"
+    # Neue ID vergeben um Kollisionen zu vermeiden
+    conv_id = f"import_{uuid.uuid4().hex[:10]}"
+    messages = body.get("messages", [])
+    model = body.get("model")
+    agent_id = body.get("agent_id")
+    canvas_json = body.get("canvas_json")
+    await _db.save_conversation(conv_id, messages, model=model, agent_id=agent_id, canvas_json=canvas_json)
+    # Projekt-ID setzen falls vorhanden
+    if body.get("project_id"):
+        await _db.set_project(conv_id, body["project_id"])
+    return {"ok": True, "id": conv_id}
+
+
+@app.post("/api/conversations/export-all")
+async def export_all_conversations():
+    """Exportiert alle Gespräche als ZIP-Archiv."""
+    import io, zipfile
+    convs = await _db.list_conversations(limit=9999)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for c in convs:
+            data = await _db.get_conversation(c["id"])
+            if data:
+                slug = _to_slug(data.get("title", c["id"]))
+                filename = f"{slug}_{c['id'][:8]}.json"
+                zf.writestr(filename, json.dumps(data, ensure_ascii=False, indent=2))
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse as SR
+    return SR(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="ai_framework_thomas_gespraeche.zip"'},
+    )
+
+
+@app.get("/api/search")
+async def search_conversations(q: str = Query(..., min_length=2)):
+    return await _db.search(q)
+
+
+# ── Upload-API ────────────────────────────────────────────────────────────────
+
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    fid = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+    fp = UPLOADS_DIR / fid
+    content = await file.read()
+    fp.write_bytes(content)
+    return {
+        "id": fid,
+        "filename": file.filename,
+        "type": file.content_type,
+        "is_image": bool(file.content_type and file.content_type.startswith("image/")),
+        "size": len(content),
+    }
+
+
+@app.get("/api/uploads/{fid}")
+async def get_upload(fid: str):
+    fp = UPLOADS_DIR / fid
+    if not fp.exists():
+        raise HTTPException(404)
+    return FileResponse(fp)
+
+
+@app.get("/api/downloads/{filename}")
+async def download_report(filename: str):
+    # only alphanumeric + dot + dash to prevent path traversal
+    import re
+    if not re.match(r'^[a-zA-Z0-9._-]+$', filename):
+        raise HTTPException(400, "Ungültiger Dateiname")
+    fp = REPORTS_DIR / filename
+    if not fp.exists():
+        raise HTTPException(404, "Datei nicht gefunden")
+    media_types = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    mt = media_types.get(fp.suffix.lower(), "application/octet-stream")
+    return FileResponse(fp, filename=filename, media_type=mt)
+
+
+# ── Agenten-API ───────────────────────────────────────────────────────────────
+
+
+@app.get("/api/agents")
+async def list_agents():
+    agents = []
+    for f in AGENTS_DIR.glob("*.json"):
+        try:
+            agents.append(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return agents
+
+
+@app.post("/api/agents/generate-prompt")
+async def generate_agent_prompt(req: Request):
+    import re
+    body = await req.json()
+    description = body.get("description", "").strip()
+    if not description:
+        raise HTTPException(400, "Keine Beschreibung angegeben")
+
+    _gp_model = _pick_model(body.get("model"))
+
+    async with _model_session(_gp_model), httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": _gp_model,
+            "think": False,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Du erstellst präzise System-Prompts für KI-Agenten. "
+                        "Antworte NUR mit dem fertigen System-Prompt, ohne Einleitung, Erklärung oder Markdown."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Erstelle einen System-Prompt für einen KI-Agenten mit folgender Aufgabe:\n\n"
+                        f"{description}\n\n"
+                        f"Regeln:\n"
+                        f"- Beginne mit 'Du bist ein...'\n"
+                        f"- Beschreibe klar die Kernaufgabe und das Verhalten\n"
+                        f"- Weise an, auf Deutsch zu antworten\n"
+                        f"- Maximal 120 Wörter\n"
+                        f"- Kein Markdown, nur Fließtext"
+                    ),
+                },
+            ],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        result = resp.json()
+        generated = result.get("message", {}).get("content", "").strip()
+
+    generated = re.sub(r"<think>.*?</think>", "", generated, flags=re.DOTALL).strip()
+    return {"prompt": generated}
+
+
+@app.post("/api/derive-persona")
+async def derive_persona(req: Request):
+    """Leitet aus der Präsentationsbeschreibung eine Analyse-Persona ab.
+
+    Die Persona wird als System-Prompt verwendet, um die Bilder fachlich passend
+    zu beschreiben (z.B. ein E-Maschinen-Experte für eine E-Maschinen-Präsentation).
+    """
+    import re
+    body = await req.json()
+    description = (body.get("description") or "").strip()
+    if not description:
+        raise HTTPException(400, "Keine Beschreibung angegeben")
+    _model = _pick_model(body.get("model"))
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": _model,
+            "think": False,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Du bestimmst aus der Beschreibung einer Präsentation einen passenden "
+                        "Fach-Experten, der die Bilder der Präsentation beschreiben soll. "
+                        "Antworte NUR mit JSON in genau diesem Format, ohne weiteren Text: "
+                        '{"persona_name":"Kurzname des Experten","system_prompt":"Du bist ein ... '
+                        'der Bilder fachkundig auf Deutsch beschreibt."}'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Beschreibung der Präsentation:\n{description}\n\n"
+                        "Der system_prompt muss anweisen, das gezeigte Bild knapp, fachlich korrekt "
+                        "und auf Deutsch zu beschreiben (max. 3 Stichpunkte plus eine kurze Bildunterschrift)."
+                    ),
+                },
+            ],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    # Markdown-Codezaun entfernen (```json … ```)
+    raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
+    raw = re.sub(r"\s*```$", "", raw).strip()
+
+    persona_name, system_prompt = "Fach-Experte", ""
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            persona_name = (data.get("persona_name") or persona_name).strip()
+            system_prompt = (data.get("system_prompt") or "").strip()
+        except Exception:
+            pass
+    if not system_prompt:
+        # JSON kaputt (z.B. echte Zeilenumbrüche im String) → Felder per Regex ziehen
+        mn = re.search(r'"persona_name"\s*:\s*"([^"]+)"', raw)
+        if mn:
+            persona_name = mn.group(1).strip()
+        ms = re.search(r'"system_prompt"\s*:\s*"([\s\S]+?)"\s*[},]', raw)
+        if ms:
+            system_prompt = ms.group(1).strip()
+    if not system_prompt:
+        # Letzter Fallback: roher Text ohne JSON-Gerüst
+        system_prompt = re.sub(r'^[\s{]*"?[\w]*"?\s*:?\s*', "", raw).strip() or (
+            "Du bist ein technischer Fach-Experte und beschreibst das gezeigte Bild "
+            "knapp und sachlich auf Deutsch (max. 3 Stichpunkte plus eine kurze Bildunterschrift)."
+        )
+    return {"persona_name": persona_name, "system_prompt": system_prompt}
+
+
+@app.post("/api/analyze-image")
+async def analyze_image(req: Request):
+    """Analysiert ein einzelnes Bild mit einem Vision-Modell und liefert
+    strukturierten Folieninhalt (Titel, Stichpunkte, Bildunterschrift)."""
+    import re
+    from tools.imaging import downscale, is_descriptive_filename
+
+    body = await req.json()
+    image_b64 = body.get("image") or ""
+    if not image_b64:
+        raise HTTPException(400, "Kein Bild übergeben")
+
+    system_prompt = (body.get("system_prompt") or "").strip() or (
+        "Du bist ein technischer Fach-Experte und beschreibst das gezeigte Bild "
+        "knapp und sachlich auf Deutsch."
+    )
+    filename = (body.get("filename") or "").strip()
+    topic = (body.get("topic") or "").strip()
+    _model = _pick_model(body.get("model"))
+
+    descriptive, label = is_descriptive_filename(filename) if filename else (False, "")
+    small = downscale(image_b64)
+
+    name_hint = ""
+    if filename:
+        if descriptive:
+            name_hint = (
+                f"\nDer Dateiname '{label}' ist beschreibend – nutze ihn als Hinweis "
+                f"auf den Bildinhalt und möglichst als Folientitel."
+            )
+        else:
+            name_hint = (
+                f"\nDer Dateiname ('{filename}') ist nicht aussagekräftig – ignoriere ihn "
+                f"und stütze dich allein auf das, was im Bild zu sehen ist."
+            )
+
+    user_text = (
+        (f"Kontext der Präsentation: {topic}\n" if topic else "")
+        + "Beschreibe dieses Bild für eine Präsentationsfolie."
+        + name_hint
+        + "\n\nAntworte NUR mit JSON in genau diesem Format, ohne weiteren Text:\n"
+        '{"title":"Kurzer Folientitel","bullets":["Stichpunkt 1","Stichpunkt 2","Stichpunkt 3"],'
+        '"caption":"Eine kurze Bildunterschrift (max. ein Satz)"}\n'
+        "Maximal 3 kurze Stichpunkte (je höchstens ein knapper Satz). "
+        "Kein Markdown, keine Sternchen, keine Aufzählungszeichen im Text."
+    )
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": _model,
+            "think": False,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text, "images": [small]},
+            ],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+    def _strip_md(s: str) -> str:
+        # Markdown-Reste entfernen, die das Canvas sonst literal zeichnet
+        s = re.sub(r"[*_`#>]+", "", s)
+        s = re.sub(r"^\s*[-•]\s*", "", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    title, bullets, caption = (label if descriptive else "Abbildung"), [], ""
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            title = _strip_md(data.get("title") or title) or title
+            b = data.get("bullets") or []
+            bullets = [_strip_md(str(x)) for x in b if str(x).strip()][:3]
+            caption = _strip_md(data.get("caption") or "")
+        except Exception:
+            pass
+    if not bullets and not caption:
+        # Fallback: roher Text als Bildunterschrift
+        caption = _strip_md(raw)[:200]
+
+    return {
+        "title": title,
+        "bullets": bullets,
+        "caption": caption,
+        "descriptive_filename": descriptive,
+    }
+
+
+@app.post("/api/agents")
+async def create_agent(agent: AgentDef):
+    if not agent.id:
+        agent.id = _to_slug(agent.name or "agent") + "_" + uuid.uuid4().hex[:4]
+    fp = _unique_agent_path(agent.name or agent.id, exclude_id=agent.id)
+    fp.write_text(json.dumps(agent.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+    return agent
+
+
+@app.put("/api/agents/{aid}")
+async def update_agent(aid: str, agent: AgentDef):
+    agent.id = aid
+    # Alte Datei finden und ggf. umbenennen
+    old_fp = _agent_path_by_id(aid)
+    new_fp = _unique_agent_path(agent.name or aid, exclude_id=aid)
+    if old_fp and old_fp != new_fp and old_fp.exists():
+        old_fp.unlink(missing_ok=True)
+    new_fp.write_text(json.dumps(agent.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+    return agent
+
+
+@app.delete("/api/agents/{aid}")
+async def delete_agent(aid: str):
+    fp = _agent_path_by_id(aid)
+    if fp:
+        fp.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+# ── Export-API ────────────────────────────────────────────────────────────────
+
+
+@app.post("/api/export/docx")
+async def export_docx(req: Request):
+    from tools.export import to_docx
+    body = await req.json()
+    body["_profile"] = _load_profile()
+    fp = to_docx(body)
+    return FileResponse(
+        fp,
+        filename="ai_framework_thomas_dokument.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@app.post("/api/export/xlsx")
+async def export_xlsx(req: Request):
+    from tools.export import to_xlsx
+    body = await req.json()
+    body["_profile"] = _load_profile()
+    fp = to_xlsx(body)
+    return FileResponse(
+        fp,
+        filename="ai_framework_thomas_tabelle.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/api/export/pptx")
+async def export_pptx(req: Request):
+    from tools.export import to_pptx
+    body = await req.json()
+    body["_profile"] = _load_profile()
+    fp = to_pptx(body)
+    return FileResponse(
+        fp,
+        filename="ai_framework_thomas_praesentation.pptx",
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+
+# ── Profil-API ────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/profile")
+async def get_profile():
+    return _load_profile()
+
+
+@app.put("/api/profile")
+async def save_profile(req: Request):
+    body = await req.json()
+    str_fields = {"first_name", "last_name", "company", "department", "position", "email", "phone", "default_project"}
+    profile = {k: str(v).strip() for k, v in body.items() if k in str_fields}
+    # Oberflächen- und Antwortsprache (de/en)
+    lang = str(body.get("lang", "") or "").lower().strip()
+    profile["lang"] = "en" if lang == "en" else "de"
+    # Modus (fachliche Ausrichtung + Farbschema)
+    mode = str(body.get("mode", "") or "").lower().strip()
+    profile["mode"] = mode if mode in VALID_MODES else DEFAULT_MODE
+    # Modus prägt die KI-Prompts? (Standard: ja)
+    profile["mode_prompt"] = bool(body.get("mode_prompt", True))
+    # „LLM pur": keine Modi/Persona/Grundregel/Formel-/Zitatregeln voranstellen
+    profile["pure_llm"] = bool(body.get("pure_llm", False))
+    # Antwortstil-Persona (leer = neutral)
+    tone = str(body.get("tone", "") or "").lower().strip()
+    profile["tone"] = tone if tone in VALID_TONES else ""
+    # Modell-Rollen (Allgemein / Programmieren / Wissenschaftlich); leer → Standardmodell
+    for _key in _MODEL_ROLES.values():
+        val = str(body.get(_key, "") or "").strip()
+        if val and val not in _MODEL_PLACEHOLDERS:
+            profile[_key] = val
+    # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
+    profile["auto_compress"] = bool(body.get("auto_compress", False))
+    try:
+        profile["compress_overflow_chars"] = max(2000, int(body.get("compress_overflow_chars", 12000)))
+    except (TypeError, ValueError):
+        profile["compress_overflow_chars"] = 12000
+    try:
+        profile["compress_idle_min"] = max(1, int(body.get("compress_idle_min", 10)))
+    except (TypeError, ValueError):
+        profile["compress_idle_min"] = 10
+    PROFILE_FILE.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+    return profile
+
+
+# ── Projekt-API ───────────────────────────────────────────────────────────────
+
+
+@app.get("/api/projects")
+async def list_projects():
+    return _load_projects()
+
+
+@app.post("/api/projects")
+async def create_project(req: Request):
+    body = await req.json()
+    projects = _load_projects()
+    project = {
+        "id": uuid.uuid4().hex[:8],
+        "name": str(body.get("name", "Neues Projekt")).strip(),
+        "number": str(body.get("number", "")).strip(),
+        "description": str(body.get("description", "")).strip(),
+        "created_at": time.time(),
+    }
+    projects.append(project)
+    PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
+    return project
+
+
+@app.put("/api/projects/{pid}")
+async def update_project(pid: str, req: Request):
+    body = await req.json()
+    projects = _load_projects()
+    for p in projects:
+        if p["id"] == pid:
+            p["name"] = str(body.get("name", p["name"])).strip()
+            p["number"] = str(body.get("number", p.get("number", ""))).strip()
+            p["description"] = str(body.get("description", p.get("description", ""))).strip()
+            break
+    PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.delete("/api/projects/{pid}")
+async def delete_project(pid: str):
+    projects = [p for p in _load_projects() if p["id"] != pid]
+    PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.put("/api/conversations/{cid}/project")
+async def set_conversation_project(cid: str, req: Request):
+    body = await req.json()
+    project_id = body.get("project_id")
+    await _db.set_project(cid, project_id)
+    return {"ok": True}
+
+
+# ── Plan-API ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/plans")
+async def list_plans():
+    plans = []
+    for f in sorted(PLANS_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            plans.append({"id": data["id"], "name": data.get("name", "Plan"), "updated_at": data.get("updated_at", 0)})
+        except Exception:
+            pass
+    return plans
+
+
+def _plan_path(plan_id: str, plan_name: str = "") -> Path:
+    """Gibt den Dateipfad für einen Plan zurück (sprechender Name + ID-Suffix)."""
+    if plan_name:
+        slug = _to_slug(plan_name)
+        return PLANS_DIR / f"{slug}_{plan_id[:8]}.json"
+    return PLANS_DIR / f"{plan_id}.json"
+
+
+def _plan_path_by_id(plan_id: str) -> Optional[Path]:
+    """Findet Plan-Datei anhand der ID."""
+    for fp in PLANS_DIR.glob("*.json"):
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+            if data.get("id") == plan_id:
+                return fp
+        except Exception:
+            pass
+    return None
+
+
+@app.post("/api/plans")
+async def create_plan(req: Request):
+    body = await req.json()
+    name = str(body.get("name", "Neuer Plan")).strip()
+    plan = {
+        "id": uuid.uuid4().hex[:12],
+        "name": name,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "tasks": body.get("tasks", []),
+        "description": str(body.get("description", "")).strip(),
+        "system_prompt": str(body.get("system_prompt", "")).strip(),
+        "resource_catalog": body.get("resource_catalog", []),
+        "resource_mode": str(body.get("resource_mode", "free")).strip(),
+        "start_date": str(body.get("start_date", "")).strip(),
+        "workdays": bool(body.get("workdays", False)),
+    }
+    _plan_path(plan["id"], name).write_text(
+        json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return plan
+
+
+@app.get("/api/plans/{pid}")
+async def get_plan(pid: str):
+    fp = _plan_path_by_id(pid)
+    if not fp or not fp.exists():
+        raise HTTPException(404, "Plan nicht gefunden")
+    return json.loads(fp.read_text(encoding="utf-8"))
+
+
+@app.put("/api/plans/{pid}")
+async def save_plan(pid: str, req: Request):
+    body = await req.json()
+    old_fp = _plan_path_by_id(pid)
+    existing = json.loads(old_fp.read_text(encoding="utf-8")) if old_fp and old_fp.exists() else {}
+    existing.update(body)
+    existing["id"] = pid
+    existing["updated_at"] = time.time()
+    new_fp = _plan_path(pid, existing.get("name", ""))
+    if old_fp and old_fp != new_fp and old_fp.exists():
+        old_fp.unlink(missing_ok=True)
+    new_fp.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+    return existing
+
+
+@app.delete("/api/plans/{pid}")
+async def delete_plan(pid: str):
+    fp = _plan_path_by_id(pid)
+    if fp:
+        fp.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@app.post("/api/plans/{pid}/ai")
+async def plan_ai(pid: str, req: Request):
+    body = await req.json()
+    fp = PLANS_DIR / f"{pid}.json"
+    plan = json.loads(fp.read_text(encoding="utf-8")) if fp.exists() else {}
+    # Inline-Tasks aus dem Body übernehmen falls kein gespeicherter Plan
+    tasks = plan.get("tasks") or body.get("tasks", [])
+    model = _pick_model(body.get("model"))
+    user_message = body.get("message", "")
+    tasks_summary = json.dumps(tasks, ensure_ascii=False)
+
+    system_prompt = (
+        "Du bist ein erfahrener Projektmanager und hilfst beim Erstellen und Verfeinern von Projektplänen. "
+        "Du kennst Methoden wie CPM, Netzplanung, kritischen Pfad und Ressourcenplanung. "
+        "Antworte auf Deutsch, präzise und konstruktiv. "
+        "Wenn du Aufgaben vorschlägst, nenne sie als JSON-Liste mit Feldern: id, name, duration, predecessors, successors."
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Aktueller Plan '{plan.get('name', 'Plan')}':\n\nAufgaben:\n{tasks_summary}\n\nFrage: {user_message}"},
+    ]
+
+    async def _stream():
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+                "model": model,
+                "think": False,
+                "messages": messages,
+                "stream": True,
+            }) as resp:
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
+                        if chunk.get("done"):
+                            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    except Exception:
+                        pass
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+async def _ensure_plan_rag(plan: dict) -> dict:
+    """Stellt sicher, dass der Plan eine eigene Wissensdatenbank besitzt
+    (wird bei der ersten Tätigkeits-Recherche automatisch angelegt)."""
+    cid = plan.get("rag_collection_id")
+    coll = await _db.rag_get_collection(cid) if cid else None
+    if coll:
+        return coll
+    from tools.rag import tier_config
+    tc = tier_config("6gb")
+    coll = {
+        "id": f"rag_{uuid.uuid4().hex[:12]}",
+        "name": (f"Plan: {plan.get('name', 'Plan')}")[:60],
+        "embed_model": EMBED_MODEL,
+        "tier": "plan",
+        "chunk_size": tc["chunk_size"], "chunk_overlap": tc["chunk_overlap"],
+        "top_k": tc["top_k"], "embed_gpu": False, "clean": True,
+        "char_limit": tc["char_limit"], "strictness": "korrekt",
+        "created_at": time.time(),
+    }
+    await _db.rag_create_collection(coll)
+    plan["rag_collection_id"] = coll["id"]
+    return coll
+
+
+@app.post("/api/plans/{pid}/research-task")
+async def plan_research_task(pid: str, req: Request):
+    """Recherchiert eine einzelne Tätigkeit wissenschaftlich: adaptiver Agent →
+    Web-Recherche → Markdown-Dossier → Einbettung ins plan-spezifische RAG →
+    Verlinkung mit der Tätigkeit. Macht den Plan interaktiv (RAG je Plan)."""
+    import re as _re
+    from tools.search import search_with_sources
+    from tools.rag import ingest_file
+
+    body = await req.json()
+    task_id = body.get("task_id")
+    model = _pick_model(body.get("model"))
+    fp = _plan_path_by_id(pid)
+    if not fp or not fp.exists():
+        raise HTTPException(status_code=404, detail="Plan nicht gefunden")
+    plan = json.loads(fp.read_text(encoding="utf-8"))
+    task = next((t for t in plan.get("tasks", []) if t.get("id") == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tätigkeit nicht gefunden")
+
+    coll = await _ensure_plan_rag(plan)
+    tname = task.get("name", task_id)
+    context = (plan.get("name", "") + " — " + (plan.get("description", "") or "")).strip(" —")
+    query = f"{tname} {context}".strip()
+
+    # 1. Adaptiver Agent aus der Tätigkeit ableiten
+    role, persona = await _derive_adaptive_prompt(
+        f"Projektaufgabe: {tname}. Projektkontext: {context}", model)
+
+    # 2. Web-Recherche
+    try:
+        sources, search_text = await search_with_sources(query, 5)
+    except Exception as e:
+        sources, search_text = [], f"(Websuche fehlgeschlagen: {e})"
+
+    # 3. Wissenschaftliche Synthese als Markdown
+    _sys = "\n\n".join(p for p in (_SCIENCE_PROMPT, persona) if p)
+    prompt = (
+        f"Erstelle ein strukturiertes, wissenschaftlich sorgfältiges Kurzdossier in **Markdown** "
+        f"zur Projekttätigkeit {tname} (Kontext: {context}). Stütze dich auf die folgenden "
+        f"Suchergebnisse und zitiere Quellen mit Link. Erfinde nichts.\n\n"
+        f"Suchergebnisse:\n{search_text[:6000]}\n\n"
+        f"Gliederung:\n## {tname}\n### Überblick\n### Vorgehen / Methodik\n"
+        f"### Wichtige Punkte & Belege\n### Risiken / Offene Fragen\n### Quellen"
+    )
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": _sys},
+                             {"role": "user", "content": prompt}],
+            })
+            resp.raise_for_status()
+            md = resp.json().get("message", {}).get("content", "")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Synthese fehlgeschlagen: {e}")
+    md = _re.sub(r"<think>.*?</think>", "", md, flags=_re.DOTALL).strip()
+    # gesicherte Quellenliste anhängen (nicht vom Modell erfunden)
+    if sources:
+        md += "\n\n### Quellen\n" + "\n".join(
+            f"- [{s.get('title', 'Quelle')}]({s.get('url', '')})" for s in sources if s.get("url"))
+
+    # 4. Ins plan-spezifische RAG einbetten
+    try:
+        await ingest_file(coll, md, f"{task_id} – {tname}", f"doc_{uuid.uuid4().hex[:12]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RAG-Einbettung fehlgeschlagen: {e}")
+
+    # 4b. Dossier automatisch als Markdown-Datei exportieren
+    #     data/dossiers/<plan-slug>_<planid>/<task-slug>_<taskid>.md
+    plan_folder = DOSSIERS_DIR / f"{_to_slug(plan.get('name', 'plan'))}_{pid[:8]}"
+    plan_folder.mkdir(parents=True, exist_ok=True)
+    md_path = plan_folder / f"{_to_slug(tname)}_{_to_slug(str(task_id))}.md"
+    frontmatter = (
+        "---\n"
+        f"plan: {plan.get('name', '')}\n"
+        f"task_id: {task_id}\n"
+        f"task: {tname}\n"
+        f"role: {role}\n"
+        f"exported: {_dt.now().isoformat(timespec='seconds')}\n"
+        f"sources: {len(sources)}\n"
+        "---\n\n"
+    )
+    try:
+        md_path.write_text(frontmatter + md, encoding="utf-8")
+    except Exception as e:
+        _write_log({"type": "error", "where": "dossier_export",
+                    "file": md_path.name, "error": str(e)})
+        md_path = None
+
+    # 5. Dossier an die Tätigkeit hängen und Plan speichern
+    task["doc"] = md
+    task["doc_role"] = role
+    task["researched"] = True
+    if md_path:
+        task["doc_file"] = str(md_path.relative_to(DATA_DIR)).replace("\\", "/")
+    plan["updated_at"] = time.time()
+    fp.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {"ok": True, "task_id": task_id, "role": role, "md": md,
+            "collection_id": coll["id"], "collection_name": coll["name"],
+            "n_sources": len(sources),
+            "doc_file": task.get("doc_file")}
+
+
+@app.post("/api/plans/derive-agent")
+async def plan_derive_agent(req: Request):
+    """Leitet aus Projektbeschreibung + Ziel einen Projektplaner-Agenten (System-Prompt) ab.
+    Dieser steuert anschließend die Aufgaben-/Ressourcenvorschläge."""
+    import re
+    body = await req.json()
+    description = (body.get("description") or "").strip()
+    if not description:
+        raise HTTPException(400, "Keine Projektbeschreibung angegeben")
+    _model = _pick_model(body.get("model"))
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": _model,
+            "think": False,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Du erstellst System-Prompts für KI-Projektplaner. "
+                        "Antworte NUR mit dem fertigen System-Prompt als Fließtext, ohne Einleitung, "
+                        "ohne Erklärung, ohne JSON, ohne Markdown."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Projektbeschreibung und Ziel:\n{description}\n\n"
+                        "Erstelle den System-Prompt für einen fachkundigen Projektplaner-Agenten zu diesem Projekt.\n"
+                        "Regeln:\n"
+                        "- Beginne mit 'Du bist ...'\n"
+                        "- Er soll passende Aufgaben, Abhängigkeiten, Dauern und Ressourcen "
+                        "(Mensch/Hardware/Software) mit Zeiten und Kosten vorschlagen\n"
+                        "- Antworte auf Deutsch, maximal 120 Wörter, nur Fließtext"
+                    ),
+                },
+            ],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    system_prompt = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    system_prompt = re.sub(r"^```[a-zA-Z]*\s*", "", system_prompt).strip()
+    system_prompt = re.sub(r"\s*```$", "", system_prompt).strip()
+    # Falls das Modell doch JSON lieferte, den system_prompt-Wert herausziehen
+    if system_prompt.startswith("{"):
+        ms = re.search(r'"system_prompt"\s*:\s*"([\s\S]+?)"\s*[},]', system_prompt)
+        if ms:
+            system_prompt = ms.group(1).strip()
+    if not system_prompt or system_prompt.startswith("{"):
+        system_prompt = (
+            "Du bist ein erfahrener Projektplaner und schlägst zu diesem Projekt passende Aufgaben, "
+            "Abhängigkeiten, Dauern und Ressourcen (Mensch/Hardware/Software) mit Zeiten und Kosten vor."
+        )
+    # Kurzname heuristisch aus den ersten sinnvollen Wörtern der Beschreibung
+    words = re.findall(r"[A-Za-zÄÖÜäöüß0-9\-]{3,}", description)
+    agent_name = " ".join(words[:3]) + "-Planer" if words else "Projektplaner"
+    return {"agent_name": agent_name[:40], "system_prompt": system_prompt}
+
+
+# Schlüsselwörter zur Typ-Erkennung. Mensch wird ZUERST geprüft, damit Rollen wie
+# "Softwareentwickler" nicht fälschlich als Software klassifiziert werden.
+_HUMAN_KW = (
+    "ingenieur", "techniker", "entwickler", "leiter", "mitarbeiter", "monteur", "planer",
+    "analyst", "experte", "expertin", "redakteur", "prüfer", "pruefer", "admin", "manager",
+    "berater", "konstrukteur", "mechaniker", "mechatroniker", "elektroniker", "elektrotechnik",
+    "elektromechanik", "programmierer", "designer", "architekt", "tester", "trainer",
+    "einkauf", "einkäufer", "einkaeufer", "controller", "controlling", "justiziar",
+    "geschäftsführung", "geschaeftsfuehrung", "scientist", "fachkraft", "personal",
+    "pilot", "operator", "bediener", "wissenschaftler", "sachbearbeiter", "assistenz",
+    "praktikant", "werkstudent", "schulungs", "kraft", "team", "rolle",
+)
+_HARDWARE_KW = (
+    "sensor", "server", "gpu", "grafikkarte", "rechner", "workstation", "laptop", " pc",
+    "maschine", "gerät", "geraet", "drucker", "kabel", "rack", "motor", "welle", "encoder",
+    "nas", "switch", "usv", "messgerät", "messgeraet", "messstreifen", "dehnungsmess",
+    "kamera", "roboter", "antrieb", "netzteil", "batterie", "akku", "scheibe", "prüfstand",
+    "pruefstand", "prüfling", "hubwagen", "werkzeug", "anlage", "platine", "bauteil",
+    "komponente", "hardware", "speicher", "storage", "festplatte", "ssd", "router",
+)
+_SOFTWARE_KW = (
+    "lizenz", "software", "labview", "cad", "solidworks", "autocad", "fusion", "revit",
+    "python", "matlab", "simulink", "simulation", "tool", "programm", " app", "datenbank",
+    "suite", "runtime", "betriebssystem", "plugin", "framework", "office", "abonnement",
+    "saas", "api", "ollama", "grafana", "docker", "vektor-db", "backup-software",
+)
+
+
+def _classify_resource_kind(name: str):
+    """Errät den Ressourcentyp anhand von Schlüsselwörtern im Namen.
+    Gibt 'human'/'hardware'/'software' zurück oder None, wenn unsicher."""
+    n = " " + (name or "").lower() + " "
+    if any(k in n for k in _HUMAN_KW):
+        return "human"
+    if any(k in n for k in _HARDWARE_KW):
+        return "hardware"
+    if any(k in n for k in _SOFTWARE_KW):
+        return "software"
+    return None
+
+
+def _coerce_resource(r: dict) -> dict:
+    """Normalisiert eine Ressourcen-Angabe der KI auf das interne Schema.
+    Korrigiert den Typ per Heuristik, wenn der Name eindeutig ist."""
+    name = str(r.get("name", "")).strip()[:80]
+    kind = str(r.get("kind", "human")).lower().strip()
+    if kind not in ("human", "hardware", "software"):
+        kind = "human"
+    guessed = _classify_resource_kind(name)
+    if guessed:
+        kind = guessed
+    def _num(v):
+        try:
+            return max(0, float(v))
+        except Exception:
+            return 0
+    return {
+        "kind": kind,
+        "name": name,
+        "qty": _num(r.get("qty", 1)) or 1,
+        "hours": _num(r.get("hours", 0)),
+        "rate": _num(r.get("rate", 0)),
+    }
+
+
+def _norm_name(s: str) -> str:
+    return re.sub(r"\s+", " ", str(s or "").lower().strip())
+
+
+def _match_catalog(name: str, catalog: list):
+    """Findet eine Katalog-Ressource zum Namen (exakt oder als Teilstring)."""
+    n = _norm_name(name)
+    if not n:
+        return None
+    for c in catalog:
+        if _norm_name(c.get("name")) == n:
+            return c
+    for c in catalog:
+        cn = _norm_name(c.get("name"))
+        if cn and (cn in n or n in cn):
+            return c
+    return None
+
+
+def _normalize_catalog(catalog) -> list:
+    """Bringt einen Ressourcen-Katalog auf {kind, name, rate}."""
+    out = []
+    for c in (catalog or []):
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("name", "")).strip()[:80]
+        if not name:
+            continue
+        kind = str(c.get("kind", "")).lower().strip()
+        if kind not in ("human", "hardware", "software"):
+            kind = _classify_resource_kind(name) or "human"
+        try:
+            rate = max(0, float(c.get("rate", 0)))
+        except Exception:
+            rate = 0
+        out.append({"kind": kind, "name": name, "rate": rate})
+    return out
+
+
+def _apply_catalog_to_resources(res_list: list, catalog: list, mode: str) -> list:
+    """Gleicht Ressourcen mit dem Katalog ab.
+    - 'strict': nur Katalog-Ressourcen behalten (Typ+Satz aus Katalog).
+    - 'extend': Treffer an Katalog angleichen, neue (Zukauf) behalten.
+    - sonst: unverändert."""
+    if not catalog or mode not in ("strict", "extend"):
+        return res_list
+    out = []
+    for r in res_list:
+        match = _match_catalog(r.get("name", ""), catalog)
+        if match:
+            r = {**r, "kind": match["kind"], "rate": match["rate"], "name": match["name"]}
+            out.append(r)
+        elif mode == "extend":
+            r = {**r, "from_catalog": False}  # Zukauf / Ergänzung
+            out.append(r)
+        # strict + kein Treffer → verwerfen
+    return out
+
+
+def _catalog_prompt(catalog: list, mode: str) -> str:
+    """Erzeugt den Katalog-Hinweis für das LLM."""
+    if not catalog:
+        return ""
+    lines = []
+    for c in catalog[:60]:
+        unit = "€/h" if c["kind"] == "human" else "€/Einheit"
+        lines.append(f"- [{c['kind']}] {c['name']} ({c['rate']:.0f} {unit})")
+    cat = "Verfügbarer Ressourcen-Katalog:\n" + "\n".join(lines) + "\n\n"
+    if mode == "strict":
+        cat += ("Verwende AUSSCHLIESSLICH Ressourcen aus diesem Katalog mit den angegebenen "
+                "Kostensätzen. Erfinde keine neuen Ressourcen.\n\n")
+    elif mode == "extend":
+        cat += ("Nutze bevorzugt Ressourcen aus diesem Katalog (mit den angegebenen Sätzen). "
+                "Nur wenn nötig, darfst du zusätzliche Ressourcen ergänzen (Zukauf).\n\n")
+    return cat
+
+
+def _coerce_candidate(c: dict) -> dict:
+    try:
+        dur = max(0, float(c.get("duration", 1)))
+    except Exception:
+        dur = 1
+    res = [_coerce_resource(r) for r in (c.get("resources") or []) if isinstance(r, dict)][:6]
+    return {"name": str(c.get("name", "")).strip()[:120], "duration": dur, "resources": res}
+
+
+@app.post("/api/plans/suggest-tasks")
+async def suggest_tasks(req: Request):
+    """Schlägt zu einer Aufgabe mehrere mögliche Vorgänger und Nachfolger vor
+    (mit Dauer und Ressourcen) – zur Auswahl, nicht automatisch übernommen."""
+    import re
+    body = await req.json()
+    _model = _pick_model(body.get("model"))
+    system_prompt = (body.get("system_prompt") or "").strip() or (
+        "Du bist ein erfahrener Projektplaner."
+    )
+    description = (body.get("description") or "").strip()
+    tasks = body.get("tasks", [])
+    anchor = body.get("anchor") or {}
+    catalog = _normalize_catalog(body.get("resource_catalog"))
+    res_mode = str(body.get("resource_mode", "free")).lower().strip()
+    no_pred = bool(anchor.get("is_start"))   # Projektstart → keine Vorgänger
+    no_succ = bool(anchor.get("is_end"))     # Projektende → keine Nachfolger
+    tasks_summary = json.dumps(
+        [{"id": t.get("id"), "name": t.get("name"), "duration": t.get("duration")} for t in tasks],
+        ensure_ascii=False,
+    )
+
+    if no_pred and no_succ:
+        return {"predecessors": [], "successors": []}
+
+    if no_pred:
+        scope = ("Diese Aufgabe ist als PROJEKTSTART markiert. Schlage KEINE Vorgänger vor "
+                 "(predecessors=[]), nur bis zu 3 direkte NACHFOLGER.")
+    elif no_succ:
+        scope = ("Diese Aufgabe ist als PROJEKTENDE markiert. Schlage KEINE Nachfolger vor "
+                 "(successors=[]), nur bis zu 3 direkte VORGÄNGER.")
+    else:
+        scope = "Schlage bis zu 3 sinnvolle direkte VORGÄNGER und bis zu 3 direkte NACHFOLGER dieser Aufgabe vor."
+
+    user = (
+        (f"Projektkontext: {description}\n\n" if description else "")
+        + f"Bereits vorhandene Aufgaben: {tasks_summary}\n\n"
+        + f"Betrachtete Aufgabe: \"{anchor.get('name', '')}\" (Dauer {anchor.get('duration', '?')} Tage)\n\n"
+        + scope + " "
+        + "Gib für jeden Vorschlag einen kurzen Namen, die Dauer in Tagen und die nötigen Ressourcen an "
+        + "(Mensch/Hardware/Software) mit Menge, grober Zeit in Stunden und Kostensatz in Euro pro Stunde "
+        + "(bei Hardware/Software pro Einheit, hours=0).\n\n"
+        + _catalog_prompt(catalog, res_mode)
+        + "Antworte NUR mit JSON in genau diesem Format, ohne Markdown, ohne Erklärung:\n"
+        + '{"predecessors":[{"name":"Teile bestellen","duration":5,'
+        + '"resources":[{"kind":"human","name":"Einkäufer","qty":1,"hours":4,"rate":55}]}],'
+        + '"successors":[{"name":"Inbetriebnahme","duration":3,"resources":[]}]}\n'
+        + "kind ist genau einer von: human, hardware, software."
+    )
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": _model,
+            "think": False,
+            "messages": [
+                {"role": "system", "content": system_prompt + " Antworte ausschließlich mit gültigem JSON."},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
+    raw = re.sub(r"\s*```$", "", raw).strip()
+    preds, succs = [], []
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            preds = [_coerce_candidate(c) for c in (data.get("predecessors") or []) if isinstance(c, dict)][:3]
+            succs = [_coerce_candidate(c) for c in (data.get("successors") or []) if isinstance(c, dict)][:3]
+        except Exception:
+            pass
+    if no_pred:
+        preds = []
+    if no_succ:
+        succs = []
+    for c in preds + succs:
+        c["resources"] = _apply_catalog_to_resources(c.get("resources", []), catalog, res_mode)
+    return {"predecessors": preds, "successors": succs}
+
+
+@app.post("/api/plans/detail-task")
+async def detail_task(req: Request):
+    """Detailliert eine ausgewählte Aufgabe per LLM: verfeinert Bezeichnung,
+    Dauer, Beschreibung und Ressourcen und schlägt zusätzlich Vorgänger und
+    Nachfolger vor. Alle Werte sind im Frontend wähl- und editierbar."""
+    body = await req.json()
+    _model = _pick_model(body.get("model"))
+    system_prompt = (body.get("system_prompt") or "").strip() or "Du bist ein erfahrener Projektplaner."
+    description = (body.get("description") or "").strip()
+    tasks = body.get("tasks", [])
+    task = body.get("task") or {}
+    catalog = _normalize_catalog(body.get("resource_catalog"))
+    res_mode = str(body.get("resource_mode", "free")).lower().strip()
+    no_pred = bool(task.get("is_start"))
+    no_succ = bool(task.get("is_end"))
+
+    cur_res = ", ".join(
+        f"{r.get('kind','')}:{r.get('name','')}" for r in (task.get("resource_list") or [])
+    ) or "—"
+    tasks_summary = json.dumps(
+        [{"id": t.get("id"), "name": t.get("name")} for t in tasks if t.get("id") != task.get("id")],
+        ensure_ascii=False,
+    )
+
+    if no_pred and no_succ:
+        scope = "Schlage KEINE Vorgänger und KEINE Nachfolger vor (predecessors=[], successors=[])."
+    elif no_pred:
+        scope = "Diese Aufgabe ist PROJEKTSTART: predecessors=[], aber bis zu 3 Nachfolger."
+    elif no_succ:
+        scope = "Diese Aufgabe ist PROJEKTENDE: successors=[], aber bis zu 3 Vorgänger."
+    else:
+        scope = "Schlage zusätzlich bis zu 3 sinnvolle direkte Vorgänger und bis zu 3 Nachfolger vor."
+
+    user = (
+        (f"Projektkontext: {description}\n\n" if description else "")
+        + f"Andere Aufgaben: {tasks_summary}\n\n"
+        + f"Zu detaillierende Aufgabe: \"{task.get('name', '')}\" "
+        + f"(aktuelle Dauer {task.get('duration', '?')} Tage, aktuelle Ressourcen: {cur_res}).\n\n"
+        + "Detailliere DIESE Aufgabe: eine präzisere Bezeichnung (name), eine realistische "
+        + "Dauer in Tagen (duration), eine kurze Detailbeschreibung in 1–2 Sätzen (notes) und die "
+        + "nötigen Ressourcen (Mensch/Hardware/Software mit Menge, Stunden, Kostensatz €). "
+        + scope + "\n\n"
+        + _catalog_prompt(catalog, res_mode)
+        + "Antworte NUR mit JSON in genau diesem Format, ohne Markdown, ohne Erklärung:\n"
+        + '{"detail":{"name":"...","duration":5,"notes":"...","resources":[{"kind":"human","name":"...","qty":1,"hours":8,"rate":80}]},'
+        + '"predecessors":[{"name":"...","duration":3,"resources":[]}],'
+        + '"successors":[{"name":"...","duration":2,"resources":[]}]}\n'
+        + "kind ist genau einer von: human, hardware, software."
+    )
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": _model,
+            "think": False,
+            "messages": [
+                {"role": "system", "content": system_prompt + " Antworte ausschließlich mit gültigem JSON."},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
+    raw = re.sub(r"\s*```$", "", raw).strip()
+
+    # Detail mit aktuellen Werten als Fallback
+    try:
+        cur_dur = float(task.get("duration", 1))
+    except Exception:
+        cur_dur = 1
+    detail = {
+        "name": str(task.get("name", "")),
+        "duration": cur_dur,
+        "notes": str(task.get("notes", "")),
+        "resources": [],
+    }
+    preds, succs = [], []
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            d = data.get("detail") or {}
+            if d.get("name"):
+                detail["name"] = str(d["name"]).strip()[:120]
+            try:
+                detail["duration"] = max(0, float(d.get("duration", cur_dur)))
+            except Exception:
+                pass
+            if d.get("notes"):
+                detail["notes"] = str(d["notes"]).strip()[:400]
+            detail["resources"] = [_coerce_resource(r) for r in (d.get("resources") or []) if isinstance(r, dict)][:6]
+            preds = [_coerce_candidate(c) for c in (data.get("predecessors") or []) if isinstance(c, dict)][:3]
+            succs = [_coerce_candidate(c) for c in (data.get("successors") or []) if isinstance(c, dict)][:3]
+        except Exception:
+            pass
+
+    if no_pred:
+        preds = []
+    if no_succ:
+        succs = []
+    detail["resources"] = _apply_catalog_to_resources(detail["resources"], catalog, res_mode)
+    for c in preds + succs:
+        c["resources"] = _apply_catalog_to_resources(c.get("resources", []), catalog, res_mode)
+    return {"detail": detail, "predecessors": preds, "successors": succs}
+
+
+@app.post("/api/plans/insert-between")
+async def insert_between(req: Request):
+    """Schlägt per LLM 1–3 sinnvolle Zwischenvorgänge vor, die zwischen zwei
+    Aufgaben A und B passen. Die KI liest Bezeichnung/Notizen beider Aufgaben
+    und überlegt, welche Tätigkeit die Lücke schließt. Auswahl/Editieren im
+    Frontend; das Frontend verdrahtet anschließend A→neu→B."""
+    body = await req.json()
+    _model = _pick_model(body.get("model"))
+    system_prompt = (body.get("system_prompt") or "").strip() or "Du bist ein erfahrener Projektplaner."
+    description = (body.get("description") or "").strip()
+    a = body.get("task_a") or {}
+    b = body.get("task_b") or {}
+    catalog = _normalize_catalog(body.get("resource_catalog"))
+    res_mode = str(body.get("resource_mode", "free")).lower().strip()
+
+    def _desc(t):
+        parts = [str(t.get("name", "")).strip()]
+        if t.get("notes"):
+            parts.append(f"(Notiz: {str(t['notes']).strip()})")
+        return " ".join(p for p in parts if p) or "?"
+
+    user = (
+        (f"Projektkontext: {description}\n\n" if description else "")
+        + f"Aufgabe A (Vorgänger): \"{_desc(a)}\", Dauer {a.get('duration', '?')} Tage.\n"
+        + f"Aufgabe B (Nachfolger): \"{_desc(b)}\", Dauer {b.get('duration', '?')} Tage.\n\n"
+        + "Überlege, welche 1–3 Tätigkeiten logisch ZWISCHEN A und B liegen müssen, "
+        + "damit der Ablauf von A nach B vollständig und konsistent ist. Jede Tätigkeit "
+        + "hat name, duration (Tage) und resources (Mensch/Hardware/Software mit Menge, "
+        + "Stunden, Kostensatz €).\n\n"
+        + _catalog_prompt(catalog, res_mode)
+        + "Antworte NUR mit JSON in genau diesem Format, ohne Markdown, ohne Erklärung:\n"
+        + '{"tasks":[{"name":"...","duration":3,"notes":"...","resources":[{"kind":"human","name":"...","qty":1,"hours":8,"rate":80}]}]}\n'
+        + "kind ist genau einer von: human, hardware, software."
+    )
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            "model": _model,
+            "think": False,
+            "messages": [
+                {"role": "system", "content": system_prompt + " Antworte ausschließlich mit gültigem JSON."},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
+    raw = re.sub(r"\s*```$", "", raw).strip()
+
+    tasks = []
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            for c in (data.get("tasks") or [])[:3]:
+                if not isinstance(c, dict):
+                    continue
+                cand = _coerce_candidate(c)
+                cand["notes"] = str(c.get("notes", "")).strip()[:400]
+                cand["resources"] = _apply_catalog_to_resources(cand.get("resources", []), catalog, res_mode)
+                tasks.append(cand)
+        except Exception:
+            pass
+
+    return {"tasks": tasks}
+
+
+@app.post("/api/plans/generate")
+async def generate_plan(req: Request):
+    """Generiert aus einer Projektbeschreibung einen vollständigen Projektplan
+    (Aufgaben mit Dauer, Abhängigkeiten und Ressourcen) per lokalem LLM.
+    Nachfolger werden serverseitig aus den Vorgängern abgeleitet."""
+    import re
+    body = await req.json()
+    _model = _pick_model(body.get("model"))
+    description = (body.get("description") or "").strip()
+    if not description:
+        raise HTTPException(400, "Keine Projektbeschreibung angegeben")
+    try:
+        max_tasks = int(body.get("max_tasks", 12))
+    except Exception:
+        max_tasks = 12
+    # Keine harte 20er-Grenze mehr – nur ein großzügiges Sicherheitsnetz gegen Ausreißer.
+    max_tasks = max(5, min(max_tasks, 200))
+    big_request = max_tasks > 30
+    system_prompt = (body.get("system_prompt") or "").strip() or (
+        "Du bist ein erfahrener Projektplaner und zerlegst Projekte in sinnvolle, "
+        "chronologisch abhängige Arbeitspakete."
+    )
+    catalog = _normalize_catalog(body.get("resource_catalog"))
+    res_mode = str(body.get("resource_mode", "free")).lower().strip()
+
+    user = (
+        f"Projektbeschreibung und Ziel:\n{description}\n\n"
+        f"Erstelle einen vollständigen Projektplan mit {max_tasks} Aufgaben in sinnvoller Reihenfolge. "
+        "Vergib fortlaufende IDs T1, T2, …. Jede Aufgabe hat: id, name, duration (Tage), "
+        "predecessors (Liste der IDs direkter Vorgänger; die erste Aufgabe hat []), "
+        "und resources (Mensch/Hardware/Software) mit Menge, Zeit in Stunden und Kostensatz in Euro "
+        "(bei Hardware/Software pro Einheit, hours=0).\n\n"
+        + _catalog_prompt(catalog, res_mode) +
+        "Antworte NUR mit JSON in genau diesem Format, ohne Markdown, ohne Erklärung:\n"
+        '{"tasks":[{"id":"T1","name":"Anforderungen klären","duration":3,"predecessors":[],'
+        '"resources":[{"kind":"human","name":"Projektleiter","qty":1,"hours":16,"rate":90}]},'
+        '{"id":"T2","name":"Konzept erstellen","duration":5,"predecessors":["T1"],"resources":[]}]}\n'
+        "kind ist genau einer von: human, hardware, software."
+    )
+
+    payload = {
+        "model": _model,
+        "think": False,
+        "format": "json",   # erzwingt valides JSON → robuster gegen Geplapper
+        "messages": [
+            {"role": "system", "content": system_prompt + " Antworte ausschließlich mit gültigem JSON."},
+            {"role": "user", "content": user},
+        ],
+        "stream": False,
+    }
+    if big_request:
+        # größeres Kontextfenster, damit lange Pläne nicht abgeschnitten werden
+        payload["options"] = {"num_ctx": 8192}
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=600 if big_request else 300) as client:
+        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
+    raw = re.sub(r"\s*```$", "", raw).strip()
+
+    # Balancierte {…}-Objekte aus einem (evtl. abgeschnittenen) String ziehen.
+    def _extract_objects(s: str) -> list:
+        objs, depth, start = [], 0, -1
+        for i, ch in enumerate(s):
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}" and depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    objs.append(s[start:i + 1]); start = -1
+        return objs
+
+    rawtasks = []
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        try:
+            rawtasks = json.loads(m.group(0)).get("tasks") or []
+        except Exception:
+            rawtasks = []
+
+    # Rettungs-Parser: bei abgeschnittenem/teilweisem JSON einzelne Aufgaben bergen
+    if not rawtasks:
+        bracket = raw.find("[", raw.find('"tasks"')) if '"tasks"' in raw else raw.find("[")
+        segment = raw[bracket:] if bracket >= 0 else raw
+        for objstr in _extract_objects(segment):
+            try:
+                obj = json.loads(objstr)
+                if isinstance(obj, dict) and obj.get("name"):
+                    rawtasks.append(obj)
+            except Exception:
+                pass
+
+    if not rawtasks:
+        raise HTTPException(502,
+            "Das Modell lieferte keinen verwertbaren Plan – bei dieser Aufgabenzahl ist ein "
+            "größeres/leistungsfähigeres Modell erforderlich. Alternativ weniger Aufgaben "
+            "anfordern oder den Plan in Phasen generieren.")
+
+    # Normalisieren: IDs eindeutig machen, Aufgaben säubern
+    tasks, seen = [], set()
+    for i, t in enumerate(rawtasks[:max_tasks], start=1):
+        if not isinstance(t, dict):
+            continue
+        tid = str(t.get("id") or f"T{i}").strip() or f"T{i}"
+        while tid in seen:
+            tid = f"{tid}_{i}"
+        seen.add(tid)
+        try:
+            dur = max(0, float(t.get("duration", 1)))
+        except Exception:
+            dur = 1
+        res = [_coerce_resource(r) for r in (t.get("resources") or []) if isinstance(r, dict)][:6]
+        res = _apply_catalog_to_resources(res, catalog, res_mode)
+        preds = [str(p).strip() for p in (t.get("predecessors") or []) if str(p).strip()]
+        tasks.append({
+            "id": tid, "name": str(t.get("name", tid)).strip()[:120], "duration": dur,
+            "predecessors": preds, "successors": [], "resources": "",
+            "resource_list": res, "notes": "", "is_start": False, "is_end": False,
+        })
+
+    # Ungültige Vorgänger-Verweise entfernen, Nachfolger ableiten
+    ids = {t["id"] for t in tasks}
+    by_id = {t["id"]: t for t in tasks}
+    for t in tasks:
+        t["predecessors"] = [p for p in t["predecessors"] if p in ids and p != t["id"]]
+    for t in tasks:
+        for p in t["predecessors"]:
+            by_id[p]["successors"].append(t["id"])
+    # Start/Ende markieren
+    for t in tasks:
+        if not t["predecessors"]:
+            t["is_start"] = True
+        if not t["successors"]:
+            t["is_end"] = True
+
+    # Warnung: kleine lokale Modelle liefern bei großen Plänen oft unvollständig
+    warning = ""
+    if big_request:
+        warning = (
+            f"Großer Plan angefordert ({max_tasks} Aufgaben). Kleine lokale Modelle "
+            "(z. B. ministral-3:3b) liefern dann oft unvollständige oder inkonsistente "
+            "Pläne – für viele Aufgaben ein größeres/leistungsfähigeres Modell verwenden "
+            "oder den Plan in Phasen generieren."
+        )
+    if len(tasks) < max_tasks * 0.8:
+        warning = (warning + " " if warning else "") + (
+            f"Das Modell lieferte nur {len(tasks)} von {max_tasks} angeforderten Aufgaben."
+        )
+
+    return {"name": "", "description": description, "tasks": tasks,
+            "requested": max_tasks, "warning": warning.strip()}
+
+
+# ── Backup / Restore ─────────────────────────────────────────────────────────
+
+from datetime import datetime as _dt
+
+
+@app.get("/api/backup")
+async def create_backup():
+    """Exportiert alle Nutzerdaten als ZIP-Archiv."""
+    import io, zipfile
+
+    buf = io.BytesIO()
+    today = _dt.now().strftime("%Y-%m-%d")
+
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+
+        # Profil
+        if PROFILE_FILE.exists():
+            zf.write(PROFILE_FILE, "profile.json")
+
+        # Projekte
+        if PROJECTS_FILE.exists():
+            zf.write(PROJECTS_FILE, "projects.json")
+
+        # Gespräche
+        convs = await _db.list_conversations(limit=9999)
+        for c in convs:
+            data = await _db.get_conversation(c["id"])
+            if data:
+                slug = _to_slug(data.get("title", c["id"]))
+                fname = f"conversations/{slug}_{c['id'][:8]}.json"
+                zf.writestr(fname, json.dumps(data, ensure_ascii=False, indent=2))
+
+        # Pläne
+        for fp in sorted(PLANS_DIR.glob("*.json")):
+            zf.write(fp, f"plans/{fp.name}")
+
+        # Agenten
+        for fp in sorted(AGENTS_DIR.glob("*.json")):
+            zf.write(fp, f"agents/{fp.name}")
+
+        # Code-Programme (IDE)
+        for fp in sorted(CODE_DIR.glob("*.json")):
+            zf.write(fp, f"code/{fp.name}")
+
+        # Branding-Assets (Logo, Vorlagen-Deckblatt, Vorlagen-Kopfzeile)
+        for fp in sorted(PROFILE_ASSETS_DIR.glob("*")):
+            if fp.is_file():
+                zf.write(fp, f"profile_assets/{fp.name}")
+
+        # RAG-Wissensdatenbanken inkl. Embeddings (base64-kodiert)
+        try:
+            import base64 as _b64
+            rag_dump = await _db.rag_export()
+            for entry in rag_dump:
+                for d in entry["documents"]:
+                    for ch in d["chunks"]:
+                        ch["embedding"] = _b64.b64encode(ch["embedding"]).decode("ascii")
+            if rag_dump:
+                zf.writestr("rag/collections.json", json.dumps(rag_dump, ensure_ascii=False))
+        except Exception:
+            pass
+
+    buf.seek(0)
+    filename = f"ai_framework_thomas_backup_{today}.zip"
+    from fastapi.responses import StreamingResponse as _SR
+    return _SR(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/restore")
+async def restore_backup(file: UploadFile = File(...)):
+    """Importiert alle Nutzerdaten aus einem ZIP-Backup."""
+    import io, zipfile
+
+    content = await file.read()
+    stats = {"conversations": 0, "plans": 0, "agents": 0,
+             "profile": False, "projects": False,
+             "profile_assets": 0, "rag_collections": 0, "errors": []}
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            names = zf.namelist()
+
+            # Profil
+            if "profile.json" in names:
+                try:
+                    data = json.loads(zf.read("profile.json").decode("utf-8"))
+                    PROFILE_FILE.write_text(
+                        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    stats["profile"] = True
+                except Exception as e:
+                    stats["errors"].append(f"profile.json: {e}")
+
+            # Projekte
+            if "projects.json" in names:
+                try:
+                    data = json.loads(zf.read("projects.json").decode("utf-8"))
+                    # Bestehende Projekte mit importierten zusammenführen
+                    existing = _load_projects()
+                    existing_ids = {p["id"] for p in existing}
+                    for p in data:
+                        if p.get("id") not in existing_ids:
+                            existing.append(p)
+                    PROJECTS_FILE.write_text(
+                        json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    stats["projects"] = True
+                except Exception as e:
+                    stats["errors"].append(f"projects.json: {e}")
+
+            # Gespräche
+            for name in names:
+                if not name.startswith("conversations/") or not name.endswith(".json"):
+                    continue
+                try:
+                    data = json.loads(zf.read(name).decode("utf-8"))
+                    conv_id = f"restore_{uuid.uuid4().hex[:10]}"
+                    msgs = data.get("messages", [])
+                    await _db.save_conversation(
+                        conv_id, msgs,
+                        model=data.get("model"),
+                        agent_id=data.get("agent_id"),
+                        canvas_json=data.get("canvas_json"),
+                    )
+                    if data.get("project_id"):
+                        await _db.set_project(conv_id, data["project_id"])
+                    stats["conversations"] += 1
+                except Exception as e:
+                    stats["errors"].append(f"{name}: {e}")
+
+            # Pläne (überspringt wenn Name+Größe bereits identisch)
+            existing_plan_names = {
+                json.loads(fp.read_text(encoding="utf-8")).get("name", "")
+                for fp in PLANS_DIR.glob("*.json")
+                if fp.exists()
+            }
+            for name in names:
+                if not name.startswith("plans/") or not name.endswith(".json"):
+                    continue
+                try:
+                    data = json.loads(zf.read(name).decode("utf-8"))
+                    plan_name = data.get("name", "")
+                    if plan_name and plan_name in existing_plan_names:
+                        continue  # bereits vorhanden → überspringen
+                    new_id = uuid.uuid4().hex[:12]
+                    data["id"] = new_id
+                    data["updated_at"] = time.time()
+                    dest = _plan_path(new_id, plan_name)
+                    dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    stats["plans"] += 1
+                    existing_plan_names.add(plan_name)
+                except Exception as e:
+                    stats["errors"].append(f"{name}: {e}")
+
+            # Agenten (überspringt wenn ID bereits existiert)
+            for name in names:
+                if not name.startswith("agents/") or not name.endswith(".json"):
+                    continue
+                try:
+                    data = json.loads(zf.read(name).decode("utf-8"))
+                    agent_name = data.get("name", "")
+                    agent_id = data.get("id") or _to_slug(agent_name) + "_" + uuid.uuid4().hex[:4]
+                    data["id"] = agent_id
+                    existing_fp = _agent_path_by_id(agent_id)
+                    if existing_fp and existing_fp.exists():
+                        continue
+                    dest = _unique_agent_path(agent_name or agent_id, exclude_id=agent_id)
+                    dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    stats["agents"] += 1
+                except Exception as e:
+                    stats["errors"].append(f"{name}: {e}")
+
+            # Code-Programme (überspringt wenn ID bereits existiert)
+            for name in names:
+                if not name.startswith("code/") or not name.endswith(".json"):
+                    continue
+                try:
+                    data = json.loads(zf.read(name).decode("utf-8"))
+                    prog_id = data.get("id", "")
+                    if prog_id and _code_path_by_id(prog_id):
+                        continue  # bereits vorhanden
+                    if not prog_id:
+                        prog_id = _to_slug(data.get("name", "prog")) + "_" + uuid.uuid4().hex[:6]
+                        data["id"] = prog_id
+                    fp = CODE_DIR / f"{_to_slug(data.get('name','prog'))}_{prog_id[-6:]}.json"
+                    fp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    stats.setdefault("code", 0)
+                    stats["code"] += 1
+                except Exception as e:
+                    stats["errors"].append(f"{name}: {e}")
+
+            # Branding-Assets (Logo, Deckblatt, Kopfzeile) – überschreiben das Vorhandene
+            for name in names:
+                if not name.startswith("profile_assets/") or name.endswith("/"):
+                    continue
+                try:
+                    asset_name = Path(name).name
+                    if not asset_name:
+                        continue
+                    (PROFILE_ASSETS_DIR / asset_name).write_bytes(zf.read(name))
+                    stats["profile_assets"] += 1
+                except Exception as e:
+                    stats["errors"].append(f"{name}: {e}")
+
+            # RAG-Wissensdatenbanken (überspringt bereits vorhandene Sammlungen)
+            if "rag/collections.json" in names:
+                try:
+                    import base64 as _b64
+                    rag_dump = json.loads(zf.read("rag/collections.json").decode("utf-8"))
+                    for entry in rag_dump:
+                        coll = entry.get("collection", {})
+                        cid = coll.get("id")
+                        if not cid or await _db.rag_collection_exists(cid):
+                            continue
+                        for d in entry.get("documents", []):
+                            for ch in d.get("chunks", []):
+                                ch["embedding"] = _b64.b64decode(ch["embedding"])
+                        await _db.rag_import_collection(coll, entry.get("documents", []))
+                        stats["rag_collections"] += 1
+                except Exception as e:
+                    stats["errors"].append(f"rag/collections.json: {e}")
+
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Ungültige ZIP-Datei")
+
+    return stats
+
+
+# ── Asset-Serving (bilder/) ───────────────────────────────────────────────────
+
+_ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp"}
+
+
+@app.get("/api/assets/{name}")
+async def get_asset(name: str):
+    fp = BILDER_DIR / name
+    if fp.suffix.lower() not in _ALLOWED_IMAGE_EXT:
+        raise HTTPException(400, "Nur Bilddateien erlaubt")
+    if not fp.exists() or not fp.is_file():
+        raise HTTPException(404, "Datei nicht gefunden")
+    return FileResponse(fp)
+
+
+# ── Profil-Assets (Logo, Vorlagen-Deckblatt, Vorlagen-Kopfzeile) ──────────────
+# Diese ersetzen die früheren Corporate-Bilder unter bilder/. Der Nutzer lädt sie
+# im Profil hoch; sie werden seitenverhältnis-erhaltend auf eine Sollgröße skaliert.
+_PROFILE_ASSETS = {
+    "logo":   {"file": "logo.png",   "max": 512,  "fmt": "PNG",  "size": "512×512 px, PNG mit Transparenz"},
+    "cover":  {"file": "cover.jpg",  "max": 1920, "fmt": "JPEG", "size": "1920×1080 px, JPG"},
+    "header": {"file": "header.jpg", "max": 1920, "fmt": "JPEG", "size": "1920×240 px, PNG/JPG"},
+}
+
+
+@app.get("/api/profile/assets")
+async def list_profile_assets():
+    """Welche Profil-Assets sind gesetzt? (für die UI)"""
+    return {
+        kind: {
+            "present": (PROFILE_ASSETS_DIR / cfg["file"]).exists(),
+            "recommended": cfg["size"],
+        }
+        for kind, cfg in _PROFILE_ASSETS.items()
+    }
+
+
+@app.post("/api/profile/asset/{kind}")
+async def upload_profile_asset(kind: str, file: UploadFile = File(...)):
+    if kind not in _PROFILE_ASSETS:
+        raise HTTPException(400, "Unbekannter Asset-Typ")
+    cfg = _PROFILE_ASSETS[kind]
+    raw = await file.read()
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw))
+        im.thumbnail((cfg["max"], cfg["max"]))   # seitenverhältnis-erhaltend
+        out = PROFILE_ASSETS_DIR / cfg["file"]
+        if cfg["fmt"] == "PNG":
+            im.convert("RGBA").save(out, "PNG")
+        else:
+            bg = Image.new("RGB", im.size, (255, 255, 255))
+            im2 = im.convert("RGBA")
+            bg.paste(im2, mask=im2.split()[-1])
+            bg.save(out, "JPEG", quality=88)
+    except Exception as e:
+        raise HTTPException(400, f"Bild konnte nicht verarbeitet werden: {e}")
+    return {"ok": True, "kind": kind}
+
+
+@app.get("/api/profile/asset/{kind}")
+async def get_profile_asset(kind: str):
+    if kind not in _PROFILE_ASSETS:
+        raise HTTPException(400, "Unbekannter Asset-Typ")
+    fp = PROFILE_ASSETS_DIR / _PROFILE_ASSETS[kind]["file"]
+    if not fp.exists():
+        raise HTTPException(404, "Kein Asset hinterlegt")
+    return FileResponse(fp)
+
+
+@app.delete("/api/profile/asset/{kind}")
+async def delete_profile_asset(kind: str):
+    if kind not in _PROFILE_ASSETS:
+        raise HTTPException(400, "Unbekannter Asset-Typ")
+    fp = PROFILE_ASSETS_DIR / _PROFILE_ASSETS[kind]["file"]
+    if fp.exists():
+        fp.unlink()
+    return {"ok": True}
+
+
+# ── Code-IDE ─────────────────────────────────────────────────────────────────
+
+
+def _code_path_by_id(prog_id: str) -> Optional[Path]:
+    for f in CODE_DIR.glob("*.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            if d.get("id") == prog_id:
+                return f
+        except Exception:
+            pass
+    return None
+
+
+@app.get("/api/code")
+async def list_code():
+    programs = []
+    for f in CODE_DIR.glob("*.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            programs.append({"id": d["id"], "name": d.get("name", ""), "updated_at": d.get("updated_at", 0)})
+        except Exception:
+            pass
+    return sorted(programs, key=lambda x: x.get("updated_at", 0), reverse=True)
+
+
+@app.get("/api/code/{prog_id}")
+async def get_code_program(prog_id: str):
+    fp = _code_path_by_id(prog_id)
+    if not fp:
+        raise HTTPException(404, "Programm nicht gefunden")
+    return json.loads(fp.read_text(encoding="utf-8"))
+
+
+@app.post("/api/code")
+async def save_code_program(req: Request):
+    body = await req.json()
+    name = str(body.get("name") or "Unbenannt").strip()
+    code = str(body.get("code") or "")
+    prog_id = str(body.get("id") or "").strip()
+    if not prog_id:
+        prog_id = (_to_slug(name) or "prog") + "_" + uuid.uuid4().hex[:6]
+    fp = _code_path_by_id(prog_id)
+    if not fp:
+        fp = CODE_DIR / f"{_to_slug(name)}_{prog_id[-6:]}.json"
+    data = {"id": prog_id, "name": name, "code": code, "updated_at": time.time()}
+    fp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return data
+
+
+@app.delete("/api/code/{prog_id}")
+async def delete_code_program(prog_id: str):
+    fp = _code_path_by_id(prog_id)
+    if not fp:
+        raise HTTPException(404, "Programm nicht gefunden")
+    fp.unlink()
+    return {"ok": True}
+
+
+# ── Diagnose-Logging ──────────────────────────────────────────────────────────
+
+
+@app.get("/api/logs")
+async def get_logs():
+    if not LOG_FILE.exists():
+        return []
+    entries = []
+    for line in LOG_FILE.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            try:
+                entries.append(json.loads(line))
+            except Exception:
+                pass
+    return entries
+
+
+@app.delete("/api/logs")
+async def clear_logs():
+    if LOG_FILE.exists():
+        LOG_FILE.unlink()
+    return {"ok": True}
+
+
+@app.put("/api/logs/config")
+async def configure_logs(req: Request):
+    global _log_active
+    body = await req.json()
+    _log_active = bool(body.get("active", False))
+    return {"active": _log_active}
+
+
+@app.get("/api/logs/active")
+async def get_logs_active():
+    return {"active": _log_active}
+
+
+@app.post("/api/logs/entry")
+async def add_log_entry(req: Request):
+    body = await req.json()
+    _write_log({k: v for k, v in body.items() if k != "ts"})
+    return {"ok": True}
+
+
+@app.get("/api/logs/download")
+async def download_logs():
+    if not LOG_FILE.exists():
+        from fastapi.responses import Response as _Resp
+        return _Resp("", media_type="text/plain")
+    return FileResponse(
+        LOG_FILE,
+        media_type="application/octet-stream",
+        filename=f"ai_framework_thomas_{time.strftime('%Y-%m-%d_%H-%M')}.log",
+    )
+
+
+# ── Static Files (muss zuletzt kommen) ───────────────────────────────────────
+
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
