@@ -7,12 +7,29 @@
     Voraussetzung: install.bat wurde bereits erfolgreich ausgeführt.
 #>
 
+param(
+    # Zielverzeichnis, in dem der Bundle-Ordner angelegt wird.
+    # Standard: das übergeordnete Verzeichnis dieses Skripts.
+    [string]$OutDir
+)
+
 $ErrorActionPreference = "Stop"
 
 $APP_DIR       = $PSScriptRoot
 $DATE_STAMP    = Get-Date -Format "yyyyMMdd"
 $BUNDLE_NAME   = "AI_Framework_Thomas_Portable_$DATE_STAMP"
-$BUNDLE_DIR    = Join-Path (Split-Path $APP_DIR -Parent) $BUNDLE_NAME
+# Basisverzeichnis: -OutDir falls angegeben, sonst Eltern-Ordner des Skripts.
+if ($OutDir) {
+    if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
+    $BASE_DIR = (Resolve-Path $OutDir).Path
+} else {
+    $BASE_DIR = Split-Path $APP_DIR -Parent
+}
+$BUNDLE_DIR    = Join-Path $BASE_DIR $BUNDLE_NAME
+# Eigener Ollama-Port fürs Bundle — kollidiert nicht mit einem evtl. bereits
+# laufenden System-Ollama auf dem Standard-Port 11434. Garantiert, dass das
+# Bundle sein eigenes Modellverzeichnis (inkl. nomic-embed-text für RAG) nutzt.
+$OLLAMA_PORT   = 11500
 $PYTHON_VER    = "3.12.7"
 $PYTHON_ZIP    = "python-$PYTHON_VER-embed-amd64.zip"
 $PYTHON_URL    = "https://www.python.org/ftp/python/$PYTHON_VER/$PYTHON_ZIP"
@@ -128,6 +145,22 @@ Write-OK "Ollama kopiert: $ollamaDir\ollama.exe"
 # ── 4. LLM-Modelle kopieren ────────────────────────────────────────────────────
 
 Write-Step "LLM-Modelle kopieren (alle lokal vorhandenen — kann mehrere GB sein)..."
+
+# Embedding-Modell für RAG absichern: ist es lokal nicht vorhanden, fehlt es auch
+# im Bundle → kein RAG. Daher vor dem Kopieren ggf. nachziehen.
+$embedBase = ($EMBED_MODEL -split ':')[0]
+$haveEmbed = $false
+try { $haveEmbed = ((& ollama list 2>$null) -match [regex]::Escape($embedBase)) } catch {}
+if (-not $haveEmbed) {
+    Write-Warn "$EMBED_MODEL nicht lokal gefunden — wird für RAG nachgeladen..."
+    & ollama pull $EMBED_MODEL
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Konnte $EMBED_MODEL nicht laden — RAG funktioniert im Bundle evtl. nicht."
+    } else { Write-OK "$EMBED_MODEL geladen" }
+} else {
+    Write-OK "$EMBED_MODEL ist lokal vorhanden (wird gebündelt)"
+}
+
 $modelsSrc  = "$env:USERPROFILE\.ollama\models"
 $modelsDest = "$ollamaDir\models"
 
@@ -156,38 +189,64 @@ if (Test-Path "$APP_DIR\data\agents") {
     Copy-Item "$APP_DIR\data\agents\*" "$BUNDLE_DIR\app\data\agents\" -Force -ErrorAction SilentlyContinue
 }
 
+# ── 5b. config.json im Bundle auf den eigenen Ollama-Port umschreiben ──────────
+
+Write-Step "Bundle-config.json auf Port $OLLAMA_PORT setzen..."
+$cfgPath = "$BUNDLE_DIR\app\config.json"
+if (Test-Path $cfgPath) {
+    $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
+    $cfg | Add-Member -NotePropertyName ollama_base -NotePropertyValue "http://localhost:$OLLAMA_PORT" -Force
+    [System.IO.File]::WriteAllText($cfgPath, ($cfg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+    Write-OK "ollama_base = http://localhost:$OLLAMA_PORT"
+} else {
+    Write-Warn "config.json im Bundle nicht gefunden — Port bleibt auf Standard"
+}
+
 # ── 6. Start-Skripte im Bundle ─────────────────────────────────────────────────
 
 Write-Step "Portable Start-Skript erstellen..."
 
-$startContent = @'
+$startContent = @"
 @echo off
 title AI_Framework_Thomas Portable
 cd /d "%~dp0app"
 
-:: Modellverzeichnis auf portables Verzeichnis setzen
+:: Eigenes Modellverzeichnis + eigener Ollama-Port (kollidiert NICHT mit einem
+:: evtl. system-installierten Ollama auf 11434). So nutzt das Bundle garantiert
+:: seine gebuendelten Modelle inkl. nomic-embed-text fuer RAG.
 set OLLAMA_MODELS=%~dp0ollama\models
-set OLLAMA_HOST=127.0.0.1:11434
+set OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT
 
-:: Ollama starten
-tasklist /fi "IMAGENAME eq ollama.exe" 2>nul | find /i "ollama.exe" >nul
-if errorlevel 1 (
-    echo [*] Starte Ollama...
-    start /min "" "%~dp0ollama\ollama.exe" serve
-    timeout /t 4 /nobreak >nul
-)
+:: Antwortet unser Port schon? (z.B. start.bat zweimal gestartet) -> nicht neu starten
+"%~dp0python\python.exe" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$OLLAMA_PORT/api/tags', timeout=2)" >nul 2>&1
+if not errorlevel 1 goto ollamaready
+
+echo [*] Starte Ollama (eigener Port $OLLAMA_PORT)...
+start /min "" "%~dp0ollama\ollama.exe" serve
+
+set /a _tries=0
+:waitollama
+timeout /t 2 /nobreak >nul
+"%~dp0python\python.exe" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$OLLAMA_PORT/api/tags', timeout=2)" >nul 2>&1
+if not errorlevel 1 goto ollamaready
+set /a _tries+=1
+if %_tries% lss 15 goto waitollama
+echo [!] Ollama antwortet nicht - Chat/RAG koennten fehlschlagen.
+
+:ollamaready
 
 :: Browser nach kurzer Verzoegerung
 start /min "" cmd /c "timeout /t 3 >nul && start http://localhost:8780"
 
 echo.
 echo  AI_Framework_Thomas Portable gestartet
-echo  URL: http://localhost:8780
+echo  URL:    http://localhost:8780
+echo  Ollama: http://127.0.0.1:$OLLAMA_PORT
 echo  Fenster schliessen um zu beenden.
 echo.
 
 "%~dp0python\python.exe" -m uvicorn main:app --host 127.0.0.1 --port 8780
-'@
+"@
 
 # start.bat OHNE BOM schreiben — cmd.exe darf kein BOM vor '@echo off' sehen
 [System.IO.File]::WriteAllText("$BUNDLE_DIR\start.bat", $startContent, (New-Object System.Text.UTF8Encoding($false)))
@@ -212,8 +271,11 @@ $(($MODELS | ForEach-Object { "- $_" }) -join "`n")
 ## Hinweise
 - Beim ersten Start kann es 10-30 Sekunden dauern bis Ollama bereit ist
 - Modelle werden aus dem ``ollama\models`` Unterverzeichnis geladen
-- Falls Modelle fehlen: ollama-Binary in ``ollama\`` ist separat ausführbar
-  Beispiel: ``ollama\ollama.exe pull ministral-3:3b``
+- Das Bundle nutzt einen **eigenen Ollama-Port ($OLLAMA_PORT)**, damit es nicht
+  mit einem evtl. bereits installierten Ollama (Port 11434) kollidiert
+- Falls Modelle fehlen, Pull gegen den Bundle-Port (in der ``start.bat``-Konsole):
+  ``set OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT`` & ``set OLLAMA_MODELS=%CD%\ollama\models``
+  dann ``ollama\ollama.exe pull nomic-embed-text``
 
 ## Bundle erstellt
 $(Get-Date -Format "yyyy-MM-dd HH:mm")

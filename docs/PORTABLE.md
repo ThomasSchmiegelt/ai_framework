@@ -30,6 +30,18 @@ AI_Framework_Thomas_Portable_YYYYMMDD\
 Doppelklick auf: make_portable.bat
 ```
 
+**Ausgabe-Verzeichnis wählen (optional):** Standardmäßig wird das Bundle im
+übergeordneten Ordner des Projekts angelegt. Mit `-OutDir` lässt sich das Ziel
+frei wählen:
+
+```
+make_portable.bat -OutDir D:\Portable
+```
+
+Der **Start**-Pfad des fertigen Bundles ist ohnehin frei: `start.bat` arbeitet
+durchgängig mit `%~dp0` (eigener Ordner), das Bundle läuft also aus jedem
+Verzeichnis / von jedem Laufwerk.
+
 Das Skript:
 1. Kopiert alle App-Dateien
 2. Lädt Python 3.12 Embeddable Package herunter (~25 MB)
@@ -74,8 +86,16 @@ Browser öffnet sich automatisch auf `http://localhost:8780`
 
 ```
 OLLAMA_MODELS = <bundle>\ollama\models
-OLLAMA_HOST   = 127.0.0.1:11434
+OLLAMA_HOST   = 127.0.0.1:11500
 ```
+
+> **Eigener Ollama-Port 11500:** Das Bundle startet sein Ollama bewusst auf Port
+> **11500** (nicht dem Standard 11434) und setzt `config.json` → `ollama_base`
+> entsprechend. So kollidiert es nie mit einem bereits **system-installierten**
+> Ollama auf 11434 und nutzt garantiert seine **eigenen** gebündelten Modelle
+> (inkl. `nomic-embed-text` für RAG). `start.bat` startet das Bundle-Ollama nur,
+> wenn der Port 11500 noch nicht antwortet, und wartet dann auf dessen
+> Bereitschaft, bevor die App hochfährt.
 
 ---
 
@@ -100,5 +120,7 @@ OLLAMA_HOST   = 127.0.0.1:11434
 | Problem | Lösung |
 |---|---|
 | `ollama.exe` startet nicht | Evtl. fehlen Visual C++ Redistributables — `winget install Microsoft.VCRedist.2015+.x64` |
-| Modelle fehlen | `ollama\ollama.exe pull ministral-3:3b` im Bundle-Verzeichnis ausführen |
-| Port belegt | In `app\config.json` Port ändern und in `start.bat` anpassen |
+| RAG funktioniert nicht / „Modell nicht gefunden" | `nomic-embed-text` fehlt im Bundle. Im Bundle-Ordner: `set OLLAMA_HOST=127.0.0.1:11500` & `set OLLAMA_MODELS=%CD%\ollama\models`, dann `ollama\ollama.exe pull nomic-embed-text`. Beim Neu-Erstellen zieht `make_portable.ps1` das Modell jetzt automatisch nach. |
+| Modelle fehlen | Wie oben, aber `ollama\ollama.exe pull ministral-3:3b` |
+| App-Port 8780 belegt | In `app\config.json` `port` ändern und in `start.bat` anpassen |
+| Ollama-Port 11500 belegt | In `app\config.json` `ollama_base` und in `start.bat` (`OLLAMA_HOST`) gemeinsam anpassen |
