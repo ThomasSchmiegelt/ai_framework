@@ -31,8 +31,9 @@ Doppelklick auf: install.bat
 1. **Python 3.12** (falls nicht vorhanden, via `winget`)
 2. **Ollama** für Windows (falls nicht vorhanden)
 3. Python-Abhängigkeiten in einer virtuellen Umgebung (`venv\`)
-4. **KI-Modelle** (Download ~2–3 GB):
+4. **KI-Modelle** (Download mehrere GB):
    - `ministral-3:3b` (Standardmodell)
+   - `gemma4:e2b` (alternatives kompaktes Chat-Modell)
    - `nomic-embed-text` (RAG-Embeddings)
 
    Weitere Modelle bei Bedarf laden (`ollama pull <modell>`) und im
@@ -56,7 +57,7 @@ Auswahllisten im Profil zeigen **alle** in Ollama installierten Modelle:
 
 ```json
 {
-  "allowed_models": ["ministral-3:3b"],
+  "allowed_models": ["ministral-3:3b", "gemma4:e2b"],
   "default_model": "ministral-3:3b"
 }
 ```

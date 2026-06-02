@@ -75,6 +75,15 @@ html[data-mode="geschaeftsfuehrung"] {
   --accent-rgb: 217,178,59;
   --border: rgba(230,213,149,0.16);
 }
+/* Eigener, frei konfigurierbarer Modus = Violett. */
+html[data-mode="custom"] {
+  --bg-main: #221432; --bg-sidebar: #190e26; --bg-input: #2e1c42;
+  --bg-hover: #46256b; --bg-active: #46256b; --bg-user-msg: #46256b;
+  --text: #ecd9f8; --text-dim: #cca8eb; --text-muted: #7c6c8a;
+  --accent: #9b59d0; --accent-hover: #a865dd; --accent-dim: rgba(155,89,208,0.15);
+  --accent-rgb: 155,89,208;
+  --border: rgba(204,168,235,0.16);
+}
 
 #sidebar-wordmark {
   font-weight: 700; font-size: 18px; letter-spacing: 0.5px;
@@ -1978,12 +1987,13 @@ html, body {
 
 #matrix-table-wrap {
   flex: 1;
-  overflow: auto;
+  overflow: auto;          /* horizontal + vertikal scrollbar bei vielen Spalten */
   padding: 10px;
 }
 
 #matrix-table {
   border-collapse: collapse;
+  width: max-content;      /* Tabelle wächst mit den Spalten → Wrap scrollt in die Breite */
   min-width: 600px;
   font-size: 13px;
 }
@@ -1991,7 +2001,8 @@ html, body {
 #matrix-table th, #matrix-table td {
   border: 1px solid var(--border);
   padding: 0;
-  min-width: 140px;
+  min-width: 180px;
+  max-width: 320px;
   vertical-align: top;
 }
 
@@ -2044,6 +2055,20 @@ html, body {
   flex-shrink: 0;
 }
 .btn-del-matrix-col:hover { color: #ef4444; }
+
+/* Agenten-Auswahl je Spalte (im Spaltenkopf) */
+.matrix-col-agent {
+  width: calc(100% - 12px);
+  margin: 0 6px 6px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 3px 4px;
+  cursor: pointer;
+}
+.matrix-col-agent:focus { outline: none; border-color: var(--accent); }
 
 /* ── Präsentations-Assistent Seitenpanel ───────────────────────── */
 .side-panel {

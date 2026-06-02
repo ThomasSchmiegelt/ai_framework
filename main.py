@@ -73,7 +73,7 @@ for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, D
 # ── Modi (fachliche Ausrichtung) ──────────────────────────────────────────────
 # AI_Framework_Thomas kennt vier Modi; jeder prägt Farben (Frontend) und – wenn aktiv – die
 # fachliche Brille der KI (System-Prompt-Präfix).
-VALID_MODES = {"maschinenbau", "ki", "soziales", "marketing", "finanz", "geschaeftsfuehrung"}
+VALID_MODES = {"maschinenbau", "ki", "soziales", "marketing", "finanz", "geschaeftsfuehrung", "custom"}
 DEFAULT_MODE = "maschinenbau"
 _MODE_PROMPTS = {
     "maschinenbau": (
@@ -366,10 +366,26 @@ _MODE_KEYWORDS = {
 }
 
 
+def _mode_keywords(mode: str) -> list:
+    """Stichwörter eines Modus. Für den frei konfigurierbaren Modus „custom"
+    aus dem Profilfeld ``custom_mode_keywords`` (Komma-/Zeilen-getrennt)."""
+    if mode == "custom":
+        raw = _load_profile().get("custom_mode_keywords", "") or ""
+        return [w.strip().lower() for w in re.split(r"[,\n;]+", str(raw)) if w.strip()]
+    return _MODE_KEYWORDS.get(mode, [])
+
+
+def _mode_prompt_text(mode: str) -> str:
+    """Fachkontext-Text eines Modus. Für „custom" aus dem Profilfeld
+    ``custom_mode_prompt`` (vom Nutzer frei formuliert)."""
+    if mode == "custom":
+        return str(_load_profile().get("custom_mode_prompt", "") or "").strip()
+    return _MODE_PROMPTS.get(mode, "")
+
+
 def _mode_matches(text: str, mode: str) -> bool:
     """True, wenn der Text ein Stichwort des Modus als ganzes Wort enthält."""
-    import re
-    kws = _MODE_KEYWORDS.get(mode, [])
+    kws = _mode_keywords(mode)
     t = (text or "").lower()
     return any(re.search(r"\b" + re.escape(kw) + r"\b", t) for kw in kws)
 
@@ -379,15 +395,17 @@ def _mode_prefix(user_text: str = "") -> str:
 
     Leer, wenn der Modus abgeschaltet ist oder – sofern ein ``user_text``
     übergeben wird – die Frage thematisch nicht zum Modus passt (frageabhängige
-    Fachbrille). Ohne ``user_text`` wird der Modus immer angewandt."""
+    Fachbrille). Ohne ``user_text`` wird der Modus immer angewandt.
+    Beim frei konfigurierbaren Modus „custom" ohne hinterlegte Stichwörter
+    greift die Fachbrille immer (keine Stichwort-Gatterung)."""
     prof = _load_profile()
     if prof.get("mode_prompt") is False:   # ausdrücklich abgeschaltet
         return ""
     mode = _active_mode()
-    mp = _MODE_PROMPTS.get(mode, "")
+    mp = _mode_prompt_text(mode)
     if not mp:
         return ""
-    if user_text and not _mode_matches(user_text, mode):
+    if user_text and _mode_keywords(mode) and not _mode_matches(user_text, mode):
         return ""
     return mp
 
@@ -2384,6 +2402,11 @@ async def save_profile(req: Request):
     # Modus (fachliche Ausrichtung + Farbschema)
     mode = str(body.get("mode", "") or "").lower().strip()
     profile["mode"] = mode if mode in VALID_MODES else DEFAULT_MODE
+    # Frei konfigurierbarer violetter Modus „custom": Name, Fachbrille (Prompt)
+    # und optionale Stichwörter werden im Profil hinterlegt.
+    profile["custom_mode_name"]     = str(body.get("custom_mode_name", "") or "").strip()[:40]
+    profile["custom_mode_prompt"]   = str(body.get("custom_mode_prompt", "") or "").strip()[:2000]
+    profile["custom_mode_keywords"] = str(body.get("custom_mode_keywords", "") or "").strip()[:1000]
     # Modus prägt die KI-Prompts? (Standard: ja)
     profile["mode_prompt"] = bool(body.get("mode_prompt", True))
     # „LLM pur": keine Modi/Persona/Grundregel/Formel-/Zitatregeln voranstellen

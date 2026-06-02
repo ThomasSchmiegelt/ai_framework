@@ -1,20 +1,25 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Schnürt eine saubere Installations-ZIP (ai_framework_thomas.zip) der AI_Framework_Thomas-Quellen.
+    Schnürt eine saubere Installations-ZIP der AI_Framework_Thomas-Quellen.
 .DESCRIPTION
     Kopiert den App-Quellbaum in ein Staging-Verzeichnis OHNE venv, Caches,
     .claude (Claude-Memory), .git, Laufzeitdaten und server.log. Nimmt die
     Standard-Agenten, eine leere Datenstruktur (.gitkeep), das 100-Aufgaben-
-    Beispielprojekt und den samples-Ordner mit. Ergebnis: <Desktop>\ai_framework_thomas.zip
+    Beispielprojekt und den samples-Ordner mit.
+.PARAMETER OutFile
+    Vollständiger Pfad der Ziel-ZIP. Standard: <Desktop>\ai_framework_thomas.zip
 #>
+param(
+    [string]$OutFile
+)
 $ErrorActionPreference = "Stop"
 
 $APP_DIR  = Split-Path $PSScriptRoot -Parent
 $STAGEROOT = Join-Path $env:TEMP "ai_framework_thomas_stage"
 $STAGE    = Join-Path $STAGEROOT "AI_Framework_Thomas"
 $DESKTOP  = [Environment]::GetFolderPath("Desktop")
-$ZIP      = Join-Path $DESKTOP "ai_framework_thomas.zip"
+$ZIP      = if ($OutFile) { $OutFile } else { Join-Path $DESKTOP "ai_framework_thomas.zip" }
 $DEMO_PLAN = "beispiel_lokale_ki_im_unternehmen_100_au_f9e83970.json"
 
 Write-Host "[*] Staging vorbereiten: $STAGE" -ForegroundColor Cyan
@@ -43,7 +48,7 @@ if (Test-Path "$APP_DIR\data\plans\$DEMO_PLAN") {
 
 # Frische, neutrale config.json sicherstellen (ohne evtl. lokale Anpassungen)
 $cfg = [ordered]@{
-    allowed_models = @("ministral-3:3b")
+    allowed_models = @("ministral-3:3b", "gemma4:e2b")
     default_model  = "ministral-3:3b"
     embed_model    = "nomic-embed-text"
     ollama_base    = "http://localhost:11434"
@@ -62,5 +67,7 @@ $size = (Get-Item $ZIP).Length / 1MB
 $files = (Get-ChildItem $STAGE -Recurse -File).Count
 Write-Host ("[OK] ai_framework_thomas.zip erstellt: {0:N1} MB, {1} Dateien -> {2}" -f $size, $files, $ZIP) -ForegroundColor Green
 
-# Aufräumen
-Remove-Item $STAGEROOT -Recurse -Force
+# Aufräumen (Fehler hier sollen den erfolgreichen Build nicht als Fehlschlag melden)
+try { Remove-Item $STAGEROOT -Recurse -Force -ErrorAction Stop } catch {
+    Write-Host "[!] Staging-Cleanup uebersprungen: $($_.Exception.Message)" -ForegroundColor Yellow
+}

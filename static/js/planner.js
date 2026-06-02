@@ -769,6 +769,12 @@ const Planner = (() => {
           } catch (_) {}
         }
       }
+      // Fertige Antwort als Markdown + LaTeX rendern (statt rohem Text)
+      if (text && typeof marked !== 'undefined') {
+        if (window._ensureKatexMarked) window._ensureKatexMarked();
+        assistantDiv.innerHTML = marked.parse(text, { gfm: true, breaks: true });
+        assistantDiv.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      }
     } catch (e) {
       assistantDiv.textContent = `Fehler: ${e.message}`;
     } finally {

@@ -4,7 +4,7 @@ Lokaler, deutschsprachiger KI-Assistent auf Basis von Ollama — **vollständig 
 und für sechs Einsatzfelder anpassbar. Die Oberfläche ist im Profil zwischen
 **Deutsch und Englisch** umschaltbar (die KI antwortet dann ebenfalls in der gewählten Sprache).
 
-AI_Framework_Thomas kennt **sechs Modi**, die jeweils Farbschema, Branding und die fachliche
+AI_Framework_Thomas kennt **sieben Modi**, die jeweils Farbschema, Branding und die fachliche
 Ausrichtung der KI bestimmen:
 
 | Modus | Farbe | Fokus |
@@ -15,6 +15,7 @@ Ausrichtung der KI bestimmen:
 | 📣 **Marketing** | Rot | Kommunikation, Kampagnen, Markenbild, Conversion |
 | 💰 **Finanz** | Grau | Controlling, Kennzahlen, Kalkulation, Reporting |
 | 📈 **Geschäftsführung** | Gelb | Strategie, Entscheidungen, Steuerung, Kommunikation |
+| 🟣 **Eigener Modus** | Violett | Frei konfigurierbar: Name, Fachbrille (Prompt) und optionale Stichwörter im Profil |
 
 Modus, Sprache, Logo und Vorlagen-Bilder werden im **Nutzerprofil** gewählt bzw. hochgeladen.
 
@@ -46,7 +47,8 @@ Standardmäßig wird **nur ein** kleines, lokal lauffähiges Modell installiert/
 
 | Modell | Rolle | Größe |
 |---|---|---|
-| `ministral-3:3b` | Standardmodell für alles | ~2 GB |
+| `ministral-3:3b` | Standardmodell für alles (auch Vision) | ~2 GB |
+| `gemma4:e2b` | Alternatives kompaktes Chat-Modell | ~2 GB |
 | `nomic-embed-text` | RAG-Embeddings (CPU) | ~0,3 GB |
 
 **Drei Modell-Rollen im Profil:** Unter **👤 Profil → 🧠 Modelle** lässt sich je
@@ -72,8 +74,9 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   **WYSIWYG-Editor** (Text direkt auf der Folie anklicken & bearbeiten)
 - 🪄 **Präsentations-Assistent** — tabellenbasiert, Folie-für-Folie, im Design des
   gewählten Modus (Farben + Logo/Vorlagen aus dem Profil)
-- 🎨 **Sechs Modi** (Maschinenbau/KI/Soziales/Marketing/Finanz/Geschäftsführung) — steuern
-  Farbschema, Branding und die fachliche Ausrichtung der KI; im Profil umschaltbar
+- 🎨 **Sieben Modi** (Maschinenbau/KI/Soziales/Marketing/Finanz/Geschäftsführung + frei
+  konfigurierbarer **Eigener Modus** in Violett) — steuern Farbschema, Branding und die
+  fachliche Ausrichtung der KI; im Profil umschaltbar
 - 🌐 **Sprachumschaltung** Deutsch ↔ Englisch im Profil (Oberfläche und KI-Antworten)
 - 🖼️ **Branding im Profil** — Logo, Vorlagen-Deckblatt und -Kopfzeile selbst
   hochladen (werden automatisch auf die Sollgröße skaliert)
@@ -93,7 +96,8 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Ressourcen-Katalog importieren (frei / erweitern / strikt), Ressourcenliste exportieren,
   **Bestellplan** (wann wird welche Ressource gebraucht / bestellt) mit Konflikt-Erkennung
   und optional Arbeitstagen. Ein **100-Aufgaben-Beispielprojekt** ist enthalten.
-- 📊 **Matrix-Recherche** — Recherche-Tabelle mit Live-Speicherung
+- 📊 **Matrix-Recherche** — Recherche-Tabelle mit Live-Speicherung und **Agent je Spalte**
+  (z. B. Rechercheur/Bewerter oder Halluzinationsprüfer; nur Favoriten-Agenten)
 - 💻 **Code-Tab** — zwei Untertabs: **IDE** (HTML5-Canvas-Programme per KI-Chat
   erstellen, ausführen, interaktive Eingabefelder, Auto-Fehlerreparatur) und
   **JSON-Editor** (JSON-Dateien öffnen, live prüfen, formatieren, reparieren — auch

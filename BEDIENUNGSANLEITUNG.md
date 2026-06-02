@@ -464,10 +464,18 @@ Einbettung in ein **plan-spezifisches RAG** (wird automatisch als „Plan: …" 
 Tab **📊 Matrix** — Recherche als Tabelle:
 
 - **Spalte 1** = Themen, **Kopfzeile ab Spalte 2** = Suchprompts.
+- **Agent je Spalte:** Unter jedem Suchprompt lässt sich ein **eigener Agent**
+  wählen (nur als **Favorit** markierte Agenten erscheinen hier). So kann jede
+  Spalte anders arbeiten — z. B. ein **Firmenagent** zur Messebesuch-Vorbereitung,
+  der **Rechercheur & Bewerter** (sucht *und* bewertet Relevanz/Schlüssigkeit) oder
+  der **Halluzinationsprüfer** (prüft Angaben auf Plausibilität). *„Kein Agent"* =
+  einfache Websuche.
 - Zelle anklicken = einzeln ausführen; **▶ Alle ausführen** = der Reihe nach.
-- **Live-Speicherung:** Ergebnisse werden nach jeder Zelle automatisch im Browser
-  gesichert — bei einem Absturz geht nichts verloren. Eine kurze Anzeige
-  *„💾 Gespeichert"* bestätigt dies.
+- Bei vielen Spalten lässt sich die Tabelle **horizontal scrollen**.
+- **Live-Speicherung:** Ergebnisse (samt Agent-Zuordnung je Spalte) werden nach
+  jeder Zelle automatisch im Browser gesichert — bei einem Absturz geht nichts
+  verloren. Eine kurze Anzeige *„💾 Gespeichert"* bestätigt dies.
+- Zellinhalte werden als **Markdown inkl. LaTeX-Formeln** dargestellt.
 - **CSV-Import/-Export** und **📋 XLSX**-Export verfügbar.
 - **📚 In Wissensdatenbank** übernimmt die gesamte Matrix (Themen × Fragen samt
   Antworten) als Dokument in eine gewählte Wissensdatenbank.
@@ -551,9 +559,10 @@ Tab **📋 Logs** — ein zuschaltbares Protokoll zur Verbesserung und Fehlersuc
 
 Agenten sind Profile mit eigenem System-Prompt, Tool-Set und optionalem Modell.
 
-- **Favoriten in der Sidebar:** In der Sidebar erscheinen **nur als Favorit
+- **Nur Favoriten sind wählbar:** Überall, wo ein Agent ausgewählt wird (Sidebar,
+  **Matrix** je Spalte, **Dokumentengenerator**), erscheinen **nur als Favorit
   markierte** Agenten. Im Tab **🤖 Agenten** schaltest du den **⭐-Stern** auf einer
-  Agenten-Karte um — favorisierte Agenten landen sofort im Sidebar-Dropdown.
+  Agenten-Karte um — favorisierte Agenten landen sofort in allen Auswahllisten.
 - **Aktivieren:** Dropdown **Agent** in der Sidebar (Favoriten). *„— Kein Agent —"* = Standard.
 - **Schnellauswahl im Chat:** In der Chatbox setzen die Buttons **📊 Präsentation**
   und **💻 Programmieren** direkt den Präsentations- bzw. Programmier-Agenten
@@ -598,9 +607,14 @@ Diese Daten erscheinen in der **Fußzeile** aller Exporte und auf dem
 Präsentations-Deckblatt.
 
 ### 🎨 Modus & Branding (im Profil)
-- **Modus** wählen: **Maschinenbau** (Blau), **KI** (Grün), **Soziales** (Braun)
-  oder **Marketing** (Rot). Der Modus ändert sofort das **Farbschema** der gesamten
-  Oberfläche und der Folien.
+- **Modus** wählen: **Maschinenbau** (Blau), **KI** (Grün), **Soziales** (Braun),
+  **Marketing** (Rot), **Finanz** (Grau), **Geschäftsführung** (Gelb) oder ein
+  **eigener Modus** (Violett). Der Modus ändert sofort das **Farbschema** der
+  gesamten Oberfläche und der Folien.
+- **Eigener Modus (Violett):** frei konfigurierbar — du vergibst einen **Namen**,
+  eine **Fachbrille** (frei formulierter Kontext-Text, der den KI-Antworten
+  vorangestellt wird) und optionale **Stichwörter**. Ohne Stichwörter greift die
+  Fachbrille bei jeder Frage; mit Stichwörtern nur bei thematisch passenden Fragen.
 - **„Modus prägt die KI-Antworten"**: ist der Haken gesetzt, bekommt die KI eine
   fachliche Brille passend zum Modus (abschaltbar, falls rein farbliche Umschaltung
   gewünscht ist).
@@ -672,7 +686,8 @@ Das aktive Modell wird unten in der Sidebar gewählt. Standardmäßig installier
 
 | Modell | Rolle |
 |--------|-------|
-| `ministral-3:3b` | Standardmodell für alles |
+| `ministral-3:3b` | Standardmodell für alles (auch Vision) |
+| `gemma4:e2b` | Alternatives kompaktes Chat-Modell |
 | `nomic-embed-text` | RAG-Embeddings (klein; läuft auf kleinen Karten bewusst auf der CPU) |
 
 ### Drei Modell-Rollen im Profil

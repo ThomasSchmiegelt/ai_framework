@@ -196,7 +196,7 @@ Reines HTML/CSS/JS, ein Modul pro Funktionsbereich unter `static/js/`:
 | `agents.js` | Agenten-CRUD (JSON-Dateien) |
 | `research.js` | Aspektbasierte Recherche mit Quellen + DOCX-Export |
 | `planner.js` | Netzplan / Critical-Path-Method (CPM), Zoom/Pan, CSV-Im/Export, KI-Assistent |
-| `matrix_research.js` | Recherche-Matrix mit `localStorage`-Speicherung + CSV-Im/Export |
+| `matrix_research.js` | Recherche-Matrix mit Agent je Spalte (nur Favoriten), `localStorage`-Speicherung + CSV-Im/Export |
 | `presentation_assistant.js` | Tabellenbasierter Präsentationsbauer (Folie für Folie) |
 | `ide.js` | Code-IDE (Untertab des Code-Tabs): Editor + Sandbox-iframe-Vorschau, KI-Assistent (Modell = Profil-Rolle „Programmieren"), Auto-Reparatur |
 | `json_editor.js` | JSON-Editor (zweiter Untertab des Code-Tabs): öffnen, prüfen, formatieren, reparieren |

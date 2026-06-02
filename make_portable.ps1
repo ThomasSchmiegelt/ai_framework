@@ -34,12 +34,13 @@ $PYTHON_VER    = "3.12.7"
 $PYTHON_ZIP    = "python-$PYTHON_VER-embed-amd64.zip"
 $PYTHON_URL    = "https://www.python.org/ftp/python/$PYTHON_VER/$PYTHON_ZIP"
 $GETPIP_URL    = "https://bootstrap.pypa.io/get-pip.py"
-# Es werden ALLE lokal vorhandenen Ollama-Modelle mitgebündelt (siehe Abschnitt 4),
-# damit jedes im Profil zugewiesene Modell (Allgemein/Programmieren/Wissenschaftlich)
-# auf dem Zielrechner verfügbar ist. Zum Schlankhalten vor dem Bündeln nicht
-# benötigte Modelle entfernen: ollama rm <modell>.
-$MODELS        = @("ministral-3:3b")         # Basismodell (nur fürs README)
-$EMBED_MODEL   = "nomic-embed-text:latest"   # RAG-Embeddings
+# Es werden GEZIELT nur die unten gelisteten Modelle ins Bundle kopiert (siehe
+# Abschnitt 4) – nicht mehr das komplette lokale Modellverzeichnis. So landen z. B.
+# nur die freigegebenen Modelle im Bundle und keine versehentlich lokal gepullten.
+# Fehlt eines lokal, wird es vor dem Kopieren automatisch nachgezogen.
+$BUNDLE_MODELS = @("ministral-3:3b", "gemma4:e2b", "nomic-embed-text:latest")  # ins Bundle
+$MODELS        = @("ministral-3:3b", "gemma4:e2b")   # Chat-Modelle (fürs README)
+$EMBED_MODEL   = "nomic-embed-text:latest"           # RAG-Embeddings
 
 function Write-Step  { param($t) Write-Host "`n[►] $t" -ForegroundColor Cyan }
 function Write-OK    { param($t) Write-Host "    [✓] $t" -ForegroundColor Green }
@@ -142,40 +143,84 @@ Get-ChildItem $ollamaSrcDir -Filter "*.dll" -ErrorAction SilentlyContinue |
     Copy-Item -Destination $ollamaDir -ErrorAction SilentlyContinue
 Write-OK "Ollama kopiert: $ollamaDir\ollama.exe"
 
-# ── 4. LLM-Modelle kopieren ────────────────────────────────────────────────────
+# ── 4. LLM-Modelle kopieren (nur die Whitelist) ────────────────────────────────
 
-Write-Step "LLM-Modelle kopieren (alle lokal vorhandenen — kann mehrere GB sein)..."
-
-# Embedding-Modell für RAG absichern: ist es lokal nicht vorhanden, fehlt es auch
-# im Bundle → kein RAG. Daher vor dem Kopieren ggf. nachziehen.
-$embedBase = ($EMBED_MODEL -split ':')[0]
-$haveEmbed = $false
-try { $haveEmbed = ((& ollama list 2>$null) -match [regex]::Escape($embedBase)) } catch {}
-if (-not $haveEmbed) {
-    Write-Warn "$EMBED_MODEL nicht lokal gefunden — wird für RAG nachgeladen..."
-    & ollama pull $EMBED_MODEL
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "Konnte $EMBED_MODEL nicht laden — RAG funktioniert im Bundle evtl. nicht."
-    } else { Write-OK "$EMBED_MODEL geladen" }
-} else {
-    Write-OK "$EMBED_MODEL ist lokal vorhanden (wird gebündelt)"
-}
+Write-Step "LLM-Modelle kopieren (nur: $($BUNDLE_MODELS -join ', '))..."
 
 $modelsSrc  = "$env:USERPROFILE\.ollama\models"
 $modelsDest = "$ollamaDir\models"
+
+# Kopiert genau EIN Modell (manifest + die referenzierten Blobs) ins Bundle.
+# Liefert $true bei Erfolg. Modellname im Format "name:tag" (tag-Default: latest).
+function Copy-OllamaModel {
+    param([string]$ModelRef, [string]$SrcRoot, [string]$DestRoot)
+
+    $parts = $ModelRef -split ':', 2
+    $name  = $parts[0]
+    $tag   = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { "latest" }
+
+    # Manifest-Pfad: …/manifests/registry.ollama.ai/library/<name>/<tag>
+    $manifestRel = "manifests\registry.ollama.ai\library\$name\$tag"
+    $manifestSrc = Join-Path $SrcRoot $manifestRel
+    if (-not (Test-Path $manifestSrc)) {
+        Write-Warn "Manifest fehlt für $ModelRef ($manifestSrc) — übersprungen."
+        return $false
+    }
+
+    # Manifest kopieren (Verzeichnisstruktur erhalten)
+    $manifestDest = Join-Path $DestRoot $manifestRel
+    New-Item -ItemType Directory -Path (Split-Path $manifestDest -Parent) -Force | Out-Null
+    Copy-Item $manifestSrc $manifestDest -Force
+
+    # Referenzierte Blobs (config + layers) aus dem Manifest lesen und kopieren
+    try {
+        $manifest = Get-Content $manifestSrc -Raw | ConvertFrom-Json
+    } catch {
+        Write-Warn "Manifest für $ModelRef nicht lesbar — übersprungen."
+        return $false
+    }
+    $digests = @()
+    if ($manifest.config -and $manifest.config.digest) { $digests += $manifest.config.digest }
+    foreach ($layer in $manifest.layers) { if ($layer.digest) { $digests += $layer.digest } }
+
+    $blobDestDir = Join-Path $DestRoot "blobs"
+    New-Item -ItemType Directory -Path $blobDestDir -Force | Out-Null
+    foreach ($d in ($digests | Select-Object -Unique)) {
+        $blobFile = $d -replace ':', '-'                 # sha256:abc -> sha256-abc
+        $blobSrc  = Join-Path $SrcRoot "blobs\$blobFile"
+        $blobDest = Join-Path $blobDestDir $blobFile
+        if (Test-Path $blobSrc) {
+            if (-not (Test-Path $blobDest)) { Copy-Item $blobSrc $blobDest -Force }
+        } else {
+            Write-Warn "Blob fehlt: $blobFile (für $ModelRef)"
+        }
+    }
+    return $true
+}
 
 if (-not (Test-Path $modelsSrc)) {
     Write-Warn "Ollama-Modellverzeichnis nicht gefunden: $modelsSrc"
     Write-Warn "Modelle werden beim ersten Start heruntergeladen."
 } else {
     New-Item -ItemType Directory -Path $modelsDest -Force | Out-Null
-    # Komplettes Modellverzeichnis (manifests + blobs) spiegeln → jedes lokal
-    # gepullte Modell ist im Bundle verfügbar und im Profil zuweisbar.
-    robocopy $modelsSrc $modelsDest /E /NFL /NDL /NJH /NJS | Out-Null
-    $pulled = @()
-    try { $pulled = (& ollama list 2>$null | Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] }) } catch {}
-    if ($pulled) { Write-OK ("Modelle gebündelt: " + ($pulled -join ', ')) }
-    else { Write-OK "Modellverzeichnis kopiert" }
+    $bundled = @()
+    foreach ($m in $BUNDLE_MODELS) {
+        $base = ($m -split ':')[0]
+        # Lokal vorhanden? Sonst nachziehen (gegen das System-Ollama auf 11434).
+        $have = $false
+        try { $have = ((& ollama list 2>$null) -match [regex]::Escape($base)) } catch {}
+        if (-not $have) {
+            Write-Warn "$m nicht lokal gefunden — wird nachgeladen..."
+            & ollama pull $m
+            if ($LASTEXITCODE -ne 0) { Write-Warn "Konnte $m nicht laden — wird übersprungen." }
+        }
+        if (Copy-OllamaModel -ModelRef $m -SrcRoot $modelsSrc -DestRoot $modelsDest) {
+            $bundled += $m
+            Write-OK "Gebündelt: $m"
+        }
+    }
+    if ($bundled.Count) { Write-OK ("Modelle im Bundle: " + ($bundled -join ', ')) }
+    else { Write-Warn "Keine Modelle gebündelt — Bundle braucht beim ersten Start Internet." }
 }
 
 # ── 5. Datenverzeichnis anlegen ────────────────────────────────────────────────

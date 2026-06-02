@@ -137,8 +137,9 @@ const Research = (() => {
             }
             reportText += ev.content;
             _reportText = reportText;
+            if (window._ensureKatexMarked) window._ensureKatexMarked();
             reportEl.innerHTML = typeof marked !== 'undefined'
-              ? marked.parse(reportText)
+              ? marked.parse(reportText, { gfm: true, breaks: true })
               : `<pre>${escHtml(reportText)}</pre>`;
             reportEl.querySelectorAll('a[href]').forEach(a => {
               a.target = '_blank';

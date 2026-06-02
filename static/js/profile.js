@@ -43,7 +43,7 @@ const Profile = (() => {
   }
 
   function applyMode(mode) {
-    const m = ['maschinenbau', 'ki', 'soziales', 'marketing', 'finanz', 'geschaeftsfuehrung'].includes(mode) ? mode : 'maschinenbau';
+    const m = ['maschinenbau', 'ki', 'soziales', 'marketing', 'finanz', 'geschaeftsfuehrung', 'custom'].includes(mode) ? mode : 'maschinenbau';
     document.documentElement.dataset.mode = m;
     // Offene Präsentation sofort im neuen Farbschema neu zeichnen
     if (typeof CanvasRenderer !== 'undefined' && CanvasRenderer.rerender) {
@@ -89,6 +89,10 @@ const Profile = (() => {
     const langEl = document.getElementById('profile-lang');
     if (langEl) langEl.value = (_data.lang === 'en') ? 'en' : 'de';
     document.getElementById('profile-mode').value = _data.mode || 'maschinenbau';
+    document.getElementById('profile-custom-mode-name').value     = _data.custom_mode_name     || '';
+    document.getElementById('profile-custom-mode-prompt').value    = _data.custom_mode_prompt    || '';
+    document.getElementById('profile-custom-mode-keywords').value  = _data.custom_mode_keywords  || '';
+    _toggleCustomMode(_data.mode || 'maschinenbau');
     document.getElementById('profile-mode-prompt').checked = _data.mode_prompt !== false;
     document.getElementById('profile-pure-llm').checked = !!_data.pure_llm;
     document.getElementById('profile-tone').value = _data.tone || '';
@@ -102,6 +106,12 @@ const Profile = (() => {
 
   function closeModal() {
     document.getElementById('profile-modal-overlay').classList.remove('active');
+  }
+
+  // Konfigurationsblock des eigenen (violetten) Modus nur bei dessen Auswahl zeigen
+  function _toggleCustomMode(mode) {
+    const box = document.getElementById('custom-mode-config');
+    if (box) box.style.display = (mode === 'custom') ? '' : 'none';
   }
 
   async function _uploadAsset(kind, file) {
@@ -150,6 +160,9 @@ const Profile = (() => {
       phone:           document.getElementById('profile-phone').value.trim(),
       default_project: document.getElementById('profile-default-project').value.trim(),
       mode:            mode,
+      custom_mode_name:     document.getElementById('profile-custom-mode-name').value.trim(),
+      custom_mode_prompt:   document.getElementById('profile-custom-mode-prompt').value.trim(),
+      custom_mode_keywords: document.getElementById('profile-custom-mode-keywords').value.trim(),
       mode_prompt:     document.getElementById('profile-mode-prompt').checked,
       pure_llm:        document.getElementById('profile-pure-llm').checked,
       tone:            document.getElementById('profile-tone').value,
@@ -184,7 +197,10 @@ const Profile = (() => {
       if (e.target === document.getElementById('profile-modal-overlay')) closeModal();
     });
     // Live-Vorschau des Modus beim Umschalten
-    document.getElementById('profile-mode')?.addEventListener('change', e => applyMode(e.target.value));
+    document.getElementById('profile-mode')?.addEventListener('change', e => {
+      applyMode(e.target.value);
+      _toggleCustomMode(e.target.value);
+    });
     // Live-Umschaltung der Oberflächensprache
     document.getElementById('profile-lang')?.addEventListener('change', e => {
       if (typeof I18n !== 'undefined') I18n.setLang(e.target.value);

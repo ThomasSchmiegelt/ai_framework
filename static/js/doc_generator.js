@@ -14,7 +14,8 @@ const DocGen = (() => {
     const prev = sel.value;
     let agents = [];
     try { agents = await (await fetch('/api/agents')).json(); } catch (_) {}
-    // Dokument-Agenten (Kategorie „Dokumentation") zuerst
+    // Nur als Favorit markierte Agenten anbieten; Dokument-Agenten („Dokumentation") zuerst
+    agents = agents.filter(a => a.favorite);
     agents.sort((a, b) => (b.category === 'Dokumentation') - (a.category === 'Dokumentation'));
     sel.innerHTML = '<option value="">(kein Agent — generisch)</option>';
     for (const a of agents) {

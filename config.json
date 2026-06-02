@@ -1,6 +1,6 @@
 {
   "_comment": "Modell-Tags bitte auf https://ollama.com/library verifizieren",
-  "allowed_models": ["ministral-3:3b"],
+  "allowed_models": ["ministral-3:3b", "gemma4:e2b"],
   "default_model": "ministral-3:3b",
   "embed_model": "nomic-embed-text",
   "ollama_base": "http://localhost:11434",

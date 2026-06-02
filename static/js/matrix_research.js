@@ -7,9 +7,10 @@ const MatrixResearch = (() => {
   // cols: Array von { prompt: string }
   // cells[r][c]: { status: 'empty'|'running'|'done', text: string }
   let _rows  = [{ topic: '' }, { topic: '' }, { topic: '' }];
-  let _cols  = [{ prompt: '' }, { prompt: '' }];
+  let _cols  = [{ prompt: '', agent: '' }, { prompt: '', agent: '' }];
   let _cells = [];  // _cells[r][c]
   let _running = false;
+  let _favAgents = [];  // nur als Favorit markierte Agenten (auswählbar pro Spalte)
 
   const STORAGE_KEY = 'ai_framework_thomas_matrix_v1';
 
@@ -59,6 +60,43 @@ const MatrixResearch = (() => {
     return document.getElementById('matrix-model-select')?.value || 'qwen3.6-16k:latest';
   }
 
+  /* ── Recherche-/Prüf-Agenten (pro Spalte wählbar) ─────────────────── */
+  // Nur als Favorit markierte Agenten laden (Recherche-/Prüf-Agenten zuerst,
+  // damit z. B. der Firmenagent für den Messebesuch schnell auffindbar ist).
+  async function _loadAgents() {
+    let agents = [];
+    try {
+      agents = await (await fetch('/api/agents')).json();
+    } catch (_) { return; }
+    const rank = a => (a.category === 'Recherche' || a.category === 'Prüfung') ? 0 : 1;
+    _favAgents = agents
+      .filter(a => a.favorite)
+      .sort((a, b) => rank(a) - rank(b) || (a.name || '').localeCompare(b.name || ''));
+    _render();
+  }
+
+  // Options-HTML für ein Spalten-Agenten-Dropdown (markiert den gewählten Agenten)
+  function _agentOptionsHtml(selectedId) {
+    let html = `<option value="">Kein Agent</option>`;
+    for (const a of _favAgents) {
+      const sel = a.id === selectedId ? ' selected' : '';
+      html += `<option value="${escHtml(a.id)}"${sel}>${escHtml((a.icon || '🤖') + ' ' + a.name)}</option>`;
+    }
+    return html;
+  }
+
+  /* ── Zelleninhalt rendern (Markdown + LaTeX bei fertigen Zellen) ──── */
+  function _renderCell(div, cell) {
+    if (cell.status === 'running') { div.textContent = '⟳ Suche läuft…'; return; }
+    if (cell.status === 'done' && cell.text && typeof marked !== 'undefined') {
+      if (window._ensureKatexMarked) window._ensureKatexMarked();
+      div.innerHTML = marked.parse(cell.text, { gfm: true, breaks: true });
+      div.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+    } else {
+      div.textContent = cell.text || '';
+    }
+  }
+
   /* ── Tabelle rendern ─────────────────────────────────────────────── */
   function _render() {
     const headerRow = document.getElementById('matrix-header-row');
@@ -81,7 +119,8 @@ const MatrixResearch = (() => {
         <div class="matrix-header-cell-wrap">
           <textarea class="matrix-cell-input" rows="2" placeholder="Suchprompt…" data-col="${c}">${escHtml(_cols[c].prompt)}</textarea>
           <button class="btn-del-matrix-col" data-col="${c}" title="Spalte löschen">✕</button>
-        </div>`;
+        </div>
+        <select class="matrix-col-agent" data-col="${c}" title="Agent für diese Spalte (nur Favoriten)">${_agentOptionsHtml(_cols[c].agent || '')}</select>`;
       headerRow.appendChild(th);
     }
 
@@ -107,7 +146,7 @@ const MatrixResearch = (() => {
         div.className = `matrix-cell-result ${cell.status}`;
         div.dataset.row = r;
         div.dataset.col = c;
-        div.textContent = cell.status === 'running' ? '⟳ Suche läuft…' : cell.text;
+        _renderCell(div, cell);
         div.title = cell.status === 'done' ? 'Klick zum erneuten Ausführen' : 'Klick zum Ausführen';
         div.style.cursor = 'pointer';
         div.addEventListener('click', () => _runCell(r, c));
@@ -121,6 +160,12 @@ const MatrixResearch = (() => {
     headerRow.querySelectorAll('textarea[data-col]').forEach(ta => {
       ta.addEventListener('input', e => {
         _cols[+ta.dataset.col].prompt = ta.value;
+        _saveState();
+      });
+    });
+    headerRow.querySelectorAll('.matrix-col-agent[data-col]').forEach(sel => {
+      sel.addEventListener('change', () => {
+        _cols[+sel.dataset.col].agent = sel.value;
         _saveState();
       });
     });
@@ -162,23 +207,31 @@ const MatrixResearch = (() => {
     _updateCellUI(r, c);
 
     const model = _getModel();
+    const agentId = _cols[c]?.agent || '';
     const query = `${topic}: ${prompt}`;
-    const messages = [
-      {
-        role: 'system',
-        content: 'Du bist ein Recherche-Assistent. Suche präzise Informationen und gib eine kompakte, strukturierte Antwort auf Deutsch. Maximal 3-4 Sätze oder eine kurze Liste.',
-      },
-      {
-        role: 'user',
-        content: `Recherchiere folgendes: "${query}"\n\nGib eine kompakte Antwort, die direkt zum Thema "${topic}" und zur Frage "${prompt}" passt.`,
-      },
-    ];
+    const userMsg = `Recherchiere folgendes: "${query}"\n\nGib eine kompakte, strukturierte Antwort, die direkt zum Thema "${topic}" und zur Frage "${prompt}" passt.`;
+
+    // Mit gewähltem Agent: dessen System-Prompt (z. B. Bewertung/Plausibilitätsprüfung)
+    // steuert die Antwort. Ohne Agent: einfacher Recherche-Assistent.
+    const body = { model, use_tools: true, science: true };
+    if (agentId) {
+      body.agent_id = agentId;
+      body.messages = [{ role: 'user', content: userMsg }];
+    } else {
+      body.messages = [
+        {
+          role: 'system',
+          content: 'Du bist ein Recherche-Assistent. Suche präzise Informationen und gib eine kompakte, strukturierte Antwort auf Deutsch. Maximal 3-4 Sätze oder eine kurze Liste.',
+        },
+        { role: 'user', content: userMsg },
+      ];
+    }
 
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, use_tools: true, science: true }),
+        body: JSON.stringify(body),
       });
 
       const reader = resp.body.getReader();
@@ -214,7 +267,7 @@ const MatrixResearch = (() => {
     const div = document.querySelector(`.matrix-cell-result[data-row="${r}"][data-col="${c}"]`);
     if (!div) return;
     div.className = `matrix-cell-result ${cell.status}`;
-    div.textContent = cell.status === 'running' ? '⟳ Suche läuft…' : cell.text;
+    _renderCell(div, cell);
   }
 
   /* ── Alle Zellen ausführen ───────────────────────────────────────── */
@@ -326,7 +379,7 @@ const MatrixResearch = (() => {
         };
 
         const header = parseLine(lines[0]);
-        const newCols = header.slice(1).map(p => ({ prompt: p.trim() }));
+        const newCols = header.slice(1).map(p => ({ prompt: p.trim(), agent: '' }));
         const newRows = [], newCells = [];
 
         for (let i = 1; i < lines.length; i++) {
@@ -356,7 +409,7 @@ const MatrixResearch = (() => {
   function _clear() {
     if (!confirm('Tabelle leeren?')) return;
     _rows  = [{ topic: '' }, { topic: '' }, { topic: '' }];
-    _cols  = [{ prompt: '' }, { prompt: '' }];
+    _cols  = [{ prompt: '', agent: '' }, { prompt: '', agent: '' }];
     _initCells();
     _saveState();
     _render();
@@ -377,6 +430,7 @@ const MatrixResearch = (() => {
 
     _syncModelSelector();
     document.getElementById('model-select')?.addEventListener('change', _syncModelSelector);
+    _loadAgents();
 
     document.getElementById('btn-matrix-add-row')?.addEventListener('click', () => {
       _rows.push({ topic: '' });
@@ -386,7 +440,7 @@ const MatrixResearch = (() => {
     });
 
     document.getElementById('btn-matrix-add-col')?.addEventListener('click', () => {
-      _cols.push({ prompt: '' });
+      _cols.push({ prompt: '', agent: '' });
       _cells.forEach(row => row.push({ status: 'empty', text: '' }));
       _saveState();
       _render();
@@ -407,6 +461,7 @@ const MatrixResearch = (() => {
 
     document.querySelector('[data-tab="matrix"]')?.addEventListener('click', () => {
       _syncModelSelector();
+      _loadAgents();
       _render();
     });
 

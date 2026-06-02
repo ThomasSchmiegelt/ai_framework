@@ -1,4 +1,4 @@
-﻿{
+{
   "id": "coder",
   "name": "Programmier-Agent",
   "description": "Schreibt im Chat lauffähigen Code und übernimmt ihn als Basis direkt in die Code-IDE.",

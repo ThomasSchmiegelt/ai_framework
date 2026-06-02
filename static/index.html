@@ -558,7 +558,7 @@
         </select>
       </div>
       <div style="padding:8px 12px 4px;font-size:13px;color:var(--text-dim);display:flex;justify-content:space-between;align-items:center">
-        <span>Spalte 1 = Themen/Informationen · Kopfzeile ab Spalte 2 = Suchprompts · Zellen werden durch KI-Websuche befüllt</span>
+        <span>Spalte 1 = Themen/Informationen · Kopfzeile ab Spalte 2 = Suchprompt + Agent (pro Spalte wählbar) · Zellen werden durch KI-Websuche befüllt</span>
         <span id="matrix-autosave-label" style="font-size:11px;color:var(--text-muted);display:none">💾 Gespeichert</span>
       </div>
       <div id="matrix-table-wrap">
@@ -862,6 +862,7 @@ Beispiele:
           <option value="marketing">📣 Marketing (Rot)</option>
           <option value="finanz">💰 Finanz (Grau)</option>
           <option value="geschaeftsfuehrung">📈 Geschäftsführung (Gelb)</option>
+          <option value="custom">🟣 Eigener Modus (Violett)</option>
         </select>
       </div>
       <div class="form-group" style="align-self:end">
@@ -884,6 +885,24 @@ Beispiele:
           <option value="felix">😎 Felix (Du, kumpelhaft)</option>
           <option value="sandra">😊 Sandra (Du, sehr korrekt & kumpelhaft)</option>
         </select>
+      </div>
+    </div>
+
+    <div id="custom-mode-config" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px">
+      <label style="display:block;margin-bottom:8px;font-weight:600">🟣 Eigener Modus konfigurieren</label>
+      <div class="form-group">
+        <label>Name des Modus</label>
+        <input type="text" id="profile-custom-mode-name" placeholder="z. B. Recht, Medizin, Vertrieb…" />
+      </div>
+      <div class="form-group">
+        <label>Fachbrille (System-Prompt-Vorspann)</label>
+        <textarea id="profile-custom-mode-prompt" rows="3" placeholder="Fachlicher Kontext: … Antworte mit Bezug zu …"></textarea>
+        <p class="planner-muted" style="font-size:11px;margin:4px 0 0">Wird den KI-Antworten vorangestellt, sobald dieser Modus aktiv ist.</p>
+      </div>
+      <div class="form-group">
+        <label>Stichwörter (optional, kommagetrennt)</label>
+        <input type="text" id="profile-custom-mode-keywords" placeholder="z. B. vertrag, klausel, haftung" />
+        <p class="planner-muted" style="font-size:11px;margin:4px 0 0">Leer = Fachbrille greift bei jeder Frage. Mit Stichwörtern nur bei thematisch passenden Fragen.</p>
       </div>
     </div>
 

@@ -169,7 +169,7 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `agents.js` | Agenten-CRUD-Oberfläche |
 | `research.js` | Recherche-Modus + Dokument-Export mit Kopfzeile |
 | `planner.js` | Netzplan (CPM), Tabelle mit Reihenfolge-Spalte (#) + stabilen IDs (Kaskaden-Rename), Zoom/Pan, CSV-Im/Export; **KI**: Agent ableiten, Plan generieren (freie Aufgabenzahl + Warnung), Aufgabe detaillieren, Vorgänger/Nachfolger vorschlagen, **Vorgang dazwischen einfügen**, **ersetzen**, Löschen mit Re-Bridge, **„Mach schön"** (Konsistenz + Sortierung), Zyklus-/Konfliktwarnungen; **Ressourcen** (Modal, Kosten, Lieferzeit, Rollup, Katalog-Im/Export, **Bestellplan** mit Arbeitstagen) |
-| `matrix_research.js` | Recherche-Matrix, **Live-Save** in `localStorage`, CSV-Im/Export |
+| `matrix_research.js` | Recherche-Matrix, **Agent je Spalte** (nur Favoriten; `_cols[c].agent` → `agent_id` an `/api/chat`), **Live-Save** in `localStorage`, CSV-Im/Export, Zellen als Markdown+LaTeX |
 | `presentation_assistant.js` | Tabellenbasierter Präsentations-Assistent (Folie-für-Folie) |
 | `illustrated_presentation.js` | **Bebilderte Präsentation**: Ordner-Picker, Analyse-Persona ableiten, Bilder per Vision-Modell beschreiben → Zweispalter-Folien |
 | `json_editor.js` | **JSON-Editor**: Datei öffnen, Live-Validierung (Zeile/Spalte), formatieren, herunterladen — Untertab des **💻 Code**-Tabs (kein eigener Tab mehr) |
