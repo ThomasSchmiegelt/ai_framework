@@ -7,6 +7,64 @@ const DocGen = (() => {
   let _docText = '';
   let _docTitle = 'Dokument';
   let _busy = false;
+  let _attached = [];                       // hochgeladene externe Dokumente: {id, filename}
+  let _dossier = { id: '', name: '', text: '' };  // gewähltes Dossier
+
+  async function _loadDossiers() {
+    const sel = document.getElementById('docgen-dossier');
+    if (!sel) return;
+    const prev = sel.value;
+    let list = [];
+    try { list = await (await fetch('/api/dossiers')).json(); } catch (_) {}
+    sel.innerHTML = '<option value="">— kein Dossier —</option>';
+    for (const d of list) {
+      const o = document.createElement('option');
+      o.value = d.id;
+      o.textContent = d.plan ? `${d.name} · ${d.plan}` : d.name;
+      sel.appendChild(o);
+    }
+    if (prev) sel.value = prev;
+  }
+
+  async function _onDossierChange() {
+    const id = document.getElementById('docgen-dossier').value;
+    if (!id) { _dossier = { id: '', name: '', text: '' }; return; }
+    try {
+      const d = await (await fetch('/api/dossiers/load?id=' + encodeURIComponent(id))).json();
+      _dossier = { id, name: d.name || 'Dossier', text: d.content || '' };
+      showToast(`✓ Dossier „${_dossier.name}" als Quellmaterial geladen`);
+    } catch (e) { showToast('Dossier konnte nicht geladen werden'); }
+  }
+
+  function _renderFiles() {
+    const wrap = document.getElementById('docgen-files');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    _attached.forEach((f, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'planner-muted';
+      chip.style.cssText = 'font-size:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:2px 8px;display:inline-flex;gap:6px;align-items:center';
+      chip.innerHTML = `📄 ${escHtml(f.filename)} <a href="#" data-i="${i}" style="text-decoration:none">✕</a>`;
+      chip.querySelector('a').addEventListener('click', (e) => {
+        e.preventDefault(); _attached.splice(i, 1); _renderFiles();
+      });
+      wrap.appendChild(chip);
+    });
+  }
+
+  async function _onFilesPicked(ev) {
+    const files = Array.from(ev.target.files || []);
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const r = await (await fetch('/api/upload', { method: 'POST', body: fd })).json();
+        if (r.id) _attached.push({ id: r.id, filename: r.filename || file.name });
+      } catch (_) { showToast('Upload fehlgeschlagen: ' + file.name); }
+    }
+    ev.target.value = '';   // gleiche Datei erneut wählbar
+    _renderFiles();
+  }
 
   async function _loadAgents() {
     const sel = document.getElementById('docgen-agent');
@@ -42,7 +100,7 @@ const DocGen = (() => {
     }
   }
 
-  function refresh() { _loadAgents(); _loadRag(); }
+  function refresh() { _loadAgents(); _loadRag(); _loadDossiers(); }
 
   async function _run() {
     if (_busy) return;
@@ -53,6 +111,18 @@ const DocGen = (() => {
     const ragSel = document.getElementById('docgen-rag');
     const rag = Array.from(ragSel.selectedOptions).map(o => o.value);
     const science = document.getElementById('docgen-science').checked;
+
+    // Quellmaterial zusammenstellen: eingefügter Text + gewähltes Dossier als
+    // Kontext an die Aufgabe hängen; externe Dateien werden serverseitig extrahiert.
+    let content = brief;
+    const ctx = [];
+    const pasteText = (document.getElementById('docgen-paste')?.value || '').trim();
+    if (pasteText) ctx.push('[Eingefügter Text]\n' + pasteText);
+    if (_dossier.text) ctx.push(`[Dossier: ${_dossier.name}]\n${_dossier.text}`);
+    if (ctx.length) {
+      content = `${brief}\n\n--- Quellmaterial (als Grundlage verwenden) ---\n\n${ctx.join('\n\n')}`;
+    }
+    const fileIds = _attached.map(f => f.id);
 
     _docTitle = brief.split('\n')[0].slice(0, 60) || 'Dokument';
     _busy = true;
@@ -70,7 +140,7 @@ const DocGen = (() => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [{ role: 'user', content: brief }],
+          messages: [{ role: 'user', content, files: fileIds.length ? fileIds : undefined }],
           model,
           agent_id: agentId,
           use_tools: false,
@@ -117,6 +187,27 @@ const DocGen = (() => {
     }
   }
 
+  // Bestehenden, eingefügten Text direkt als Dokument übernehmen (ohne KI).
+  function _usePasted() {
+    const ta = document.getElementById('docgen-paste');
+    const text = (ta?.value || '').trim();
+    if (!text) { showToast('Bitte zuerst Text einfügen'); return; }
+    _docText = text;
+    _docTitle = text.split('\n')[0].replace(/^#+\s*/, '').slice(0, 60) || 'Dokument';
+    const out = document.getElementById('docgen-output');
+    if (typeof marked !== 'undefined') {
+      if (window._ensureKatexMarked) window._ensureKatexMarked();
+      out.innerHTML = marked.parse(_docText, { gfm: true, breaks: true });
+      out.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+    } else {
+      out.textContent = _docText;
+    }
+    document.getElementById('docgen-status').textContent = '✓ Text übernommen';
+    document.getElementById('btn-docgen-export').style.display = '';
+    document.getElementById('btn-docgen-rag').style.display = '';
+    showToast('✓ Text übernommen — exportierbar / in Wissensdatenbank');
+  }
+
   async function _exportDocx() {
     if (!_docText) return;
     showToast('Erstelle Dokument…');
@@ -137,9 +228,28 @@ const DocGen = (() => {
     } catch (e) { showToast('Export fehlgeschlagen: ' + e.message); }
   }
 
+  // Aus dem Chat übernommenen (komprimierten) Verlauf als Quellmaterial laden.
+  function loadFromChat(title, text) {
+    const ta = document.getElementById('docgen-paste');
+    if (ta) {
+      ta.value = (text || '').trim();
+      const det = ta.closest('details');
+      if (det) det.open = true;
+    }
+    const brief = document.getElementById('docgen-brief');
+    if (brief && !brief.value.trim()) {
+      brief.value = `Bereite auf Basis des übernommenen Chats „${title || 'Chat'}" vor: erstelle eine strukturierte Besprechungsvorlage (Ziel, Agenda, Teilnehmer/Rollen, Entscheidungen, Aufgaben mit Verantwortlichen).`;
+    }
+    showToast('✓ Chat als Quellmaterial geladen — Auftrag prüfen und „Dokument erzeugen"');
+  }
+
   function init() {
     refresh();
     document.getElementById('btn-docgen-run')?.addEventListener('click', _run);
+    document.getElementById('btn-docgen-paste')?.addEventListener('click', _usePasted);
+    document.getElementById('docgen-file')?.addEventListener('change', _onFilesPicked);
+    document.getElementById('docgen-dossier')?.addEventListener('change', _onDossierChange);
+    document.getElementById('btn-docgen-dossier-refresh')?.addEventListener('click', _loadDossiers);
     document.getElementById('btn-docgen-export')?.addEventListener('click', _exportDocx);
     document.getElementById('btn-docgen-rag')?.addEventListener('click', () => {
       if (typeof RAG !== 'undefined') RAG.ingestText(_docTitle, _docText);
@@ -148,5 +258,5 @@ const DocGen = (() => {
     document.querySelector('.tab-btn[data-tab="docgen"]')?.addEventListener('click', refresh);
   }
 
-  return { init, refresh };
+  return { init, refresh, loadFromChat };
 })();

@@ -337,6 +337,23 @@ Förderprogramm**, einen Projektbericht oder ein Pflichtenheft) mit Hilfe eines
 Mit der Option **„quellengebunden (wissenschaftlich)"** arbeitet die KI streng auf
 Basis der Quellen (für belegpflichtige Dokumente).
 
+### Quellmaterial mitgeben
+
+Im Abschnitt **📎 Quellmaterial** kannst du der Aufgabe konkrete Vorlagen beilegen:
+
+- **Externes Dokument laden** — PDF/DOCX/TXT/XLSX hochladen; der Text wird automatisch
+  extrahiert und als Grundlage genutzt (z. B. alte Protokolle, um eine **Besprechung
+  vorzubereiten**).
+- **Dossier wählen** — eines der in der Tätigkeits-Recherche erzeugten Dossiers als
+  Quelle einbinden.
+- **📋 Bestehenden Text einfügen** — Text per Copy & Paste übernehmen. „**⬇ Text direkt
+  als Dokument übernehmen**" lädt ihn unverändert als Dokument (ohne KI); ohne
+  Übernehmen dient er der Aufgabe als Quellmaterial.
+
+Aus dem **Chat** bringt der Knopf **„→ 📄 Doku"** (in der Eingabeleiste) das laufende
+Gespräch komprimiert hierher — praktisch, um z. B. aus einer Unterhaltung eine
+Besprechung zu planen.
+
 ---
 
 ## 10. Planer (Netzplan / CPM)
@@ -351,6 +368,10 @@ Tab **🗂️ Planer** — Projektplanung nach der Methode des **Kritischen Pfad
 Jede Aufgabe hat: **ES**/**EF** (frühester Start/Ende), **LS**/**LF** (spätester
 Start/Ende), **Puffer** = LF − EF. Aufgaben mit Puffer 0 bilden den **kritischen
 Pfad** (rot).
+
+> **Tipp:** Den **Trenner** zwischen Aufgabenliste und Netzplan kannst du mit der Maus
+> **ziehen**, um die Breite der Bereiche anzupassen (Doppelklick setzt zurück). Im
+> **Code**-Tab gibt es denselben Trenner zwischen Editor und Vorschau.
 
 1. **＋ Aufgabe** anlegen, ID, Name, Dauer, Vorgänger/Nachfolger (kommasepariert) eintragen.
 2. **⚙️ CPM berechnen** zeichnet den Netzplan.

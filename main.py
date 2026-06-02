@@ -295,7 +295,9 @@ _SCIENCE_PROMPT = (
     "Unterscheide klar zwischen gesicherten Fakten, herrschender Meinung und Annahmen. "
     "Erfinde nichts und gib keine Behauptung ohne Beleg wieder. Nenne Quellen mit Titel und "
     "Link. Bei Normen/Gesetzen die genaue Bezeichnung angeben. Strukturiere sachlich "
-    "(Überblick, Befunde mit Belegen, offene Fragen)."
+    "(Überblick, Befunde mit Belegen, offene Fragen). "
+    "Sprich den Nutzer NICHT persönlich an: keine Anrede (kein 'Sehr geehrte', kein 'Hallo', "
+    "keine Namensnennung) – formuliere durchgehend neutral und sachlich."
 )
 
 
@@ -1230,12 +1232,16 @@ async def _chat_generator(request: ChatRequest):
     )
     canvas_emitted = False   # über alle Loop-Iterationen: wurde schon ein Canvas gesendet?
 
+    # Niedrige Temperatur reduziert Halluzinationen kleiner Modelle deutlich und
+    # macht das Tool-Calling zuverlässiger. Für Wissenschaft/Recherche noch strenger.
+    _temp = 0.1 if request.science else 0.3
     # Agentic Loop
     for _iter in range(8):
         payload = {
             "model": model,
             "messages": messages,
             "stream": False,
+            "options": {"temperature": _temp},
             "tools": active_tools if request.use_tools else [],
         }
 
@@ -1260,8 +1266,31 @@ async def _chat_generator(request: ChatRequest):
                 content_raw = _strip_inline_tool_calls(content_raw)
                 msg_obj["content"] = content_raw
 
+        # Diagnose: Roh-Antwort des Modells protokollieren (hilft bei „keine Antwort")
+        _write_log({
+            "type": "llm_response", "model": model, "iter": _iter,
+            "content_len": len(content_raw or ""),
+            "tool_calls": [tc.get("function", {}).get("name") for tc in tool_calls],
+            "done_reason": result.get("done_reason"),
+        })
+
         if not tool_calls:
             content = content_raw
+
+            # Leere Antwort des Modells: nicht stumm bleiben, sondern erklären.
+            # (Häufig bei kleinen Modellen, die nichts oder nur einen Tool-Call ohne
+            #  Text liefern – sonst sähe der Nutzer „keine Antwort" ohne Hinweis.)
+            if not (content or "").strip():
+                _hinweis = (
+                    f"Das Modell '{model}' hat eine leere Antwort geliefert"
+                    + (" (nach Tool-Aufrufen)." if _tools_called else ".")
+                    + " Bitte erneut senden oder ein anderes Modell wählen."
+                )
+                yield _sse({"type": "error", "message": _hinweis})
+                _write_log({"type": "empty_response", "model": model,
+                            "tools_called": _tools_called})
+                yield _sse({"type": "done"})
+                return
 
             # Canvas-Daten extrahieren falls vorhanden
             canvas_data = _extract_canvas_json(content)
@@ -2068,6 +2097,35 @@ async def get_upload(fid: str):
     if not fp.exists():
         raise HTTPException(404)
     return FileResponse(fp)
+
+
+@app.get("/api/dossiers")
+async def list_dossiers():
+    """Listet die automatisch erzeugten Planer-Recherche-Dossiers (.md) auf –
+    als wählbares Quellmaterial im Dokumentengenerator."""
+    items = []
+    if DOSSIERS_DIR.exists():
+        for fp in sorted(DOSSIERS_DIR.rglob("*.md")):
+            items.append({
+                "id": fp.relative_to(DOSSIERS_DIR).as_posix(),
+                "name": fp.stem.replace("_", " "),
+                "plan": fp.parent.name.replace("_", " "),
+            })
+    return items
+
+
+@app.get("/api/dossiers/load")
+async def load_dossier(id: str = Query(...)):
+    """Inhalt eines Dossiers (mit Pfad-Traversal-Schutz)."""
+    target = (DOSSIERS_DIR / id).resolve()
+    try:
+        target.relative_to(DOSSIERS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(400, "Ungültiger Pfad")
+    if not target.exists() or target.suffix != ".md":
+        raise HTTPException(404)
+    return {"name": target.stem.replace("_", " "),
+            "content": target.read_text(encoding="utf-8")}
 
 
 @app.get("/api/downloads/{filename}")

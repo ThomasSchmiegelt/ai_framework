@@ -557,6 +557,51 @@ const Planner = (() => {
     _canvas.height = parent.clientHeight || 300;
   }
 
+  /* ── Ziehbarer Trenner: Breite Tabelle ↔ Netzplan ───────────────── */
+  const _SPLIT_KEY = 'planner_table_width';
+  function _initSplitter() {
+    const splitter = document.getElementById('planner-splitter');
+    const area     = document.getElementById('planner-table-area');
+    const main     = document.getElementById('planner-main');
+    if (!splitter || !area || !main) return;
+
+    // Gespeicherte Breite wiederherstellen
+    const saved = parseInt(localStorage.getItem(_SPLIT_KEY) || '', 10);
+    if (saved > 0) area.style.width = saved + 'px';
+
+    const _apply = (clientX) => {
+      const rect = main.getBoundingClientRect();
+      let w = clientX - rect.left;
+      const max = rect.width - 160;          // Netzplan mind. ~160px
+      w = Math.max(220, Math.min(w, max));   // Tabelle mind. 220px
+      area.style.width = w + 'px';
+    };
+
+    const _onMove = (e) => { _apply(e.clientX); };
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      localStorage.setItem(_SPLIT_KEY, String(parseInt(area.style.width, 10) || 0));
+    };
+
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+
+    // Doppelklick → Standardbreite (55%) wiederherstellen
+    splitter.addEventListener('dblclick', () => {
+      area.style.width = '';
+      localStorage.removeItem(_SPLIT_KEY);
+      _recalcAndRender();
+    });
+  }
+
   /* ── Plan-Liste laden ────────────────────────────────────────────── */
   async function _loadPlanList() {
     const sel = document.getElementById('planner-plan-select');
@@ -1807,6 +1852,9 @@ const Planner = (() => {
 
     // Resize
     new ResizeObserver(_recalcAndRender).observe(_canvas.parentElement);
+
+    // Ziehbarer Trenner Tabelle ↔ Netzplan
+    _initSplitter();
 
     // Tab-Wechsel
     document.querySelector('[data-tab="planner"]')?.addEventListener('click', () => {

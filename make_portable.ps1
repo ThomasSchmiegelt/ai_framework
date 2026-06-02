@@ -147,7 +147,15 @@ Write-OK "Ollama kopiert: $ollamaDir\ollama.exe"
 
 Write-Step "LLM-Modelle kopieren (nur: $($BUNDLE_MODELS -join ', '))..."
 
-$modelsSrc  = "$env:USERPROFILE\.ollama\models"
+# Modellquelle: bevorzugt die OLLAMA_MODELS-Umgebungsvariable (falls der Nutzer
+# seine Modelle z. B. auf D:\OLLAMA_MODELS ausgelagert hat), sonst der Standard
+# unter %USERPROFILE%\.ollama\models.
+if ($env:OLLAMA_MODELS -and (Test-Path $env:OLLAMA_MODELS)) {
+    $modelsSrc = $env:OLLAMA_MODELS
+    Write-OK "Modellquelle aus OLLAMA_MODELS: $modelsSrc"
+} else {
+    $modelsSrc = "$env:USERPROFILE\.ollama\models"
+}
 $modelsDest = "$ollamaDir\models"
 
 # Kopiert genau EIN Modell (manifest + die referenzierten Blobs) ins Bundle.

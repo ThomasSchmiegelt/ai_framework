@@ -133,6 +133,25 @@ async function exportChat(format) {
   }
 }
 
+// Chat (komprimiert) als Quellmaterial in den Dokumentengenerator übernehmen
+function chatToDocGen() {
+  const rows = document.querySelectorAll('.message-row');
+  const parts = [];
+  rows.forEach(row => {
+    const role = row.classList.contains('user') ? 'Nutzer' : 'Assistent';
+    const content = row.querySelector('.bubble-content')?.textContent?.trim();
+    if (content) parts.push(`**${role}:** ${content}`);
+  });
+  if (!parts.length) { showToast('Kein Chat-Inhalt vorhanden'); return; }
+  const transcript = parts.join('\n\n');
+  const title = (document.querySelector('.conv-item.active .conv-title')?.textContent || 'Chat').trim();
+  if (typeof DocGen !== 'undefined' && DocGen.loadFromChat) {
+    DocGen.loadFromChat(title, transcript);
+  }
+  document.querySelector('.tab-btn[data-tab="docgen"]')?.click();
+  showToast('✓ Chat in den Dokumentengenerator übernommen');
+}
+
 // ── Suchergebnisse rendern ─────────────────────────────────────────────────
 
 function renderSearchResults(results) {
@@ -298,6 +317,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-export-pptx').addEventListener('click', () => exportCanvas('pptx'));
   document.getElementById('btn-export-xlsx').addEventListener('click', () => exportCanvas('xlsx'));
   document.getElementById('btn-export-docx').addEventListener('click', () => exportChat('docx'));
+  document.getElementById('btn-chat-to-doc')?.addEventListener('click', chatToDocGen);
 
   // Modal
   document.getElementById('btn-modal-cancel').addEventListener('click', () => AgentManager.closeModal());

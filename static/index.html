@@ -86,6 +86,9 @@
       </div>
       <input type="file" id="restore-input" accept=".zip" style="display:none" />
       <button id="btn-profile" class="btn-sidebar-action" style="width:100%">👤 Profil bearbeiten</button>
+      <div id="sidebar-credit" style="margin-top:8px;text-align:center;font-size:11px;opacity:.55">
+        Entwickelt von Thomas Schmiegelt
+      </div>
     </div>
   </aside>
 
@@ -161,6 +164,9 @@
             <!-- Export-Buttons (nur in Toolbar als kleine Optionen) -->
             <button class="tool-toggle" id="btn-export-docx" title="Chat als Word exportieren">
               📝 DOCX
+            </button>
+            <button class="tool-toggle" id="btn-chat-to-doc" title="Chat (komprimiert) als Quellmaterial in den Dokumentengenerator übernehmen – z. B. um eine Besprechung zu planen">
+              → 📄 Doku
             </button>
 
             <input type="file" id="file-input" style="display:none"
@@ -416,6 +422,30 @@
           <textarea id="docgen-brief" rows="4" placeholder="z. B. Erstelle einen Förderantrag für das Programm … auf Basis des Projekts. Gliederung: Zusammenfassung, Ausgangslage, Ziele, Arbeitspakete, Zeit- und Kostenplan, Wirkung."></textarea>
         </div>
 
+        <details class="research-field" style="margin-top:4px" open>
+          <summary style="cursor:pointer;user-select:none">📎 Quellmaterial — externes Dokument laden oder Dossier wählen <span class="label-hint">(dient der Aufgabe als Grundlage)</span></summary>
+          <div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div>
+              <label style="font-size:12px">Externes Dokument (PDF/DOCX/TXT/XLSX)</label><br>
+              <input type="file" id="docgen-file" accept=".pdf,.docx,.txt,.md,.xlsx,.csv" multiple />
+            </div>
+            <div style="flex:1;min-width:220px">
+              <label style="font-size:12px">Dossier (aus Planer-Recherche)</label>
+              <div style="display:flex;gap:6px">
+                <select id="docgen-dossier" class="sidebar-select" style="flex:1"><option value="">— kein Dossier —</option></select>
+                <button id="btn-docgen-dossier-refresh" class="export-btn" title="Dossier-Liste neu laden">⟳</button>
+              </div>
+            </div>
+          </div>
+          <div id="docgen-files" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+        </details>
+
+        <details class="research-field" style="margin-top:4px">
+          <summary style="cursor:pointer;user-select:none">📋 Bestehenden Text einfügen (Copy &amp; Paste)</summary>
+          <textarea id="docgen-paste" rows="6" style="margin-top:8px" placeholder="Hier vorhandenen Text einfügen (Strg+V). „Text übernehmen" lädt ihn direkt als Dokument (DOCX/RAG). Ohne Übernehmen dient er der Aufgabe als Quellmaterial."></textarea>
+          <button id="btn-docgen-paste" class="export-btn" style="margin-top:8px">⬇ Text direkt als Dokument übernehmen</button>
+        </details>
+
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <button id="btn-docgen-run">📄 Dokument erzeugen</button>
           <button id="btn-docgen-export" class="export-btn" style="display:none">📝 Als DOCX</button>
@@ -517,6 +547,9 @@
             </table>
           </div>
         </div>
+
+        <!-- Ziehbarer Trenner: Breite Tabelle ↔ Netzplan -->
+        <div id="planner-splitter" title="Ziehen, um die Breite zu ändern (Doppelklick = zurücksetzen)"></div>
 
         <!-- Rechte Hälfte: Netzplan-Canvas -->
         <div id="planner-canvas-area">
@@ -635,6 +668,9 @@ Beispiele:
               placeholder="Der KI-generierte Code erscheint hier automatisch und kann manuell angepasst werden…"></textarea>
           </div>
         </div>
+
+        <!-- Ziehbarer Trenner: Breite Editor ↔ Vorschau (Doppelklick = zurücksetzen) -->
+        <div id="ide-splitter" title="Ziehen, um die Breite zu ändern (Doppelklick = zurücksetzen)"></div>
 
         <!-- Rechte Spalte: Vorschau + Konsole -->
         <div id="ide-right">

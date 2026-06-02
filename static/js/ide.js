@@ -531,7 +531,46 @@ if (!_drawFn) { _resize(); }
     }
 
     document.querySelector('[data-tab="ide"]')?.addEventListener('click', _loadList);
+    _initSplitter();
     _loadList();
+  }
+
+  /* ── Ziehbarer Trenner: Breite Editor ↔ Vorschau ─────────────────── */
+  function _initSplitter() {
+    const splitter = document.getElementById('ide-splitter');
+    const body     = document.getElementById('ide-body');
+    if (!splitter || !body) return;
+
+    const KEY = 'ide_left_width';
+    const saved = parseInt(localStorage.getItem(KEY) || '', 10);
+    if (saved > 0) body.style.setProperty('--ide-left-w', saved + 'px');
+
+    const _apply = (clientX) => {
+      const rect = body.getBoundingClientRect();
+      let w = clientX - rect.left;
+      w = Math.max(240, Math.min(w, rect.width - 220));  // Editor ≥240, Vorschau ≥220
+      body.style.setProperty('--ide-left-w', w + 'px');
+    };
+    const _onMove = (e) => _apply(e.clientX);
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      const cur = body.style.getPropertyValue('--ide-left-w');
+      if (cur) localStorage.setItem(KEY, String(parseInt(cur, 10) || 0));
+    };
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+    splitter.addEventListener('dblclick', () => {
+      body.style.removeProperty('--ide-left-w');
+      localStorage.removeItem(KEY);
+    });
   }
 
   return { init, loadFromChat };

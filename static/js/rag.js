@@ -138,7 +138,12 @@ const RAG = (() => {
             · max ${c.char_limit} Z. · ${c.clean ? 'bereinigt' : 'roh'} · ${c.n_docs} Dok / ${c.n_chunks} Chunks
           </span>
         </div>
-        <div style="margin:8px 0 6px">${docRows}</div>
+        <details class="rag-docs" style="margin:8px 0 6px"${docs.length && docs.length <= 4 ? ' open' : ''}>
+          <summary class="planner-muted" style="cursor:pointer;user-select:none;font-size:12.5px">
+            📄 ${docs.length} Dokument${docs.length === 1 ? '' : 'e'} – ein-/ausklappen
+          </summary>
+          <div style="margin-top:6px">${docRows}</div>
+        </details>
         <div style="display:flex;gap:8px">
           <button class="export-btn rag-add-doc" data-id="${c.id}">＋ Dokument(e) hinzufügen</button>
           <button class="export-btn rag-del-coll" data-id="${c.id}">🗑 Datenbank löschen</button>
