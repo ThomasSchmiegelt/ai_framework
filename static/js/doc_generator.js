@@ -102,7 +102,93 @@ const DocGen = (() => {
 
   function refresh() { _loadAgents(); _loadRag(); _loadDossiers(); }
 
-  async function _run() {
+  // Markdown → HTML mit derselben Aufbereitung wie im Chat (Formeln/Links/Code).
+  function _renderDoc(el, text) {
+    if (typeof Chat !== 'undefined' && Chat.renderMarkdown) {
+      Chat.renderMarkdown(el, text);
+    } else if (typeof marked !== 'undefined') {
+      if (window._ensureKatexMarked) window._ensureKatexMarked();
+      el.innerHTML = marked.parse(text, { gfm: true, breaks: true });
+      el.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+    } else {
+      el.textContent = text;
+    }
+  }
+
+  // Aktionsknöpfe (DOCX / Präsentation / Wissensdatenbank) ein- bzw. ausblenden
+  function _showActions(show) {
+    const disp = show ? '' : 'none';
+    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-present', 'btn-docgen-rag'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = disp;
+    });
+  }
+
+  // Platzhalter im rechten Bereich aus-/einblenden
+  function _hidePlaceholder(hide = true) {
+    const ph = document.getElementById('docgen-placeholder');
+    if (ph) ph.style.display = hide ? 'none' : '';
+  }
+
+  // Erzeugtes Dokument als Präsentation in den Canvas/Präsentations-Bereich schieben
+  async function _present() {
+    if (!_docText.trim()) return;
+    const model = document.getElementById('model-select')?.value;
+    showToast('🖥️ Präsentation wird erstellt…');
+    try {
+      const r = await fetch('/api/presentation/from-text', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: _docText, model }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.status);
+      const data = await r.json();
+      if (typeof CanvasRenderer !== 'undefined') CanvasRenderer.render(data);
+      if (typeof switchTab === 'function') switchTab('canvas');
+      else document.querySelector('.tab-btn[data-tab="canvas"]')?.click();
+      showToast('✓ Präsentation im Canvas erstellt — bearbeitbar');
+    } catch (e) {
+      showToast('Präsentation fehlgeschlagen: ' + e.message);
+    }
+  }
+
+  /* Ziehbarer Trenner: Steuerung ↔ Dokument (Breite in localStorage) */
+  const _SPLIT_KEY = 'docgen_left_width';
+  function _initSplitter() {
+    const splitter = document.getElementById('docgen-splitter');
+    const left = document.getElementById('docgen-left');
+    const body = document.getElementById('docgen-body');
+    if (!splitter || !left || !body) return;
+    const saved = parseInt(localStorage.getItem(_SPLIT_KEY) || '', 10);
+    if (saved > 0) left.style.width = saved + 'px';
+
+    const _apply = (clientX) => {
+      const rect = body.getBoundingClientRect();
+      let w = clientX - rect.left;
+      w = Math.max(320, Math.min(w, rect.width - 280));
+      left.style.width = w + 'px';
+    };
+    const _onMove = (e) => _apply(e.clientX);
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      localStorage.setItem(_SPLIT_KEY, String(parseInt(left.style.width, 10) || 0));
+    };
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+    splitter.addEventListener('dblclick', () => {
+      left.style.width = '';
+      localStorage.removeItem(_SPLIT_KEY);
+    });
+  }
+
+  async function _run(thenPresent = false) {
     if (_busy) return;
     const brief = document.getElementById('docgen-brief').value.trim();
     if (!brief) { showToast('Bitte beschreibe das gewünschte Dokument'); return; }
@@ -129,9 +215,10 @@ const DocGen = (() => {
     const status = document.getElementById('docgen-status');
     const out = document.getElementById('docgen-output');
     document.getElementById('btn-docgen-run').disabled = true;
-    document.getElementById('btn-docgen-export').style.display = 'none';
-    document.getElementById('btn-docgen-rag').style.display = 'none';
-    status.textContent = '⏳ Dokument wird erzeugt…';
+    document.getElementById('btn-docgen-run-present').disabled = true;
+    _showActions(false);
+    _hidePlaceholder();
+    status.textContent = thenPresent ? '⏳ Inhalt für die Präsentation wird erzeugt…' : '⏳ Dokument wird erzeugt…';
     out.innerHTML = '';
     _docText = '';
 
@@ -167,25 +254,25 @@ const DocGen = (() => {
           } catch (_) {}
         }
       }
-      // Final als Markdown rendern (inkl. Formeln/Links)
-      if (typeof marked !== 'undefined') {
-        if (window._ensureKatexMarked) window._ensureKatexMarked();
-        out.innerHTML = marked.parse(_docText, { gfm: true, breaks: true });
-        out.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
-      }
+      // Final als Markdown rendern — exakt dieselbe Pipeline wie im Chat
+      // (KaTeX-Formeln, Normen-/Gesetzes-Links, Code-Highlighting).
+      _renderDoc(out, _docText);
       status.textContent = _docText.trim() ? '✓ Fertig' : 'Kein Inhalt erzeugt';
-      if (_docText.trim()) {
-        document.getElementById('btn-docgen-export').style.display = '';
-        document.getElementById('btn-docgen-rag').style.display = '';
-      }
+      if (_docText.trim()) _showActions(true); else _hidePlaceholder(false);
     } catch (e) {
       status.textContent = '';
       showToast('Fehler: ' + e.message);
     } finally {
       _busy = false;
       document.getElementById('btn-docgen-run').disabled = false;
+      document.getElementById('btn-docgen-run-present').disabled = false;
     }
+    // Direkt im Anschluss als Präsentation in den Canvas übernehmen
+    if (thenPresent && _docText.trim()) await _present();
   }
+
+  // Inhalt erzeugen UND direkt als Präsentation im Canvas (Querformat) öffnen
+  function _runPresentation() { return _run(true); }
 
   // Bestehenden, eingefügten Text direkt als Dokument übernehmen (ohne KI).
   function _usePasted() {
@@ -194,18 +281,11 @@ const DocGen = (() => {
     if (!text) { showToast('Bitte zuerst Text einfügen'); return; }
     _docText = text;
     _docTitle = text.split('\n')[0].replace(/^#+\s*/, '').slice(0, 60) || 'Dokument';
-    const out = document.getElementById('docgen-output');
-    if (typeof marked !== 'undefined') {
-      if (window._ensureKatexMarked) window._ensureKatexMarked();
-      out.innerHTML = marked.parse(_docText, { gfm: true, breaks: true });
-      out.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
-    } else {
-      out.textContent = _docText;
-    }
+    _renderDoc(document.getElementById('docgen-output'), _docText);
     document.getElementById('docgen-status').textContent = '✓ Text übernommen';
-    document.getElementById('btn-docgen-export').style.display = '';
-    document.getElementById('btn-docgen-rag').style.display = '';
-    showToast('✓ Text übernommen — exportierbar / in Wissensdatenbank');
+    _hidePlaceholder();
+    _showActions(true);
+    showToast('✓ Text übernommen — exportierbar / als Präsentation / in Wissensdatenbank');
   }
 
   async function _exportDocx() {
@@ -228,6 +308,26 @@ const DocGen = (() => {
     } catch (e) { showToast('Export fehlgeschlagen: ' + e.message); }
   }
 
+  async function _exportPdf() {
+    if (!_docText) return;
+    showToast('Erstelle PDF…');
+    try {
+      const profile = await (await fetch('/api/profile')).json();
+      const resp = await fetch('/api/export/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: _docTitle, content: _docText, _profile: profile }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || ('HTTP ' + resp.status));
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = _docTitle.replace(/\s+/g, '_').slice(0, 40) + '.pdf'; a.click();
+      URL.revokeObjectURL(url);
+      showToast('✓ PDF exportiert');
+    } catch (e) { showToast('PDF-Export fehlgeschlagen: ' + e.message); }
+  }
+
   // Aus dem Chat übernommenen (komprimierten) Verlauf als Quellmaterial laden.
   function loadFromChat(title, text) {
     const ta = document.getElementById('docgen-paste');
@@ -245,8 +345,12 @@ const DocGen = (() => {
 
   function init() {
     refresh();
-    document.getElementById('btn-docgen-run')?.addEventListener('click', _run);
+    _initSplitter();
+    document.getElementById('btn-docgen-run')?.addEventListener('click', () => _run(false));
+    document.getElementById('btn-docgen-run-present')?.addEventListener('click', _runPresentation);
     document.getElementById('btn-docgen-paste')?.addEventListener('click', _usePasted);
+    document.getElementById('btn-docgen-present')?.addEventListener('click', _present);
+    document.getElementById('btn-docgen-pdf')?.addEventListener('click', _exportPdf);
     document.getElementById('docgen-file')?.addEventListener('change', _onFilesPicked);
     document.getElementById('docgen-dossier')?.addEventListener('change', _onDossierChange);
     document.getElementById('btn-docgen-dossier-refresh')?.addEventListener('click', _loadDossiers);

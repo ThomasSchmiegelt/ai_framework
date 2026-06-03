@@ -83,6 +83,8 @@ const Research = (() => {
     document.getElementById('btn-reset-research').style.display = 'none';
     const outputArea = document.getElementById('research-output-area');
     outputArea.style.display = 'block';
+    const ph = document.getElementById('research-placeholder');
+    if (ph) ph.style.display = 'none';
     document.getElementById('research-report').innerHTML = '';
 
     buildProgressList(topic, aspects);
@@ -156,8 +158,7 @@ const Research = (() => {
             setStepState('rp-synth', 'done', 'Fertig ✓');
             document.getElementById('btn-start-research').disabled = false;
             document.getElementById('btn-reset-research').style.display = 'inline-flex';
-            document.getElementById('btn-research-export').style.display = '';
-            document.getElementById('btn-research-rag').style.display = '';
+            _showResultActions(true);
             if (typeof hljs !== 'undefined') {
               reportEl.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
             }
@@ -211,10 +212,21 @@ const Research = (() => {
     document.getElementById('research-progress-list').innerHTML = '';
     document.getElementById('research-report').innerHTML = '';
     document.getElementById('btn-reset-research').style.display = 'none';
-    document.getElementById('btn-research-export').style.display = 'none';
-    document.getElementById('btn-research-rag').style.display = 'none';
+    _showResultActions(false);
+    const ph = document.getElementById('research-placeholder');
+    if (ph) ph.style.display = '';
     document.getElementById('btn-start-research').disabled = false;
     document.getElementById('research-topic').focus();
+  }
+
+  // Ergebnis-Aktionen (Präsentation/Dokument/DOCX/PDF/RAG) ein-/ausblenden
+  function _showResultActions(show) {
+    const disp = show ? '' : 'none';
+    ['btn-research-present', 'btn-research-to-doc', 'btn-research-export',
+     'btn-research-pdf', 'btn-research-rag'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = disp;
+    });
   }
 
   // ── Recherche-Export ─────────────────────────────────────────────────────
@@ -250,9 +262,88 @@ const Research = (() => {
     }
   }
 
+  async function exportPdf() {
+    if (!_reportText) { showToast('Kein Bericht zum Exportieren'); return; }
+    showToast('Erstelle PDF…');
+    try {
+      const profile = await (await fetch('/api/profile')).json();
+      const resp = await fetch('/api/export/pdf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Recherche: ' + _reportTopic, content: _reportText, _profile: profile }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || ('HTTP ' + resp.status));
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `recherche_${_reportTopic.substring(0, 20).replace(/\s/g, '_')}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+      showToast('✓ PDF exportiert');
+    } catch (e) { showToast('PDF-Export fehlgeschlagen: ' + e.message); }
+  }
+
+  // Bericht als Präsentation in den Canvas (Querformat). Formeln ($…$) bleiben
+  // erhalten und werden auf dem Canvas via KaTeX gerendert.
+  async function present() {
+    if (!_reportText) { showToast('Kein Bericht'); return; }
+    const model = document.getElementById('model-select')?.value;
+    showToast('🖥️ Präsentation wird erstellt…');
+    try {
+      const r = await fetch('/api/presentation/from-text', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: _reportText, model }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.status);
+      const data = await r.json();
+      if (typeof CanvasRenderer !== 'undefined') CanvasRenderer.render(data);
+      if (typeof switchTab === 'function') switchTab('canvas');
+      showToast('✓ Präsentation im Canvas erstellt');
+    } catch (e) { showToast('Präsentation fehlgeschlagen: ' + e.message); }
+  }
+
+  // Bericht (inkl. Formeln) an den Dokumentengenerator übergeben — dort kann ein
+  // formelbewusstes Dokument erzeugt und exportiert/präsentiert werden.
+  function toDocGen() {
+    if (!_reportText) { showToast('Kein Bericht'); return; }
+    if (typeof DocGen !== 'undefined' && DocGen.loadFromChat) {
+      DocGen.loadFromChat(`Recherche: ${_reportTopic}`, _reportText);
+    }
+    document.querySelector('.tab-btn[data-tab="docgen"]')?.click();
+  }
+
+  /* Ziehbarer Trenner: Einstellungen ↔ Bericht */
+  const _SPLIT_KEY = 'research_left_width';
+  function _initSplitter() {
+    const splitter = document.getElementById('research-splitter');
+    const left = document.getElementById('research-left');
+    const body = document.getElementById('research-body');
+    if (!splitter || !left || !body) return;
+    const saved = parseInt(localStorage.getItem(_SPLIT_KEY) || '', 10);
+    if (saved > 0) left.style.width = saved + 'px';
+    const _apply = (x) => {
+      const rect = body.getBoundingClientRect();
+      left.style.width = Math.max(340, Math.min(x - rect.left, rect.width - 280)) + 'px';
+    };
+    const _onMove = (e) => _apply(e.clientX);
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      localStorage.setItem(_SPLIT_KEY, String(parseInt(left.style.width, 10) || 0));
+    };
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault(); splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+    splitter.addEventListener('dblclick', () => { left.style.width = ''; localStorage.removeItem(_SPLIT_KEY); });
+  }
+
   // ── Init ─────────────────────────────────────────────────────────────────
 
   function init() {
+    _initSplitter();
     document.getElementById('btn-add-aspect').addEventListener('click', addAspect);
 
     document.getElementById('aspect-input').addEventListener('keydown', e => {
@@ -262,6 +353,9 @@ const Research = (() => {
     document.getElementById('btn-start-research').addEventListener('click', startResearch);
     document.getElementById('btn-reset-research').addEventListener('click', reset);
     document.getElementById('btn-research-export')?.addEventListener('click', exportDocx);
+    document.getElementById('btn-research-pdf')?.addEventListener('click', exportPdf);
+    document.getElementById('btn-research-present')?.addEventListener('click', present);
+    document.getElementById('btn-research-to-doc')?.addEventListener('click', toDocGen);
     document.getElementById('btn-research-rag')?.addEventListener('click', () => {
       const topic = document.getElementById('research-topic').value.trim() || 'Recherche';
       if (typeof RAG !== 'undefined') RAG.ingestText(`Recherche: ${topic}`, _reportText);

@@ -28,7 +28,12 @@ function switchTab(tabId) {
   document.querySelectorAll('.panel').forEach(panel => {
     panel.classList.toggle('active', panel.id === `${tabId}-panel`);
   });
-  if (tabId === 'canvas' && typeof CanvasEditor !== 'undefined') CanvasEditor.refresh();
+  if (tabId === 'canvas') {
+    // Canvas wird erst jetzt sichtbar → Folie neu rendern, damit Formel-Overlays
+    // korrekt zur aktuellen Anzeigegröße positioniert werden.
+    if (typeof CanvasRenderer !== 'undefined' && CanvasRenderer.rerender) CanvasRenderer.rerender();
+    if (typeof CanvasEditor !== 'undefined') CanvasEditor.refresh();
+  }
 }
 
 // ── Modelle laden ──────────────────────────────────────────────────────────
@@ -315,6 +320,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Export-Buttons
   document.getElementById('btn-export-pptx').addEventListener('click', () => exportCanvas('pptx'));
+  document.getElementById('btn-export-pdf')?.addEventListener('click', () => exportCanvas('pdf'));
   document.getElementById('btn-export-xlsx').addEventListener('click', () => exportCanvas('xlsx'));
   document.getElementById('btn-export-docx').addEventListener('click', () => exportChat('docx'));
   document.getElementById('btn-chat-to-doc')?.addEventListener('click', chatToDocGen);
@@ -349,6 +355,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Dokumentengenerator
   DocGen.init();
+
+  // Mail → Wissensdatenbank
+  if (typeof Mail !== 'undefined') Mail.init();
 
   // Profil + Projekte
   Profile.init();

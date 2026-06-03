@@ -12,9 +12,39 @@ gekennzeichnet.
 Einstiegspunkte: :func:`to_docx`, :func:`to_xlsx`, :func:`to_pptx`
 (jede gibt einen Pfad zur temporären Ausgabedatei zurück).
 """
+import re
 import tempfile
 import time
 from pathlib import Path
+
+# Inline-Markdown: ***fett-kursiv***, **fett**, *kursiv*, `code`
+_MD_INLINE = re.compile(r"\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`", re.DOTALL)
+
+
+def _strip_md(text: str) -> str:
+    """Entfernt Inline-Markdown-Marker (für Überschriften/PDF, wo kein Mischsatz)."""
+    return _MD_INLINE.sub(lambda m: next(g for g in m.groups() if g is not None), text)
+
+
+def _add_md_runs(paragraph, text: str) -> None:
+    """Fügt Text mit Inline-Markdown als echte Word-Runs hinzu (fett/kursiv/Code),
+    damit in Word keine literalen ** / *** / ` erscheinen."""
+    pos = 0
+    for m in _MD_INLINE.finditer(text):
+        if m.start() > pos:
+            paragraph.add_run(text[pos:m.start()])
+        bi, b, i, code = m.groups()
+        if bi is not None:
+            r = paragraph.add_run(bi); r.bold = True; r.italic = True
+        elif b is not None:
+            r = paragraph.add_run(b); r.bold = True
+        elif i is not None:
+            r = paragraph.add_run(i); r.italic = True
+        elif code is not None:
+            r = paragraph.add_run(code); r.font.name = "Consolas"
+        pos = m.end()
+    if pos < len(text):
+        paragraph.add_run(text[pos:])
 
 # Branding-Bilder aus dem Nutzerprofil (vom Nutzer im Profil hochgeladen)
 _ASSETS_DIR   = Path(__file__).parent.parent / "data" / "profile_assets"
@@ -72,16 +102,21 @@ def to_docx(data: dict) -> Path:
     content = data.get("content", "")
     if content:
         for para in content.split("\n"):
-            if para.startswith("# "):
-                doc.add_heading(para[2:], 1)
-            elif para.startswith("## "):
-                doc.add_heading(para[3:], 2)
+            if para.startswith("#### "):
+                doc.add_heading(_strip_md(para[5:]), 4)
             elif para.startswith("### "):
-                doc.add_heading(para[4:], 3)
+                doc.add_heading(_strip_md(para[4:]), 3)
+            elif para.startswith("## "):
+                doc.add_heading(_strip_md(para[3:]), 2)
+            elif para.startswith("# "):
+                doc.add_heading(_strip_md(para[2:]), 1)
             elif para.startswith("- ") or para.startswith("* "):
-                doc.add_paragraph(para[2:], style="List Bullet")
+                _add_md_runs(doc.add_paragraph(style="List Bullet"), para[2:])
+            elif re.match(r"^\d+\.\s", para):
+                _add_md_runs(doc.add_paragraph(style="List Number"),
+                             re.sub(r"^\d+\.\s", "", para))
             elif para.strip():
-                doc.add_paragraph(para)
+                _add_md_runs(doc.add_paragraph(), para)
 
     messages = data.get("messages", [])
     for msg in messages:
@@ -90,7 +125,7 @@ def to_docx(data: dict) -> Path:
         if role == "user":
             p = doc.add_paragraph()
             p.add_run("Benutzer: ").bold = True
-            p.add_run(text)
+            _add_md_runs(p, text)
         elif role == "assistant":
             ki_label = doc.add_paragraph()
             ki_run = ki_label.add_run("▶ Von KI generiert")
@@ -99,7 +134,7 @@ def to_docx(data: dict) -> Path:
             ki_run.font.color.rgb = RGBColor(0x3B, 0x76, 0xBA)
             p = doc.add_paragraph()
             p.add_run("Assistent: ").bold = True
-            p.add_run(text)
+            _add_md_runs(p, text)
 
     headers = data.get("headers")
     rows    = data.get("rows")
@@ -406,3 +441,185 @@ def _to_lines(val) -> list:
     if isinstance(val, list):
         return [str(b) for b in val]
     return [b for b in str(val).split("\n")]
+
+
+# ── PDF (matplotlib, ohne LaTeX/TeX-Installation) ────────────────────────────
+
+# Corporate-Farben als matplotlib-RGB-Tupel
+_PDF_DARK   = (0x11 / 255, 0x31 / 255, 0x4F / 255)
+_PDF_ACCENT = (0x3B / 255, 0x76 / 255, 0xBA / 255)
+_PDF_GRAY   = (0x6C / 255, 0x6F / 255, 0x76 / 255)
+_PDF_WHITE  = (1, 1, 1)
+
+
+def to_pdf(data: dict) -> Path:
+    """Erzeugt ein PDF aus einem Dokument ({title, content}) ODER einer
+    Präsentation ({type:"presentation", slides:[…]}). Reines matplotlib —
+    keine TeX-/LaTeX-Installation nötig."""
+    import matplotlib
+    matplotlib.use("Agg")
+    fp = Path(tempfile.mktemp(suffix=".pdf"))
+    if data.get("type") == "presentation":
+        _pdf_presentation(data, fp)
+    else:
+        _pdf_document(data, fp)
+    return fp
+
+
+def _pdf_blocks_from_markdown(content: str) -> list[dict]:
+    """Markdown → einfache Blockliste {text,size,bold,bullet,gap} (Inline-Marker
+    werden entfernt — matplotlib-Text kann keinen Mischsatz)."""
+    blocks: list[dict] = []
+    for raw in (content or "").split("\n"):
+        line = raw.rstrip()
+        if not line.strip():
+            blocks.append({"text": "", "size": 5, "bold": False, "bullet": False, "gap": True})
+            continue
+        if line.startswith("#### "):
+            blocks.append({"text": _strip_md(line[5:]), "size": 11, "bold": True, "bullet": False})
+        elif line.startswith("### "):
+            blocks.append({"text": _strip_md(line[4:]), "size": 12, "bold": True, "bullet": False})
+        elif line.startswith("## "):
+            blocks.append({"text": _strip_md(line[3:]), "size": 13.5, "bold": True, "bullet": False})
+        elif line.startswith("# "):
+            blocks.append({"text": _strip_md(line[2:]), "size": 15, "bold": True, "bullet": False})
+        elif line.startswith("- ") or line.startswith("* "):
+            blocks.append({"text": _strip_md(line[2:]), "size": 10.5, "bold": False, "bullet": True})
+        elif re.match(r"^\d+\.\s", line):
+            blocks.append({"text": _strip_md(line), "size": 10.5, "bold": False, "bullet": False})
+        else:
+            blocks.append({"text": _strip_md(line), "size": 10.5, "bold": False, "bullet": False})
+    return blocks
+
+
+def _pdf_document(data: dict, fp: Path) -> None:
+    import textwrap
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    PW, PH = 8.27, 11.69          # A4 hochkant (Zoll)
+    L, R, TOP, BOT = 0.10, 0.92, 0.93, 0.07
+    usable_pt = (R - L) * PW * 72
+    footer_text = _footer_text(data)
+    title = data.get("title", "Dokument")
+
+    blocks = _pdf_blocks_from_markdown(data.get("content", ""))
+
+    pages: list = []
+    fig = ax = None
+    y = 0.0
+
+    def _new_page():
+        nonlocal fig, ax, y
+        fig = plt.figure(figsize=(PW, PH))
+        ax = fig.add_axes([0, 0, 1, 1]); ax.axis("off")
+        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_autoscale_on(False)
+        ax.text(0.5, BOT - 0.025, footer_text, ha="center", va="center",
+                fontsize=8, color=_PDF_GRAY, parse_math=False)
+        pages.append(fig)
+        y = TOP
+
+    def _advance(size, factor=1.55):
+        nonlocal y
+        y -= (size * factor) / (PH * 72)
+
+    _new_page()
+    # Titel
+    ax.text(L, y, _strip_md(title), ha="left", va="top", fontsize=20,
+            fontweight="bold", color=_PDF_DARK, parse_math=False)
+    _advance(20, 2.2)
+    ax.plot([L, R], [y, y], color=_PDF_ACCENT, lw=1.2)
+    _advance(10)
+
+    for blk in blocks:
+        if blk.get("gap"):
+            _advance(6)
+            continue
+        size = blk["size"]
+        chars = max(20, int(usable_pt / (0.50 * size)))
+        prefix = "•  " if blk["bullet"] else ""
+        indent = 0.022 if blk["bullet"] else 0.0
+        wrapped = textwrap.wrap(blk["text"], width=chars) or [""]
+        for i, ln in enumerate(wrapped):
+            if y < BOT + 0.02:
+                _new_page()
+            x = L + (indent if (blk["bullet"] and i > 0) else 0)
+            ax.text(x, y, (prefix + ln) if (blk["bullet"] and i == 0) else ln,
+                    ha="left", va="top", fontsize=size,
+                    fontweight="bold" if blk["bold"] else "normal",
+                    color=_PDF_DARK if blk["bold"] else (0.1, 0.1, 0.1),
+                    parse_math=False)
+            _advance(size)
+        if blk["bold"]:
+            _advance(4)
+
+    with PdfPages(str(fp)) as pdf:
+        for f in pages:
+            pdf.savefig(f)
+            plt.close(f)
+
+
+def _pdf_presentation(data: dict, fp: Path) -> None:
+    import textwrap
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+    from matplotlib.patches import Rectangle
+
+    SW, SH = 13.33, 7.5           # 16:9 quer (Zoll)
+    footer_text = _footer_text(data)
+    slides = data.get("slides", []) or []
+
+    with PdfPages(str(fp)) as pdf:
+        for sd in slides:
+            layout = sd.get("layout", "bullets")
+            title = sd.get("title", "")
+            fig = plt.figure(figsize=(SW, SH))
+            ax = fig.add_axes([0, 0, 1, 1]); ax.axis("off")
+            ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+
+            if layout == "title":
+                ax.add_patch(Rectangle((0, 0), 1, 1, color=_PDF_DARK))
+                ax.text(0.5, 0.56, title, ha="center", va="center", fontsize=34,
+                        fontweight="bold", color=_PDF_WHITE, wrap=True, parse_math=False)
+                sub = sd.get("content", "")
+                if sub:
+                    ax.text(0.5, 0.40, sub, ha="center", va="center", fontsize=18,
+                            color=(0.64, 0.78, 0.92), wrap=True, parse_math=False)
+            elif layout == "section":
+                ax.add_patch(Rectangle((0, 0), 1, 1, color=(0, 0x3A / 255, 0x74 / 255)))
+                ax.text(0.5, 0.55, title, ha="center", va="center", fontsize=30,
+                        fontweight="bold", color=_PDF_WHITE, wrap=True, parse_math=False)
+                sub = sd.get("subtitle") or sd.get("content", "")
+                if sub:
+                    ax.text(0.5, 0.40, sub, ha="center", va="center", fontsize=18,
+                            color=(0.64, 0.78, 0.92), wrap=True, parse_math=False)
+            else:
+                # Titelstreifen
+                ax.add_patch(Rectangle((0, 0.86), 1, 0.14, color=_PDF_DARK))
+                ax.text(0.04, 0.93, title, ha="left", va="center", fontsize=22,
+                        fontweight="bold", color=_PDF_WHITE, parse_math=False)
+                # Inhalt sammeln
+                bullets = sd.get("bullets")
+                if isinstance(bullets, str):
+                    bullets = [b for b in bullets.split("\n") if b.strip()]
+                if not bullets:
+                    left, right = sd.get("left"), sd.get("right")
+                    if left or right:
+                        bullets = _to_lines(left or "") + _to_lines(right or "")
+                    elif sd.get("content"):
+                        bullets = [b for b in str(sd["content"]).split("\n") if b.strip()]
+                bullets = bullets or []
+                yb = 0.78
+                for b in bullets:
+                    if yb < 0.08:
+                        break
+                    for i, ln in enumerate(textwrap.wrap(_strip_md(str(b)), width=78) or [""]):
+                        txt = ("◆  " + ln) if i == 0 else "    " + ln
+                        ax.text(0.05, yb, txt, ha="left", va="top",
+                                fontsize=17, color=_PDF_DARK, parse_math=False)
+                        yb -= 0.062
+
+            ax.text(0.5, 0.02, footer_text, ha="center", va="center",
+                    fontsize=8, color=_PDF_GRAY, parse_math=False)
+            pdf.savefig(fig)
+            plt.close(fig)

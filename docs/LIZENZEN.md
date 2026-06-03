@@ -40,7 +40,7 @@ Apache-2.0, PSF) ohne Copyleft-Pflichten.
 | scipy | 1.17.1 | BSD | Berechnungen (Optimierung/Algebra) |
 | sympy | 1.14.0 | BSD | Symbolischer Gleichungslöser |
 | Pint | 0.25.3 | BSD | Einheitenumrechnung |
-| matplotlib | 3.10.9 | PSF (BSD-artig) | Diagramme |
+| matplotlib | 3.10.9 | PSF (BSD-artig) | Diagramme **und PDF-Export** (Dokumente/Präsentationen, ohne LaTeX) |
 
 ---
 
@@ -97,6 +97,7 @@ Apache-2.0, PSF) ohne Copyleft-Pflichten.
 |---|---|---|---|
 | marked.js | latest (jsDelivr) | MIT | Markdown-Rendering im Chat |
 | highlight.js | 11.9.0 | BSD-3-Clause | Code-Syntax-Hervorhebung |
+| KaTeX | 0.16.9 | MIT | Mathematische Formeln (Chat, Dokumente, Canvas-Folien) |
 
 > Beide werden zur Laufzeit von `cdn.jsdelivr.net` geladen. Für einen
 > vollständig **offline**-fähigen bzw. lizenzrechtlich gebündelten Betrieb
@@ -128,7 +129,7 @@ selbst und unterliegt keiner Drittlizenz.
   1. **LLM-Modelle** — Nutzungsbedingungen von Gemma bzw. Mistral/Ministral
      gegen den geplanten (kommerziellen?) Einsatz abgleichen.
   2. **certifi (MPL-2.0)** — geringes Risiko, der Vollständigkeit halber gelistet.
-- **CDN-Abhängigkeit:** marked.js & highlight.js für Offline-Auslieferung lokal bündeln.
+- **CDN-Abhängigkeit:** marked.js, highlight.js & KaTeX für Offline-Auslieferung lokal bündeln.
 
 *Diese Übersicht dient der Orientierung und ersetzt keine Rechtsberatung. Maßgeblich
 ist jeweils der Originallizenztext der konkret eingesetzten Version.*

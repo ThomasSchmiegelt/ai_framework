@@ -18,7 +18,7 @@ import aiofiles
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 import db as _db
 from fastapi.staticfiles import StaticFiles
@@ -1025,6 +1025,39 @@ async def rag_delete_document(did: str):
     return {"ok": True}
 
 
+def _stitch_chunks(chunks: list) -> str:
+    """Setzt überlappende Chunks wieder zu einem Fließtext zusammen, indem die
+    Überlappung (gemeinsamer Übergang) zwischen aufeinanderfolgenden Chunks
+    entfernt wird."""
+    if not chunks:
+        return ""
+    out = chunks[0]
+    for nxt in chunks[1:]:
+        k = min(len(out), len(nxt), 1200)
+        ov = 0
+        for j in range(k, 20, -1):           # größte Überlappung ≥ 20 Zeichen
+            if out[-j:] == nxt[:j]:
+                ov = j
+                break
+        out += ("" if ov else "\n\n") + nxt[ov:]
+    return out
+
+
+@app.get("/api/rag/documents/{did}/export")
+async def rag_export_document(did: str, format: str = "md"):
+    """Exportiert den (aus den Chunks rekonstruierten) Inhalt eines Dokuments
+    als Markdown oder TXT zum Download."""
+    doc = await _db.rag_document_chunks(did)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+    text = _stitch_chunks(doc["chunks"])
+    ext = "md" if format == "md" else "txt"
+    media = "text/markdown" if ext == "md" else "text/plain"
+    base = re.sub(r"[^\w.\-]+", "_", Path(doc["filename"]).stem) or "dokument"
+    headers = {"Content-Disposition": f'attachment; filename="{base}.{ext}"'}
+    return Response(content=text, media_type=f"{media}; charset=utf-8", headers=headers)
+
+
 @app.post("/api/rag/collections/{cid}/from-conversation")
 async def rag_from_conversation(cid: str, req: Request):
     """Übernimmt ein gespeichertes Gespräch als Dokument in eine RAG-Sammlung
@@ -1120,6 +1153,7 @@ async def _chat_generator(request: ChatRequest):
     model = request.model
     _agent_fixed_model = False   # Agent gibt explizit ein Modell vor
     code_capable = False   # Programmier-Agent → Code aus der Antwort in die IDE übernehmen
+    _presenter_dedicated = False   # echter Präsentations-Agent (Canvas-Fallback erlaubt)
     _log_t0 = time.time()
     _tools_called: list = []
     _last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
@@ -1145,6 +1179,14 @@ async def _chat_generator(request: ChatRequest):
             # Marker-„Tool" code_ide kennzeichnet den Programmier-Agenten (kein echtes
             # Ollama-Tool, daher nicht in active_tools — nur Fähigkeits-Flag).
             code_capable = "code_ide" in allowed
+            # „Echter" Präsentations-Agent: nur für diesen (oder bei klarer Nutzer-
+            # Absicht) darf der Canvas-Fallback aus Fließtext eine Präsentation bauen.
+            # Verhindert, dass allgemeine Antwort-Modi (z. B. Felix/Sandra), die das
+            # create_presentation-Tool nur „dabei" haben, zu schnell ins Canvas springen.
+            _presenter_dedicated = (
+                request.agent_id == "presenter"
+                or agent.get("category") == "Präsentation"
+            )
 
     # Rollen-Modell wählen, sofern der Agent keines fest vorgibt:
     #  • Programmier-Agent (code_ide) → Programmier-Modell
@@ -1307,8 +1349,15 @@ async def _chat_generator(request: ChatRequest):
 
             # Fallback: präsentationsfähiger Agent lieferte nur Fließtext (kein Tool-Aufruf)
             # → Text per zweitem Aufruf in Folien umwandeln, damit dennoch eine
-            #   Canvas-Präsentation entsteht.
+            #   Canvas-Präsentation entsteht. NUR wenn der Nutzer eine Präsentation
+            #   wollte ODER es der dedizierte Präsentations-Agent ist — damit allgemeine
+            #   Antwort-Modi nicht bei jedem „Agenda"/„Gliederung" ins Canvas springen.
+            _wants_pres = bool(re.search(
+                r"(?i)präsentation|präsentier|foliensatz|folien|\bslides?\b|slide-?deck|"
+                r"powerpoint|pptx|vortrag",
+                _last_user))
             if (not canvas_emitted and presentation_capable and len(content) > 300
+                    and (_wants_pres or _presenter_dedicated)
                     and re.search(r"(?i)folie|slide|präsentation|agenda|gliederung|inhaltsverzeichnis", content)):
                 conv = await _text_to_presentation(content, model)
                 if conv:
@@ -2128,6 +2177,136 @@ async def load_dossier(id: str = Query(...)):
             "content": target.read_text(encoding="utf-8")}
 
 
+# ── Mail (IMAP read-only) → Wissensdatenbank ────────────────────────────────
+# Reine stdlib (tools/mail.py). Zugangsdaten in data/mail.json (NICHT im Backup,
+# NICHT in git – siehe .gitignore). Passwort im Klartext: bei Gmail ein
+# App-Passwort verwenden, nicht das Hauptpasswort.
+MAIL_CONFIG_FILE = DATA_DIR / "mail.json"
+
+
+def _load_mail_cfg() -> dict:
+    if MAIL_CONFIG_FILE.exists():
+        try:
+            return json.loads(MAIL_CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+@app.get("/api/mail/config")
+async def mail_get_config():
+    cfg = _load_mail_cfg()
+    return {
+        "protocol": cfg.get("protocol", "imap"),
+        "host": cfg.get("host", ""),
+        "port": cfg.get("port", 993),
+        "user": cfg.get("user", ""),
+        "ssl": cfg.get("ssl", True),
+        "has_password": bool(cfg.get("password")),
+    }
+
+
+@app.post("/api/mail/config")
+async def mail_set_config(req: Request):
+    body = await req.json()
+    cfg = _load_mail_cfg()
+    cfg["protocol"] = "pop3" if str(body.get("protocol", "imap")).lower() == "pop3" else "imap"
+    cfg["host"] = str(body.get("host", "")).strip()
+    cfg["port"] = int(body.get("port") or (995 if cfg["protocol"] == "pop3" else 993))
+    cfg["user"] = str(body.get("user", "")).strip()
+    cfg["ssl"] = bool(body.get("ssl", True))
+    pw = body.get("password")
+    if pw:   # nur überschreiben, wenn ein neues Passwort übergeben wurde
+        cfg["password"] = pw
+    MAIL_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
+                                encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/api/mail/list")
+async def mail_list(req: Request):
+    from tools import mail as _mail
+    body = await req.json()
+    cfg = _load_mail_cfg()
+    limit = int(body.get("limit") or 25)
+    search = str(body.get("search", "")).strip()
+    try:
+        items = await asyncio.to_thread(_mail.list_messages, cfg, limit, search)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"IMAP-Fehler: {e}")
+    return {"messages": items}
+
+
+@app.post("/api/mail/message")
+async def mail_message(req: Request):
+    """Holt eine einzelne Mail vollständig (Vorschau im rechten Mail-Bereich)."""
+    from tools import mail as _mail
+    body = await req.json()
+    uid = body.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="Keine Mail gewählt")
+    cfg = _load_mail_cfg()
+    try:
+        msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, [uid])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Mail-Fehler: {e}")
+    if not msgs:
+        raise HTTPException(status_code=404, detail="Mail nicht gefunden")
+    return msgs[0]
+
+
+@app.post("/api/mail/to-rag")
+async def mail_to_rag(req: Request):
+    from tools import mail as _mail
+    from tools.rag import ingest_file
+    body = await req.json()
+    cid = body.get("collection_id")
+    uids = body.get("uids") or []
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Wissensdatenbank nicht gefunden")
+    if not uids:
+        raise HTTPException(status_code=400, detail="Keine Mails ausgewählt")
+    cfg = _load_mail_cfg()
+    try:
+        msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, uids)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"IMAP-Fehler: {e}")
+    ingested, chunks = 0, 0
+    for m in msgs:
+        text = (
+            f"Von: {m['from']}\nAn: {m.get('to', '')}\nDatum: {m['date']}\n"
+            f"Betreff: {m['subject']}\n\n{m['text']}"
+        ).strip()
+        if not m["text"].strip():
+            continue
+        title = f"Mail: {m['subject']}"[:120]
+        try:
+            n = await ingest_file(coll, text, title, f"mail_{uuid.uuid4().hex[:12]}")
+            ingested += 1
+            chunks += n
+        except Exception:
+            continue
+    return {"ok": True, "ingested": ingested, "chunks": chunks}
+
+
+@app.post("/api/presentation/from-text")
+async def presentation_from_text(req: Request):
+    """Wandelt fertigen Text (z. B. aus dem Dokumentengenerator) in eine
+    Canvas-Präsentation um — ohne Konversation. Gibt das Canvas-JSON zurück,
+    das der Frontend-Renderer direkt anzeigen kann."""
+    body = await req.json()
+    text = str(body.get("text", "")).strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Kein Text übergeben")
+    model = _pick_model(body.get("model"))
+    data = await _text_to_presentation(text, model)
+    if not data:
+        raise HTTPException(status_code=422,
+                            detail="Konnte aus dem Text keine Folien ableiten")
+    return data
+
+
 @app.get("/api/downloads/{filename}")
 async def download_report(filename: str):
     # only alphanumeric + dot + dash to prevent path traversal
@@ -2439,6 +2618,22 @@ async def export_pptx(req: Request):
         filename="ai_framework_thomas_praesentation.pptx",
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
+
+
+@app.post("/api/export/pdf")
+async def export_pdf(req: Request):
+    """PDF aus Dokument ({title,content}) oder Präsentation ({type:'presentation'})
+    — über matplotlib, ohne TeX-Installation."""
+    from tools.export import to_pdf
+    body = await req.json()
+    body["_profile"] = _load_profile()
+    try:
+        fp = await asyncio.to_thread(to_pdf, body)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF-Export fehlgeschlagen: {e}")
+    name = ("ai_framework_thomas_praesentation.pdf"
+            if body.get("type") == "presentation" else "ai_framework_thomas_dokument.pdf")
+    return FileResponse(fp, filename=name, media_type="application/pdf")
 
 
 # ── Profil-API ────────────────────────────────────────────────────────────────

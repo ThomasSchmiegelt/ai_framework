@@ -10,14 +10,20 @@
 param(
     # Zielverzeichnis, in dem der Bundle-Ordner angelegt wird.
     # Standard: das übergeordnete Verzeichnis dieses Skripts.
-    [string]$OutDir
+    [string]$OutDir,
+
+    # Bündelt WEDER die Ollama-Binary NOCH die Modelle und nutzt das bereits auf
+    # dem Zielrechner installierte System-Ollama (Standard-Port 11434). Ergebnis:
+    # ein deutlich kleineres Bundle, das ein vorhandenes Ollama voraussetzt.
+    [switch]$UseSystemOllama
 )
 
 $ErrorActionPreference = "Stop"
 
 $APP_DIR       = $PSScriptRoot
 $DATE_STAMP    = Get-Date -Format "yyyyMMdd"
-$BUNDLE_NAME   = "AI_Framework_Thomas_Portable_$DATE_STAMP"
+$BUNDLE_NAME   = if ($UseSystemOllama) { "AI_Framework_Thomas_Portable_SystemOllama_$DATE_STAMP" }
+                 else                  { "AI_Framework_Thomas_Portable_$DATE_STAMP" }
 # Basisverzeichnis: -OutDir falls angegeben, sonst Eltern-Ordner des Skripts.
 if ($OutDir) {
     if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
@@ -29,7 +35,9 @@ $BUNDLE_DIR    = Join-Path $BASE_DIR $BUNDLE_NAME
 # Eigener Ollama-Port fürs Bundle — kollidiert nicht mit einem evtl. bereits
 # laufenden System-Ollama auf dem Standard-Port 11434. Garantiert, dass das
 # Bundle sein eigenes Modellverzeichnis (inkl. nomic-embed-text für RAG) nutzt.
-$OLLAMA_PORT   = 11500
+# Bei -UseSystemOllama wird stattdessen der Standard-Port 11434 des bereits
+# installierten Ollama verwendet (keine eigene Binary/Modelle im Bundle).
+$OLLAMA_PORT   = if ($UseSystemOllama) { 11434 } else { 11500 }
 $PYTHON_VER    = "3.12.7"
 $PYTHON_ZIP    = "python-$PYTHON_VER-embed-amd64.zip"
 $PYTHON_URL    = "https://www.python.org/ftp/python/$PYTHON_VER/$PYTHON_ZIP"
@@ -119,6 +127,9 @@ if ($LASTEXITCODE -ne 0) { Write-Fail "Paket-Installation fehlgeschlagen" }
 Write-OK "Pakete installiert"
 
 # ── 3. Ollama Binary kopieren ──────────────────────────────────────────────────
+# (Bei -UseSystemOllama übersprungen: das Bundle nutzt das installierte Ollama.)
+
+if (-not $UseSystemOllama) {
 
 Write-Step "Ollama Binary suchen und kopieren..."
 $ollamaLocations = @(
@@ -231,6 +242,12 @@ if (-not (Test-Path $modelsSrc)) {
     else { Write-Warn "Keine Modelle gebündelt — Bundle braucht beim ersten Start Internet." }
 }
 
+}  # Ende: Ollama-Binary + Modelle nur OHNE -UseSystemOllama bündeln
+else {
+    Write-Step "System-Ollama-Modus: Ollama-Binary & Modelle werden NICHT gebündelt."
+    Write-OK "Bundle nutzt das installierte Ollama auf 127.0.0.1:$OLLAMA_PORT"
+}
+
 # ── 5. Datenverzeichnis anlegen ────────────────────────────────────────────────
 
 foreach ($d in @("conversations","uploads","agents","reports","code","plans","dossiers","profile_assets")) {
@@ -243,23 +260,67 @@ if (Test-Path "$APP_DIR\data\agents") {
 }
 
 # ── 5b. config.json im Bundle auf den eigenen Ollama-Port umschreiben ──────────
+# (Bei -UseSystemOllama nicht nötig — config bleibt auf dem Standard-Port 11434.)
 
-Write-Step "Bundle-config.json auf Port $OLLAMA_PORT setzen..."
-$cfgPath = "$BUNDLE_DIR\app\config.json"
-if (Test-Path $cfgPath) {
-    $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
-    $cfg | Add-Member -NotePropertyName ollama_base -NotePropertyValue "http://localhost:$OLLAMA_PORT" -Force
-    [System.IO.File]::WriteAllText($cfgPath, ($cfg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
-    Write-OK "ollama_base = http://localhost:$OLLAMA_PORT"
-} else {
-    Write-Warn "config.json im Bundle nicht gefunden — Port bleibt auf Standard"
+if (-not $UseSystemOllama) {
+    Write-Step "Bundle-config.json auf Port $OLLAMA_PORT setzen..."
+    $cfgPath = "$BUNDLE_DIR\app\config.json"
+    if (Test-Path $cfgPath) {
+        $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
+        $cfg | Add-Member -NotePropertyName ollama_base -NotePropertyValue "http://localhost:$OLLAMA_PORT" -Force
+        [System.IO.File]::WriteAllText($cfgPath, ($cfg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+        Write-OK "ollama_base = http://localhost:$OLLAMA_PORT"
+    } else {
+        Write-Warn "config.json im Bundle nicht gefunden — Port bleibt auf Standard"
+    }
 }
 
 # ── 6. Start-Skripte im Bundle ─────────────────────────────────────────────────
 
 Write-Step "Portable Start-Skript erstellen..."
 
-$startContent = @"
+if ($UseSystemOllama) {
+    # Variante „System-Ollama": nutzt das auf dem Rechner installierte Ollama
+    # (Port 11434, Standard-Modellverzeichnis). Startet es bei Bedarf über PATH.
+    $startContent = @"
+@echo off
+title AI_Framework_Thomas Portable (System-Ollama)
+cd /d "%~dp0app"
+
+:: Nutzt das INSTALLIERTE Ollama (Standard-Port 11434, dessen Modellverzeichnis).
+:: Voraussetzung: Ollama ist installiert und die Modelle sind gezogen
+::   ollama pull ministral-3:3b   &   ollama pull nomic-embed-text
+"%~dp0python\python.exe" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$OLLAMA_PORT/api/tags', timeout=2)" >nul 2>&1
+if not errorlevel 1 goto ollamaready
+
+echo [*] Starte installiertes Ollama (PATH)...
+start /min "" ollama serve
+
+set /a _tries=0
+:waitollama
+timeout /t 2 /nobreak >nul
+"%~dp0python\python.exe" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$OLLAMA_PORT/api/tags', timeout=2)" >nul 2>&1
+if not errorlevel 1 goto ollamaready
+set /a _tries+=1
+if %_tries% lss 15 goto waitollama
+echo [!] Ollama antwortet nicht. Ist Ollama installiert? (https://ollama.com)
+echo [!] Chat/RAG koennten ohne laufendes Ollama fehlschlagen.
+
+:ollamaready
+
+start /min "" cmd /c "timeout /t 3 >nul && start http://localhost:8780"
+
+echo.
+echo  AI_Framework_Thomas Portable (System-Ollama) gestartet
+echo  URL:    http://localhost:8780
+echo  Ollama: http://127.0.0.1:$OLLAMA_PORT  (installiertes System-Ollama)
+echo  Fenster schliessen um zu beenden.
+echo.
+
+"%~dp0python\python.exe" -m uvicorn main:app --host 127.0.0.1 --port 8780
+"@
+} else {
+    $startContent = @"
 @echo off
 title AI_Framework_Thomas Portable
 cd /d "%~dp0app"
@@ -300,6 +361,7 @@ echo.
 
 "%~dp0python\python.exe" -m uvicorn main:app --host 127.0.0.1 --port 8780
 "@
+}
 
 # start.bat OHNE BOM schreiben — cmd.exe darf kein BOM vor '@echo off' sehen
 [System.IO.File]::WriteAllText("$BUNDLE_DIR\start.bat", $startContent, (New-Object System.Text.UTF8Encoding($false)))
@@ -308,7 +370,32 @@ Write-OK "start.bat erstellt"
 
 # ── 7. README im Bundle ────────────────────────────────────────────────────────
 
-$readmeContent = @"
+if ($UseSystemOllama) {
+    $readmeContent = @"
+# AI_Framework_Thomas Portable (System-Ollama)
+
+Diese Variante bündelt **weder Ollama noch die Modelle** und nutzt das bereits auf
+dem Rechner installierte Ollama (Port $OLLAMA_PORT). Das Bundle ist dadurch deutlich kleiner.
+
+## Verwendung
+Doppelklick auf ``start.bat``
+
+## Voraussetzungen
+- Windows 10/11 (64-bit)
+- **Ollama installiert** (https://ollama.com) und folgende Modelle gezogen:
+$(($MODELS | ForEach-Object { "  - ``ollama pull $_``" }) -join "`n")
+  - ``ollama pull $EMBED_MODEL``  (für RAG)
+
+## Hinweise
+- ``start.bat`` startet das installierte Ollama bei Bedarf automatisch (über PATH)
+- Es wird das Standard-Modellverzeichnis des installierten Ollama genutzt
+- Fehlt ein Modell: ``ollama pull <name>`` in einer normalen Konsole
+
+## Bundle erstellt
+$(Get-Date -Format "yyyy-MM-dd HH:mm")
+"@
+} else {
+    $readmeContent = @"
 # AI_Framework_Thomas Portable
 
 ## Verwendung
@@ -333,6 +420,7 @@ $(($MODELS | ForEach-Object { "- $_" }) -join "`n")
 ## Bundle erstellt
 $(Get-Date -Format "yyyy-MM-dd HH:mm")
 "@
+}
 
 $readmeContent | Out-File -FilePath "$BUNDLE_DIR\README.md" -Encoding UTF8
 

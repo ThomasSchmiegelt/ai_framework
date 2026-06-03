@@ -374,6 +374,20 @@ async def rag_list_documents(cid: str) -> list:
         return [dict(r) for r in await cur.fetchall()]
 
 
+async def rag_document_chunks(did: str) -> Optional[dict]:
+    """Dateiname + Chunk-Texte eines Dokuments (in seq-Reihenfolge) — für den
+    Export des Dokumentinhalts als Markdown/TXT."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT filename FROM rag_documents WHERE id=?", (did,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        cur = await db.execute(
+            "SELECT text FROM rag_chunks WHERE document_id=? ORDER BY seq", (did,))
+        return {"filename": row["filename"], "chunks": [r["text"] for r in await cur.fetchall()]}
+
+
 async def rag_delete_document(did: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys=ON")

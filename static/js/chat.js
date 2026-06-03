@@ -822,5 +822,7 @@ const Chat = (() => {
     newConversation,
     loadConversationList,
     importConversation,
+    renderMarkdown,   // wiederverwendbar (Dokumentengenerator, Recherche): identische
+                      // Formel-/Normen-/Code-Aufbereitung wie im Chat
   };
 })();

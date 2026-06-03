@@ -99,13 +99,14 @@
     <div id="tab-bar">
       <button class="tab-btn active" data-tab="chat">💬 Chat</button>
       <button class="tab-btn" data-tab="canvas">🖼️ Canvas</button>
-      <button class="tab-btn" data-tab="agents">🤖 Agenten</button>
-      <button class="tab-btn" data-tab="research">🔬 Recherche</button>
-      <button class="tab-btn" data-tab="rag">📚 RAG</button>
       <button class="tab-btn" data-tab="docgen">📄 Dokumente</button>
-      <button class="tab-btn" data-tab="planner">🗂️ Planer</button>
+      <button class="tab-btn" data-tab="research">🔬 Recherche</button>
       <button class="tab-btn" data-tab="matrix">📊 Matrix</button>
+      <button class="tab-btn" data-tab="planner">🗂️ Planer</button>
       <button class="tab-btn" data-tab="ide">💻 Code</button>
+      <button class="tab-btn" data-tab="agents">🤖 Agenten</button>
+      <button class="tab-btn" data-tab="rag">📚 RAG</button>
+      <button class="tab-btn" data-tab="mail">📧 Mail</button>
       <button class="tab-btn" data-tab="logs">📋 Logs</button>
     </div>
 
@@ -196,6 +197,7 @@
         <button class="export-btn" id="btn-pres-assistant">🪄 Assistent</button>
         <button class="export-btn" id="btn-illus-pres">🖼️ Bild-Präsentation</button>
         <button class="export-btn" id="btn-export-pptx">📊 PPTX</button>
+        <button class="export-btn" id="btn-export-pdf">📑 PDF</button>
         <button class="export-btn" id="btn-export-xlsx">📋 XLSX</button>
       </div>
 
@@ -287,8 +289,10 @@
       <div id="agents-grid"></div>
     </div>
 
-    <!-- ── Recherche-Panel ───────────────────────────────────────────────── -->
+    <!-- ── Recherche-Panel (zwei Spalten + ziehbarer Trenner) ─────────────── -->
     <div id="research-panel" class="panel">
+     <div id="research-body">
+      <div id="research-left">
       <div id="research-config">
         <div id="research-header-block">
           <h2>🔬 Agentische Recherche</h2>
@@ -311,22 +315,39 @@
           </div>
         </div>
 
-        <div style="display:flex;gap:10px;align-items:center">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <button id="btn-start-research">🔬 Recherche starten</button>
           <button id="btn-reset-research" style="display:none">↺ Neue Recherche</button>
-          <button id="btn-research-export" class="export-btn" style="display:none">📄 Als Dokument</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
+          <button id="btn-research-present" class="export-btn" style="display:none">🖥️ Als Präsentation</button>
+          <button id="btn-research-to-doc" class="export-btn" style="display:none">📄 Dokument erstellen</button>
+          <button id="btn-research-export" class="export-btn" style="display:none">📝 Als DOCX</button>
+          <button id="btn-research-pdf" class="export-btn" style="display:none">📑 Als PDF</button>
           <button id="btn-research-rag" class="export-btn" style="display:none">📚 In Wissensdatenbank</button>
         </div>
       </div>
-
-      <div id="research-output-area" style="display:none">
-        <div id="research-progress-list"></div>
-        <div id="research-report"></div>
       </div>
+
+      <div id="research-splitter" title="Ziehen zum Verschieben · Doppelklick = Standard"></div>
+
+      <div id="research-right">
+        <div id="research-placeholder" class="docgen-placeholder">
+          Der Recherchebericht erscheint hier.<br>
+          Links Thema &amp; Aspekte eingeben und „🔬 Recherche starten".
+        </div>
+        <div id="research-output-area" style="display:none">
+          <div id="research-progress-list"></div>
+          <div id="research-report"></div>
+        </div>
+      </div>
+     </div>
     </div>
 
-    <!-- ── RAG-Panel (Wissenssammlungen) ─────────────────────────────────── -->
+    <!-- ── RAG-Panel (zwei Spalten + ziehbarer Trenner) ───────────────────── -->
     <div id="rag-panel" class="panel">
+     <div id="rag-body">
+      <div id="rag-left">
       <div id="rag-config">
         <div id="research-header-block">
           <h2>📚 Wissensdatenbanken (RAG)</h2>
@@ -390,14 +411,123 @@
           <button id="btn-rag-from-chat" class="export-btn">übernehmen</button>
         </div>
       </div>
+      </div>
 
-      <div id="rag-collections-list" style="margin-top:18px"></div>
+      <div id="rag-splitter" title="Ziehen zum Verschieben · Doppelklick = Standard"></div>
+
+      <div id="rag-right">
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:10px">Vorhandene Wissensdatenbanken</h3>
+        <div id="rag-collections-list"></div>
+      </div>
+     </div>
       <input type="file" id="rag-file-input" style="display:none"
         accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md" multiple />
     </div>
 
-    <!-- ── Dokumentengenerator-Panel ─────────────────────────────────────── -->
+    <!-- ── Mail-Panel (IMAP/POP3 read-only → Wissensdatenbank) ──────────────── -->
+    <div id="mail-panel" class="panel">
+     <div id="mail-body">
+      <div id="mail-left">
+      <div id="research-config">
+        <div id="research-header-block">
+          <h2>📧 Mail → Wissensdatenbank</h2>
+          <p class="research-intro">
+            Bestimmte E-Mails (read-only) auswählen und direkt in eine Wissensdatenbank
+            (RAG) übernehmen — z. B. um aus Mail-Threads eine Besprechung vorzubereiten.
+          </p>
+        </div>
+
+        <details class="research-field" id="mail-settings">
+          <summary style="cursor:pointer;user-select:none">⚙️ Postfach-Zugang (IMAP / POP3)</summary>
+          <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:12px">Protokoll</label>
+              <select id="mail-protocol" class="sidebar-select">
+                <option value="imap">IMAP (empfohlen — lässt Mails auf dem Server)</option>
+                <option value="pop3">POP3</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px">Server</label>
+              <input type="text" id="mail-host" class="sidebar-select" placeholder="imap.gmail.com" />
+            </div>
+            <div>
+              <label style="font-size:12px">Port</label>
+              <input type="number" id="mail-port" class="sidebar-select" value="993" />
+            </div>
+            <div>
+              <label style="font-size:12px">Benutzer (E-Mail)</label>
+              <input type="text" id="mail-user" class="sidebar-select" placeholder="name@gmail.com" autocomplete="off" />
+            </div>
+            <div>
+              <label style="font-size:12px">Passwort / App-Passwort</label>
+              <input type="password" id="mail-pass" class="sidebar-select" placeholder="(leer lassen = unverändert)" autocomplete="new-password" />
+            </div>
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" id="mail-ssl" checked /> SSL/TLS (empfohlen)
+          </label>
+          <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button id="btn-mail-save" class="export-btn">💾 Zugang speichern</button>
+            <span id="mail-cfg-status" class="planner-muted" style="font-size:12px"></span>
+          </div>
+          <p class="planner-muted" style="font-size:11.5px;margin-top:8px">
+            ⚠️ Das Passwort wird lokal in <code>data/mail.json</code> im Klartext gespeichert
+            (nicht im Backup, nicht in git). Für <strong>Gmail</strong> mit 2FA ein
+            <strong>App-Passwort</strong> verwenden, nicht das Hauptpasswort.
+          </p>
+        </details>
+
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:10px">
+          <div>
+            <label style="font-size:12px">Suche (Absender/Betreff) — optional</label>
+            <input type="text" id="mail-search" class="sidebar-select" placeholder="z. B. Besprechung" style="min-width:200px" />
+          </div>
+          <div>
+            <label style="font-size:12px">Anzahl</label>
+            <input type="number" id="mail-limit" class="sidebar-select" value="25" min="1" max="100" style="max-width:80px" />
+          </div>
+          <button id="btn-mail-fetch" class="export-btn">📥 Abrufen</button>
+          <span id="mail-status" class="planner-muted" style="font-size:12px"></span>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:12px">
+          <div style="flex:1;min-width:220px">
+            <label style="font-size:12px">Ziel-Wissensdatenbank</label>
+            <select id="mail-rag" class="sidebar-select" style="width:100%"></select>
+          </div>
+          <button id="btn-mail-to-rag" class="export-btn">📚 Ausgewählte → Wissensdatenbank</button>
+        </div>
+      </div>
+
+      <div id="mail-list" style="margin-top:16px"></div>
+      </div>
+
+      <div id="mail-splitter" title="Ziehen zum Verschieben · Doppelklick = Standard"></div>
+
+      <div id="mail-right">
+        <div id="mail-preview-empty" class="docgen-placeholder">
+          Eine Mail links anklicken, um sie hier anzusehen und zu bearbeiten.
+        </div>
+        <div id="mail-preview" style="display:none">
+          <div id="mail-preview-head"></div>
+          <textarea id="mail-preview-body" spellcheck="false"
+            placeholder="Mail-Text (bearbeitbar) …"></textarea>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:center">
+            <select id="mail-preview-rag" class="sidebar-select" style="min-width:200px"></select>
+            <button id="btn-mail-preview-rag" class="export-btn">📚 Diese Mail → Wissensdatenbank</button>
+            <button id="btn-mail-preview-doc" class="export-btn">📄 → Dokumentengenerator</button>
+          </div>
+          <span id="mail-preview-status" class="planner-muted" style="font-size:12px"></span>
+        </div>
+      </div>
+     </div>
+    </div>
+
+    <!-- ── Dokumentengenerator-Panel (zwei Spalten + ziehbarer Trenner) ───── -->
     <div id="docgen-panel" class="panel">
+     <div id="docgen-body">
+      <div id="docgen-left">
       <div id="research-config">
         <div id="research-header-block">
           <h2>📄 Dokumentengenerator</h2>
@@ -448,7 +578,10 @@
 
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <button id="btn-docgen-run">📄 Dokument erzeugen</button>
+          <button id="btn-docgen-run-present">🖥️ Präsentation erzeugen</button>
           <button id="btn-docgen-export" class="export-btn" style="display:none">📝 Als DOCX</button>
+          <button id="btn-docgen-pdf" class="export-btn" style="display:none">📑 Als PDF</button>
+          <button id="btn-docgen-present" class="export-btn" style="display:none">🖥️ Als Präsentation</button>
           <button id="btn-docgen-rag" class="export-btn" style="display:none">📚 In Wissensdatenbank</button>
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px">
             <input type="checkbox" id="docgen-science" /> quellengebunden (wissenschaftlich)
@@ -456,8 +589,18 @@
           <span id="docgen-status" class="planner-muted" style="font-size:12px"></span>
         </div>
       </div>
+      </div>
 
-      <div id="docgen-output" style="margin-top:16px"></div>
+      <div id="docgen-splitter" title="Ziehen zum Verschieben · Doppelklick = Standard"></div>
+
+      <div id="docgen-right">
+        <div id="docgen-placeholder" class="docgen-placeholder">
+          Das erzeugte Dokument erscheint hier.<br>
+          Links den Auftrag beschreiben und „📄 Dokument erzeugen" wählen.
+        </div>
+        <div id="docgen-output"></div>
+      </div>
+     </div>
     </div>
 
     <!-- ── Planer-Panel ──────────────────────────────────────────────────── -->
@@ -1192,6 +1335,7 @@ Beispiele:
 <script src="/js/research.js?v=20260601"></script>
 <script src="/js/rag.js?v=20260601"></script>
 <script src="/js/doc_generator.js?v=20260601"></script>
+<script src="/js/mail.js?v=20260601"></script>
 <script src="/js/profile.js?v=20260601"></script>
 <script src="/js/projects.js?v=20260601"></script>
 <script src="/js/planner.js?v=20260601"></script>

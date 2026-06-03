@@ -19,6 +19,30 @@ AI_Framework_Thomas_Portable_YYYYMMDD\
 
 ---
 
+## Zwei Bundle-Varianten
+
+| Variante | Skript | Bündelt Ollama + Modelle? | Größe | Voraussetzung am Ziel |
+|---|---|---|---|---|
+| **A — Voll-Bundle** (Standard) | `make_portable.bat` | **Ja** (eigene `ollama.exe` + Modelle, eigener Port 11500) | ~5 GB | nichts |
+| **B — System-Ollama** | `make_portable_systemollama.bat` | **Nein** (nutzt installiertes Ollama, Port 11434) | ~0,5 GB | Ollama installiert + Modelle gezogen |
+
+**Variante B** ist gedacht für Rechner, auf denen Ollama **bereits installiert** ist:
+das Bundle enthält dann nur App + Embedded-Python + Pakete (kein `ollama\`-Ordner,
+keine Modell-Blobs) und spricht das vorhandene System-Ollama auf dem Standard-Port
+**11434** an. `start.bat` startet das installierte Ollama bei Bedarf über den PATH.
+Vor dem ersten Start die Modelle ziehen:
+
+```
+ollama pull ministral-3:3b
+ollama pull nomic-embed-text
+```
+
+Intern ist Variante B derselbe Skriptlauf mit dem Schalter `-UseSystemOllama`
+(`make_portable.ps1 -UseSystemOllama`); die Schritte „Ollama-Binary kopieren",
+„Modelle kopieren" und „config.json-Port umschreiben" entfallen.
+
+---
+
 ## Portable Bundle erstellen
 
 ### Voraussetzung

@@ -17,6 +17,7 @@
 9. [Recherche](#9-recherche)
 - [RAG — Eigene Wissenssammlungen](#rag--eigene-wissenssammlungen)
 - [Dokumentengenerator](#dokumentengenerator)
+- [Mail → Wissensdatenbank](#mail--wissensdatenbank)
 10. [Planer (Netzplan / CPM)](#10-planer-netzplan--cpm)
 11. [Matrix-Recherche](#11-matrix-recherche)
 12. [Code-Tab (IDE + JSON-Editor)](#12-code-tab-ide--json-editor)
@@ -64,18 +65,20 @@ Voraussetzung: **Ollama läuft** (`ollama list` zum Prüfen) und die Modelle aus
 
 ## 3. Benutzeroberfläche im Überblick
 
-Oben verläuft die **Tab-Leiste** mit acht Bereichen:
+Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 
 | Tab | Funktion |
 |-----|----------|
 | 💬 Chat | Haupt-Chat-Ansicht |
-| 🖼️ Canvas | Präsentationen & Tabellen anzeigen |
-| 🤖 Agenten | Agenten erstellen und bearbeiten |
+| 🖼️ Canvas | Präsentationen & Tabellen anzeigen (Export PPTX/PDF/XLSX) |
+| 📄 Dokumente | Dokumentengenerator — Dokument oder Präsentation erzeugen |
 | 🔬 Recherche | Aspektbasierte Recherche mit Quellen |
-| 📚 RAG | Eigene Wissenssammlungen für die KI |
-| 🗂️ Planer | Netzplan / Kritischer Pfad |
 | 📊 Matrix | Recherche-Tabelle |
-| 💻 IDE | Code-Programme erstellen & ausführen |
+| 🗂️ Planer | Netzplan / Kritischer Pfad |
+| 💻 Code | Code-IDE + JSON-Editor |
+| 🤖 Agenten | Agenten erstellen und bearbeiten |
+| 📚 RAG | Eigene Wissenssammlungen für die KI |
+| 📧 Mail | Postfach (IMAP/POP3) read-only → Wissensdatenbank |
 | 📋 Logs | Diagnose-Protokoll |
 
 ### Sidebar (links)
@@ -331,11 +334,23 @@ Förderprogramm**, einen Projektbericht oder ein Pflichtenheft) mit Hilfe eines
    **Plan-RAG** aus der Tätigkeits-Recherche oder eine Recherche-Datenbank. Die
    passenden Auszüge fließen als Kontext ein.
 3. **Auftrag** beschreiben (welches Dokument, welche Gliederung, welches Programm …).
-4. **📄 Dokument erzeugen.** Das Ergebnis erscheint formatiert (inkl. Formeln/Links).
-5. **📝 Als DOCX** exportieren oder **📚 In Wissensdatenbank** zurücklegen.
+4. **📄 Dokument erzeugen** — das Ergebnis erscheint **rechts** formatiert (inkl. Formeln
+   via KaTeX/Links). Oder **🖥️ Präsentation erzeugen** — derselbe Inhalt landet als
+   Präsentation im **Canvas** (Querformat).
+5. Export als **📝 DOCX**, **📑 PDF**, als **🖥️ Präsentation** (Canvas) oder zurück
+   **📚 In Wissensdatenbank**.
+
+> **Layout:** Der Dokumenten-Tab ist zweispaltig — links die Steuerung, rechts das
+> erzeugte Dokument. Der **Trenner** dazwischen ist mit der Maus ziehbar
+> (Doppelklick setzt zurück). Denselben ziehbaren Trenner gibt es in **Recherche**,
+> **RAG** und **Mail**.
 
 Mit der Option **„quellengebunden (wissenschaftlich)"** arbeitet die KI streng auf
 Basis der Quellen (für belegpflichtige Dokumente).
+
+> **Hinweis zu Formeln im Export:** DOCX und PDF setzen LaTeX-Formeln **nicht** als
+> Formelsatz (sie erscheinen als `$…$`-Text). Formelsatz gibt es **am Bildschirm**
+> (Dokument-Ansicht, Canvas-Folien) sowie in der **Präsentation** im Canvas.
 
 ### Quellmaterial mitgeben
 
@@ -353,6 +368,29 @@ Im Abschnitt **📎 Quellmaterial** kannst du der Aufgabe konkrete Vorlagen beil
 Aus dem **Chat** bringt der Knopf **„→ 📄 Doku"** (in der Eingabeleiste) das laufende
 Gespräch komprimiert hierher — praktisch, um z. B. aus einer Unterhaltung eine
 Besprechung zu planen.
+
+---
+
+## Mail → Wissensdatenbank
+
+Tab **📧 Mail**: ruft ein Postfach **read-only** ab und übernimmt einzelne Mails in
+eine Wissensdatenbank oder den Dokumentengenerator — z. B. um aus einem Mail-Thread
+eine Besprechung vorzubereiten. Der Tab ist zweispaltig (links Zugang/Liste, rechts
+Vorschau/Bearbeitung).
+
+1. **⚙️ Postfach-Zugang** öffnen und **Protokoll** wählen — **IMAP** (empfohlen, lässt
+   die Mails auf dem Server) oder **POP3**. Server, Port (Standard wird je Protokoll/SSL
+   vorgeschlagen), Benutzer und Passwort eintragen, **💾 Zugang speichern**.
+   - Bei **Gmail** mit 2-Faktor ein **App-Passwort** verwenden, nicht das Hauptpasswort.
+   - Der Zugang wird lokal in `data/mail.json` gespeichert (nicht im Backup, nicht in git).
+2. Optional **Suche** (Absender/Betreff) und **Anzahl** setzen, dann **📥 Abrufen**.
+3. **Mail anklicken** → sie erscheint rechts in der **Vorschau** mit **bearbeitbarem**
+   Textfeld. Von dort:
+   - **📚 Diese Mail → Wissensdatenbank** (übernimmt den ggf. bearbeiteten Text),
+   - **📄 → Dokumentengenerator** (als Quellmaterial weiterverarbeiten).
+4. Mehrere Mails über die Haken auswählen und gesammelt **📚 → Wissensdatenbank** übernehmen.
+
+> Es werden keine Mails gelöscht oder versendet — der Zugriff ist rein lesend.
 
 ---
 

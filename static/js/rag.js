@@ -126,8 +126,10 @@ const RAG = (() => {
       card.style.cssText = 'margin-bottom:12px;padding:12px';
       const docs = await (await fetch(`/api/rag/collections/${c.id}/documents`)).json();
       const docRows = docs.map(d => `
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:3px 0">
-          <span>📄 ${escHtml(d.filename)} <span class="planner-muted">· ${d.n_chunks} Chunks</span></span>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12.5px;padding:3px 0">
+          <span style="flex:1;min-width:0">📄 ${escHtml(d.filename)} <span class="planner-muted">· ${d.n_chunks} Chunks</span></span>
+          <button class="export-btn rag-exp-doc" data-id="${d.id}" data-fmt="md" style="font-size:11px" title="Inhalt als Markdown exportieren">⬇ md</button>
+          <button class="export-btn rag-exp-doc" data-id="${d.id}" data-fmt="txt" style="font-size:11px" title="Inhalt als Text exportieren">⬇ txt</button>
           <button class="export-btn rag-del-doc" data-id="${d.id}" style="font-size:11px">entfernen</button>
         </div>`).join('') || '<span class="planner-muted" style="font-size:12px">Keine Dokumente</span>';
       card.innerHTML = `
@@ -156,6 +158,18 @@ const RAG = (() => {
       b.addEventListener('click', () => _deleteCollection(b.dataset.id)));
     wrap.querySelectorAll('.rag-del-doc').forEach(b =>
       b.addEventListener('click', () => _deleteDoc(b.dataset.id)));
+    wrap.querySelectorAll('.rag-exp-doc').forEach(b =>
+      b.addEventListener('click', () => _exportDoc(b.dataset.id, b.dataset.fmt)));
+  }
+
+  // Dokumentinhalt (aus Chunks rekonstruiert) als Markdown/TXT herunterladen
+  function _exportDoc(did, fmt) {
+    const a = document.createElement('a');
+    a.href = `/api/rag/documents/${encodeURIComponent(did)}/export?format=${fmt === 'txt' ? 'txt' : 'md'}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast(`⬇ Export als ${fmt.toUpperCase()}…`);
   }
 
   async function _create() {
@@ -269,9 +283,40 @@ const RAG = (() => {
     return Array.from(sel.selectedOptions).map(o => o.value);
   }
 
+  /* Ziehbarer Trenner: Einstellungen ↔ vorhandene Wissensdatenbanken */
+  const _SPLIT_KEY = 'rag_left_width';
+  function _initSplitter() {
+    const splitter = document.getElementById('rag-splitter');
+    const left = document.getElementById('rag-left');
+    const body = document.getElementById('rag-body');
+    if (!splitter || !left || !body) return;
+    const saved = parseInt(localStorage.getItem(_SPLIT_KEY) || '', 10);
+    if (saved > 0) left.style.width = saved + 'px';
+    const _apply = (x) => {
+      const rect = body.getBoundingClientRect();
+      left.style.width = Math.max(340, Math.min(x - rect.left, rect.width - 280)) + 'px';
+    };
+    const _onMove = (e) => _apply(e.clientX);
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      localStorage.setItem(_SPLIT_KEY, String(parseInt(left.style.width, 10) || 0));
+    };
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault(); splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+    splitter.addEventListener('dblclick', () => { left.style.width = ''; localStorage.removeItem(_SPLIT_KEY); });
+  }
+
   function init() {
     _loadEmbedModel();
     _updateSliderLabels();
+    _initSplitter();
     loadCollections();
     _fillConvSelect();
     document.getElementById('rag-speed').addEventListener('input', _updateSliderLabels);

@@ -37,6 +37,16 @@ const CanvasRenderer = (() => {
   }
   reloadBranding();
 
+  // Skaliert der Canvas (Tab-Wechsel sichtbar werden, Fenster-Resize), müssen die
+  // Formel-Overlays neu positioniert werden → komplette Folie neu rendern.
+  try {
+    let _ro;
+    new ResizeObserver(() => {
+      clearTimeout(_ro);
+      _ro = setTimeout(() => { if (currentData && currentData.type === 'presentation') rerender(); }, 60);
+    }).observe(canvas);
+  } catch (_) {}
+
   /* Folienpalette aus den aktiven CSS-Variablen (folgt dem Profil-Modus) */
   function _cssVar(name, fb) {
     try {
@@ -288,6 +298,86 @@ const CanvasRenderer = (() => {
     ctx.fillRect(x, y, 5, h);
   }
 
+  /* ── Mathematische Formeln (KaTeX) als HTML-Overlay über dem Canvas ────────
+     Canvas kann kein LaTeX zeichnen. KaTeX rendert aber synchron zu HTML, daher
+     legen wir die Formeln als absolut positionierte, klickdurchlässige Elemente
+     exakt über die Canvas-Positionen (in Anzeige-Pixeln, an die CSS-Skalierung
+     des Canvas angepasst). Höhe wird sofort gemessen → korrekter vertikaler Fluss. */
+  let _mathLayer = null;
+  const _MATH_RE = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\$([^\n$]+?)\$|\\\(([^\n]+?)\\\)/g;
+
+  function _esc(s) {
+    return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  }
+  function _hasMath(s) {
+    return typeof s === 'string' && typeof katex !== 'undefined'
+        && /\$\$[\s\S]+?\$\$|\$[^\n$]+?\$|\\\([^\n]+?\\\)|\\\[[\s\S]+?\\\]/.test(s);
+  }
+  // Text mit eingebetteten Formeln → HTML (Text escaped, Formeln via KaTeX gerendert)
+  function _texToHtml(text) {
+    let out = '', last = 0, m;
+    _MATH_RE.lastIndex = 0;
+    while ((m = _MATH_RE.exec(text))) {
+      out += _esc(text.slice(last, m.index));
+      const display = m[1] !== undefined || m[2] !== undefined;
+      const tex = m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2]
+                : m[3] !== undefined ? m[3] : m[4];
+      try { out += katex.renderToString(tex, { displayMode: display, throwOnError: false }); }
+      catch (_) { out += _esc(m[0]); }
+      last = m.index + m[0].length;
+    }
+    out += _esc(text.slice(last));
+    return out;
+  }
+
+  function _ensureMathLayer() {
+    const area = document.getElementById('canvas-area');
+    if (!_mathLayer || !_mathLayer.isConnected) {
+      _mathLayer = document.createElement('div');
+      _mathLayer.id = 'canvas-math-layer';
+      _mathLayer.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;overflow:visible';
+    }
+    if (_mathLayer.parentElement !== area && area) area.appendChild(_mathLayer);
+    return _mathLayer;
+  }
+  function _clearMathLayer() {
+    if (_mathLayer) _mathLayer.innerHTML = '';
+  }
+  // Canvas-Skalierung/Offset (Anzeige-Pixel relativ zum positionierten canvas-area)
+  function _metrics() {
+    const sx = canvas.clientWidth / W;
+    const sy = canvas.clientHeight / H;
+    return { sx, sy, ox: canvas.offsetLeft, oy: canvas.offsetTop, visible: sx > 0 && sy > 0 };
+  }
+
+  // Formel-Zeile als Overlay platzieren; gibt die belegte Höhe in CANVAS-Pixeln zurück.
+  function _placeMath(text, x, y, maxWidthCanvas, opts = {}) {
+    const { color = '#11314f', size = 22, align = 'left' } = opts;
+    const layer = _ensureMathLayer();
+    const mtr = _metrics();
+    const el = document.createElement('div');
+    const wDisp = maxWidthCanvas * mtr.sx;
+    el.className = 'canvas-math-line';
+    el.style.cssText =
+      `position:absolute;left:${mtr.ox + x * mtr.sx}px;top:${mtr.oy + y * mtr.sy}px;` +
+      `width:${wDisp}px;color:${color};font-size:${size * mtr.sy}px;line-height:1.4;` +
+      `text-align:${align};white-space:normal;overflow-wrap:break-word`;
+    el.innerHTML = _texToHtml(text);
+    layer.appendChild(el);
+    // Höhe sofort messen; bei verstecktem Canvas (sy≈0) Heuristik, korrekt beim Re-Render.
+    const hDisp = el.offsetHeight;
+    return mtr.visible && hDisp > 0 ? hDisp / mtr.sy : size * 1.5;
+  }
+
+  // Zeichnet Text mit oder ohne Formeln; gibt End-Y (Canvas-Pixel) zurück.
+  function _drawMaybeMath(text, x, y, opts = {}) {
+    if (_hasMath(text)) {
+      const h = _placeMath(text, x, y, opts.maxWidth || (W - x - 40), opts);
+      return y + h;
+    }
+    return drawText(text, x, y, opts);
+  }
+
   // ── Präsentation ───────────────────────────────────────────────────────────
 
   function renderPresentation(data, slideIdx) {
@@ -296,6 +386,7 @@ const CanvasRenderer = (() => {
     if (!slide) return;
 
     _editRegions = [];   // Regionen der neuen Folie sammeln
+    _clearMathLayer();   // Formel-Overlays der vorherigen Folie entfernen
     clear(theme.bg);
     drawSlide(slide, theme, data);
     drawSlideNumber(slideIdx, data.slides.length, theme);
@@ -450,7 +541,7 @@ const CanvasRenderer = (() => {
       ctx.beginPath();
       ctx.arc(48, y + 10, dotR, 0, Math.PI * 2);
       ctx.fill();
-      const endY = drawText(bullet, indent, y, {
+      const endY = _drawMaybeMath(bullet, indent, y, {
         color: P.dark, size: 22, maxWidth: W - indent - 60, lineHeight: 1.4,
       });
       y = Math.max(endY, y + lineH) + 4;
@@ -514,7 +605,7 @@ const CanvasRenderer = (() => {
       if (ly > slideH - 40) break;
       ctx.fillStyle = P.accent;
       ctx.beginPath(); ctx.arc(44, ly + 8, 4, 0, Math.PI * 2); ctx.fill();
-      ly = drawText(item, 62, ly, { color: P.dark, size: 20, maxWidth: midX - 80, lineHeight: 1.4 }) + 8;
+      ly = _drawMaybeMath(item, 62, ly, { color: P.dark, size: 20, maxWidth: midX - 80, lineHeight: 1.4 }) + 8;
     }
 
     // Rechts: Text (nur wenn kein Bild)
@@ -525,7 +616,7 @@ const CanvasRenderer = (() => {
         if (ry > slideH - 40) break;
         ctx.fillStyle = P.accent;
         ctx.beginPath(); ctx.arc(midX + 28, ry + 8, 4, 0, Math.PI * 2); ctx.fill();
-        ry = drawText(item, midX + 46, ry, { color: P.dark, size: 20, maxWidth: midX - 80, lineHeight: 1.4 }) + 8;
+        ry = _drawMaybeMath(item, midX + 46, ry, { color: P.dark, size: 20, maxWidth: midX - 80, lineHeight: 1.4 }) + 8;
       }
     }
   }
@@ -533,7 +624,7 @@ const CanvasRenderer = (() => {
   function drawBlankSlide(slide, theme, slideH) {
     clear(theme.bg);
     if (slide.content) {
-      drawText(slide.content, 60, 60, { color: theme.text, size: 22, maxWidth: W - 120 });
+      _drawMaybeMath(slide.content, 60, 60, { color: theme.text, size: 22, maxWidth: W - 120 });
     }
   }
 
@@ -567,6 +658,7 @@ const CanvasRenderer = (() => {
   function renderSpreadsheet(data) {
     document.getElementById('canvas-title').textContent = data.title || 'Tabelle';
     document.getElementById('slide-nav').style.display = 'none';
+    _clearMathLayer();
 
     // Canvas sicher aus dem Container entfernen (nicht zerstören)
     const area = document.getElementById('canvas-area');

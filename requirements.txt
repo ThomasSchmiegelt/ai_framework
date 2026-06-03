@@ -13,11 +13,15 @@ aiofiles>=23.2.0
 aiosqlite>=0.20.0
 
 # Engineering-Tools (Berechnung, Einheiten, Gleichungslöser, Diagramme)
+# matplotlib dient zusätzlich dem PDF-Export (Dokumente/Präsentationen) ohne LaTeX.
 numpy>=1.26.0
 scipy>=1.13.0
 sympy>=1.12
 Pint>=0.23
 matplotlib>=3.8.0
+
+# Mail (IMAP/POP3, tools/mail.py) nutzt ausschließlich die Python-Standardbibliothek
+# (imaplib, poplib, email) — daher kein zusätzliches Paket nötig.
 
 # RAG (Wissenssammlungen): benötigt KEINE zusätzlichen pip-Pakete — die
 # Vektorsuche nutzt NumPy (oben), HTTP-Aufrufe httpx (oben) und die

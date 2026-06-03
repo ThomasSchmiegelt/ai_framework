@@ -1,7 +1,7 @@
 ﻿# 🤖 AI_Framework_Thomas
 
 Lokaler, deutschsprachiger KI-Assistent auf Basis von Ollama — **vollständig offline**
-und für sechs Einsatzfelder anpassbar. Die Oberfläche ist im Profil zwischen
+und für sieben Einsatzfelder anpassbar. Die Oberfläche ist im Profil zwischen
 **Deutsch und Englisch** umschaltbar (die KI antwortet dann ebenfalls in der gewählten Sprache).
 
 AI_Framework_Thomas kennt **sieben Modi**, die jeweils Farbschema, Branding und die fachliche
@@ -26,7 +26,8 @@ Modus, Sprache, Logo und Vorlagen-Bilder werden im **Nutzerprofil** gewählt bzw
 | Variante | Skript | Dokumentation |
 |---|---|---|
 | **1. Installation** (Standard) | `install.bat` | [docs/INSTALL.md](docs/INSTALL.md) |
-| **2. Portable** (kein Install) | `make_portable.bat` | [docs/PORTABLE.md](docs/PORTABLE.md) |
+| **2a. Portable** (alles gebündelt, kein Install) | `make_portable.bat` | [docs/PORTABLE.md](docs/PORTABLE.md) |
+| **2b. Portable (System-Ollama)** (nutzt installiertes Ollama, ~0,5 GB) | `make_portable_systemollama.bat` | [docs/PORTABLE.md](docs/PORTABLE.md) |
 | **3. Server** (Mehrbenutzerbetrieb) | `make_server.bat` | [docs/SERVER.md](docs/SERVER.md) |
 
 ### Starten nach Installation
@@ -70,8 +71,9 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 💬 **Chat** mit Streaming (SSE), Websuche, Berechnungen
 - 🗺️ **Routenplaner** — Frage nach dem Weg von A nach B zeigt eine interaktive
   OpenStreetMap-Route direkt im Chat (Geocoding via Nominatim, Routing via OSRM)
-- 🖼️ **Canvas** — Präsentationen & Tabellen, Export als PPTX/XLSX, mit
-  **WYSIWYG-Editor** (Text direkt auf der Folie anklicken & bearbeiten)
+- 🖼️ **Canvas** — Präsentationen & Tabellen, Export als **PPTX/XLSX/PDF**, mit
+  **WYSIWYG-Editor** (Text direkt auf der Folie anklicken & bearbeiten); **Formeln**
+  auf Folien werden via KaTeX gerendert
 - 🪄 **Präsentations-Assistent** — tabellenbasiert, Folie-für-Folie, im Design des
   gewählten Modus (Farben + Logo/Vorlagen aus dem Profil)
 - 🎨 **Sieben Modi** (Maschinenbau/KI/Soziales/Marketing/Finanz/Geschäftsführung + frei
@@ -85,7 +87,17 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 🤖 **Agenten** — konfigurierbare System-Prompts und Tool-Sets; per **⭐ Favorit**
   erscheinen ausgewählte Agenten in der Sidebar. Im Chat zwei Schnellauswahl-Buttons
   **📊 Präsentation** und **💻 Programmieren**
-- 🔬 **Recherche** — aspektbasiert mit Quellen, Export als Dokument (mit Kopfzeile)
+- 📄 **Dokumentengenerator** — zweispaltig (links Steuerung, rechts das erzeugte
+  Dokument): Dokument **oder** Präsentation erzeugen (Letztere landet im Canvas im
+  Querformat), gestützt auf Agenten + Wissensdatenbanken + Quellmaterial
+  (Upload/Dossier/Text); Export als **DOCX / PDF**, als Präsentation oder zurück in
+  eine Wissensdatenbank. Formeln werden via KaTeX gerendert
+- 📧 **Mail → Wissensdatenbank** — Postfach read-only per **IMAP oder POP3**
+  abrufen, Mail rechts in der Vorschau ansehen/bearbeiten und in eine
+  Wissensdatenbank oder den Dokumentengenerator übernehmen (Zugang lokal, nicht im Backup/git)
+- 🔬 **Recherche** — aspektbasiert mit Quellen, zweispaltig (links Einstellungen,
+  rechts Bericht); Ergebnis als **Präsentation** (Canvas), **Dokument** (Dokumentengenerator),
+  **DOCX/PDF** oder in eine Wissensdatenbank — Formeln bleiben erhalten
 - 🗂️ **Planer** — Netzplan / Kritischer Pfad (CPM), CSV-Im/Export. **KI-Funktionen:**
   Projekt-Agent aus der Beschreibung ableiten, kompletten Plan generieren (freie
   Aufgabenzahl, warnt bei Bedarf vor zu kleinem Modell), Aufgabe detaillieren,
@@ -96,6 +108,10 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Ressourcen-Katalog importieren (frei / erweitern / strikt), Ressourcenliste exportieren,
   **Bestellplan** (wann wird welche Ressource gebraucht / bestellt) mit Konflikt-Erkennung
   und optional Arbeitstagen. Ein **100-Aufgaben-Beispielprojekt** ist enthalten.
+- 📚 **Wissensdatenbanken (RAG)** — zweispaltig (links anlegen/einstellen, rechts
+  alle vorhandenen Datenbanken): Dokumente hochladen, im Chat per 📚-Umschalter als
+  Kontext einblenden, Regler „schnell↔gründlich" und „kreativ↔korrekt", einzelne
+  Dokumente als **Markdown/TXT exportieren**
 - 📊 **Matrix-Recherche** — Recherche-Tabelle mit Live-Speicherung und **Agent je Spalte**
   (z. B. Rechercheur/Bewerter oder Halluzinationsprüfer; nur Favoriten-Agenten)
 - 💻 **Code-Tab** — zwei Untertabs: **IDE** (HTML5-Canvas-Programme per KI-Chat
@@ -168,10 +184,10 @@ AI_Framework_Thomas/
 ├── install / make_portable / make_server  (.bat + .ps1)  Installationsvarianten
 ├── start.bat / start_server.bat            Schnellstart
 ├── uninstall.bat / .ps1    Deinstallation
-├── tools/                  search · files · export · engineering · materials · report · routing · imaging
+├── tools/                  search · files · export · engineering · materials · report · routing · imaging · rag · mail
 ├── static/
 │   ├── index.html          Single-Page-App
-│   ├── css/app.css         Theme + 6 Modus-Farbschemata
+│   ├── css/app.css         Theme + 7 Modus-Farbschemata
 │   └── js/                 Frontend-Module (chat, canvas, ide, planner, …)
 ├── bilder/                 (leer – Branding kommt aus dem Nutzerprofil)
 ├── data/                   Laufzeitdaten (DB, agents, plans, code, uploads, …)
