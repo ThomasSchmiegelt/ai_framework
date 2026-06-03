@@ -18,6 +18,47 @@ from email.header import decode_header, make_header
 _MAX_BODY = 100_000   # sehr lange Threads kappen (Speicher/Embedding-Schutz)
 
 
+def domain_of(addr: str) -> str:
+    """Extrahiert die Domäne aus einem From-/To-Header (z. B.
+    ``"Max Muster <max@firma.de>"`` → ``firma.de``). Leer, wenn keine erkennbar."""
+    m = re.search(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)", str(addr or ""))
+    return m.group(1).lower() if m else ""
+
+
+# Signaturen/Disclaimer/Zitat-Verläufe, die vor der RAG-Aufnahme stören
+_SIG_MARKERS = (
+    "-- ", "mit freundlichen grüßen", "freundliche grüße", "beste grüße",
+    "viele grüße", "best regards", "kind regards", "regards,", "gesendet von",
+    "sent from my", "von meinem", "diese e-mail", "this e-mail", "this email",
+    "vertraulich", "confidential", "haftungsausschluss", "disclaimer",
+)
+_QUOTE_INTRO = re.compile(
+    r"^\s*(>|am\s.+\sschrieb|on\s.+\swrote|-{2,}\s*(original|ursprüngliche)|"
+    r"von:\s|from:\s|gesendet:\s|sent:\s)", re.IGNORECASE)
+
+
+def clean_mail_text(text: str) -> str:
+    """Bereinigt einen Mail-Body vor der RAG-Aufnahme: schneidet den zitierten
+    Vorgänger-Verlauf ab, entfernt Signatur/Disclaimer ab dem ersten Marker und
+    reduziert Leerzeilen. Konservativ — der eigentliche Inhalt bleibt erhalten."""
+    if not text:
+        return ""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: list[str] = []
+    for ln in lines:
+        low = ln.strip().lower()
+        # Beginn eines zitierten Verlaufs → ab hier abschneiden
+        if _QUOTE_INTRO.match(ln):
+            break
+        # Signatur-/Disclaimer-Marker → ab hier abschneiden
+        if low and any(low.startswith(mk) or low == mk.strip() for mk in _SIG_MARKERS):
+            break
+        out.append(ln)
+    cleaned = "\n".join(out)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned or text.strip()   # nie komplett leeren
+
+
 def _decode(value: str) -> str:
     """MIME-kodierte Header (=?UTF-8?…?=) in lesbaren Text wandeln."""
     if not value:

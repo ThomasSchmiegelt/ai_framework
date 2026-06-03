@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import math
+import re
 
 
 def unit_convert(value: float, from_unit: str, to_unit: str) -> str:
@@ -126,6 +127,90 @@ def plot_chart(
 
         fig.tight_layout()
 
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=130, bbox_inches="tight",
+                    facecolor=fig.get_facecolor())
+        plt.close(fig)
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode()
+        return json.dumps({"type": "image", "data": f"data:image/png;base64,{b64}"})
+    except Exception as e:
+        return f"Plot-Fehler: {e}"
+
+
+def plot_function(
+    expression: str,
+    var: str = "x",
+    x_min: float = -10.0,
+    x_max: float = 10.0,
+    title: str = "",
+    x_label: str = "",
+    y_label: str = "",
+    num: int = 400,
+) -> str:
+    """Plottet eine (oder mehrere, mit ``;`` getrennte) mathematische Funktion(en)
+    über einen Wertebereich. Versteht ``^`` als Potenz, implizite Multiplikation
+    (``2x``) und einen ``f(x)=``/``y=``-Vorsatz."""
+    try:
+        import numpy as np
+        import sympy
+        from sympy.parsing.sympy_parser import (
+            parse_expr, standard_transformations,
+            implicit_multiplication_application, convert_xor,
+        )
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        transformations = standard_transformations + (
+            implicit_multiplication_application, convert_xor)
+        sym = sympy.symbols(var)
+
+        raw_list = [e.strip() for e in re.split(r"[;\n]+", str(expression)) if e.strip()]
+        if not raw_list:
+            return "Plot-Fehler: keine Funktion angegeben."
+
+        xs = np.linspace(float(x_min), float(x_max), max(50, int(num)))
+        series = []   # (label, ys)
+        for raw in raw_list:
+            # „f(x) =" oder „y =" am Anfang entfernen
+            term = re.sub(r"^\s*[A-Za-z]\w*\s*\([^)]*\)\s*=\s*", "", raw)
+            term = re.sub(r"^\s*[A-Za-z]\w*\s*=\s*", "", term)
+            expr = parse_expr(term, local_dict={var: sym}, transformations=transformations)
+            f = sympy.lambdify(sym, expr, modules=["numpy"])
+            with np.errstate(all="ignore"):
+                ys = f(xs)
+            ys = np.broadcast_to(np.asarray(ys, dtype=float), xs.shape).astype(float).copy()
+            ys[~np.isfinite(ys)] = np.nan
+            series.append((raw, ys))
+
+        fig, ax = plt.subplots(figsize=(10, 5.5))
+        fig.patch.set_facecolor("#1e1e2e")
+        ax.set_facecolor("#252535")
+        for spine in ax.spines.values():
+            spine.set_edgecolor("#444")
+        ax.tick_params(colors="#ccc", labelsize=10)
+        ax.xaxis.label.set_color("#ccc")
+        ax.yaxis.label.set_color("#ccc")
+        ax.title.set_color("#fff")
+        ax.grid(True, color="#333", linewidth=0.8, alpha=0.7)
+        ax.axhline(0, color="#666", linewidth=1)
+        ax.axvline(0, color="#666", linewidth=1)
+
+        palette = ["#4fc3f7", "#f48fb1", "#aed581", "#ffb74d", "#ba68c8", "#4db6ac"]
+        for i, (label, ys) in enumerate(series):
+            ax.plot(xs, ys, color=palette[i % len(palette)], linewidth=2, label=label)
+
+        ax.set_title(title or ("Funktion: " + ", ".join(r for r, _ in series)),
+                     fontsize=13, pad=10)
+        ax.set_xlabel(x_label or var, fontsize=11)
+        if y_label:
+            ax.set_ylabel(y_label, fontsize=11)
+        if len(series) > 1:
+            ax.legend(facecolor="#2a2a3e", labelcolor="#ccc",
+                      edgecolor="#555", fontsize=10)
+
+        fig.tight_layout()
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=130, bbox_inches="tight",
                     facecolor=fig.get_facecolor())

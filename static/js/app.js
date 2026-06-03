@@ -82,6 +82,7 @@ async function exportCanvas(format) {
   const data = CanvasRenderer.getCurrentData();
   if (!data) { showToast('Kein Inhalt zum Exportieren'); return; }
 
+  const ext = format === 'latex' ? 'tex' : format;
   try {
     showToast(`Export als ${format.toUpperCase()} wird erstellt…`);
     const resp = await fetch(`/api/export/${format}`, {
@@ -96,7 +97,7 @@ async function exportCanvas(format) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ai_framework_thomas_export.${format}`;
+    a.download = `ai_framework_thomas_export.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
     showToast(`✓ Als ${format.toUpperCase()} exportiert`);
@@ -321,6 +322,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Export-Buttons
   document.getElementById('btn-export-pptx').addEventListener('click', () => exportCanvas('pptx'));
   document.getElementById('btn-export-pdf')?.addEventListener('click', () => exportCanvas('pdf'));
+  document.getElementById('btn-export-latex')?.addEventListener('click', () => exportCanvas('latex'));
   document.getElementById('btn-export-xlsx').addEventListener('click', () => exportCanvas('xlsx'));
   document.getElementById('btn-export-docx').addEventListener('click', () => exportChat('docx'));
   document.getElementById('btn-chat-to-doc')?.addEventListener('click', chatToDocGen);

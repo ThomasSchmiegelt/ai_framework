@@ -126,7 +126,8 @@ Die Tool-Definitionen (`TOOL_DEFS` in `main.py`) werden Ollama als Funktions-Sch
 | `calculate` | Python-Code für Berechnungen ausführen | `_safe_exec()` (Sandbox) |
 | `unit_convert` | Physikalische Einheiten umrechnen (Pint) | `tools/engineering.py` |
 | `solve_equation` | Gleichungen/Systeme symbolisch lösen (SymPy) | `tools/engineering.py` |
-| `plot_chart` | 2D-Diagramm (Linie/Balken/Streu) als Bild | `tools/engineering.py` |
+| `plot_chart` | 2D-Diagramm (Linie/Balken/Streu) aus Wertereihen als Bild | `tools/engineering.py` |
+| `plot_function` | Funktionsgraph aus einem Term (`f(x)=x^2`, `sin(x)`; mehrere mit `;`) als Bild | `tools/engineering.py` |
 | `material_lookup` | ~40 Werkstoffe (E-Modul, Rₚ, Rₘ, Dichte …) | `tools/materials.py` |
 | `bolt_calculator` | Schraubenauslegung nach VDI 2230 (vereinfacht) | `tools/engineering.py` |
 | `generate_report` | Ingenieurbericht als PDF/DOCX (LaTeX-Formeln) | `tools/report.py` |
@@ -134,7 +135,9 @@ Die Tool-Definitionen (`TOOL_DEFS` in `main.py`) werden Ollama als Funktions-Sch
 | `create_spreadsheet` | Tabelle fürs Canvas (XLSX-exportierbar) | direkt in `main.py` |
 
 Datei-Extraktion (PDF via pypdf, DOCX, XLSX, Bilder) liegt in `tools/files.py`,
-die Export-Erzeugung (DOCX/XLSX/PPTX aus Chat-Inhalten) in `tools/export.py`.
+die Export-Erzeugung (DOCX/XLSX/PPTX/**PDF**/**LaTeX** aus Chat-/Dokumentinhalten) in
+`tools/export.py` — **PDF** rendert Formeln via matplotlib-mathtext (ohne TeX-Installation),
+**LaTeX** liefert `article`/`beamer`-Quelltext.
 
 ### Code-Sandbox (`_safe_exec`)
 
@@ -176,7 +179,8 @@ Pläne (`data/plans/`), Profil, Projekte und gespeicherte Code-Programme (`data/
 | Suche | `GET /api/search?q=` |
 | Dateien | `POST /api/upload`, `GET /api/uploads/{id}`, `GET /api/downloads/{file}` |
 | Agenten | `GET/POST/PUT/DELETE /api/agents[/{id}]`, `POST /api/agents/generate-prompt` |
-| Export | `POST /api/export/{docx\|xlsx\|pptx}` |
+| Export | `POST /api/export/{docx\|xlsx\|pptx\|pdf\|latex}` |
+| Mail *(🚧 in Entwicklung)* | `GET/POST /api/mail/config`, `POST /api/mail/{list\|message\|to-rag}`, `GET/POST /api/mail/rules` + `DELETE /api/mail/rules/{id}`, `POST /api/mail/action/{rag\|agent}` |
 | Profil/Projekte | `GET/PUT /api/profile`, `GET/POST/PUT/DELETE /api/projects[/{id}]` |
 | Pläne (Netzplan) | `GET/POST/PUT/DELETE /api/plans[/{id}]`, `POST /api/plans/{id}/ai` |
 | Code-IDE | `GET/POST/DELETE /api/code[/{id}]` |
@@ -195,6 +199,8 @@ Reines HTML/CSS/JS, ein Modul pro Funktionsbereich unter `static/js/`:
 | `canvas.js` | HTML5-Canvas-Renderer für Folien & Tabellen, lädt IGEL-Corporate-Bilder |
 | `agents.js` | Agenten-CRUD (JSON-Dateien) |
 | `research.js` | Aspektbasierte Recherche mit Quellen + DOCX-Export |
+| `doc_generator.js` | Dokumentengenerator (Agent + RAG + Quellmaterial → DOCX/PDF/LaTeX); Besprechungsnotizen mit Autospeichern |
+| `mail.js` | *🚧 in Entwicklung.* Mail-Tab: Abruf, Filter (Absender/Betreff/Domäne), Aktions-Set (max. 4: RAG/Agent/Doku/Notiz), speicherbare Regeln; Versand stets manuell |
 | `planner.js` | Netzplan / Critical-Path-Method (CPM), Zoom/Pan, CSV-Im/Export, KI-Assistent |
 | `matrix_research.js` | Recherche-Matrix mit Agent je Spalte (nur Favoriten), `localStorage`-Speicherung + CSV-Im/Export |
 | `presentation_assistant.js` | Tabellenbasierter Präsentationsbauer (Folie für Folie) |

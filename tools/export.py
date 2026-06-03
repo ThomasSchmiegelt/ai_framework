@@ -1,4 +1,4 @@
-﻿"""
+"""
 Dokument-Export für AI_Framework_Thomas — erzeugt DOCX, XLSX und PPTX aus Chat-/Canvas-Inhalten.
 
 Alle Exporte tragen die AI_Framework_Thomas-Fußzeile ("KI generierter Inhalt" + optional
@@ -45,6 +45,76 @@ def _add_md_runs(paragraph, text: str) -> None:
         pos = m.end()
     if pos < len(text):
         paragraph.add_run(text[pos:])
+
+
+# ── Mathe-/LaTeX-Formeln ───────────────────────────────
+# Formel-Segmente in vier Schreibweisen: $$..$$, $..$, \[..\], \(..\)
+_MATH_RE = re.compile(r"\$\$.+?\$\$|\$[^$\n]+?\$|\\\[.+?\\\]|\\\(.+?\\\)", re.DOTALL)
+_SENT = "\x00"          # geschuetztes Leerzeichen innerhalb einer Formel (Umbruch)
+_MATHTEXT_PARSER = None
+
+
+def _has_math(text: str) -> bool:
+    return bool(_MATH_RE.search(text or ""))
+
+
+def _math_to_mpl(text: str) -> str:
+    """Vereinheitlicht alle Formel-Trenner auf ``$..$`` -- matplotlib-mathtext
+    kennt nur das Dollar-Zeichen (kein Backslash-Klammer / $$)."""
+    text = re.sub(r"\$\$(.+?)\$\$", r"$\1$", text, flags=re.DOTALL)
+    text = re.sub(r"\\\[(.+?)\\\]", r"$\1$", text, flags=re.DOTALL)
+    text = re.sub(r"\\\((.+?)\\\)", r"$\1$", text, flags=re.DOTALL)
+    return text
+
+
+def _mpl_safe_math(text: str) -> str:
+    """Macht eine (bereits auf ``$..$`` normalisierte) Zeile zeichensicher fuer
+    matplotlib: jede Formel wird mit dem mathtext-Parser geprueft -- nicht
+    renderbare Formeln fallen auf ihren reinen Innentext zurueck; einzelne
+    ungepaarte ``$`` werden maskiert. So stuerzt ``savefig`` nie ab."""
+    global _MATHTEXT_PARSER
+    if _MATHTEXT_PARSER is None:
+        from matplotlib import mathtext
+        _MATHTEXT_PARSER = mathtext.MathTextParser("agg")
+    out, pos = [], 0
+    for m in re.finditer(r"\$[^$\n]+?\$", text):
+        out.append(text[pos:m.start()].replace("$", r"\$"))
+        seg = m.group(0)
+        try:
+            _MATHTEXT_PARSER.parse(seg)
+            out.append(seg)
+        except Exception:
+            out.append(seg.strip("$"))
+        pos = m.end()
+    out.append(text[pos:].replace("$", r"\$"))
+    return "".join(out)
+
+
+def _strip_md_keep_math(text: str) -> str:
+    """Wie :func:`_strip_md`, laesst aber ``$..$``-Formeln unangetastet
+    (sonst wuerde ``*`` in einer Formel als Kursiv-Marker verschluckt)."""
+    saved: list[str] = []
+
+    def _keep(m):
+        saved.append(m.group(0))
+        return "\x01%d\x02" % (len(saved) - 1)
+
+    t = _MATH_RE.sub(_keep, text)
+    t = _strip_md(t)
+    for i, s in enumerate(saved):
+        t = t.replace("\x01%d\x02" % i, s)
+    return t
+
+
+def _wrap_keep_math(text: str, width: int) -> list:
+    """Zeilenumbruch wie :func:`textwrap.wrap`, bricht aber nie innerhalb einer
+    Formel (Leerzeichen darin werden vor dem Umbruch geschuetzt)."""
+    import textwrap
+    protected = _MATH_RE.sub(lambda m: m.group(0).replace(" ", _SENT), text)
+    lines = textwrap.wrap(protected, width=width,
+                          break_long_words=False, break_on_hyphens=False) or [""]
+    return [ln.replace(_SENT, " ") for ln in lines]
+
 
 # Branding-Bilder aus dem Nutzerprofil (vom Nutzer im Profil hochgeladen)
 _ASSETS_DIR   = Path(__file__).parent.parent / "data" / "profile_assets"
@@ -466,9 +536,22 @@ def to_pdf(data: dict) -> Path:
     return fp
 
 
+def _pdf_text(ax, x, y, s, **kw):
+    """``ax.text`` mit automatischer Formel-Erkennung: enthält ``s`` eine
+    ``$..$``-Formel, wird sie via mathtext gesetzt (vorher entschärft, damit
+    ``savefig`` nie abstürzt), sonst als reiner Text."""
+    if _has_math(s):
+        ax.text(x, y, _mpl_safe_math(s), parse_math=True, **kw)
+    else:
+        ax.text(x, y, s, parse_math=False, **kw)
+
+
 def _pdf_blocks_from_markdown(content: str) -> list[dict]:
-    """Markdown → einfache Blockliste {text,size,bold,bullet,gap} (Inline-Marker
-    werden entfernt — matplotlib-Text kann keinen Mischsatz)."""
+    """Markdown → einfache Blockliste {text,size,bold,bullet,gap}. Inline-Marker
+    werden entfernt, ``$..$``-Formeln aber erhalten (matplotlib-mathtext)."""
+    def _clean(s: str) -> str:
+        return _strip_md_keep_math(_math_to_mpl(s))
+
     blocks: list[dict] = []
     for raw in (content or "").split("\n"):
         line = raw.rstrip()
@@ -476,24 +559,23 @@ def _pdf_blocks_from_markdown(content: str) -> list[dict]:
             blocks.append({"text": "", "size": 5, "bold": False, "bullet": False, "gap": True})
             continue
         if line.startswith("#### "):
-            blocks.append({"text": _strip_md(line[5:]), "size": 11, "bold": True, "bullet": False})
+            blocks.append({"text": _clean(line[5:]), "size": 11, "bold": True, "bullet": False})
         elif line.startswith("### "):
-            blocks.append({"text": _strip_md(line[4:]), "size": 12, "bold": True, "bullet": False})
+            blocks.append({"text": _clean(line[4:]), "size": 12, "bold": True, "bullet": False})
         elif line.startswith("## "):
-            blocks.append({"text": _strip_md(line[3:]), "size": 13.5, "bold": True, "bullet": False})
+            blocks.append({"text": _clean(line[3:]), "size": 13.5, "bold": True, "bullet": False})
         elif line.startswith("# "):
-            blocks.append({"text": _strip_md(line[2:]), "size": 15, "bold": True, "bullet": False})
+            blocks.append({"text": _clean(line[2:]), "size": 15, "bold": True, "bullet": False})
         elif line.startswith("- ") or line.startswith("* "):
-            blocks.append({"text": _strip_md(line[2:]), "size": 10.5, "bold": False, "bullet": True})
+            blocks.append({"text": _clean(line[2:]), "size": 10.5, "bold": False, "bullet": True})
         elif re.match(r"^\d+\.\s", line):
-            blocks.append({"text": _strip_md(line), "size": 10.5, "bold": False, "bullet": False})
+            blocks.append({"text": _clean(line), "size": 10.5, "bold": False, "bullet": False})
         else:
-            blocks.append({"text": _strip_md(line), "size": 10.5, "bold": False, "bullet": False})
+            blocks.append({"text": _clean(line), "size": 10.5, "bold": False, "bullet": False})
     return blocks
 
 
 def _pdf_document(data: dict, fp: Path) -> None:
-    import textwrap
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 
@@ -525,8 +607,8 @@ def _pdf_document(data: dict, fp: Path) -> None:
 
     _new_page()
     # Titel
-    ax.text(L, y, _strip_md(title), ha="left", va="top", fontsize=20,
-            fontweight="bold", color=_PDF_DARK, parse_math=False)
+    _pdf_text(ax, L, y, _strip_md_keep_math(_math_to_mpl(title)), ha="left", va="top",
+              fontsize=20, fontweight="bold", color=_PDF_DARK)
     _advance(20, 2.2)
     ax.plot([L, R], [y, y], color=_PDF_ACCENT, lw=1.2)
     _advance(10)
@@ -539,16 +621,15 @@ def _pdf_document(data: dict, fp: Path) -> None:
         chars = max(20, int(usable_pt / (0.50 * size)))
         prefix = "•  " if blk["bullet"] else ""
         indent = 0.022 if blk["bullet"] else 0.0
-        wrapped = textwrap.wrap(blk["text"], width=chars) or [""]
+        wrapped = _wrap_keep_math(blk["text"], chars)
         for i, ln in enumerate(wrapped):
             if y < BOT + 0.02:
                 _new_page()
             x = L + (indent if (blk["bullet"] and i > 0) else 0)
-            ax.text(x, y, (prefix + ln) if (blk["bullet"] and i == 0) else ln,
-                    ha="left", va="top", fontsize=size,
-                    fontweight="bold" if blk["bold"] else "normal",
-                    color=_PDF_DARK if blk["bold"] else (0.1, 0.1, 0.1),
-                    parse_math=False)
+            _pdf_text(ax, x, y, (prefix + ln) if (blk["bullet"] and i == 0) else ln,
+                      ha="left", va="top", fontsize=size,
+                      fontweight="bold" if blk["bold"] else "normal",
+                      color=_PDF_DARK if blk["bold"] else (0.1, 0.1, 0.1))
             _advance(size)
         if blk["bold"]:
             _advance(4)
@@ -559,8 +640,22 @@ def _pdf_document(data: dict, fp: Path) -> None:
             plt.close(f)
 
 
+def _slide_bullets(sd: dict) -> list:
+    """Sammelt die Aufzählungspunkte einer Folie aus ``bullets`` / ``left`` +
+    ``right`` / ``content`` (für PDF- und LaTeX-Export gleichermaßen)."""
+    bullets = sd.get("bullets")
+    if isinstance(bullets, str):
+        bullets = [b for b in bullets.split("\n") if b.strip()]
+    if not bullets:
+        left, right = sd.get("left"), sd.get("right")
+        if left or right:
+            bullets = _to_lines(left or "") + _to_lines(right or "")
+        elif sd.get("content"):
+            bullets = [b for b in str(sd["content"]).split("\n") if b.strip()]
+    return bullets or []
+
+
 def _pdf_presentation(data: dict, fp: Path) -> None:
-    import textwrap
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
     from matplotlib.patches import Rectangle
@@ -598,28 +693,175 @@ def _pdf_presentation(data: dict, fp: Path) -> None:
                 ax.add_patch(Rectangle((0, 0.86), 1, 0.14, color=_PDF_DARK))
                 ax.text(0.04, 0.93, title, ha="left", va="center", fontsize=22,
                         fontweight="bold", color=_PDF_WHITE, parse_math=False)
-                # Inhalt sammeln
-                bullets = sd.get("bullets")
-                if isinstance(bullets, str):
-                    bullets = [b for b in bullets.split("\n") if b.strip()]
-                if not bullets:
-                    left, right = sd.get("left"), sd.get("right")
-                    if left or right:
-                        bullets = _to_lines(left or "") + _to_lines(right or "")
-                    elif sd.get("content"):
-                        bullets = [b for b in str(sd["content"]).split("\n") if b.strip()]
-                bullets = bullets or []
+                # Inhalt sammeln (Formeln bleiben erhalten)
+                bullets = _slide_bullets(sd)
                 yb = 0.78
                 for b in bullets:
                     if yb < 0.08:
                         break
-                    for i, ln in enumerate(textwrap.wrap(_strip_md(str(b)), width=78) or [""]):
+                    clean = _strip_md_keep_math(_math_to_mpl(str(b)))
+                    for i, ln in enumerate(_wrap_keep_math(clean, 78)):
                         txt = ("◆  " + ln) if i == 0 else "    " + ln
-                        ax.text(0.05, yb, txt, ha="left", va="top",
-                                fontsize=17, color=_PDF_DARK, parse_math=False)
+                        _pdf_text(ax, 0.05, yb, txt, ha="left", va="top",
+                                  fontsize=17, color=_PDF_DARK)
                         yb -= 0.062
 
             ax.text(0.5, 0.02, footer_text, ha="center", va="center",
                     fontsize=8, color=_PDF_GRAY, parse_math=False)
             pdf.savefig(fig)
             plt.close(fig)
+
+
+# == LaTeX-Quellcode (reine .tex-Datei) =====================================
+# Erzeugt echtes LaTeX: Dokument -> article, Präsentation -> beamer. Formeln
+# ($..$, $$..$$, \(..\), \[..\]) bleiben als echtes LaTeX-Math erhalten;
+# Markdown (**fett**, *kursiv*, `code`, #/##/### Überschriften, -/* und 1.
+# Listen) wird in LaTeX-Befehle übersetzt. Reiner Text wird LaTeX-sicher
+# maskiert -- aber niemals innerhalb von Formeln.
+
+def _latex_escape_text(s: str) -> str:
+    """Maskiert LaTeX-Sonderzeichen in reinem Text (nicht in Formeln)."""
+    s = s.replace(chr(92), "\x00BS\x00")        # Backslash zuerst sichern
+    for a, b in [("&", r"\&"), ("%", r"\%"), ("$", r"\$"), ("#", r"\#"),
+                 ("_", r"\_"), ("{", r"\{"), ("}", r"\}"),
+                 ("~", r"\textasciitilde{}"), ("^", r"\textasciicircum{}")]:
+        s = s.replace(a, b)
+    return s.replace("\x00BS\x00", r"\textbackslash{}")
+
+
+def _math_to_latex(seg: str) -> str:
+    """Normalisiert ein Formel-Segment auf gültiges LaTeX-Math: ``$$..$$`` ->
+    ``\\[..\\]`` (display); ``$..$``, ``\\(..\\)``, ``\\[..\\]`` bleiben gültig."""
+    m = re.match(r"^\$\$(.+)\$\$$", seg, re.DOTALL)
+    if m:
+        return r"\[" + m.group(1) + r"\]"
+    return seg
+
+
+def _latex_inline(text: str) -> str:
+    """Eine Textzeile -> LaTeX: Formeln werden geschützt, der Rest maskiert,
+    Markdown-Inline (**fett**/*kursiv*/`code`) in LaTeX-Befehle übersetzt."""
+    saved: list[str] = []
+
+    def _keep(m):
+        saved.append(m.group(0))
+        return "\x01%d\x02" % (len(saved) - 1)
+
+    t = _MATH_RE.sub(_keep, text)
+    t = _latex_escape_text(t)
+    t = re.sub(r"\*\*(.+?)\*\*", r"\\textbf{\1}", t)
+    t = re.sub(r"\*(.+?)\*", r"\\textit{\1}", t)
+    t = re.sub(r"`(.+?)`", r"\\texttt{\1}", t)
+    for i, s in enumerate(saved):
+        t = t.replace("\x01%d\x02" % i, _math_to_latex(s))
+    return t
+
+
+def _md_to_latex_body(content: str) -> str:
+    """Markdown -> LaTeX-Body (Überschriften, Listen, Absätze)."""
+    out: list[str] = []
+    list_mode = None  # "itemize" | "enumerate"
+
+    def _close():
+        nonlocal list_mode
+        if list_mode:
+            out.append(r"\end{%s}" % list_mode)
+            list_mode = None
+
+    for raw in (content or "").split("\n"):
+        line = raw.rstrip()
+        if not line.strip():
+            _close()
+            out.append("")
+        elif line.startswith("#### "):
+            _close(); out.append(r"\paragraph{%s}" % _latex_inline(line[5:]))
+        elif line.startswith("### "):
+            _close(); out.append(r"\subsubsection{%s}" % _latex_inline(line[4:]))
+        elif line.startswith("## "):
+            _close(); out.append(r"\subsection{%s}" % _latex_inline(line[3:]))
+        elif line.startswith("# "):
+            _close(); out.append(r"\section{%s}" % _latex_inline(line[2:]))
+        elif line.startswith("- ") or line.startswith("* "):
+            if list_mode != "itemize":
+                _close(); out.append(r"\begin{itemize}"); list_mode = "itemize"
+            out.append(r"  \item " + _latex_inline(line[2:]))
+        elif re.match(r"^\d+\.\s", line):
+            if list_mode != "enumerate":
+                _close(); out.append(r"\begin{enumerate}"); list_mode = "enumerate"
+            out.append(r"  \item " + _latex_inline(re.sub(r"^\d+\.\s+", "", line)))
+        else:
+            _close(); out.append(_latex_inline(line))
+    _close()
+    return "\n".join(out)
+
+
+def _latex_document(data: dict) -> str:
+    title = data.get("title", "Dokument")
+    body = _md_to_latex_body(data.get("content", ""))
+    footer = _footer_text(data)
+    lang = (data.get("_profile", {}) or {}).get("lang", "de")
+    babel = "english" if lang == "en" else "ngerman"
+    pre = [
+        r"\documentclass[11pt,a4paper]{article}",
+        r"\usepackage[a4paper,margin=25mm]{geometry}",
+        r"\usepackage[utf8]{inputenc}",
+        r"\usepackage[T1]{fontenc}",
+        r"\usepackage[%s]{babel}" % babel,
+        r"\usepackage{amsmath,amssymb}",
+        r"\usepackage{lmodern}",
+        r"\usepackage{parskip}",
+        r"\usepackage{hyperref}",
+        r"\usepackage{fancyhdr}",
+        r"\pagestyle{fancy}",
+        r"\fancyhf{}",
+        r"\cfoot{\thepage}",
+        r"\lfoot{\small " + _latex_escape_text(footer) + "}",
+        r"\setlength{\headheight}{14pt}",
+        r"\title{" + _latex_inline(title) + "}",
+        r"\date{\today}",
+        r"\begin{document}",
+        r"\maketitle",
+    ]
+    return "\n".join(pre) + "\n\n" + body + "\n\n" + r"\end{document}" + "\n"
+
+
+def _latex_presentation(data: dict) -> str:
+    title = data.get("title", "Präsentation")
+    slides = data.get("slides", []) or []
+    lang = (data.get("_profile", {}) or {}).get("lang", "de")
+    babel = "english" if lang == "en" else "ngerman"
+    out = [
+        r"\documentclass[aspectratio=169]{beamer}",
+        r"\usepackage[utf8]{inputenc}",
+        r"\usepackage[T1]{fontenc}",
+        r"\usepackage[%s]{babel}" % babel,
+        r"\usepackage{amsmath,amssymb}",
+        r"\usetheme{default}",
+        r"\setbeamertemplate{navigation symbols}{}",
+        r"\title{" + _latex_inline(title) + "}",
+        r"\begin{document}",
+        r"\frame{\titlepage}",
+    ]
+    for sd in slides:
+        out.append(r"\begin{frame}{" + _latex_inline(sd.get("title", "")) + "}")
+        bullets = _slide_bullets(sd)
+        if bullets:
+            out.append(r"\begin{itemize}")
+            for b in bullets:
+                out.append(r"  \item " + _latex_inline(str(b)))
+            out.append(r"\end{itemize}")
+        out.append(r"\end{frame}")
+    out.append(r"\end{document}")
+    return "\n".join(out) + "\n"
+
+
+def to_latex(data: dict) -> Path:
+    """Erzeugt eine reine LaTeX-Quelldatei (.tex) aus einem Dokument
+    ({title, content}) ODER einer Präsentation ({type:"presentation", slides})."""
+    if data.get("type") == "presentation":
+        src = _latex_presentation(data)
+    else:
+        src = _latex_document(data)
+    fp = Path(tempfile.mktemp(suffix=".tex"))
+    fp.write_text(src, encoding="utf-8")
+    return fp

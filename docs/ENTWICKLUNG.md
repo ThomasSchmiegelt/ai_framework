@@ -111,7 +111,7 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `POST /api/upload` · `GET /api/uploads/{id}` | Datei-Upload/-Abruf |
 | `GET/POST/PUT/DELETE /api/agents[/{id}]` | Agenten-CRUD |
 | `POST /api/agents/generate-prompt` | System-Prompt per KI erzeugen |
-| `POST /api/export/{docx\|xlsx\|pptx}` | Dokument-Export |
+| `POST /api/export/{docx\|xlsx\|pptx\|pdf\|latex}` | Dokument-/Präsentations-Export. **pdf** rendert LaTeX-Formeln via matplotlib-mathtext (keine TeX-Installation nötig); **latex** liefert eine reine `.tex` (Dokument → `article`, Präsentation → `beamer`) |
 | `GET/PUT /api/profile` | Nutzerprofil |
 | `GET/POST/PUT/DELETE /api/projects[/{id}]` | Projekt-CRUD |
 | `PUT /api/conversations/{id}/project` | Gespräch einem Projekt zuordnen |
@@ -128,6 +128,12 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `GET/DELETE /api/logs` · `PUT /api/logs/config` · `GET /api/logs/active` · `POST /api/logs/entry` · `GET /api/logs/download` | Diagnose-Logger |
 | `GET /api/backup` · `POST /api/restore` | Komplett-Backup/-Restore (ZIP) |
 | `GET /api/assets/{name}` | Corporate-Bilder aus `bilder/` |
+| `GET/POST /api/mail/config` | Postfach-Zugang (IMAP/POP3) lesen/speichern — *🚧 in Entwicklung* |
+| `POST /api/mail/list` · `POST /api/mail/message` | Mails auflisten / eine Mail volltext laden (read-only) |
+| `POST /api/mail/to-rag` | Ausgewählte Mails (optional bereinigt) in eine Wissensdatenbank |
+| `GET/POST /api/mail/rules` · `DELETE /api/mail/rules/{id}` | Mail-Regeln (Filter + bis zu 4 Aktionen) — Persistenz `data/mail_rules.json` |
+| `POST /api/mail/action/rag` | Einzelne Mail bereinigt (`tools.mail.clean_mail_text`) in eine Wissensdatenbank |
+| `POST /api/mail/action/agent` | Agent erledigt eine Aufgabe an einer Mail (z. B. Antwort entwerfen) → **nur Text zurück, kein Versand** |
 
 ---
 
@@ -147,12 +153,14 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 |---|---|
 | `search.py` | DuckDuckGo-Suche (async), liefert Quellenliste |
 | `files.py` | Extraktion: PDF (pypdf), DOCX, XLSX/CSV, Text |
-| `export.py` | DOCX/XLSX/PPTX-Erzeugung mit Corporate-Design & KI-Kennzeichnung |
-| `engineering.py` | Einheiten (Pint), Solver (SymPy), Plots (matplotlib), VDI-2230-Schraube |
+| `export.py` | DOCX/XLSX/PPTX/**PDF**/**LaTeX**-Erzeugung mit Corporate-Design & KI-Kennzeichnung. **PDF** (`to_pdf`) rendert LaTeX-Formeln via matplotlib-mathtext (vorvalidiert, crash-sicher); **LaTeX** (`to_latex`) erzeugt `article`/`beamer`-Quelltext (Markdown→LaTeX, Formeln bleiben Math) |
+| `engineering.py` | Einheiten (Pint), Solver (SymPy), Diagramme aus Wertereihen (`plot_chart`), **Funktionsgraph aus Term** (`plot_function`, SymPy-Lambdify, `^`/implizite Mult./`f(x)=`-Vorsatz, mehrere Funktionen mit `;`), VDI-2230-Schraube |
 | `materials.py` | ~40 Werkstoffe (Stähle, Alu, Titan, Edelstahl, Kunststoffe) |
 | `report.py` | PDF/DOCX-Reports mit LaTeX-Formelsatz |
 | `routing.py` | Routenplanung: Geocoding (Nominatim) + Routing (OSRM), liefert `{type:"map", …}` für das `route_planner`-Chat-Tool (Internet nötig) |
 | `imaging.py` | Bild-Hilfen für die bebilderte Präsentation: Dateiname-Heuristik + Pillow-Downscale |
+| `mail.py` | *🚧 in Entwicklung.* Read-only IMAP/POP3 (nur stdlib: `imaplib`/`poplib`/`email`); `domain_of()` (Domäne aus From-Header), `clean_mail_text()` (Zitat-Verlauf/Signatur/Disclaimer entfernen vor RAG) |
+| `rag.py` | RAG-Engine: Cleanup, Chunking, Ollama-Embeddings (CPU), NumPy-Kosinus-Suche; VRAM-Tiers, Per-Basis `strictness`/`char_limit` |
 
 > **Chat-Tool `route_planner`** (in `TOOL_DEFS`): bei Fragen nach dem Weg/Strecke von Ort A nach B; das Backend streamt einen `map`-Frame, den `chat.js` als interaktive Leaflet-Karte rendert (Leaflet vom CDN in `index.html`).
 
@@ -172,6 +180,8 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `matrix_research.js` | Recherche-Matrix, **Agent je Spalte** (nur Favoriten; `_cols[c].agent` → `agent_id` an `/api/chat`), **Live-Save** in `localStorage`, CSV-Im/Export, Zellen als Markdown+LaTeX |
 | `presentation_assistant.js` | Tabellenbasierter Präsentations-Assistent (Folie-für-Folie) |
 | `illustrated_presentation.js` | **Bebilderte Präsentation**: Ordner-Picker, Analyse-Persona ableiten, Bilder per Vision-Modell beschreiben → Zweispalter-Folien |
+| `doc_generator.js` | **Dokumentengenerator**: Dokument/Präsentation per Agent + RAG + Quellmaterial erzeugen; Export DOCX/PDF/**LaTeX**; **Besprechungsnotizen** im Einfügefeld (Autospeichern in `localStorage`, Auto-Leeren nach Export) |
+| `mail.js` | *🚧 in Entwicklung.* Mail-Tab: Abruf, Live-Filter (Absender/Betreff/Domäne), **Aktions-Set (max. 4)** (RAG/Agent/Doku/Notiz), **Regeln** (`/api/mail/rules`), Ergebnis-Karten rechts; Agent-Entwurf mit Kopieren/mailto/→Doku — **Versand stets manuell** |
 | `json_editor.js` | **JSON-Editor**: Datei öffnen, Live-Validierung (Zeile/Spalte), formatieren, herunterladen — Untertab des **💻 Code**-Tabs (kein eigener Tab mehr) |
 | `ide.js` | Code-IDE (Untertab): Editor, Canvas-Vorschau, KI-Assistent (Modell = Profil-Rolle „Programmieren"), Auto-Repair |
 | `logger.js` | Diagnose-Logger-Oberfläche |
@@ -212,6 +222,8 @@ ai_framework_thomas_run(draw);   // PFLICHT am Ende — registriert + zeichnet, 
 | `data/user_profile.json` | `{first_name, last_name, company, department, position, email, phone, default_project}` |
 | `data/projects.json` | `[{id, name, number, description, created_at}]` |
 | `data/uploads/` | temporäre Uploads |
+| `data/mail.json` | Postfach-Zugang `{protocol, host, port, user, ssl, password}` — **nicht** im Backup/git (Passwort im Klartext) |
+| `data/mail_rules.json` | Mail-Regeln `[{id, name, filter:{from,subject,domain}, actions:[…≤4]}]` — *🚧 in Entwicklung*, nicht in git |
 | `data/ai_framework_thomas.log` | Diagnose-Log (JSON-Lines, nur bei aktivem Logging) |
 
 Dateinamen werden über `_to_slug()` aus dem Anzeigenamen gebildet

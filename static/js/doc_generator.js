@@ -118,7 +118,7 @@ const DocGen = (() => {
   // Aktionsknöpfe (DOCX / Präsentation / Wissensdatenbank) ein- bzw. ausblenden
   function _showActions(show) {
     const disp = show ? '' : 'none';
-    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-present', 'btn-docgen-rag'].forEach(id => {
+    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-latex', 'btn-docgen-present', 'btn-docgen-rag'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = disp;
     });
@@ -305,6 +305,7 @@ const DocGen = (() => {
       a.href = url; a.download = _docTitle.replace(/\s+/g, '_').slice(0, 40) + '.docx'; a.click();
       URL.revokeObjectURL(url);
       showToast('✓ Exportiert');
+      _clearNote(true);
     } catch (e) { showToast('Export fehlgeschlagen: ' + e.message); }
   }
 
@@ -325,7 +326,73 @@ const DocGen = (() => {
       a.href = url; a.download = _docTitle.replace(/\s+/g, '_').slice(0, 40) + '.pdf'; a.click();
       URL.revokeObjectURL(url);
       showToast('✓ PDF exportiert');
+      _clearNote(true);
     } catch (e) { showToast('PDF-Export fehlgeschlagen: ' + e.message); }
+  }
+
+  async function _exportLatex() {
+    if (!_docText) return;
+    showToast('Erstelle LaTeX…');
+    try {
+      const profile = await (await fetch('/api/profile')).json();
+      const resp = await fetch('/api/export/latex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: _docTitle, content: _docText, _profile: profile }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || ('HTTP ' + resp.status));
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = _docTitle.replace(/\s+/g, '_').slice(0, 40) + '.tex'; a.click();
+      URL.revokeObjectURL(url);
+      showToast('✓ LaTeX (.tex) exportiert');
+      _clearNote(true);
+    } catch (e) { showToast('LaTeX-Export fehlgeschlagen: ' + e.message); }
+  }
+
+  // ── Besprechungsnotizen: automatisch sichern / wiederherstellen / leeren ──
+  // Das „Bestehenden Text einfügen"-Feld wird laufend in localStorage gesichert,
+  // sodass Notizen während einer Besprechung einen Reload überstehen. Nach dem
+  // erfolgreichen Abspeichern/Export des erzeugten Dokuments wird es geleert.
+  const _NOTE_KEY = 'docgen_paste_notes';
+
+  function _noteStatus(msg) {
+    const el = document.getElementById('docgen-note-status');
+    if (el) el.textContent = msg || '';
+  }
+
+  function _autosaveNote() {
+    const ta = document.getElementById('docgen-paste');
+    if (!ta) return;
+    try { localStorage.setItem(_NOTE_KEY, ta.value || ''); } catch (e) {}
+  }
+
+  function _restoreNote() {
+    const ta = document.getElementById('docgen-paste');
+    if (!ta) return;
+    let saved = '';
+    try { saved = localStorage.getItem(_NOTE_KEY) || ''; } catch (e) {}
+    if (saved && !ta.value.trim()) {
+      ta.value = saved;
+      _noteStatus('↺ gespeicherte Notiz wiederhergestellt');
+    }
+  }
+
+  function _saveNote() {
+    _autosaveNote();
+    const t = new Date().toLocaleTimeString();
+    _noteStatus('💾 gespeichert ' + t);
+    showToast('✓ Notiz gespeichert (bleibt nach Neuladen erhalten)');
+  }
+
+  // auto=true → stilles Leeren nach Export (kein Toast); sonst manuell per Button
+  function _clearNote(auto) {
+    const ta = document.getElementById('docgen-paste');
+    if (ta) ta.value = '';
+    try { localStorage.removeItem(_NOTE_KEY); } catch (e) {}
+    _noteStatus(auto ? '🗑 Notiz nach Export automatisch geleert' : '🗑 Notiz geleert');
+    if (!auto) showToast('✓ Notiz geleert');
   }
 
   // Aus dem Chat übernommenen (komprimierten) Verlauf als Quellmaterial laden.
@@ -351,6 +418,12 @@ const DocGen = (() => {
     document.getElementById('btn-docgen-paste')?.addEventListener('click', _usePasted);
     document.getElementById('btn-docgen-present')?.addEventListener('click', _present);
     document.getElementById('btn-docgen-pdf')?.addEventListener('click', _exportPdf);
+    document.getElementById('btn-docgen-latex')?.addEventListener('click', _exportLatex);
+    // Besprechungsnotizen: laufendes Autospeichern + Wiederherstellen + Buttons
+    _restoreNote();
+    document.getElementById('docgen-paste')?.addEventListener('input', _autosaveNote);
+    document.getElementById('btn-docgen-note-save')?.addEventListener('click', _saveNote);
+    document.getElementById('btn-docgen-note-clear')?.addEventListener('click', () => _clearNote(false));
     document.getElementById('docgen-file')?.addEventListener('change', _onFilesPicked);
     document.getElementById('docgen-dossier')?.addEventListener('change', _onDossierChange);
     document.getElementById('btn-docgen-dossier-refresh')?.addEventListener('click', _loadDossiers);

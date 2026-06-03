@@ -17,7 +17,7 @@
 9. [Recherche](#9-recherche)
 - [RAG — Eigene Wissenssammlungen](#rag--eigene-wissenssammlungen)
 - [Dokumentengenerator](#dokumentengenerator)
-- [Mail → Wissensdatenbank](#mail--wissensdatenbank)
+- [Mail-Bearbeitung (Beta)](#mail-bearbeitung)
 10. [Planer (Netzplan / CPM)](#10-planer-netzplan--cpm)
 11. [Matrix-Recherche](#11-matrix-recherche)
 12. [Code-Tab (IDE + JSON-Editor)](#12-code-tab-ide--json-editor)
@@ -31,7 +31,8 @@
 19. [Modelle & VRAM](#19-modelle--vram)
 20. [Tastenkürzel](#20-tastenkürzel)
 21. [Technische Hinweise](#21-technische-hinweise)
-22. [Deinstallation](#22-deinstallation)
+22. [Aktualisieren (Update)](#22-aktualisieren-update)
+23. [Deinstallation](#23-deinstallation)
 
 ---
 
@@ -78,7 +79,7 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | 💻 Code | Code-IDE + JSON-Editor |
 | 🤖 Agenten | Agenten erstellen und bearbeiten |
 | 📚 RAG | Eigene Wissenssammlungen für die KI |
-| 📧 Mail | Postfach (IMAP/POP3) read-only → Wissensdatenbank |
+| 📧 Mail | Postfach (IMAP/POP3) read-only: filtern → bis zu 4 Aktionen (Beta) |
 | 📋 Logs | Diagnose-Protokoll |
 
 ### Sidebar (links)
@@ -99,8 +100,10 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 1. Text eingeben, **Enter** sendet (**Shift+Enter** = neue Zeile).
 2. Die KI antwortet per Streaming (wortweise in Echtzeit).
 
-**🔍 Websuche** (Toolbar) ist standardmäßig aktiv — die KI sucht selbstständig,
-wenn sie aktuelle Informationen braucht. Inaktiv = nur Modellwissen.
+**🔍 Websuche** (Toolbar) ist standardmäßig **aus** — die KI antwortet dann nur aus
+Modellwissen (alle Daten bleiben lokal). Einmal anklicken aktiviert die Suche, dann
+recherchiert die KI bei Bedarf selbstständig. Der Schalter bleibt nur für die laufende
+Sitzung aktiv und startet bei jedem Neuladen wieder ausgeschaltet.
 
 Während der Antwort werden Tool-Aufrufe angezeigt (Suche, Berechnung,
 Präsentation …).
@@ -138,11 +141,20 @@ Die KI ruft diese Tools bei Bedarf selbstständig auf:
 - **🗺️ Routenplaner** (`route_planner`) — bei einer Frage nach dem Weg von Ort A nach
   Ort B wird eine **interaktive OpenStreetMap-Karte** mit der Route direkt im Chat
   angezeigt (Strecke und Fahrzeit inklusive). *Benötigt Internet.*
-- Zusätzlich: Einheitenumrechnung, Gleichungslöser, Diagramme, Werkstoff-Lookup,
+- **📈 Funktion plotten** (`plot_function`) — nennst du eine **mathematische Funktion**
+  (z. B. `f(x)=x^2`, `sin(x)`, `sqrt(x)`) oder bittest um einen Graphen/Verlauf/eine
+  Kennlinie, zeichnet die KI den **Graphen direkt im Chat**. Versteht `^` als Potenz,
+  implizite Multiplikation (`2x`) und mehrere Funktionen mit `;` zum Vergleich. Diese
+  Regel ist **immer aktiv** (unabhängig vom Antwortstil/Modus), im **Maschinenbau-Modus**
+  besonders betont.
+- **📊 Diagramm** (`plot_chart`) — Linien-/Balken-/Streudiagramm aus Wertereihen
+  (z. B. Kraft-Weg-Kurven, Spannungs-Dehnungs-Diagramme).
+- Zusätzlich: Einheitenumrechnung, Gleichungslöser, Werkstoff-Lookup,
   VDI-2230-Schraubenberechnung.
 
 **Beispiel-Prompts:**
 - *„Berechne die Leistung: P = U × I mit U = 400 V, I = 25 A"*
+- *„Plotte f(x)=x^2 und sin(x) von -5 bis 5"* → zeichnet den Graphen im Chat
 - *„Erstelle eine Präsentation über FEM-Analyse mit 6 Folien"*
 - *„Vergleichstabelle gängiger FEM-Softwarepakete"*
 - *„Wie komme ich von Stuttgart nach München?"* → zeigt die Route auf der Karte
@@ -337,8 +349,8 @@ Förderprogramm**, einen Projektbericht oder ein Pflichtenheft) mit Hilfe eines
 4. **📄 Dokument erzeugen** — das Ergebnis erscheint **rechts** formatiert (inkl. Formeln
    via KaTeX/Links). Oder **🖥️ Präsentation erzeugen** — derselbe Inhalt landet als
    Präsentation im **Canvas** (Querformat).
-5. Export als **📝 DOCX**, **📑 PDF**, als **🖥️ Präsentation** (Canvas) oder zurück
-   **📚 In Wissensdatenbank**.
+5. Export als **📝 DOCX**, **📑 PDF**, **𝐓 LaTeX** (reine `.tex`-Datei), als
+   **🖥️ Präsentation** (Canvas) oder zurück **📚 In Wissensdatenbank**.
 
 > **Layout:** Der Dokumenten-Tab ist zweispaltig — links die Steuerung, rechts das
 > erzeugte Dokument. Der **Trenner** dazwischen ist mit der Maus ziehbar
@@ -348,9 +360,15 @@ Förderprogramm**, einen Projektbericht oder ein Pflichtenheft) mit Hilfe eines
 Mit der Option **„quellengebunden (wissenschaftlich)"** arbeitet die KI streng auf
 Basis der Quellen (für belegpflichtige Dokumente).
 
-> **Hinweis zu Formeln im Export:** DOCX und PDF setzen LaTeX-Formeln **nicht** als
-> Formelsatz (sie erscheinen als `$…$`-Text). Formelsatz gibt es **am Bildschirm**
-> (Dokument-Ansicht, Canvas-Folien) sowie in der **Präsentation** im Canvas.
+> **Hinweis zu Formeln im Export:**
+> - **PDF** setzt LaTeX-Formeln jetzt als echten **Formelsatz** (über matplotlib-mathtext,
+>   ohne LaTeX-Installation) — `$…$`, `$$…$$`, `\(…\)` und `\[…\]` werden gerendert.
+> - **𝐓 LaTeX-Export** erzeugt eine reine `.tex`-Datei (Dokument → `article`,
+>   Präsentation → `beamer`); Formeln bleiben echtes LaTeX-Math, Markdown wird in
+>   LaTeX-Befehle übersetzt. Mit einer LaTeX-Installation (z. B. MiKTeX/TeX Live)
+>   selbst zu PDF kompilierbar.
+> - **DOCX** zeigt Formeln weiterhin als `$…$`-Text (kein Word-Formelsatz).
+> - **Formelsatz am Bildschirm** (Dokument-Ansicht, Canvas-Folien) via KaTeX.
 
 ### Quellmaterial mitgeben
 
@@ -364,6 +382,11 @@ Im Abschnitt **📎 Quellmaterial** kannst du der Aufgabe konkrete Vorlagen beil
 - **📋 Bestehenden Text einfügen** — Text per Copy & Paste übernehmen. „**⬇ Text direkt
   als Dokument übernehmen**" lädt ihn unverändert als Dokument (ohne KI); ohne
   Übernehmen dient er der Aufgabe als Quellmaterial.
+  - **Besprechungsnotizen:** Das Feld wird **automatisch gespeichert** (übersteht ein
+    Neuladen) — ideal, um während einer Besprechung mitzuschreiben. „**💾 Notiz
+    speichern**" sichert manuell, „**🗑 Notiz leeren**" löscht. Nach dem **erfolgreichen
+    Export** des erzeugten Dokuments (DOCX/PDF/LaTeX) wird das Notizfeld **automatisch
+    geleert**.
 
 Aus dem **Chat** bringt der Knopf **„→ 📄 Doku"** (in der Eingabeleiste) das laufende
 Gespräch komprimiert hierher — praktisch, um z. B. aus einer Unterhaltung eine
@@ -371,26 +394,50 @@ Besprechung zu planen.
 
 ---
 
-## Mail → Wissensdatenbank
+## Mail-Bearbeitung
 
-Tab **📧 Mail**: ruft ein Postfach **read-only** ab und übernimmt einzelne Mails in
-eine Wissensdatenbank oder den Dokumentengenerator — z. B. um aus einem Mail-Thread
-eine Besprechung vorzubereiten. Der Tab ist zweispaltig (links Zugang/Liste, rechts
-Vorschau/Bearbeitung).
+> 🚧 **In Entwicklung (Beta).** Der Mail-Tab wird aktiv weiterentwickelt; einzelne
+> Schritte können sich noch ändern und nicht jedes Postfach ist erprobt. Der Zugriff
+> ist und bleibt **read-only** — es werden **keine Mails gelöscht oder automatisch
+> versendet**.
+
+Tab **📧 Mail**: ruft ein Postfach **read-only** ab, **filtert** die Mails und führt
+pro Mail **bis zu vier Aktionen** aus (z. B. in eine Wissensdatenbank übernehmen oder
+einen Agenten eine Antwort entwerfen lassen). Zweispaltig: **links** Zugang, Filter,
+Liste und Aktions-Set; **rechts** die **Ergebnisse**. **Versand erfolgt immer manuell.**
 
 1. **⚙️ Postfach-Zugang** öffnen und **Protokoll** wählen — **IMAP** (empfohlen, lässt
    die Mails auf dem Server) oder **POP3**. Server, Port (Standard wird je Protokoll/SSL
-   vorgeschlagen), Benutzer und Passwort eintragen, **💾 Zugang speichern**.
+   vorgeschlagen), Benutzer und Passwort eintragen, **💾 Zugang speichern**. Der Block
+   ist **einklappbar** (minimierbar) und bleibt nach dem Speichern zu.
    - Bei **Gmail** mit 2-Faktor ein **App-Passwort** verwenden, nicht das Hauptpasswort.
    - Der Zugang wird lokal in `data/mail.json` gespeichert (nicht im Backup, nicht in git).
-2. Optional **Suche** (Absender/Betreff) und **Anzahl** setzen, dann **📥 Abrufen**.
-3. **Mail anklicken** → sie erscheint rechts in der **Vorschau** mit **bearbeitbarem**
-   Textfeld. Von dort:
-   - **📚 Diese Mail → Wissensdatenbank** (übernimmt den ggf. bearbeiteten Text),
-   - **📄 → Dokumentengenerator** (als Quellmaterial weiterverarbeiten).
-4. Mehrere Mails über die Haken auswählen und gesammelt **📚 → Wissensdatenbank** übernehmen.
+2. Optional **Suche** (serverseitig) und **Anzahl** setzen, dann **📥 Abrufen**.
+3. **🔎 Filter** (clientseitig, live): nach **Absender**, **Betreff** und/oder **Domäne**
+   eingrenzen. Über der Liste steht „Treffer/Gesamt".
+4. **🎬 Aktions-Set (max. 4):** Pro Slot einen Typ wählen und konfigurieren:
+   - **📚 In RAG (bereinigt)** — Mail mailspezifisch **bereinigen** (Zitat-Verlauf,
+     Signatur, Disclaimer werden entfernt) und in eine Wissensdatenbank übernehmen.
+   - **🤖 Agent-Aufgabe** — einen **Favoriten-Agenten** (⭐) wählen und einen
+     **Freitext-Auftrag** geben (z. B. „höfliche Antwort entwerfen", „zusammenfassen",
+     „Termine/Aufgaben extrahieren"). Das Ergebnis erscheint rechts als **editierbarer
+     Entwurf**.
+   - **📄 → Dokumentengenerator** — Mail als Quellmaterial übergeben.
+   - **🏷 Markieren / Notiz** — lokale Markierung an die Mail (Badge in der Liste).
+5. **▶ Aktionen anwenden** — auf die **angehakten** Mails (oder „**auf alle gefilterten**").
+   Läuft sequenziell, mit Fortschritt und **⏹ Abbrechen**. (Agent-Aktionen nutzen das
+   lokale Modell und können dauern — ab >5 Mails wird rückgefragt.)
+6. **Ergebnisse rechts:** Jede Aktion bekommt eine Karte. Ein Agent-Entwurf hat
+   **📋 Kopieren**, **✉ Im Mailprogramm öffnen** (mailto, vorbefüllt — du sendest selbst)
+   und **📄 → Doku**.
 
-> Es werden keine Mails gelöscht oder versendet — der Zugriff ist rein lesend.
+**Regeln:** Filter + Aktions-Set lassen sich als **Regel** speichern (`💾 Regel`) und
+später wieder laden (`— Regel laden —`), z. B. „Rechnungen von firma.de → ins RAG +
+Antwort entwerfen". Regeln liegen lokal in `data/mail_rules.json`. Die Ausführung
+bleibt immer manuell per **▶**.
+
+> Es werden keine Mails gelöscht oder versendet — der Zugriff ist rein lesend, der
+> Versand passiert ausschließlich von Hand in deinem Mailprogramm/der Zwischenablage.
 
 ---
 
@@ -678,8 +725,8 @@ Präsentations-Deckblatt.
   fachliche Brille passend zum Modus (abschaltbar, falls rein farbliche Umschaltung
   gewünscht ist).
 - **„Keine Modi verwenden (LLM pur)"**: schaltet **sämtliche** automatischen
-  Vorgaben ab — Modus-Brille, Persona, Anti-Halluzinations-Grundregel sowie Formel-
-  und Zitatregeln. Das Modell antwortet dann ohne jede Voreinstellung („pur"). Ein
+  Vorgaben ab — Modus-Brille, Persona, Anti-Halluzinations-Grundregel sowie Formel-,
+  Graph- und Zitatregeln. Das Modell antwortet dann ohne jede Voreinstellung („pur"). Ein
   ausdrücklich gewählter Agent und aktive Wissensdatenbanken bleiben davon unberührt.
 - **Logo & Vorlagenbilder hochladen** (werden automatisch auf die Sollgröße skaliert):
   - **Logo** – 512×512 px, PNG mit Transparenz (Sidebar + Dokumente)
@@ -798,7 +845,32 @@ Für tiefergehende Architektur siehe **docs/ENTWICKLUNG.md**.
 
 ---
 
-## 22. Deinstallation
+## 22. Aktualisieren (Update)
+
+Mit **`update.bat`** wird **nur der Programmcode** (Systemdateien) ausgetauscht — alle
+**Nutzerdaten und Einstellungen bleiben erhalten**.
+
+- **Unberührt:** `data\` (Gespräche, Agenten, Pläne, Wissensdatenbanken, Profil,
+  Branding, Mail-Zugang & -Regeln), `config.json`, sowie `venv\` / `python\` / `ollama\`
+  inkl. Modelle.
+- **Ersetzt:** Programmdateien (`main.py`, `static\`, `tools\`, Skripte, Doku …).
+
+**So geht's:**
+1. Neue Version bereitlegen (der Ordner mit der neuen `update.bat` = Quelle).
+2. `update.bat` starten und den Pfad der bestehenden Installation angeben:
+   ```
+   update.bat "D:\AI_Framework_Thomas_Portable_YYYYMMDD"
+   ```
+   Ohne Angabe wird der Pfad abgefragt. Ein Portable-`app\`-Unterordner wird automatisch erkannt.
+3. Vor dem Überschreiben legt das Skript eine Sicherung unter `app\_update_backup\` an.
+4. Auf Wunsch werden anschließend neue Python-Pakete aus `requirements.txt` installiert.
+
+> Danach **App neu starten** (`start.bat`) und im Browser mit **Strg+F5** neu laden.
+> Eine vollständige Datensicherung vorab (siehe Abschnitt **18. Backup**) ist trotzdem empfehlenswert.
+
+---
+
+## 23. Deinstallation
 
 **Automatisch:** `uninstall.bat` doppelklicken und den Anweisungen folgen.
 Entfernt die virtuelle Umgebung (`venv/`), optional die Daten (`data/`) und

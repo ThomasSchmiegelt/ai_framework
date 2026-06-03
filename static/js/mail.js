@@ -4,7 +4,24 @@
 
 const Mail = (() => {
   let _messages = [];
+  let _filtered = [];    // nach Filter (Absender/Betreff/Domäne) sichtbare Mails
   let _current = null;   // aktuell in der Vorschau geöffnete Mail
+  let _actions = [{}, {}, {}, {}];  // bis zu 4 Aktions-Slots
+  let _agents = [];      // für Agent-Aktion
+  let _abort = false;    // Abbruch der laufenden Aktions-Schleife
+
+  const _domainOf = (addr) => {
+    const m = String(addr || '').match(/[\w.+-]+@([\w-]+(?:\.[\w-]+)+)/);
+    return m ? m[1].toLowerCase() : '';
+  };
+
+  // Notizen pro Mail lokal (uid) – „Markieren / Notiz"-Aktion
+  const _NOTE_KEY = 'mail_notes';
+  function _notes() { try { return JSON.parse(localStorage.getItem(_NOTE_KEY) || '{}'); } catch (_) { return {}; } }
+  function _setNote(uid, txt) {
+    const n = _notes(); if (txt) n[uid] = txt; else delete n[uid];
+    localStorage.setItem(_NOTE_KEY, JSON.stringify(n));
+  }
 
   async function _loadConfig() {
     try {
@@ -58,9 +75,13 @@ const Mail = (() => {
     } catch (e) { showToast('Fehler: ' + e.message); }
   }
 
+  let _colls = [];   // RAG-Sammlungen (Cache für Aktions-Slots)
+
   async function _loadRag() {
     let colls = [];
     try { colls = await (await fetch('/api/rag/collections')).json(); } catch (_) {}
+    _colls = colls;
+    _renderActions();   // Slot-RAG-Auswahl aktualisieren
     for (const id of ['mail-rag', 'mail-preview-rag']) {
       const sel = document.getElementById(id);
       if (!sel) continue;
@@ -100,25 +121,40 @@ const Mail = (() => {
     }
   }
 
+  function _matchFilter(m) {
+    const f = (document.getElementById('mail-f-from')?.value || '').trim().toLowerCase();
+    const s = (document.getElementById('mail-f-subject')?.value || '').trim().toLowerCase();
+    const d = (document.getElementById('mail-f-domain')?.value || '').trim().toLowerCase();
+    if (f && !String(m.from || '').toLowerCase().includes(f)) return false;
+    if (s && !String(m.subject || '').toLowerCase().includes(s)) return false;
+    if (d && !_domainOf(m.from).includes(d)) return false;
+    return true;
+  }
+
   function _render() {
     const list = document.getElementById('mail-list');
     if (!_messages.length) {
+      _filtered = [];
       list.innerHTML = '<p class="planner-muted" style="font-size:13px">Keine Mails — Zugang prüfen oder Suche anpassen.</p>';
       return;
     }
-    const rows = _messages.map(m => `
+    _filtered = _messages.filter(_matchFilter);
+    const notes = _notes();
+    const rows = _filtered.map(m => {
+      const note = notes[m.uid];
+      return `
       <div class="mail-row" style="display:flex;gap:10px;align-items:flex-start;padding:7px 6px;border-bottom:1px solid var(--border)">
         <input type="checkbox" class="mail-check" data-uid="${escHtml(m.uid)}" style="margin-top:3px;cursor:pointer" />
         <span class="mail-open" data-uid="${escHtml(m.uid)}" style="flex:1;min-width:0;cursor:pointer" title="Anklicken zum Ansehen/Bearbeiten">
-          <span style="font-weight:600">${escHtml(m.subject)}</span><br>
+          <span style="font-weight:600">${escHtml(m.subject)}</span>${note ? ' <span title="' + escHtml(note) + '" style="cursor:help">🏷</span>' : ''}<br>
           <span class="planner-muted" style="font-size:12px">${escHtml(m.from)} · ${escHtml(m.date)}</span>
         </span>
-      </div>`).join('');
+      </div>`; }).join('');
     list.innerHTML = `
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
         <button id="btn-mail-all" class="export-btn" style="font-size:12px">Alle aus-/abwählen</button>
-        <span class="planner-muted" style="font-size:12px">${_messages.length} Mail(s) — anklicken = Vorschau, Haken = Sammelübernahme</span>
-      </div>${rows}`;
+        <span class="planner-muted" style="font-size:12px">${_filtered.length}/${_messages.length} Mail(s) — anklicken = Vorschau, Haken = Aktionen/Sammelübernahme</span>
+      </div>${rows || '<p class="planner-muted" style="font-size:13px">Kein Treffer für den Filter.</p>'}`;
     document.getElementById('btn-mail-all')?.addEventListener('click', () => {
       const boxes = list.querySelectorAll('.mail-check');
       const anyOff = Array.from(boxes).some(b => !b.checked);
@@ -254,7 +290,238 @@ const Mail = (() => {
     }
   }
 
-  function refresh() { _loadConfig(); _loadRag(); }
+  /* ── Agenten (für Agent-Aktion) ──────────────────────────────────── */
+  async function _loadAgents() {
+    try {
+      const all = await (await fetch('/api/agents')).json();
+      _agents = (all || []).filter(a => a.favorite);   // nur Favoriten-Agenten
+    } catch (_) { _agents = []; }
+    _renderActions();
+  }
+
+  /* ── Aktions-Slots (max. 4) ──────────────────────────────────────── */
+  function _ragOptions(sel) {
+    if (!_colls.length) return '<option value="">— keine Wissensdatenbank —</option>';
+    return _colls.map(c => `<option value="${escHtml(c.id)}"${c.id === sel ? ' selected' : ''}>${escHtml(c.name)} (${c.n_chunks})</option>`).join('');
+  }
+  function _agentOptions(sel) {
+    return '<option value="">— Standard-Assistent —</option>' +
+      _agents.map(a => `<option value="${escHtml(a.id)}"${a.id === sel ? ' selected' : ''}>${escHtml((a.icon || '🤖') + ' ' + a.name)}</option>`).join('');
+  }
+
+  function _slotParams(i, a) {
+    if (a.type === 'rag') {
+      return `<select class="sidebar-select mail-act-rag" data-i="${i}" style="min-width:180px">${_ragOptions(a.collection_id)}</select>
+        <label style="font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" class="mail-act-clean" data-i="${i}" ${a.clean !== false ? 'checked' : ''}/> bereinigen</label>`;
+    }
+    if (a.type === 'agent') {
+      return `<select class="sidebar-select mail-act-agent" data-i="${i}" style="min-width:170px">${_agentOptions(a.agent_id)}</select>
+        <input type="text" class="sidebar-select mail-act-instr" data-i="${i}" placeholder="Auftrag, z. B. höfliche Antwort entwerfen" value="${escHtml(a.instruction || '')}" style="flex:1;min-width:200px" />`;
+    }
+    if (a.type === 'note') {
+      return `<input type="text" class="sidebar-select mail-act-note" data-i="${i}" placeholder="Notiz/Markierung…" value="${escHtml(a.note || '')}" style="flex:1;min-width:220px" />`;
+    }
+    if (a.type === 'doc') {
+      return `<span class="planner-muted" style="font-size:12px">Mail als Quellmaterial in den Dokumentengenerator</span>`;
+    }
+    return '';
+  }
+
+  function _renderActions() {
+    const wrap = document.getElementById('mail-actions');
+    if (!wrap) return;
+    wrap.innerHTML = _actions.map((a, i) => `
+      <div class="mail-action-slot" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed var(--border)">
+        <span class="planner-muted" style="font-size:12px;width:18px">${i + 1}.</span>
+        <select class="sidebar-select mail-act-type" data-i="${i}" style="min-width:170px">
+          <option value=""${!a.type ? ' selected' : ''}>— keine —</option>
+          <option value="rag"${a.type === 'rag' ? ' selected' : ''}>📚 In RAG (bereinigt)</option>
+          <option value="agent"${a.type === 'agent' ? ' selected' : ''}>🤖 Agent-Aufgabe</option>
+          <option value="doc"${a.type === 'doc' ? ' selected' : ''}>📄 → Dokumentengenerator</option>
+          <option value="note"${a.type === 'note' ? ' selected' : ''}>🏷 Markieren / Notiz</option>
+        </select>
+        ${_slotParams(i, a)}
+      </div>`).join('');
+
+    wrap.querySelectorAll('.mail-act-type').forEach(el => el.addEventListener('change', () => {
+      const i = +el.dataset.i; _actions[i] = { type: el.value }; _renderActions();
+    }));
+    const bind = (cls, key, prop) => wrap.querySelectorAll(cls).forEach(el => {
+      el.addEventListener(prop === 'checked' ? 'change' : 'input', () => {
+        _actions[+el.dataset.i][key] = prop === 'checked' ? el.checked : el.value;
+      });
+    });
+    bind('.mail-act-rag', 'collection_id', 'value');
+    bind('.mail-act-clean', 'clean', 'checked');
+    bind('.mail-act-agent', 'agent_id', 'value');
+    bind('.mail-act-instr', 'instruction', 'value');
+    bind('.mail-act-note', 'note', 'value');
+  }
+
+  /* ── Regeln (Filter + Aktions-Set speichern) ─────────────────────── */
+  let _rules = [];
+  async function _loadRules() {
+    try { _rules = (await (await fetch('/api/mail/rules')).json()).rules || []; } catch (_) { _rules = []; }
+    const sel = document.getElementById('mail-rule-select');
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— Regel laden —</option>' +
+      _rules.map(r => `<option value="${escHtml(r.id)}">${escHtml(r.name)}</option>`).join('');
+    if (prev) sel.value = prev;
+  }
+  function _currentFilter() {
+    return {
+      from: document.getElementById('mail-f-from').value.trim(),
+      subject: document.getElementById('mail-f-subject').value.trim(),
+      domain: document.getElementById('mail-f-domain').value.trim(),
+    };
+  }
+  async function _saveRule() {
+    const name = document.getElementById('mail-rule-name').value.trim()
+      || document.getElementById('mail-rule-select').selectedOptions[0]?.textContent
+      || 'Regel';
+    const id = document.getElementById('mail-rule-select').value || undefined;
+    const body = { id, name, filter: _currentFilter(), actions: _actions.filter(a => a.type) };
+    try {
+      const r = await fetch('/api/mail/rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.status);
+      showToast('✓ Regel gespeichert');
+      await _loadRules();
+      document.getElementById('mail-rule-select').value = (await r.json()).rule.id;
+    } catch (e) { showToast('Fehler: ' + e.message); }
+  }
+  async function _deleteRule() {
+    const id = document.getElementById('mail-rule-select').value;
+    if (!id) { showToast('Keine Regel gewählt'); return; }
+    if (!confirm('Diese Regel löschen?')) return;
+    try {
+      await fetch('/api/mail/rules/' + encodeURIComponent(id), { method: 'DELETE' });
+      showToast('✓ Regel gelöscht'); _loadRules();
+    } catch (e) { showToast('Fehler: ' + e.message); }
+  }
+  function _applyRule() {
+    const id = document.getElementById('mail-rule-select').value;
+    const rule = _rules.find(r => r.id === id);
+    if (!rule) return;
+    const f = rule.filter || {};
+    document.getElementById('mail-f-from').value = f.from || '';
+    document.getElementById('mail-f-subject').value = f.subject || '';
+    document.getElementById('mail-f-domain').value = f.domain || '';
+    document.getElementById('mail-rule-name').value = rule.name || '';
+    _actions = [{}, {}, {}, {}];
+    (rule.actions || []).slice(0, 4).forEach((a, i) => { _actions[i] = { ...a }; });
+    _renderActions();
+    _render();
+    showToast('Regel „' + (rule.name || '') + '" angewendet');
+  }
+
+  /* ── Aktionen ausführen (Versand stets manuell) ──────────────────── */
+  function _resultCard(title, inner, badge) {
+    const div = document.createElement('div');
+    div.className = 'mail-result-card';
+    div.innerHTML = `<div class="mail-result-head">${badge || ''} ${escHtml(title)}</div>${inner}`;
+    document.getElementById('mail-results').appendChild(div);
+    return div;
+  }
+
+  async function _execAction(uid, a, mailMeta) {
+    if (a.type === 'rag') {
+      if (!a.collection_id) { _resultCard('RAG übersprungen', '<div class="planner-muted">Keine Wissensdatenbank gewählt</div>'); return; }
+      const r = await fetch('/api/mail/action/rag', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, collection_id: a.collection_id, clean: a.clean !== false }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || r.status);
+      _resultCard('In Wissensdatenbank übernommen', `<div class="planner-muted">${j.chunks} Chunk(s)${a.clean !== false ? ', bereinigt' : ''}</div>`, '📚');
+      if (typeof RAG !== 'undefined' && RAG.loadCollections) RAG.loadCollections();
+    } else if (a.type === 'agent') {
+      const r = await fetch('/api/mail/action/agent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, agent_id: a.agent_id, instruction: a.instruction || 'Fasse die Mail zusammen.' }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || r.status);
+      const card = _resultCard(`Agent-Ergebnis${a.instruction ? ': ' + a.instruction : ''}`, '', '🤖');
+      const ta = document.createElement('textarea');
+      ta.className = 'mail-result-text'; ta.value = j.text || '';
+      const bar = document.createElement('div'); bar.className = 'mail-result-bar';
+      const subj = mailMeta.subject || '';
+      bar.innerHTML = `<button class="export-btn mail-r-copy">📋 Kopieren</button>
+        <button class="export-btn mail-r-mailto">✉ Im Mailprogramm öffnen</button>
+        <button class="export-btn mail-r-doc">📄 → Doku</button>`;
+      card.appendChild(ta); card.appendChild(bar);
+      bar.querySelector('.mail-r-copy').addEventListener('click', () => {
+        navigator.clipboard.writeText(ta.value).then(() => showToast('✓ In Zwischenablage kopiert'));
+      });
+      bar.querySelector('.mail-r-mailto').addEventListener('click', () => {
+        const to = _domainOf(mailMeta.from) ? (String(mailMeta.from).match(/[\w.+-]+@[\w.-]+/) || [''])[0] : '';
+        const re = subj.toLowerCase().startsWith('re:') ? subj : 'Re: ' + subj;
+        window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(re)}&body=${encodeURIComponent(ta.value)}`;
+      });
+      bar.querySelector('.mail-r-doc').addEventListener('click', () => {
+        if (typeof DocGen !== 'undefined' && DocGen.loadFromChat) DocGen.loadFromChat('Mail: ' + subj, ta.value);
+        document.querySelector('.tab-btn[data-tab="docgen"]')?.click();
+      });
+    } else if (a.type === 'doc') {
+      const m = await (await fetch('/api/mail/message', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid }),
+      })).json();
+      const txt = `Von: ${m.from || ''}\nAn: ${m.to || ''}\nDatum: ${m.date || ''}\nBetreff: ${m.subject || ''}\n\n${m.text || ''}`.trim();
+      if (typeof DocGen !== 'undefined' && DocGen.loadFromChat) DocGen.loadFromChat('Mail: ' + (m.subject || ''), txt);
+      _resultCard('An Dokumentengenerator übergeben', '<div class="planner-muted">Im Tab „Dokumente" weiterbearbeiten</div>', '📄');
+    } else if (a.type === 'note') {
+      _setNote(uid, a.note || '🏷');
+      _resultCard('Markiert / Notiz gesetzt', `<div class="planner-muted">${escHtml(a.note || '🏷')}</div>`, '🏷');
+      _render();
+    }
+  }
+
+  async function _runActions() {
+    const acts = _actions.filter(a => a.type);
+    if (!acts.length) { showToast('Bitte mindestens eine Aktion konfigurieren'); return; }
+    const scopeAll = document.getElementById('mail-act-scope-all').checked;
+    let targets;
+    if (scopeAll) {
+      targets = _filtered.slice();
+    } else {
+      const checked = Array.from(document.querySelectorAll('.mail-check')).filter(b => b.checked).map(b => b.dataset.uid);
+      const uids = checked.length ? checked : (_current ? [_current.uid] : []);
+      targets = _filtered.filter(m => uids.includes(String(m.uid)));
+    }
+    if (!targets.length) { showToast('Bitte Mail(s) auswählen (Haken) oder „auf alle gefilterten" aktivieren'); return; }
+    if (targets.length > 5 && !confirm(`${targets.length} Mails × ${acts.length} Aktion(en) über das lokale Modell — das kann dauern. Fortfahren?`)) return;
+
+    _abort = false;
+    const status = document.getElementById('mail-run-status');
+    const runBtn = document.getElementById('btn-mail-run');
+    const abortBtn = document.getElementById('btn-mail-run-abort');
+    runBtn.disabled = true; abortBtn.style.display = '';
+    document.getElementById('mail-preview-empty').style.display = 'none';
+    document.getElementById('mail-preview').style.display = '';
+    document.getElementById('mail-results').innerHTML = '';
+
+    let done = 0;
+    outer:
+    for (const m of targets) {
+      _resultCard(`▼ ${m.subject || '(kein Betreff)'} — ${m.from || ''}`, '', '✉');
+      for (const a of acts) {
+        if (_abort) break outer;
+        status.textContent = `⏳ ${done + 1}/${targets.length * acts.length} …`;
+        try { await _execAction(String(m.uid), a, m); }
+        catch (e) { _resultCard('Fehler', `<div class="planner-muted">${escHtml(e.message)}</div>`, '⚠️'); }
+        done++;
+      }
+    }
+    status.textContent = _abort ? `⏹ abgebrochen (${done} erledigt)` : `✓ fertig (${done} Aktion(en))`;
+    runBtn.disabled = false; abortBtn.style.display = 'none';
+    if (typeof RAG !== 'undefined' && RAG.loadCollections) RAG.loadCollections();
+    _loadRag();
+  }
+
+  function refresh() { _loadConfig(); _loadRag(); _loadAgents(); _loadRules(); _renderActions(); }
 
   function init() {
     document.getElementById('btn-mail-save')?.addEventListener('click', _saveConfig);
@@ -264,8 +531,19 @@ const Mail = (() => {
     document.getElementById('btn-mail-to-rag')?.addEventListener('click', _toRag);
     document.getElementById('btn-mail-preview-rag')?.addEventListener('click', _previewToRag);
     document.getElementById('btn-mail-preview-doc')?.addEventListener('click', _previewToDoc);
+    // Filter (live)
+    ['mail-f-from', 'mail-f-subject', 'mail-f-domain'].forEach(id =>
+      document.getElementById(id)?.addEventListener('input', _render));
+    // Regeln
+    document.getElementById('mail-rule-select')?.addEventListener('change', _applyRule);
+    document.getElementById('btn-mail-rule-save')?.addEventListener('click', _saveRule);
+    document.getElementById('btn-mail-rule-del')?.addEventListener('click', _deleteRule);
+    // Aktionen
+    document.getElementById('btn-mail-run')?.addEventListener('click', _runActions);
+    document.getElementById('btn-mail-run-abort')?.addEventListener('click', () => { _abort = true; });
     document.querySelector('.tab-btn[data-tab="mail"]')?.addEventListener('click', refresh);
     _initSplitter();
+    _renderActions();
     refresh();
   }
 

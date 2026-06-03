@@ -68,12 +68,15 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 
 ## Features
 
-- 💬 **Chat** mit Streaming (SSE), Websuche, Berechnungen
+- 💬 **Chat** mit Streaming (SSE), Websuche (standardmäßig **aus**), Berechnungen
+- 📈 **Funktion plotten** — nennst du eine Funktion (`f(x)=x^2`, `sin(x)`, `sqrt(x)`)
+  oder bittest um einen Graphen, zeichnet die KI ihn **direkt im Chat** (`plot_function`,
+  mehrere Funktionen mit `;`); immer aktiv, im Maschinenbau-Modus betont
 - 🗺️ **Routenplaner** — Frage nach dem Weg von A nach B zeigt eine interaktive
   OpenStreetMap-Route direkt im Chat (Geocoding via Nominatim, Routing via OSRM)
-- 🖼️ **Canvas** — Präsentationen & Tabellen, Export als **PPTX/XLSX/PDF**, mit
-  **WYSIWYG-Editor** (Text direkt auf der Folie anklicken & bearbeiten); **Formeln**
-  auf Folien werden via KaTeX gerendert
+- 🖼️ **Canvas** — Präsentationen & Tabellen, Export als **PPTX/XLSX/PDF/LaTeX (.tex)**,
+  mit **WYSIWYG-Editor** (Text direkt auf der Folie anklicken & bearbeiten); **Formeln**
+  auf Folien werden via KaTeX gerendert (im PDF/LaTeX als echter Formelsatz)
 - 🪄 **Präsentations-Assistent** — tabellenbasiert, Folie-für-Folie, im Design des
   gewählten Modus (Farben + Logo/Vorlagen aus dem Profil)
 - 🎨 **Sieben Modi** (Maschinenbau/KI/Soziales/Marketing/Finanz/Geschäftsführung + frei
@@ -90,11 +93,16 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 📄 **Dokumentengenerator** — zweispaltig (links Steuerung, rechts das erzeugte
   Dokument): Dokument **oder** Präsentation erzeugen (Letztere landet im Canvas im
   Querformat), gestützt auf Agenten + Wissensdatenbanken + Quellmaterial
-  (Upload/Dossier/Text); Export als **DOCX / PDF**, als Präsentation oder zurück in
-  eine Wissensdatenbank. Formeln werden via KaTeX gerendert
-- 📧 **Mail → Wissensdatenbank** — Postfach read-only per **IMAP oder POP3**
-  abrufen, Mail rechts in der Vorschau ansehen/bearbeiten und in eine
-  Wissensdatenbank oder den Dokumentengenerator übernehmen (Zugang lokal, nicht im Backup/git)
+  (Upload/Dossier/Text); Export als **DOCX / PDF / LaTeX (.tex)**, als Präsentation oder
+  zurück in eine Wissensdatenbank. Formeln werden via KaTeX gerendert, im **PDF** als
+  echter Formelsatz (matplotlib, ohne LaTeX-Installation). Das Notizfeld „Text einfügen"
+  speichert automatisch (Besprechungsnotizen) und leert sich nach dem Export
+- 📧 **Mail-Bearbeitung** *(🚧 in Entwicklung / Beta)* — Postfach read-only per **IMAP/POP3**
+  abrufen, nach **Absender/Betreff/Domäne** filtern und pro Mail **bis zu 4 Aktionen**
+  ausführen: in eine **Wissensdatenbank** (bereinigt), **Agent-Aufgabe** (z. B. Antwort
+  entwerfen), **→ Dokumentengenerator**, **Markieren**. Filter + Aktionen als **Regel**
+  speicherbar; **Versand immer manuell** (Zwischenablage/mailto), Zugang lokal
+  (nicht im Backup/git)
 - 🔬 **Recherche** — aspektbasiert mit Quellen, zweispaltig (links Einstellungen,
   rechts Bericht); Ergebnis als **Präsentation** (Canvas), **Dokument** (Dokumentengenerator),
   **DOCX/PDF** oder in eine Wissensdatenbank — Formeln bleiben erhalten
@@ -183,6 +191,7 @@ AI_Framework_Thomas/
 ├── requirements.txt        Python-Abhängigkeiten
 ├── install / make_portable / make_server  (.bat + .ps1)  Installationsvarianten
 ├── start.bat / start_server.bat            Schnellstart
+├── update.bat              Nur Systemdateien aktualisieren (Daten/config.json bleiben)
 ├── uninstall.bat / .ps1    Deinstallation
 ├── tools/                  search · files · export · engineering · materials · report · routing · imaging · rag · mail
 ├── static/

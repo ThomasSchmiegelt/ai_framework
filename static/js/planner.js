@@ -602,6 +602,53 @@ const Planner = (() => {
     });
   }
 
+  /* ── Ziehbarer horizontaler Trenner: Höhe des KI-Chatfensters ─────── */
+  const _HSPLIT_KEY = 'planner_ai_height';
+  function _initHSplitter() {
+    const splitter = document.getElementById('planner-h-splitter');
+    const panel    = document.getElementById('planner-panel');
+    const ai       = document.getElementById('planner-ai-panel');
+    if (!splitter || !panel || !ai) return;
+
+    // Gespeicherte Höhe wiederherstellen
+    const saved = parseInt(localStorage.getItem(_HSPLIT_KEY) || '', 10);
+    if (saved > 0) panel.style.setProperty('--planner-ai-h', saved + 'px');
+
+    const _apply = (clientY) => {
+      const rect = panel.getBoundingClientRect();
+      let h = rect.bottom - clientY;             // Abstand vom unteren Rand
+      const max = rect.height - 200;             // oberer Bereich mind. ~200px
+      h = Math.max(90, Math.min(h, max));        // Chat mind. 90px
+      panel.style.setProperty('--planner-ai-h', h + 'px');
+    };
+
+    const _onMove = (e) => { _apply(e.clientY); };
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      const cur = parseInt(panel.style.getPropertyValue('--planner-ai-h'), 10) || 0;
+      localStorage.setItem(_HSPLIT_KEY, String(cur));
+      _recalcAndRender();
+    };
+
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+
+    // Doppelklick → Standardhöhe (220px) wiederherstellen
+    splitter.addEventListener('dblclick', () => {
+      panel.style.removeProperty('--planner-ai-h');
+      localStorage.removeItem(_HSPLIT_KEY);
+      _recalcAndRender();
+    });
+  }
+
   /* ── Plan-Liste laden ────────────────────────────────────────────── */
   async function _loadPlanList() {
     const sel = document.getElementById('planner-plan-select');
@@ -1855,6 +1902,8 @@ const Planner = (() => {
 
     // Ziehbarer Trenner Tabelle ↔ Netzplan
     _initSplitter();
+    // Ziehbarer horizontaler Trenner über dem KI-Chatfenster
+    _initHSplitter();
 
     // Tab-Wechsel
     document.querySelector('[data-tab="planner"]')?.addEventListener('click', () => {

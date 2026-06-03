@@ -1365,7 +1365,7 @@ html, body {
 #mail-preview-body {
   width: 100%;
   box-sizing: border-box;
-  min-height: 48vh;
+  min-height: 22vh;
   resize: vertical;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -1378,6 +1378,24 @@ html, body {
   outline: none;
 }
 #mail-preview-body:focus { border-color: var(--accent); }
+
+/* Ergebnis-Karten der Mail-Aktionen (rechte Spalte) */
+.mail-result-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.mail-result-head { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.mail-result-text {
+  width: 100%; box-sizing: border-box; min-height: 140px; resize: vertical;
+  background: var(--bg-main); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); padding: 10px 12px; font-size: 13px; line-height: 1.55;
+  font-family: var(--font); outline: none;
+}
+.mail-result-text:focus { border-color: var(--accent); }
+.mail-result-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 /* Recherche- & RAG-Tab: zwei Spalten (Einstellungen ↔ Ergebnis/Liste) mit Trenner */
 #research-panel,
@@ -2161,11 +2179,31 @@ html, body {
 #planner-canvas:active { cursor: grabbing; }
 
 /* ── KI-Assistent für Planer ────────────────────────────────────── */
+/* Horizontaler Trenner zwischen Netzplan/Tabelle und dem KI-Chatfenster */
+#planner-h-splitter {
+  flex: 0 0 6px;
+  cursor: row-resize;
+  background: var(--border);
+  position: relative;
+  transition: background .15s;
+}
+#planner-h-splitter:hover,
+#planner-h-splitter.dragging {
+  background: var(--accent);
+}
+#planner-h-splitter::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: -4px; bottom: -4px;
+}
+
 #planner-ai-panel {
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  max-height: 220px;
+  flex: 0 0 auto;
+  height: var(--planner-ai-h, 220px);
+  min-height: 90px;
 }
 
 #planner-ai-messages {
@@ -2557,7 +2595,7 @@ html, body {
 #ide-ai-panel {
   display: flex; flex-direction: column;
   flex: 0 0 auto; max-height: 55%;
-  background: #fff; border-bottom: 3px solid var(--accent);
+  background: var(--bg-main); border-bottom: 3px solid var(--accent);
 }
 #ide-ai-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -2579,12 +2617,12 @@ html, body {
   font-size: 13px; line-height: 1.5; max-width: 96%;
 }
 .ide-chat-msg.user {
-  background: var(--accent-dim); color: var(--bg-input); align-self: flex-end;
-  border: 1px solid var(--text-dim);
+  background: var(--bg-user-msg); color: var(--text); align-self: flex-end;
+  border: 1px solid var(--border);
 }
 .ide-chat-msg.assistant {
-  background: var(--accent-dim); color: var(--bg-hover); align-self: flex-start;
-  border: 1px solid var(--text); font-family: inherit;
+  background: var(--bg-input); color: var(--text); align-self: flex-start;
+  border: 1px solid var(--border); font-family: inherit;
 }
 
 #ide-ai-input-area {
@@ -2593,8 +2631,8 @@ html, body {
   flex-shrink: 0; background: var(--accent-dim);
 }
 #ide-chat-input {
-  width: 100%; background: #fff; border: 2px solid var(--text-dim);
-  border-radius: 8px; color: var(--bg-input); font-size: 13px;
+  width: 100%; background: var(--bg-input); border: 2px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: 13px;
   padding: 10px 12px; resize: none; outline: none;
   font-family: var(--font); line-height: 1.5;
   box-sizing: border-box;
@@ -2651,7 +2689,9 @@ html, body {
   padding: 4px 12px; background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
-#ide-preview { flex: 1; border: none; border-bottom: 1px solid var(--border); background: #fff; }
+/* Leere Vorschau folgt dem dunklen Theme; ein laufendes Programm bringt seinen
+   eigenen (weißen) <body>-Hintergrund mit und überdeckt dies. */
+#ide-preview { flex: 1; border: none; border-bottom: 1px solid var(--border); background: var(--bg-main); }
 
 #ide-console-bar {
   display: flex; align-items: center; justify-content: space-between;

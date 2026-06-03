@@ -24,6 +24,7 @@ data/user_profile.json
 data/projects.json
 data/profile_assets/*
 data/mail.json
+data/mail_rules.json
 
 # Verzeichnisstruktur erhalten (Inhalt ignoriert)
 !data/uploads/.gitkeep

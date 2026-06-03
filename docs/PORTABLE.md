@@ -97,6 +97,40 @@ Browser öffnet sich automatisch auf `http://localhost:8780`
 
 ---
 
+## Bundle aktualisieren (`update.bat`)
+
+`update.bat` tauscht **nur die Systemdateien** (Programmcode) eines bestehenden
+Bundles aus und lässt **alle Nutzerdaten und die Konfiguration unberührt**.
+
+**Unverändert bleiben:** `app\data\` (Konversationen, Agenten, Pläne, RAG-DB, Profil,
+Branding, `mail.json`, `mail_rules.json`), `app\config.json` (eigener Port 11500),
+`python\`, `ollama\` inkl. Modelle.
+
+**Ersetzt werden:** `main.py`, `db.py`, `requirements.txt`, `static\`, `tools\`,
+`docs\`, `scripts\`, `samples\`, `bilder\`, `*.md`, `*.ps1`, `*.bat`, `LICENSE`.
+
+### Ablauf
+1. Die **neue Version** entpacken/bereitlegen (der Ordner, in dem `update.bat` liegt
+   = Quelle).
+2. `update.bat` mit dem Pfad der bestehenden Installation als Ziel aufrufen:
+
+   ```
+   update.bat "D:\AI_Framework_Thomas_Portable_YYYYMMDD"
+   ```
+
+   Ohne Argument wird der Zielpfad abgefragt. Das `app\`-Unterverzeichnis wird auf
+   beiden Seiten automatisch erkannt (Portable-Bundle **und** flache Entwickler-Installation).
+3. Vor dem Überschreiben legt das Skript eine Sicherung des alten Codes unter
+   `app\_update_backup\` an (Rollback möglich).
+4. Danach bietet es optional an, die `requirements.txt`-Pakete in das gebündelte
+   `python\` (bzw. `venv\`) zu installieren — wichtig, falls die neue Version neue
+   Abhängigkeiten mitbringt.
+
+> Nach dem Update die App neu starten (`start.bat`) und den Browser mit **Strg+F5**
+> neu laden, damit das aktualisierte Frontend (CSS/JS) geladen wird.
+
+---
+
 ## Technische Details
 
 | Komponente | Methode |

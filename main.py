@@ -110,25 +110,33 @@ _MODE_PROMPTS = {
 VALID_TONES = {"roboter", "professor", "doktor", "felix", "sandra"}
 _TONE_PROMPTS = {
     "roboter": (
-        "Antwortstil »Roboter«: Extrem sachlich und nüchtern. Keine Höflichkeitsfloskeln, "
-        "keine persönliche Anrede, keine Emotionen. Nur Fakten – knapp, präzise und neutral."
+        "Du selbst antwortest im Stil »Roboter«: extrem sachlich und nüchtern. Keine "
+        "Höflichkeitsfloskeln, keine persönliche Anrede, keine Emotionen. Nur Fakten – "
+        "knapp, präzise und neutral."
     ),
     "professor": (
-        "Antwortstil »Herr Professor«: Sprich den Nutzer durchgehend mit »Sie« an. "
-        "Sehr korrekt, formell und distanziert, im souveränen Duktus eines Professors. "
-        "Gewählte, präzise Fachsprache, respektvoll und sachlich."
+        "Du selbst bist »Herr Professor« – antworte in der Rolle eines souveränen "
+        "Hochschulprofessors. WICHTIG: »Herr Professor« bist DU, nicht der Nutzer; rede "
+        "den Nutzer niemals mit »Herr Professor« oder einem Titel an, sondern schlicht "
+        "höflich mit »Sie«. Korrekt, formell und sachlich, in gewählter, präziser Fachsprache."
     ),
     "doktor": (
-        "Antwortstil »Frau Doktor«: Sprich den Nutzer durchgehend mit »Sie« an. "
-        "Korrekt, höflich und sachlich-distanziert, professionell und klar verständlich."
+        "Du selbst bist »Frau Doktor« – antworte in dieser Rolle. WICHTIG: »Frau Doktor« "
+        "bist DU, nicht der Nutzer; rede den Nutzer niemals mit »Frau Doktor« oder einem "
+        "Titel an, sondern schlicht höflich mit »Sie«. Korrekt, höflich und sachlich-"
+        "distanziert, professionell und klar verständlich."
     ),
     "felix": (
-        "Antwortstil »Felix«: Sprich den Nutzer durchgehend mit »Du« an. Locker und "
-        "kumpelhaft, aber fachlich korrekt. Freundlich, direkt und unkompliziert."
+        "Du selbst heißt »Felix« – antworte in dieser Rolle. »Felix« ist DEIN Name, nicht "
+        "der des Nutzers; den Nutzer nicht »Felix« nennen. Sprich den Nutzer durchgehend "
+        "mit »Du« an. Locker und kumpelhaft, aber fachlich korrekt. Freundlich, direkt und "
+        "unkompliziert."
     ),
     "sandra": (
-        "Antwortstil »Sandra«: Sprich den Nutzer durchgehend mit »Du« an. Herzlich und "
-        "kumpelhaft, dabei sehr korrekt und sorgfältig. Nahbar, freundlich und genau."
+        "Du selbst heißt »Sandra« – antworte in dieser Rolle. »Sandra« ist DEIN Name, nicht "
+        "der des Nutzers; den Nutzer nicht »Sandra« nennen. Sprich den Nutzer durchgehend "
+        "mit »Du« an. Herzlich und kumpelhaft, dabei sehr korrekt und sorgfältig. Nahbar, "
+        "freundlich und genau."
     ),
 }
 
@@ -279,6 +287,14 @@ _FORMULA_RULE = (
     "ein, statt nur Zahlen ohne Symbole zu schreiben."
 )
 
+# Funktionen/Kennlinien zusätzlich als Graph zeichnen (tone-/modusunabhängig)
+_PLOT_RULE = (
+    "Wenn der Nutzer eine mathematische Funktion nennt oder du eine berechnest bzw. "
+    "herleitest (z. B. Kennlinie, Verlauf, Kurve) und eine grafische Darstellung das "
+    "Verständnis fördert, zeichne sie mit dem Werkzeug plot_function – unabhängig vom "
+    "gewählten Antwortstil. Den Graphen zeigt die App direkt an."
+)
+
 # Zitate von Normen/Gesetzen/Quellen als Link (Detail-URLs ergänzt die App selbst)
 _CITATION_RULE = (
     "Wenn du eine Norm (DIN/EN/ISO/IEC/VDI/VDE), einen Gesetzes- oder Paragrafenverweis "
@@ -322,7 +338,7 @@ def _augment_prefix(user_text: str = "") -> str:
     if _load_profile().get("pure_llm"):
         return _lang_rule()
     parts = [_BASE_GUARD, _mode_prefix(user_text), _persona_prefix(),
-             _FORMULA_RULE, _CITATION_RULE, _lang_rule()]
+             _FORMULA_RULE, _PLOT_RULE, _CITATION_RULE, _lang_rule()]
     return "\n\n".join(p for p in parts if p)
 
 # Stichwörter je Modus: Die Fachbrille wird nur angewandt, wenn die aktuelle
@@ -336,6 +352,7 @@ _MODE_KEYWORDS = {
         "passung", "bauteil", "maschine", "antrieb", "zahnrad", "feder", "niet",
         "schweißen", "fräsen", "drehen", "bohren", "statik", "dynamik",
         "kinematik", "ingenieur", "vdi", "din", "iso", "cad", "kn", "mpa", "nm",
+        "funktion", "graph", "plot", "plotten", "diagramm", "kennlinie", "verlauf", "kurve",
     ],
     "ki": [
         "ki", "künstliche intelligenz", "machine learning", "ml", "deep learning",
@@ -617,6 +634,32 @@ TOOL_DEFS = [
                     "y2_label": {"type": "string", "description": "Legende zweite Reihe"},
                 },
                 "required": ["x_data", "y_data"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plot_function",
+            "description": (
+                "Zeichnet den Graphen einer mathematischen Funktion und zeigt ihn direkt an. "
+                "IMMER verwenden, wenn der Nutzer eine Funktion nennt (z. B. f(x)=x^2, sin(x), "
+                "sqrt(x), 2x+1) oder einen Graphen/Plot/Verlauf/eine Kennlinie wünscht. "
+                "Versteht ^ als Potenz, implizite Multiplikation (2x) und einen 'f(x)='/'y='-Vorsatz; "
+                "mehrere Funktionen mit ';' trennen, um sie zu vergleichen."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "description": "Funktionsterm, z. B. 'x^2', 'sin(x)', 'sqrt(x)'. Mehrere mit ';' getrennt."},
+                    "var": {"type": "string", "default": "x", "description": "Variable (Standard: x)"},
+                    "x_min": {"type": "number", "default": -10, "description": "Untere Bereichsgrenze"},
+                    "x_max": {"type": "number", "default": 10, "description": "Obere Bereichsgrenze"},
+                    "title": {"type": "string", "description": "Diagrammtitel (optional)"},
+                    "x_label": {"type": "string", "description": "Bezeichnung X-Achse (optional)"},
+                    "y_label": {"type": "string", "description": "Bezeichnung Y-Achse (optional)"},
+                },
+                "required": ["expression"],
             },
         },
     },
@@ -1433,7 +1476,7 @@ async def _chat_generator(request: ChatRequest):
                     pass
 
             # Diagramm-Bild sofort streamen
-            if fn == "plot_chart":
+            if fn in ("plot_chart", "plot_function"):
                 try:
                     img_data = json.loads(tool_result)
                     if img_data.get("type") == "image":
@@ -1519,6 +1562,18 @@ async def _execute_tool(name: str, args: dict) -> str:
             series_label=args.get("series_label", ""),
             y2_data=args.get("y2_data"),
             y2_label=args.get("y2_label", ""),
+        )
+
+    if name == "plot_function":
+        from tools.engineering import plot_function
+        return plot_function(
+            expression=str(args.get("expression", "")),
+            var=str(args.get("var", "x") or "x"),
+            x_min=float(args.get("x_min", -10)),
+            x_max=float(args.get("x_max", 10)),
+            title=str(args.get("title", "")),
+            x_label=str(args.get("x_label", "")),
+            y_label=str(args.get("y_label", "")),
         )
 
     if name == "material_lookup":
@@ -2272,14 +2327,16 @@ async def mail_to_rag(req: Request):
         msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, uids)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"IMAP-Fehler: {e}")
+    do_clean = body.get("clean", True)
     ingested, chunks = 0, 0
     for m in msgs:
-        text = (
-            f"Von: {m['from']}\nAn: {m.get('to', '')}\nDatum: {m['date']}\n"
-            f"Betreff: {m['subject']}\n\n{m['text']}"
-        ).strip()
         if not m["text"].strip():
             continue
+        bodytext = _mail.clean_mail_text(m["text"]) if do_clean else m["text"]
+        text = (
+            f"Von: {m['from']}\nAn: {m.get('to', '')}\nDatum: {m['date']}\n"
+            f"Betreff: {m['subject']}\n\n{bodytext}"
+        ).strip()
         title = f"Mail: {m['subject']}"[:120]
         try:
             n = await ingest_file(coll, text, title, f"mail_{uuid.uuid4().hex[:12]}")
@@ -2288,6 +2345,155 @@ async def mail_to_rag(req: Request):
         except Exception:
             continue
     return {"ok": True, "ingested": ingested, "chunks": chunks}
+
+
+# ── Mail-Aktionen & Regeln (regelbasierte Verarbeitung, Versand stets manuell) ──
+MAIL_RULES_FILE = DATA_DIR / "mail_rules.json"
+
+
+def _load_mail_rules() -> list:
+    if MAIL_RULES_FILE.exists():
+        try:
+            return json.loads(MAIL_RULES_FILE.read_text(encoding="utf-8")) or []
+        except Exception:
+            return []
+    return []
+
+
+@app.get("/api/mail/rules")
+async def mail_rules_list():
+    return {"rules": _load_mail_rules()}
+
+
+@app.post("/api/mail/rules")
+async def mail_rules_save(req: Request):
+    """Speichert/aktualisiert eine Mail-Regel (Filter → bis zu 4 Aktionen).
+    Eine Regel: {id, name, filter:{from,subject,domain}, actions:[…]}."""
+    body = await req.json()
+    rules = _load_mail_rules()
+    rid = str(body.get("id") or uuid.uuid4().hex[:10])
+    rule = {
+        "id": rid,
+        "name": str(body.get("name", "")).strip() or "Regel",
+        "filter": body.get("filter") or {},
+        "actions": (body.get("actions") or [])[:4],
+    }
+    rules = [r for r in rules if r.get("id") != rid] + [rule]
+    MAIL_RULES_FILE.write_text(json.dumps(rules, ensure_ascii=False, indent=2),
+                               encoding="utf-8")
+    return {"ok": True, "rule": rule}
+
+
+@app.delete("/api/mail/rules/{rid}")
+async def mail_rules_delete(rid: str):
+    rules = [r for r in _load_mail_rules() if r.get("id") != rid]
+    MAIL_RULES_FILE.write_text(json.dumps(rules, ensure_ascii=False, indent=2),
+                               encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/api/mail/action/rag")
+async def mail_action_rag(req: Request):
+    """Eine einzelne Mail (optional bereinigt) in eine Wissensdatenbank übernehmen."""
+    from tools import mail as _mail
+    from tools.rag import ingest_file
+    body = await req.json()
+    uid = body.get("uid")
+    cid = body.get("collection_id")
+    if not uid:
+        raise HTTPException(status_code=400, detail="Keine Mail gewählt")
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Wissensdatenbank nicht gefunden")
+    cfg = _load_mail_cfg()
+    try:
+        msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, [uid])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Mail-Fehler: {e}")
+    if not msgs:
+        raise HTTPException(status_code=404, detail="Mail nicht gefunden")
+    m = msgs[0]
+    bodytext = _mail.clean_mail_text(m["text"]) if body.get("clean", True) else m["text"]
+    if not bodytext.strip():
+        raise HTTPException(status_code=400, detail="Mail hat keinen Text")
+    text = (
+        f"Von: {m['from']}\nAn: {m.get('to', '')}\nDatum: {m['date']}\n"
+        f"Betreff: {m['subject']}\n\n{bodytext}"
+    ).strip()
+    title = f"Mail: {m['subject']}"[:120]
+    n = await ingest_file(coll, text, title, f"mail_{uuid.uuid4().hex[:12]}")
+    return {"ok": True, "chunks": n}
+
+
+@app.post("/api/mail/action/agent")
+async def mail_action_agent(req: Request):
+    """Lässt einen Agenten eine Aufgabe an einer Mail erledigen (z. B. Antwort
+    entwerfen, zusammenfassen). Gibt NUR den erzeugten Text zurück — nichts wird
+    gesendet. Versand erfolgt stets manuell im Frontend."""
+    body = await req.json()
+    uid = body.get("uid")
+    instruction = str(body.get("instruction", "")).strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail="Keine Mail gewählt")
+    if not instruction:
+        raise HTTPException(status_code=400, detail="Kein Auftrag angegeben")
+
+    from tools import mail as _mail
+    cfg = _load_mail_cfg()
+    try:
+        msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, [uid])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Mail-Fehler: {e}")
+    if not msgs:
+        raise HTTPException(status_code=404, detail="Mail nicht gefunden")
+    m = msgs[0]
+
+    # Agent-System-Prompt laden (optional); Modell wählen
+    sys_prompt = (
+        "Du bist ein sorgfältiger Assistent für die Mailbearbeitung. Antworte auf "
+        "Deutsch, sachlich und nur auf Basis der vorliegenden Mail. Erfinde nichts."
+    )
+    model = _model_for("general")
+    aid = body.get("agent_id")
+    if aid:
+        af = _agent_path_by_id(aid)
+        if af and af.exists():
+            try:
+                agent = json.loads(af.read_text(encoding="utf-8"))
+                sys_prompt = agent.get("system_prompt") or sys_prompt
+                if agent.get("model"):
+                    model = agent["model"]
+            except Exception:
+                pass
+    model = _pick_model(body.get("model"), model)
+
+    bodytext = _mail.clean_mail_text(m["text"]) or m["text"]
+    user_msg = (
+        f"AUFGABE: {instruction}\n\n"
+        f"--- E-MAIL ---\nVon: {m['from']}\nAn: {m.get('to', '')}\n"
+        f"Datum: {m['date']}\nBetreff: {m['subject']}\n\n{bodytext}\n--- ENDE ---\n\n"
+        f"Erledige die Aufgabe. Gib NUR das Ergebnis aus (keine Vorrede). "
+        f"Falls eine Antwort-Mail verlangt ist, formuliere sie versandfertig."
+    )
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": model,
+                "think": False,
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_msg},
+                ],
+                "options": {"temperature": 0.3},
+                "stream": False,
+            })
+            resp.raise_for_status()
+            out = resp.json().get("message", {}).get("content", "").strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent-Fehler: {e}")
+    out = re.sub(r"<think>.*?</think>", "", out, flags=re.DOTALL).strip()
+    return {"ok": True, "text": out, "model": model,
+            "subject": m.get("subject", ""), "from": m.get("from", "")}
 
 
 @app.post("/api/presentation/from-text")
@@ -2634,6 +2840,22 @@ async def export_pdf(req: Request):
     name = ("ai_framework_thomas_praesentation.pdf"
             if body.get("type") == "presentation" else "ai_framework_thomas_dokument.pdf")
     return FileResponse(fp, filename=name, media_type="application/pdf")
+
+
+@app.post("/api/export/latex")
+async def export_latex(req: Request):
+    """Reine LaTeX-Quelle (.tex): Dokument → article, Präsentation → beamer.
+    Formeln bleiben echtes LaTeX-Math; keine TeX-Installation nötig."""
+    from tools.export import to_latex
+    body = await req.json()
+    body["_profile"] = _load_profile()
+    try:
+        fp = await asyncio.to_thread(to_latex, body)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LaTeX-Export fehlgeschlagen: {e}")
+    name = ("ai_framework_thomas_praesentation.tex"
+            if body.get("type") == "presentation" else "ai_framework_thomas_dokument.tex")
+    return FileResponse(fp, filename=name, media_type="application/x-tex")
 
 
 # ── Profil-API ────────────────────────────────────────────────────────────────
