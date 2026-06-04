@@ -835,6 +835,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     rag_collections: List[str] = []
     science: bool = False   # Wissenschaftsmodus (z. B. Matrix-Recherche)
+    show_thinking: bool = False   # Denkprozess des Modells als eigene SSE-Frames mitsenden
 
 
 class AgentDef(BaseModel):
@@ -1328,6 +1329,8 @@ async def _chat_generator(request: ChatRequest):
     # Niedrige Temperatur reduziert Halluzinationen kleiner Modelle deutlich und
     # macht das Tool-Calling zuverlässiger. Für Wissenschaft/Recherche noch strenger.
     _temp = 0.1 if request.science else 0.3
+    # Denkprozess anfordern? Wird abgeschaltet, falls das Modell 'think' nicht unterstützt.
+    _think_on = bool(request.show_thinking)
     # Agentic Loop
     for _iter in range(8):
         payload = {
@@ -1337,10 +1340,17 @@ async def _chat_generator(request: ChatRequest):
             "options": {"temperature": _temp},
             "tools": active_tools if request.use_tools else [],
         }
+        if _think_on:
+            payload["think"] = True
 
         try:
             async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
                 resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+                # Modelle ohne Reasoning lehnen 'think' mit 400 ab → ohne erneut versuchen
+                if resp.status_code == 400 and _think_on:
+                    _think_on = False
+                    payload.pop("think", None)
+                    resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
                 resp.raise_for_status()
                 result = resp.json()
         except Exception as e:
@@ -1358,6 +1368,28 @@ async def _chat_generator(request: ChatRequest):
                 tool_calls = inline_calls
                 content_raw = _strip_inline_tool_calls(content_raw)
                 msg_obj["content"] = content_raw
+
+        # Denkprozess einsammeln: aus dem nativen 'thinking'-Feld (Reasoning-Modelle)
+        # UND aus inline <think>…</think>-Tags. In jedem Fall aus dem sichtbaren Text
+        # entfernen, damit er nie in die Antwort leckt.
+        _think_parts = []
+        _native_think = (msg_obj.get("thinking") or "").strip()
+        if _native_think:
+            _think_parts.append(_native_think)
+        if content_raw and "<think" in content_raw.lower():
+            _think_parts += [m.strip() for m in
+                             re.findall(r"<think>(.*?)</think>", content_raw, flags=re.DOTALL)]
+            content_raw = re.sub(r"<think>.*?</think>", "", content_raw, flags=re.DOTALL)
+            # unvollständig (kein schließendes Tag): Rest ab <think> als Denken werten
+            _unclosed = re.search(r"<think>(.*)$", content_raw, flags=re.DOTALL)
+            if _unclosed:
+                _think_parts.append(_unclosed.group(1).strip())
+                content_raw = content_raw[:_unclosed.start()]
+            content_raw = re.sub(r"</?think>", "", content_raw).strip()
+            msg_obj["content"] = content_raw
+        _think_text = "\n\n".join(p for p in _think_parts if p).strip()
+        if request.show_thinking and _think_text:
+            yield _sse({"type": "thinking", "content": _think_text})
 
         # Diagnose: Roh-Antwort des Modells protokollieren (hilft bei „keine Antwort")
         _write_log({
@@ -2241,19 +2273,55 @@ async def load_dossier(id: str = Query(...)):
 
 
 # ── Mail (IMAP read-only) → Wissensdatenbank ────────────────────────────────
-# Reine stdlib (tools/mail.py). Zugangsdaten in data/mail.json (NICHT im Backup,
-# NICHT in git – siehe .gitignore). Passwort im Klartext: bei Gmail ein
-# App-Passwort verwenden, nicht das Hauptpasswort.
+# Reine stdlib (tools/mail.py). Server/Port/Benutzer liegen in data/mail.json
+# (NICHT im Backup, NICHT in git – siehe .gitignore). Das **Passwort wird NICHT
+# gespeichert**: es lebt nur im Arbeitsspeicher dieses Prozesses (_MAIL_SESSION_PW)
+# und muss pro Sitzung neu eingegeben werden.
 MAIL_CONFIG_FILE = DATA_DIR / "mail.json"
+
+# Mail-Passwort nur im Speicher halten – nie auf Platte schreiben.
+_MAIL_SESSION_PW: Optional[str] = None
 
 
 def _load_mail_cfg() -> dict:
-    if MAIL_CONFIG_FILE.exists():
+    """Server/Port/Benutzer aus der Datei – ohne Passwort.
+
+    Räumt ein evtl. früher im Klartext gespeichertes Passwort einmalig aus der
+    Datei (Altbestand), damit nichts auf der Platte verbleibt.
+    """
+    if not MAIL_CONFIG_FILE.exists():
+        return {}
+    try:
+        cfg = json.loads(MAIL_CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(cfg, dict):
+        return {}
+    if "password" in cfg:
+        cfg.pop("password", None)
         try:
-            return json.loads(MAIL_CONFIG_FILE.read_text(encoding="utf-8"))
+            MAIL_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
+                                        encoding="utf-8")
         except Exception:
-            return {}
-    return {}
+            pass
+    return cfg
+
+
+def _mail_runtime_cfg() -> dict:
+    """Verbindungs-Konfiguration inkl. Session-Passwort (nur im Speicher)."""
+    cfg = _load_mail_cfg()
+    cfg["password"] = _MAIL_SESSION_PW or ""
+    return cfg
+
+
+def _mail_cfg_or_401() -> dict:
+    """Wie _mail_runtime_cfg, aber mit klarem Hinweis, falls das Passwort fehlt."""
+    if not _MAIL_SESSION_PW:
+        raise HTTPException(
+            status_code=401,
+            detail="Mail-Passwort für diese Sitzung nicht gesetzt – bitte in den Einstellungen eingeben.",
+        )
+    return _mail_runtime_cfg()
 
 
 @app.get("/api/mail/config")
@@ -2265,12 +2333,15 @@ async def mail_get_config():
         "port": cfg.get("port", 993),
         "user": cfg.get("user", ""),
         "ssl": cfg.get("ssl", True),
-        "has_password": bool(cfg.get("password")),
+        # „has_password" = Passwort ist für DIESE Sitzung eingegeben (nur im Speicher)
+        "has_password": bool(_MAIL_SESSION_PW),
+        "password_session_only": True,
     }
 
 
 @app.post("/api/mail/config")
 async def mail_set_config(req: Request):
+    global _MAIL_SESSION_PW
     body = await req.json()
     cfg = _load_mail_cfg()
     cfg["protocol"] = "pop3" if str(body.get("protocol", "imap")).lower() == "pop3" else "imap"
@@ -2278,11 +2349,14 @@ async def mail_set_config(req: Request):
     cfg["port"] = int(body.get("port") or (995 if cfg["protocol"] == "pop3" else 993))
     cfg["user"] = str(body.get("user", "")).strip()
     cfg["ssl"] = bool(body.get("ssl", True))
-    pw = body.get("password")
-    if pw:   # nur überschreiben, wenn ein neues Passwort übergeben wurde
-        cfg["password"] = pw
+    cfg.pop("password", None)   # Passwort niemals in die Datei schreiben
+    # Server/Port/Benutzer dauerhaft speichern …
     MAIL_CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
                                 encoding="utf-8")
+    # … das Passwort nur im Speicher dieser Sitzung halten.
+    pw = body.get("password")
+    if pw:
+        _MAIL_SESSION_PW = pw
     return {"ok": True}
 
 
@@ -2290,7 +2364,7 @@ async def mail_set_config(req: Request):
 async def mail_list(req: Request):
     from tools import mail as _mail
     body = await req.json()
-    cfg = _load_mail_cfg()
+    cfg = _mail_cfg_or_401()
     limit = int(body.get("limit") or 25)
     search = str(body.get("search", "")).strip()
     try:
@@ -2308,7 +2382,7 @@ async def mail_message(req: Request):
     uid = body.get("uid")
     if not uid:
         raise HTTPException(status_code=400, detail="Keine Mail gewählt")
-    cfg = _load_mail_cfg()
+    cfg = _mail_cfg_or_401()
     try:
         msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, [uid])
     except Exception as e:
@@ -2330,7 +2404,7 @@ async def mail_to_rag(req: Request):
         raise HTTPException(status_code=404, detail="Wissensdatenbank nicht gefunden")
     if not uids:
         raise HTTPException(status_code=400, detail="Keine Mails ausgewählt")
-    cfg = _load_mail_cfg()
+    cfg = _mail_cfg_or_401()
     try:
         msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, uids)
     except Exception as e:
@@ -2413,7 +2487,7 @@ async def mail_action_rag(req: Request):
     coll = await _db.rag_get_collection(cid)
     if not coll:
         raise HTTPException(status_code=404, detail="Wissensdatenbank nicht gefunden")
-    cfg = _load_mail_cfg()
+    cfg = _mail_cfg_or_401()
     try:
         msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, [uid])
     except Exception as e:
@@ -2447,7 +2521,7 @@ async def mail_action_agent(req: Request):
         raise HTTPException(status_code=400, detail="Kein Auftrag angegeben")
 
     from tools import mail as _mail
-    cfg = _load_mail_cfg()
+    cfg = _mail_cfg_or_401()
     try:
         msgs = await asyncio.to_thread(_mail.fetch_messages, cfg, [uid])
     except Exception as e:
@@ -2912,6 +2986,9 @@ async def save_profile(req: Request):
         profile["compress_idle_min"] = max(1, int(body.get("compress_idle_min", 10)))
     except (TypeError, ValueError):
         profile["compress_idle_min"] = 10
+    # Erst-Start-Einleitung: einmal absolviert? + beim nächsten Start erneut zeigen?
+    profile["onboarding_done"] = bool(body.get("onboarding_done", False))
+    profile["replay_intro"] = bool(body.get("replay_intro", False))
     PROFILE_FILE.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
     return profile
 
@@ -4117,10 +4194,35 @@ async def get_asset(name: str):
 # Diese ersetzen die früheren Corporate-Bilder unter bilder/. Der Nutzer lädt sie
 # im Profil hoch; sie werden seitenverhältnis-erhaltend auf eine Sollgröße skaliert.
 _PROFILE_ASSETS = {
-    "logo":   {"file": "logo.png",   "max": 512,  "fmt": "PNG",  "size": "512×512 px, PNG mit Transparenz"},
-    "cover":  {"file": "cover.jpg",  "max": 1920, "fmt": "JPEG", "size": "1920×1080 px, JPG"},
-    "header": {"file": "header.jpg", "max": 1920, "fmt": "JPEG", "size": "1920×240 px, PNG/JPG"},
+    "logo":   {"file": "logo.png",   "max": 512,  "fmt": "PNG",  "default": "default_logo.png",   "size": "512×512 px, PNG mit Transparenz"},
+    "cover":  {"file": "cover.jpg",  "max": 1920, "fmt": "JPEG", "default": "default_cover.jpg",   "size": "1920×1080 px, JPG"},
+    "header": {"file": "header.jpg", "max": 1920, "fmt": "JPEG", "default": "default_header.jpg",  "size": "1920×240 px, PNG/JPG"},
 }
+
+
+def _seed_default_profile_assets() -> None:
+    """Beim ersten Start die mitgelieferten Standard-Branding-Bilder
+    (``bilder/default_*``) nach ``data/profile_assets/`` übernehmen – nur, solange
+    der Nutzer noch keine eigenen hochgeladen hat. Einmalig per Sentinel, damit ein
+    bewusst entferntes Asset nicht beim nächsten Start wieder auftaucht."""
+    sentinel = PROFILE_ASSETS_DIR / ".defaults_seeded"
+    if sentinel.exists():
+        return
+    for cfg in _PROFILE_ASSETS.values():
+        target = PROFILE_ASSETS_DIR / cfg["file"]
+        src = BILDER_DIR / cfg.get("default", "")
+        if not target.exists() and src.exists():
+            try:
+                target.write_bytes(src.read_bytes())
+            except Exception:
+                pass
+    try:
+        sentinel.write_text("seeded", encoding="utf-8")
+    except Exception:
+        pass
+
+
+_seed_default_profile_assets()
 
 
 @app.get("/api/profile/assets")

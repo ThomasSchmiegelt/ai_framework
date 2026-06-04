@@ -28,7 +28,7 @@ New-Item -ItemType Directory -Path $STAGE -Force | Out-Null
 
 # App-Baum kopieren – ohne venv, Caches, .claude, .git, KOMPLETTES data, Bundles
 robocopy $APP_DIR $STAGE /E `
-    /XD "venv" "__pycache__" ".claude" ".git" "data" "AI_Framework_Thomas_Portable" "AI_Framework_Thomas_Server" `
+    /XD "venv" "__pycache__" ".claude" ".git" "data" "erster_start" "AI_Framework_Thomas_Portable" "AI_Framework_Thomas_Server" `
     /XF "server.log" "*.pyc" "*.bak" "*.tmp" /NFL /NDL /NJH /NJS | Out-Null
 
 # Datenstruktur frisch aufbauen (nur Defaults + Beispiel, keine Nutzerdaten)

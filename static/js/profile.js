@@ -99,6 +99,8 @@ const Profile = (() => {
     document.getElementById('profile-auto-compress').checked = !!_data.auto_compress;
     document.getElementById('profile-compress-overflow').value = _data.compress_overflow_chars || 12000;
     document.getElementById('profile-compress-idle').value = _data.compress_idle_min || 10;
+    const replayEl = document.getElementById('profile-replay-intro');
+    if (replayEl) replayEl.checked = !!_data.replay_intro;
     _fillModelSelects();
     _refreshPreviews();
     document.getElementById('profile-modal-overlay').classList.add('active');
@@ -172,6 +174,9 @@ const Profile = (() => {
       model_general: document.getElementById('profile-model-general')?.value || '',
       model_coding:  document.getElementById('profile-model-coding')?.value || '',
       model_science: document.getElementById('profile-model-science')?.value || '',
+      // Profil gespeichert ⇒ als eingerichtet markieren; Einleitung nur auf Wunsch erneut
+      onboarding_done: true,
+      replay_intro: !!document.getElementById('profile-replay-intro')?.checked,
     };
     try {
       const resp = await fetch('/api/profile', {

@@ -5,6 +5,8 @@ const Chat = (() => {
   let isStreaming = false;
   let pendingFiles = [];  // { id, filename, is_image }
   let currentConvId = null;
+  let abortController = null;   // bricht den laufenden /api/chat-Stream ab
+  let showThinking = false;    // Denkprozess-Panel aktiv?
 
   // Anzeigenamen der Antwortstil-Personas (Profil → tone). Leer = Standard-Branding.
   const PERSONA_NAMES = {
@@ -18,7 +20,7 @@ const Chat = (() => {
   // Beschriftung der Assistenten-Antwort: gewählte Persona (z. B. „Roboter"),
   // sonst der Markenname. Übersetzt über I18n, falls verfügbar.
   function _assistantLabel() {
-    let name = 'AI_Framework_Thomas';
+    let name = 'LOCAL AI';
     try {
       const tone = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get().tone || '') : '';
       if (tone && PERSONA_NAMES[tone]) {
@@ -77,6 +79,12 @@ const Chat = (() => {
 
   // ── Nachrichten senden ─────────────────────────────────────────────────────
 
+  // Senden-Button: während des Streamings = Abbruch (Sanduhr), sonst senden
+  function sendOrAbort() {
+    if (isStreaming) { abortStreaming(); return; }
+    sendMessage();
+  }
+
   async function sendMessage() {
     if (isStreaming) return;
 
@@ -87,6 +95,9 @@ const Chat = (() => {
     showWelcome(false);
     isStreaming = true;
     setBtnSendState(false);
+
+    // Denkprozess-Panel für die neue Antwort leeren
+    resetThinking();
 
     const model = document.getElementById('model-select').value;
     const agentId = document.getElementById('agent-select').value || null;
@@ -121,11 +132,14 @@ const Chat = (() => {
     // Tool-Status-Element
     let toolStatusEl = null;
 
-    // SSE-Stream starten
+    // SSE-Stream starten (abbrechbar über AbortController)
+    abortController = new AbortController();
+    let wasAborted = false;
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           messages: messages.filter(m => m.role !== 'system'),
           model,
@@ -134,6 +148,7 @@ const Chat = (() => {
           web_search: useSearch,
           conversation_id: currentConvId,
           rag_collections: (typeof RAG !== 'undefined') ? RAG.selectedCollections() : [],
+          show_thinking: showThinking,
         }),
       });
 
@@ -170,21 +185,34 @@ const Chat = (() => {
               insertRagSources(bubbleContent, textEl, event.sources);
             } else if (event.type === 'adaptive') {
               insertAdaptiveNote(bubbleContent, textEl, event.role);
+            } else if (event.type === 'thinking') {
+              appendThinking(event.content);
             }
           } catch (_) {}
         }
       }
     } catch (e) {
-      textEl.innerHTML = `<em style="color:#ef4444">Fehler: ${e.message}</em>`;
+      if (e.name === 'AbortError') {
+        wasAborted = true;
+      } else {
+        textEl.innerHTML = `<em style="color:#ef4444">Fehler: ${e.message}</em>`;
+      }
     }
 
     // Cursor entfernen, Markdown rendern (nur das Textelement, Medien bleiben erhalten)
     const cursor = textEl.querySelector('.cursor');
     if (cursor) cursor.remove();
     renderMarkdown(textEl, fullText);
+    if (wasAborted) {
+      const note = document.createElement('div');
+      note.style.cssText = 'margin-top:6px;font-size:12px;color:var(--text-muted);font-style:italic';
+      note.textContent = '⏹ Abgebrochen';
+      textEl.appendChild(note);
+    }
 
     messages.push({ role: 'assistant', content: fullText });
 
+    abortController = null;
     isStreaming = false;
     setBtnSendState(true);
     scrollToBottom();
@@ -538,8 +566,64 @@ const Chat = (() => {
 
   function setBtnSendState(enabled) {
     const btn = document.getElementById('btn-send');
-    btn.disabled = !enabled;
+    // Während des Streamings bleibt der Button klickbar – ein Klick auf die
+    // Sanduhr (⏳) bricht die laufende Antwort ab.
+    btn.disabled = false;
     btn.textContent = enabled ? '↑' : '⏳';
+    btn.title = enabled ? 'Senden (Enter)' : 'Antwort abbrechen';
+    btn.classList.toggle('btn-send-busy', !enabled);
+  }
+
+  // ── Abbruch ────────────────────────────────────────────────────────────────
+  function abortStreaming() {
+    if (abortController) {
+      try { abortController.abort(); } catch (_) {}
+    }
+  }
+
+  // ── Denkprozess-Panel ───────────────────────────────────────────────────────
+  function setThinkingPanelVisible(visible) {
+    const panel = document.getElementById('thinking-panel');
+    if (panel) panel.style.display = visible ? 'flex' : 'none';
+  }
+
+  function resetThinking() {
+    const el = document.getElementById('thinking-content');
+    if (!el) return;
+    el.textContent = '';
+    el.classList.remove('thinking-empty');
+    el.dataset.has = '';
+  }
+
+  function appendThinking(text) {
+    if (!text) return;
+    const el = document.getElementById('thinking-content');
+    if (!el) return;
+    el.classList.remove('thinking-empty');
+    el.textContent += (el.dataset.has ? '\n\n' : '') + text;
+    el.dataset.has = '1';
+    el.scrollTop = el.scrollHeight;
+    // Falls Antwort kommt, aber Panel zu war: Hinweis nicht nötig – Toggle steuert Sichtbarkeit
+  }
+
+  function toggleThinking() {
+    showThinking = !showThinking;
+    const btn = document.getElementById('btn-thinking-toggle');
+    if (btn) btn.classList.toggle('active', showThinking);
+    setThinkingPanelVisible(showThinking);
+    try { localStorage.setItem('show_thinking', showThinking ? '1' : '0'); } catch (_) {}
+  }
+
+  function initThinking() {
+    try { showThinking = localStorage.getItem('show_thinking') === '1'; } catch (_) {}
+    const btn = document.getElementById('btn-thinking-toggle');
+    if (btn) btn.classList.toggle('active', showThinking);
+    setThinkingPanelVisible(showThinking);
+    const closeBtn = document.getElementById('btn-thinking-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => {
+      // Schließen über ✕ deaktiviert auch den Toggle
+      if (showThinking) toggleThinking();
+    });
   }
 
   function showWelcome(show) {
@@ -818,6 +902,10 @@ const Chat = (() => {
 
   return {
     sendMessage,
+    sendOrAbort,
+    abortStreaming,
+    toggleThinking,
+    initThinking,
     uploadFile,
     loadConversation,
     newConversation,

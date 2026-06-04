@@ -87,7 +87,7 @@ const I18n = (() => {
     'Sammlung(en) wählen': 'Select collection(s)',
     'Chat als Word exportieren': 'Export chat as Word',
     'Senden (Enter)': 'Send (Enter)',
-    'AI_Framework_Thomas · Lokal & privat · Ctrl+K = Neues Gespräch': 'AI_Framework_Thomas · Local & private · Ctrl+K = New chat',
+    'LOCAL AI · Lokal & privat · Ctrl+K = Neues Gespräch': 'LOCAL AI · Local & private · Ctrl+K = New chat',
 
     // ── Canvas ──
     'Kein Inhalt': 'No content',
@@ -242,8 +242,8 @@ const I18n = (() => {
     '↺ Aktualisieren': '↺ Refresh',
     'Alle Typen': 'All types',
     'Fehler': 'Errors',
-    'Protokolliert Chat-Anfragen, Tool-Aufrufe, Exports und Frontend-Ereignisse für Diagnose & Verbesserung von AI_Framework_Thomas.':
-      'Logs chat requests, tool calls, exports and frontend events for diagnostics & improvement of AI_Framework_Thomas.',
+    'Protokolliert Chat-Anfragen, Tool-Aufrufe, Exports und Frontend-Ereignisse für Diagnose & Verbesserung von LOCAL AI.':
+      'Logs chat requests, tool calls, exports and frontend events for diagnostics & improvement of LOCAL AI.',
 
     // ── Agent-Modal ──
     'Neuer Agent': 'New agent',

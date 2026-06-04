@@ -34,7 +34,7 @@ Ollama must be running separately on `http://localhost:11434` with at least one 
 ```
 Frontend (Vanilla JS, 10 tabs) static/js/app.js, chat.js, canvas.js, ide.js, planner.js, …
        ↓ SSE streaming
-Backend (FastAPI)              main.py  (~1900 lines)
+Backend (FastAPI)              main.py  (~4300 lines)
        ↓ httpx
 Ollama (local LLM)             localhost:11434
        ↓

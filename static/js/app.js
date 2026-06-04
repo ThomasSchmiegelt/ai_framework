@@ -195,7 +195,10 @@ function renderSearchResults(results) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Profil zuerst laden, damit das Allgemein-Modell als Standard greift
-  if (typeof Profile !== 'undefined' && Profile.load) { try { await Profile.load(); } catch (_) {} }
+  let _profile = {};
+  if (typeof Profile !== 'undefined' && Profile.load) { try { _profile = await Profile.load(); } catch (_) {} }
+  // Erst-Start-Einleitung beim ersten Mal (oder auf Wunsch) anzeigen
+  if (typeof Onboarding !== 'undefined') { Onboarding.init(); Onboarding.maybeShow(_profile); }
   // Modelle und Agenten laden
   await loadModels();
   await AgentManager.load();
@@ -246,12 +249,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   input.addEventListener('input', () => autoResizeTextarea(input));
 
-  document.getElementById('btn-send').addEventListener('click', () => Chat.sendMessage());
+  document.getElementById('btn-send').addEventListener('click', () => Chat.sendOrAbort());
 
   // Such-Toggle
   document.getElementById('btn-search-toggle').addEventListener('click', function() {
     this.classList.toggle('active');
   });
+
+  // Denkprozess-Toggle (Panel rechts ein-/ausblenden)
+  document.getElementById('btn-thinking-toggle').addEventListener('click', () => Chat.toggleThinking());
+  Chat.initThinking();
 
   // Datei-Upload
   const fileInput = document.getElementById('file-input');

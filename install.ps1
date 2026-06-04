@@ -196,7 +196,8 @@ try {
     $sc.TargetPath       = "$APP_DIR\start.bat"
     $sc.WorkingDirectory = $APP_DIR
     $sc.Description      = "AI_Framework_Thomas — Lokaler KI-Assistent"
-    $sc.IconLocation     = "shell32.dll,13"
+    $iconPath = Join-Path $APP_DIR "bilder\icon.ico"
+    if (Test-Path $iconPath) { $sc.IconLocation = "$iconPath,0" } else { $sc.IconLocation = "shell32.dll,13" }
     $sc.Save()
     Write-OK "Verknüpfung auf Desktop"
 } catch {

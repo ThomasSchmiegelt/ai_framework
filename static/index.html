@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🤖 AI_Framework_Thomas</title>
+  <title>🤖 LOCAL AI</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon" />
 
   <!-- Marked.js für Markdown -->
@@ -22,7 +22,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260603" />
+  <link rel="stylesheet" href="/css/app.css?v=20260604e" />
 </head>
 <body>
 
@@ -33,7 +33,7 @@
     <div id="sidebar-brand">
       <img src="/api/profile/asset/logo" alt="Logo" id="sidebar-logo"
            onerror="this.style.display='none'" />
-      <span id="sidebar-wordmark">AI_Framework_Thomas</span>
+      <span id="sidebar-wordmark">LOCAL AI</span>
     </div>
     <div id="sidebar-top">
       <button id="btn-new-chat">＋ Neues Gespräch</button>
@@ -113,11 +113,12 @@
     <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
     <div id="chat-panel" class="panel active">
 
-      <!-- Nachrichten -->
+      <!-- Nachrichten + optionales Denkprozess-Panel -->
+      <div id="chat-main">
       <div id="messages">
         <!-- Welcome-Screen -->
         <div id="welcome">
-          <h2>🤖 AI_Framework_Thomas</h2>
+          <h2>🤖 LOCAL AI</h2>
           <p>Dein lokaler KI-Assistent auf Basis von Ollama.<br/>
              Stelle eine Frage, lade eine Datei hoch oder aktiviere die Websuche.</p>
 
@@ -130,6 +131,16 @@
             <div class="chip">⚙️ Erkläre den Unterschied zwischen FEM und CFD</div>
           </div>
         </div>
+      </div>
+
+      <!-- Denkprozess-Panel (rechts, umschaltbar) -->
+      <aside id="thinking-panel" style="display:none">
+        <div id="thinking-header">
+          <span>🧠 Denkprozess</span>
+          <button id="btn-thinking-close" title="Panel schließen">✕</button>
+        </div>
+        <div id="thinking-content" class="thinking-empty">Noch kein Denkprozess. Sende eine Nachricht – sofern das Modell Reasoning unterstützt, erscheint es hier.</div>
+      </aside>
       </div>
 
       <!-- Input-Bereich -->
@@ -159,6 +170,9 @@
             <button id="btn-rag-toggle" class="tool-toggle" title="Wissenssammlung (RAG) für die Antwort nutzen">
               📚 RAG
             </button>
+            <button id="btn-thinking-toggle" class="tool-toggle" title="Denkprozess des Modells im rechten Panel anzeigen">
+              🧠 Denkprozess
+            </button>
             <select id="rag-chat-select" class="sidebar-select" multiple size="1"
               title="Sammlung(en) wählen" style="display:none;max-width:200px;height:32px"></select>
 
@@ -178,7 +192,7 @@
         </div>
 
         <div style="margin-top:6px;font-size:11.5px;color:var(--text-muted);text-align:center">
-          AI_Framework_Thomas · Lokal &amp; privat · Ctrl+K = Neues Gespräch
+          LOCAL AI · Lokal &amp; privat · Ctrl+K = Neues Gespräch
         </div>
       </div>
     </div>
@@ -463,8 +477,8 @@
               <input type="text" id="mail-user" class="sidebar-select" placeholder="name@gmail.com" autocomplete="off" />
             </div>
             <div>
-              <label style="font-size:12px">Passwort / App-Passwort</label>
-              <input type="password" id="mail-pass" class="sidebar-select" placeholder="(leer lassen = unverändert)" autocomplete="new-password" />
+              <label style="font-size:12px">Passwort / App-Passwort <span class="planner-muted">(pro Sitzung)</span></label>
+              <input type="password" id="mail-pass" class="sidebar-select" placeholder="jede Sitzung neu eingeben – wird nicht gespeichert" autocomplete="off" />
             </div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;cursor:pointer">
@@ -475,7 +489,9 @@
             <span id="mail-cfg-status" class="planner-muted" style="font-size:12px"></span>
           </div>
           <p class="planner-muted" style="font-size:11.5px;margin-top:8px">
-            ⚠️ Das Passwort wird lokal in <code>data/mail.json</code> im Klartext gespeichert
+            🔒 Das <strong>Passwort wird nicht gespeichert</strong> – es bleibt nur im
+            Arbeitsspeicher dieser Sitzung und muss nach jedem Programmstart neu eingegeben
+            werden. Server, Port und Benutzer bleiben in <code>data/mail.json</code> erhalten
             (nicht im Backup, nicht in git). Für <strong>Gmail</strong> mit 2FA ein
             <strong>App-Passwort</strong> verwenden, nicht das Hauptpasswort.
           </p>
@@ -924,7 +940,7 @@ Beispiele:
       </div>
 
       <div style="padding:6px 14px 4px;font-size:12px;color:var(--text-dim)">
-        Protokolliert Chat-Anfragen, Tool-Aufrufe, Exports und Frontend-Ereignisse für Diagnose &amp; Verbesserung von AI_Framework_Thomas.
+        Protokolliert Chat-Anfragen, Tool-Aufrufe, Exports und Frontend-Ereignisse für Diagnose &amp; Verbesserung von LOCAL AI.
       </div>
 
       <div id="log-entries"></div>
@@ -1199,9 +1215,35 @@ Beispiele:
       </div>
     </div>
 
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <div class="form-group">
+      <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="profile-replay-intro" />
+        🌌 Einleitung beim nächsten Start abspielen
+      </label>
+      <p class="planner-muted" style="font-size:11.5px;margin:4px 0 0">
+        Zeigt die Schritt-für-Schritt-Einführung beim nächsten Programmstart erneut.
+      </p>
+    </div>
+
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn-cancel" id="btn-profile-close">Abbrechen</button>
       <button class="btn-save" id="btn-profile-save">💾 Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Erst-Start-Einleitung (Onboarding) ─────────────────────────────────── -->
+<div id="onboarding-overlay" style="display:none">
+  <div id="onboarding-card">
+    <button id="onboarding-skip" title="Einleitung überspringen">Überspringen ✕</button>
+    <div id="onboarding-body"><!-- von onboarding.js befüllt --></div>
+    <div id="onboarding-footer">
+      <div id="onboarding-dots"></div>
+      <div id="onboarding-nav">
+        <button id="onboarding-back" class="ob-btn ob-btn-ghost">‹ Zurück</button>
+        <button id="onboarding-next" class="ob-btn ob-btn-primary">Weiter ›</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1373,15 +1415,15 @@ Beispiele:
 <div id="toast"></div>
 
 <!-- Scripts (mit Versions-Stempel ?v= → erzwingt Neuladen nach Updates) -->
-<script src="/js/i18n.js?v=20260603"></script>
+<script src="/js/i18n.js?v=20260604"></script>
 <script src="/js/canvas.js?v=20260603"></script>
 <script src="/js/canvas_editor.js?v=20260603"></script>
 <script src="/js/agents.js?v=20260603"></script>
-<script src="/js/chat.js?v=20260603"></script>
+<script src="/js/chat.js?v=20260604"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260603"></script>
 <script src="/js/doc_generator.js?v=20260603"></script>
-<script src="/js/mail.js?v=20260603"></script>
+<script src="/js/mail.js?v=20260604"></script>
 <script src="/js/profile.js?v=20260603"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260603"></script>
@@ -1391,6 +1433,7 @@ Beispiele:
 <script src="/js/json_editor.js?v=20260603"></script>
 <script src="/js/logger.js?v=20260603"></script>
 <script src="/js/ide.js?v=20260603"></script>
+<script src="/js/onboarding.js?v=20260604f"></script>
 <script src="/js/app.js?v=20260603"></script>
 
 </body>

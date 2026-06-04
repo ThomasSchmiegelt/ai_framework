@@ -87,7 +87,13 @@ html[data-mode="custom"] {
 
 #sidebar-wordmark {
   font-weight: 700; font-size: 18px; letter-spacing: 0.5px;
-  color: var(--text); margin-left: 6px;
+  margin-left: 6px;
+  /* Markenschriftzug „LOCAL AI" in Lila/Pink – passend zum Logo */
+  background: linear-gradient(90deg, #d633ff, #ff4ecd);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #ff4ecd; /* Fallback */
 }
 
 .profile-asset-prev {
@@ -377,6 +383,63 @@ html, body {
 
 #messages::-webkit-scrollbar { width: 6px; }
 #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Messages + Denkprozess-Panel nebeneinander */
+#chat-main {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+/* Denkprozess-Panel (rechts, umschaltbar) */
+#thinking-panel {
+  width: 340px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-input);
+  min-height: 0;
+}
+#thinking-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+#thinking-header button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+#thinking-header button:hover { background: var(--bg-hover); color: var(--text); }
+#thinking-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+}
+#thinking-content.thinking-empty { color: var(--text-muted); font-style: italic; font-family: inherit; }
+#thinking-content::-webkit-scrollbar { width: 6px; }
+#thinking-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Senden-Button im Abbruch-Modus (während des Streamings) */
+#btn-send.btn-send-busy { background: var(--bg-hover); color: var(--text); }
 
 .message-row {
   width: 100%;
@@ -1051,8 +1114,9 @@ html, body {
 #welcome h2 {
   font-size: 28px;
   font-weight: 700;
-  color: var(--text);
-  background: linear-gradient(135deg, var(--text-dim), var(--accent), #0056ad);
+  color: #ff4ecd; /* Fallback */
+  /* Markenschriftzug „LOCAL AI" in Lila/Pink – passend zum Logo */
+  background: linear-gradient(135deg, #b07bff, #d633ff, #ff4ecd);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -2756,3 +2820,226 @@ html, body {
 .log-fe      .log-badge { background: #4f5b61; color: var(--text); }   /* rgb(79,91,97) */
 
 /* (IDE-Chat-Styles sind jetzt im Code-IDE-Block oben) */
+
+
+/* ── Erst-Start-Einleitung (Onboarding) ─────────────────────────────────────
+   Pink/Violett im 80er-Sci-Fi-Look, angelehnt an den „eigenen Modus". */
+#onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: none;              /* per JS auf flex */
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(circle at 30% 20%, rgba(214,51,255,0.25), transparent 60%),
+              radial-gradient(circle at 80% 90%, rgba(255,78,205,0.22), transparent 55%),
+              rgba(12,6,20,0.86);
+  backdrop-filter: blur(6px);
+}
+
+#onboarding-card {
+  width: min(1040px, 94vw);
+  height: min(700px, 92vh);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border-radius: 18px;
+  background: #1b0f29;
+  border: 1px solid rgba(255,120,230,0.35);
+  box-shadow: 0 0 0 1px rgba(155,89,208,0.25),
+              0 0 40px rgba(214,51,255,0.35),
+              0 20px 60px rgba(0,0,0,0.6);
+  overflow: hidden;
+}
+
+#onboarding-skip {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 3;
+  background: rgba(20,10,30,0.5);
+  border: 1px solid rgba(255,120,230,0.4);
+  color: #f3d4ff;
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+#onboarding-skip:hover { background: rgba(214,51,255,0.25); border-color: #ff7ee6; }
+
+#onboarding-body { flex: 1; min-height: 0; display: flex; }
+
+.ob-slide { flex: 1; min-height: 0; display: flex; }
+
+/* Folie 1 – Startbild als Hintergrund, Formular links über transparentem Panel */
+.ob-slide--form {
+  background-size: cover;
+  background-position: right center;
+  position: relative;
+}
+.ob-slide--form::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, rgba(20,8,32,0.92) 0%, rgba(20,8,32,0.78) 42%, rgba(20,8,32,0) 66%);
+}
+.ob-form-panel {
+  position: relative;
+  z-index: 1;
+  width: min(56%, 520px);
+  padding: 38px 34px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ob-field { display: flex; flex-direction: column; gap: 4px; }
+.ob-field label { font-size: 12.5px; color: #f0c8ff; letter-spacing: 0.3px; }
+.ob-field .ob-opt { color: #b98fd6; font-size: 11px; }
+
+.ob-input {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,120,230,0.45);
+  border-radius: 9px;
+  padding: 9px 12px;
+  color: #fff;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.ob-input::placeholder { color: rgba(243,212,255,0.5); }
+.ob-input:focus {
+  border-color: #ff4ecd;
+  background: rgba(255,255,255,0.10);
+  box-shadow: 0 0 0 3px rgba(255,78,205,0.25), 0 0 18px rgba(214,51,255,0.4);
+}
+.ob-textarea { resize: vertical; min-height: 64px; line-height: 1.45; }
+
+.ob-divider {
+  margin: 8px 0 2px;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ff8fe6;
+  text-shadow: 0 0 10px rgba(255,78,205,0.6);
+}
+
+/* Info-Folien – Text + Screenshot (Standard: zentriert, z. B. Personalisierung) */
+.ob-slide--info { padding: 46px 44px; gap: 30px; align-items: center; }
+.ob-info-text { flex: 1 1 42%; }
+.ob-info-image {
+  flex: 1 1 58%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ob-info-image img {
+  max-width: 100%;
+  max-height: 460px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,120,230,0.35);
+  box-shadow: 0 0 28px rgba(214,51,255,0.3), 0 10px 30px rgba(0,0,0,0.5);
+}
+
+/* „big" (ab Folie „Chat"): Screenshot füllt die Folie, Text liegt darüber –
+   exakt der Aufbau von Folie 1 (Startbild). */
+.ob-slide--cover {
+  position: relative;
+  background-size: cover;
+  background-position: right center;
+}
+.ob-slide--cover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg,
+    rgba(20,8,32,0.82) 0%, rgba(20,8,32,0.66) 36%,
+    rgba(20,8,32,0.28) 58%, rgba(20,8,32,0) 76%);
+}
+.ob-cover-panel {
+  position: relative;
+  z-index: 1;
+  width: min(52%, 480px);
+  height: 100%;
+  padding: 40px 38px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow-y: auto;
+}
+
+.ob-title {
+  margin: 0 0 14px;
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 18px rgba(255,78,205,0.55);
+}
+.ob-slide--form .ob-title { font-size: 23px; margin-bottom: 8px; }
+.ob-text { margin: 0; font-size: 15px; line-height: 1.6; color: #e4ccf5; }
+.ob-text strong { color: #ffaef0; }
+
+/* Fußzeile mit Punkten + Navigation */
+#onboarding-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 26px;
+  border-top: 1px solid rgba(255,120,230,0.2);
+  background: rgba(10,4,18,0.5);
+}
+#onboarding-dots { display: flex; gap: 8px; }
+.ob-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: rgba(255,120,230,0.28);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.ob-dot:hover { background: rgba(255,120,230,0.6); }
+.ob-dot.active {
+  background: #ff4ecd;
+  transform: scale(1.25);
+  box-shadow: 0 0 10px rgba(255,78,205,0.8);
+}
+
+#onboarding-nav { display: flex; gap: 10px; }
+.ob-btn {
+  padding: 9px 20px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: filter 0.15s, background 0.15s, border-color 0.15s;
+}
+.ob-btn-ghost {
+  background: transparent;
+  border-color: rgba(255,120,230,0.4);
+  color: #f0c8ff;
+}
+.ob-btn-ghost:hover { background: rgba(214,51,255,0.18); }
+.ob-btn-primary {
+  background: linear-gradient(95deg, #d633ff, #ff4ecd);
+  color: #fff;
+  box-shadow: 0 0 18px rgba(255,78,205,0.5);
+}
+.ob-btn-primary:hover { filter: brightness(1.1); }
+
+@media (max-width: 720px) {
+  .ob-slide--info { flex-direction: column; padding: 32px 24px; gap: 18px; }
+  .ob-form-panel { width: 100%; }
+  .ob-slide--form::before {
+    background: linear-gradient(180deg, rgba(20,8,32,0.92), rgba(20,8,32,0.82));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #onboarding-overlay { backdrop-filter: none; }
+  .ob-dot, .ob-btn { transition: none; }
+}

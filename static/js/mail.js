@@ -33,8 +33,12 @@ const Mail = (() => {
       document.getElementById('mail-user').value = c.user || '';
       document.getElementById('mail-ssl').checked = c.ssl !== false;
       const st = document.getElementById('mail-cfg-status');
-      if (st) st.textContent = c.has_password ? '✓ Zugang gespeichert' : '';
-      // Einstellungen aufklappen, wenn noch kein Zugang hinterlegt ist
+      // Passwort wird NICHT gespeichert – es gilt nur für die laufende Sitzung.
+      if (st) st.textContent = c.has_password
+        ? '🔓 Passwort für diese Sitzung aktiv'
+        : '🔒 Passwort für diese Sitzung eingeben (wird nicht gespeichert)';
+      // Einstellungen aufklappen, wenn Server/Benutzer fehlen ODER das Passwort
+      // für diese Sitzung noch nicht eingegeben wurde.
       const det = document.getElementById('mail-settings');
       if (det && !(c.host && c.user && c.has_password)) det.open = true;
     } catch (_) {}
