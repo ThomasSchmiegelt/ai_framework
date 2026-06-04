@@ -831,6 +831,7 @@ class ChatRequest(BaseModel):
     model: str = DEFAULT_MODEL
     agent_id: Optional[str] = None
     use_tools: bool = True
+    web_search: bool = False   # Websuche-Tool nur anbieten, wenn der Schalter aktiv ist
     conversation_id: Optional[str] = None
     rag_collections: List[str] = []
     science: bool = False   # Wissenschaftsmodus (z. B. Matrix-Recherche)
@@ -1230,6 +1231,13 @@ async def _chat_generator(request: ChatRequest):
                 request.agent_id == "presenter"
                 or agent.get("category") == "Präsentation"
             )
+
+    # Websuche ist standardmäßig AUS und nur über den Schalter (oder Wissenschafts-
+    # modus) verfügbar. Alle übrigen Werkzeuge (Plot, Rechner, Einheiten …) bleiben
+    # davon unberührt – sonst „malt" das Modell mangels plot_function selbst Linien.
+    if not (request.web_search or request.science):
+        active_tools = [t for t in active_tools
+                        if t["function"]["name"] != "web_search"]
 
     # Rollen-Modell wählen, sofern der Agent keines fest vorgibt:
     #  • Programmier-Agent (code_ide) → Programmier-Modell

@@ -757,8 +757,54 @@ def _latex_inline(text: str) -> str:
     return t
 
 
+def _latex_table(rows: list[str]) -> str:
+    """Markdown-Tabelle (Zeilen mit ``|``) -> LaTeX-tabular. Die Trennzeile
+    (``|---|---|``) wird übersprungen."""
+    def cells(line: str) -> list[str]:
+        s = line.strip()
+        if s.startswith("|"):
+            s = s[1:]
+        if s.endswith("|"):
+            s = s[:-1]
+        return [c.strip() for c in s.split("|")]
+
+    body = [r for r in rows if not re.match(r"^\s*\|?[\s:|-]+\|?\s*$", r)]
+    if not body:
+        return ""
+    ncol = max(len(cells(r)) for r in body)
+    out = [r"\begin{center}", r"\begin{tabular}{|" + "l|" * ncol + "}", r"\hline"]
+    for i, r in enumerate(body):
+        cs = cells(r)
+        cs += [""] * (ncol - len(cs))
+        out.append(" & ".join(_latex_inline(c) for c in cs) + r" \\")
+        out.append(r"\hline")
+    out += [r"\end{tabular}", r"\end{center}"]
+    return "\n".join(out)
+
+
 def _md_to_latex_body(content: str) -> str:
-    """Markdown -> LaTeX-Body (Überschriften, Listen, Absätze)."""
+    """Markdown -> LaTeX-Body. Blockorientiert: mehrzeilige Display-Formeln
+    (``$$..$$`` / ``\\[..\\]``) und Codeblöcke (``` ``` ```) werden ZUERST aus
+    dem Fließtext herausgelöst und unzerschnitten gesetzt — sonst zerbricht die
+    zeilenweise Verarbeitung jede über mehrere Zeilen gehende Formel."""
+    text = content or ""
+    stash: list[str] = []
+
+    def _keep_block(latex: str) -> str:
+        stash.append(latex)
+        return "\n\x03%d\x03\n" % (len(stash) - 1)
+
+    # 1) Codeblöcke schützen (verbatim, NICHT maskiert)
+    text = re.sub(
+        r"```[A-Za-z0-9_+-]*\n(.*?)```",
+        lambda m: _keep_block("\\begin{verbatim}\n" + m.group(1).rstrip("\n") + "\n\\end{verbatim}"),
+        text, flags=re.DOTALL)
+    # 2) Display-Formeln (auch mehrzeilig) schützen
+    text = re.sub(
+        r"\$\$(.+?)\$\$|\\\[(.+?)\\\]",
+        lambda m: _keep_block("\\[\n" + (m.group(1) or m.group(2)).strip() + "\n\\]"),
+        text, flags=re.DOTALL)
+
     out: list[str] = []
     list_mode = None  # "itemize" | "enumerate"
 
@@ -768,11 +814,23 @@ def _md_to_latex_body(content: str) -> str:
             out.append(r"\end{%s}" % list_mode)
             list_mode = None
 
-    for raw in (content or "").split("\n"):
-        line = raw.rstrip()
-        if not line.strip():
-            _close()
-            out.append("")
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+        stripped = line.strip()
+        # Geschützter Block (Code/Formel) -> 1:1 einsetzen
+        mblk = re.match(r"^\x03(\d+)\x03$", stripped)
+        if mblk:
+            _close(); out.append(stash[int(mblk.group(1))]); i += 1; continue
+        # Markdown-Tabelle: aufeinanderfolgende Zeilen mit '|'
+        if "|" in stripped and stripped.startswith("|"):
+            tbl = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                tbl.append(lines[i]); i += 1
+            _close(); out.append(_latex_table(tbl)); continue
+        if not stripped:
+            _close(); out.append("")
         elif line.startswith("#### "):
             _close(); out.append(r"\paragraph{%s}" % _latex_inline(line[5:]))
         elif line.startswith("### "):
@@ -791,6 +849,7 @@ def _md_to_latex_body(content: str) -> str:
             out.append(r"  \item " + _latex_inline(re.sub(r"^\d+\.\s+", "", line)))
         else:
             _close(); out.append(_latex_inline(line))
+        i += 1
     _close()
     return "\n".join(out)
 
