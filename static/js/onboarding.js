@@ -87,15 +87,25 @@ const Onboarding = (() => {
            + 'Konfliktwarnungen. Die KI hilft beim Ableiten und Detaillieren der Aufgaben.',
     },
     {
+      image: 'code.png',
+      title: '10 · Code-IDE',
+      text: 'Schreibe und führe kleine Programme direkt im Browser aus: links der '
+           + '<strong>Code-Editor</strong>, rechts die <strong>Live-Vorschau</strong> mit interaktiven '
+           + 'Eingabefeldern und Canvas. Der <strong>KI-Assistent</strong> erzeugt den Code auf Zuruf '
+           + '(„was soll das Programm zeigen?") und repariert ihn bei Fehlern. Fertige '
+           + '<strong>Beispiele</strong> wie Toleranzanalyse oder Federkennlinie sind ein Klick entfernt. '
+           + 'Im Reiter <strong>JSON-Editor</strong> reparierst du defekte JSON-Dateien mit Live-Prüfung.',
+    },
+    {
       image: 'Mail_System.png',
-      title: '10 · Mail-Bearbeitung',
+      title: '11 · Mail-Bearbeitung',
       text: 'Lies Postfächer (IMAP/POP3) und verarbeite Mails per Regeln: in eine Wissensdatenbank '
            + 'übernehmen, als Agenten-Aufgabe, an den Dokumentengenerator oder als Notiz. Der '
            + 'Versand bleibt <strong>immer manuell</strong>. <em>(🚧 in Entwicklung)</em>',
     },
     {
       image: 'log_file.png',
-      title: '11 · Log-Datei',
+      title: '12 · Log-Datei',
       text: 'Im <strong>Log-Tab</strong> siehst du bei Bedarf, was im Hintergrund passiert: '
            + 'Modell-Antworten, Tool-Aufrufe und Diagnosen. Praktisch zur Fehlersuche – '
            + 'ein- und ausschaltbar und als Datei exportierbar.',
