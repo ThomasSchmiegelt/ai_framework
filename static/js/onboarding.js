@@ -13,7 +13,7 @@ const Onboarding = (() => {
   const SLIDES = [
     {
       kind: 'form',
-      image: 'start.jfif',
+      image: 'start.jpg',
       title: 'Willkommen an Bord 🌌',
       text: 'Schön, dass du da bist! Erzähl mir kurz, wer du bist – und richte deinen ganz '
            + 'eigenen Modus ein. In genau diesem Modus startet das Framework gleich.',

@@ -137,6 +137,51 @@ Alle von KI erzeugten Texte werden in Exporten mit **„Von KI generiert"** geke
 
 ---
 
+## 🖼️ Oberfläche
+
+Ein Eindruck der wichtigsten Tabs (Screenshots aus der Anwendung):
+
+![Start & Personalisierung](static/onboarding/start.jpg)
+*Erststart: Profil und eigener Modus werden eingerichtet.*
+
+![Personalisierung](static/onboarding/personalisierung.png)
+*👤 Profil — Modell-Rollen, Modus, Sprache und Branding.*
+
+![Chat](static/onboarding/chat_fenster.png)
+*💬 Chat mit Streaming, Tool-Aufrufen und Formel-/Plot-Ausgabe.*
+
+![Agenten](static/onboarding/agenten.png)
+*🤖 Agenten — eigene System-Prompts und Tool-Sets, Favoriten in der Sidebar.*
+
+![Recherche](static/onboarding/agentische_recherche.png)
+*🔬 Recherche — aspektbasiert mit Quellen.*
+
+![Canvas](static/onboarding/Praesentation_canvas.png)
+*🖼️ Canvas — Präsentationen & Tabellen mit WYSIWYG-Editor.*
+
+![Dokumentengenerator](static/onboarding/Dokumentengenerator.png)
+*📄 Dokumentengenerator — gestützt auf Agenten, Wissensdatenbanken und Quellmaterial.*
+
+![Wissensdatenbanken (RAG)](static/onboarding/RAG_Wissensdatenbank.png)
+*📚 Wissensdatenbanken (RAG) — Dokumente einbetten und im Chat als Kontext nutzen.*
+
+![Mail](static/onboarding/Mail_System.png)
+*📧 Mail-Bearbeitung (🚧 in Entwicklung) — Postfach read-only filtern und Aktionen auslösen.*
+
+![Planer](static/onboarding/planer.png)
+*🗂️ Planer — Netzplan / Kritischer Pfad (CPM) mit Ressourcen und Bestellplan.*
+
+![Matrix-Recherche](static/onboarding/matrix.png)
+*📊 Matrix-Recherche — Recherche-Tabelle mit Agent je Spalte.*
+
+![Code](static/onboarding/code.png)
+*💻 Code — IDE mit Canvas-Vorschau und JSON-Editor.*
+
+![Diagnose-Logger](static/onboarding/log_file.png)
+*📋 Diagnose-Logger — zuschaltbares Protokoll zur Fehlersuche.*
+
+---
+
 ## Architektur
 
 ```
