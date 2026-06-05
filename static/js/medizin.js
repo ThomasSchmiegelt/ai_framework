@@ -10,18 +10,38 @@ const MedizinChat = (() => {
 
   // ── Modell ──────────────────────────────────────────────────────────────
 
-  function _syncModelSelect() {
-    const src = document.getElementById('model-select');
+  // Im Medizin-Tab dürfen NUR medizinische Modelle (medgemma-Familie, z. B.
+  // medgemma:4b / medgemma:27b) als Analyse-Modell gewählt werden – keine
+  // allgemeinen Chat-Modelle.
+  // Nur das offizielle MedGemma (medgemma:4b / medgemma:27b o. ä.) zulassen –
+  // keine allgemeinen Chat-Modelle und keine Community-Ports.
+  function _isMedModel(name) { return /^medgemma:/i.test(name || ''); }
+
+  async function _syncModelSelect() {
     const dst = document.getElementById('medizin-model-select');
-    if (!src || !dst) return;
+    if (!dst) return;
+    let names = [];
+    // Zuerst aus der bereits geladenen Sidebar-Liste, sonst direkt abrufen
+    const src = document.getElementById('model-select');
+    if (src) names = Array.from(src.options).map(o => o.value).filter(Boolean);
+    if (!names.some(_isMedModel)) {
+      try {
+        const r = await fetch('/api/models');
+        const d = await r.json();
+        names = (d.models || []).map(m => m.name);
+      } catch (_) {}
+    }
     const medModel = (typeof Profile !== 'undefined' && Profile.get)
       ? (Profile.get().model_medical || '') : '';
-    dst.innerHTML = src.innerHTML;
-    if (medModel && Array.from(dst.options).some(o => o.value === medModel)) {
-      dst.value = medModel;
-    } else {
-      dst.value = src.value;
+    const medgemma = names.filter(_isMedModel);
+    if (!medgemma.length) {
+      dst.innerHTML = '<option value="">Kein medgemma-Modell – „ollama pull medgemma:4b"</option>';
+      return;
     }
+    dst.innerHTML = medgemma.map(v => `<option value="${v}">${v}</option>`).join('');
+    // Vorauswahl: hinterlegtes Medizin-Modell (falls medgemma), sonst erstes medgemma
+    dst.value = (medModel && _isMedModel(medModel) && medgemma.includes(medModel))
+      ? medModel : medgemma[0];
   }
 
   // ── Patienten-RAG ────────────────────────────────────────────────────────

@@ -79,7 +79,7 @@ serialize — never nested):
 3a. if incomplete and `round < _MED_MAX_ROUNDS` (=2): Ministral **formulates a follow-up question** → `question` frame, waits for the user's answer
 3b. if complete or rounds exhausted: MedGemma streams the **final assessment** (`think:False` — MedGemma returns empty content with Ollama think mode)
 
-SSE frames: `stage` (`{stage:refine|analyze|formulate|final, status:start|done, label?, content?}` → collapsible blocks in the UI), `question` (`{content, round}` → shown as assistant bubble, frontend tracks `round`), `text`, `done` (`{needs_followup, round}`), `error`. `POST /api/medizin/translate` streams a lay-language translation of an assessment via the general model (the `🗣 In einfaches Deutsch übersetzen` button). Patient files are RAG collections whose name starts with `Patient:` (filtered in `medizin.js`). Disclaimer text in `_MED_DISCLAIMER`.
+SSE frames: `stage` (`{stage:refine|analyze|formulate|final, status:start|done, label?, content?}` → collapsible blocks in the UI), `question` (`{content, round}` → shown as assistant bubble, frontend tracks `round`), `text`, `done` (`{needs_followup, round}`), `error`. `POST /api/medizin/translate` streams a lay-language translation of an assessment via the general model (the `🗣 In einfaches Deutsch übersetzen` button). Patient files are RAG collections whose name starts with `Patient:` (filtered in `medizin.js`). The Medizin model selector is **restricted to MedGemma** (`_isMedModel` → `/^medgemma:/i`, e.g. `medgemma:4b`/`medgemma:27b`); no general chat models are offered there (an empty list shows an `ollama pull medgemma:4b` hint). Disclaimer text in `_MED_DISCLAIMER`.
 
 ### Mathe tab — tutor mode with deterministic SymPy grounding
 

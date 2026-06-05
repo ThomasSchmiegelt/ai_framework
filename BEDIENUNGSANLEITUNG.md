@@ -509,8 +509,9 @@ Rückfragen) zurückschalten.
   Für **dauerhafte** Befunde/Bilder besser **📎 In Akte laden** nutzen (Patienten-RAG;
   die Pipeline nutzt die Akte automatisch als Kontext).
 - **🗑 Verlauf löschen** — Chat-Reset (die Patienten-Akte bleibt erhalten).
-- Das **Medizin-Modell** wird im Dropdown oben gewählt (Vorauswahl: das im Profil
-  hinterlegte Medizin-Modell).
+- Das **Medizin-Modell** wird im Dropdown oben gewählt — hier sind **nur MedGemma-Modelle**
+  (`medgemma:4b` / `medgemma:27b`) zugelassen, keine allgemeinen Chat-Modelle. Ist keins
+  installiert, weist ein Hinweis auf `ollama pull medgemma:4b` hin.
 
 ### Schnell-Prompts
 
