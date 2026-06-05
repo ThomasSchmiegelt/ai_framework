@@ -12,6 +12,12 @@ import aiosqlite
 
 DB_PATH = Path("data/ai_framework_thomas.db")
 
+
+def set_db_path(path: Path):
+    """Wird von main.py aufgerufen um den Datenbankpfad aus config.json zu setzen."""
+    global DB_PATH
+    DB_PATH = path
+
 _SCHEMA_STMTS = [
     "PRAGMA journal_mode=WAL",
     "PRAGMA foreign_keys=ON",
@@ -61,6 +67,7 @@ _SCHEMA_STMTS = [
         clean         INTEGER NOT NULL DEFAULT 1,
         char_limit    INTEGER NOT NULL DEFAULT 3000,
         strictness    TEXT    NOT NULL DEFAULT 'ausgewogen',
+        server_path   TEXT,
         created_at    REAL    NOT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS rag_documents (
@@ -100,6 +107,10 @@ async def init():
             pass
         try:
             await db.execute("ALTER TABLE rag_collections ADD COLUMN strictness TEXT NOT NULL DEFAULT 'ausgewogen'")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE rag_collections ADD COLUMN server_path TEXT")
         except Exception:
             pass
         await db.commit()
@@ -305,15 +316,25 @@ async def rag_create_collection(coll: dict):
         await db.execute(
             """INSERT INTO rag_collections
                (id, name, embed_model, tier, chunk_size, chunk_overlap, top_k,
-                embed_gpu, clean, char_limit, strictness, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                embed_gpu, clean, char_limit, strictness, server_path, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 coll["id"], coll["name"], coll["embed_model"], coll["tier"],
                 coll["chunk_size"], coll["chunk_overlap"], coll["top_k"],
                 1 if coll.get("embed_gpu") else 0, 1 if coll.get("clean", True) else 0,
                 int(coll.get("char_limit", 3000)), coll.get("strictness", "ausgewogen"),
+                coll.get("server_path") or None,
                 coll.get("created_at") or time.time(),
             ),
+        )
+        await db.commit()
+
+
+async def rag_set_server_path(cid: str, server_path: Optional[str]):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE rag_collections SET server_path=? WHERE id=?",
+            (server_path or None, cid),
         )
         await db.commit()
 
@@ -449,22 +470,51 @@ async def rag_collection_exists(cid: str) -> bool:
         return await cur.fetchone() is not None
 
 
+async def rag_export_collection(cid: str) -> Optional[dict]:
+    """Exportiert eine einzelne RAG-Sammlung inkl. Dokumente, Chunks und
+    Embeddings als rohe Bytes (Aufrufer base64-kodiert für JSON-Serialisierung)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM rag_collections WHERE id=?", (cid,))
+        c = await cur.fetchone()
+        if not c:
+            return None
+        c = dict(c)
+        cur = await db.execute(
+            "SELECT id, filename, n_chunks, created_at FROM rag_documents "
+            "WHERE collection_id=? ORDER BY created_at",
+            (cid,),
+        )
+        docs = [dict(r) for r in await cur.fetchall()]
+        for d in docs:
+            cur = await db.execute(
+                "SELECT seq, text, embedding FROM rag_chunks WHERE document_id=? ORDER BY seq",
+                (d["id"],),
+            )
+            d["chunks"] = [
+                {"seq": r["seq"], "text": r["text"], "embedding": bytes(r["embedding"])}
+                for r in await cur.fetchall()
+            ]
+        return {"collection": c, "documents": docs}
+
+
 async def rag_import_collection(coll: dict, documents: list):
     """Stellt eine Sammlung inkl. Dokumente/Chunks/Embeddings wieder her
-    (Backup-Restore). Embeddings werden als rohe Bytes erwartet. Der Aufrufer
+    (Backup-Restore oder Klon). Embeddings werden als rohe Bytes erwartet. Der Aufrufer
     stellt sicher, dass die Sammlung noch nicht existiert."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute(
             """INSERT INTO rag_collections
                (id, name, embed_model, tier, chunk_size, chunk_overlap, top_k,
-                embed_gpu, clean, char_limit, strictness, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                embed_gpu, clean, char_limit, strictness, server_path, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 coll["id"], coll["name"], coll["embed_model"], coll["tier"],
                 coll["chunk_size"], coll["chunk_overlap"], coll["top_k"],
                 1 if coll.get("embed_gpu") else 0, 1 if coll.get("clean", True) else 0,
                 int(coll.get("char_limit", 3000)), coll.get("strictness", "ausgewogen"),
+                coll.get("server_path") or None,
                 coll.get("created_at") or time.time(),
             ),
         )

@@ -435,5 +435,5 @@ const DocGen = (() => {
     document.querySelector('.tab-btn[data-tab="docgen"]')?.addEventListener('click', refresh);
   }
 
-  return { init, refresh, loadFromChat };
+  return { init, refresh, loadFromChat, getText: () => _docText, setText: t => { _docText = t; } };
 })();

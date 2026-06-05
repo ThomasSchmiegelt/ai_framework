@@ -51,10 +51,12 @@ Standardmäßig wird **nur ein** kleines, lokal lauffähiges Modell installiert/
 | `ministral-3:3b` | Standardmodell für alles (auch Vision) | ~2 GB |
 | `gemma4:e2b` | Alternatives kompaktes Chat-Modell | ~2 GB |
 | `nomic-embed-text` | RAG-Embeddings (CPU) | ~0,3 GB |
+| `alibayram/medgemma` | *optional* — medizinisches Modell für den 🩺 Medizin-Tab | ~2,5 GB |
 
-**Drei Modell-Rollen im Profil:** Unter **👤 Profil → 🧠 Modelle** lässt sich je
-Einsatzzweck — **Allgemein**, **Programmieren**, **Wissenschaftlich** — ein eigenes
-Modell zuweisen. Leer = `ministral-3:3b`. Weitere Modelle vorher bei Bedarf laden:
+**Vier Modell-Rollen im Profil:** Unter **👤 Profil → 🧠 Modelle** lässt sich je
+Einsatzzweck — **Allgemein**, **Programmieren / Mathe** (gemeinsames Modell für Code-IDE und
+Mathe-Tab), **Wissenschaftlich**, **Medizin** — ein eigenes Modell zuweisen.
+Leer = `ministral-3:3b`. Weitere Modelle vorher bei Bedarf laden:
 
 ```bash
 ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
@@ -70,8 +72,9 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 
 - 💬 **Chat** mit Streaming (SSE), Websuche (standardmäßig **aus**), Berechnungen
 - 📈 **Funktion plotten** — nennst du eine Funktion (`f(x)=x^2`, `sin(x)`, `sqrt(x)`)
-  oder bittest um einen Graphen, zeichnet die KI ihn **direkt im Chat** (`plot_function`,
-  mehrere Funktionen mit `;`); immer aktiv, im Maschinenbau-Modus betont
+  oder bittest um einen Graphen, wird er **direkt im Chat** gezeichnet. Die Erkennung +
+  Zeichnung laufen **deterministisch serverseitig** (mehrere Funktionen mit `und`/`;`,
+  Bereich „von … bis …") — zuverlässig unabhängig davon, ob das kleine Modell mitspielt
 - 🗺️ **Routenplaner** — Frage nach dem Weg von A nach B zeigt eine interaktive
   OpenStreetMap-Route direkt im Chat (Geocoding via Nominatim, Routing via OSRM)
 - 🖼️ **Canvas** — Präsentationen & Tabellen, Export als **PPTX/XLSX/PDF/LaTeX (.tex)**,
@@ -126,6 +129,19 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   erstellen, ausführen, interaktive Eingabefelder, Auto-Fehlerreparatur) und
   **JSON-Editor** (JSON-Dateien öffnen, live prüfen, formatieren, reparieren — auch
   ohne Programmierkenntnisse)
+- 🔢 **Mathe-Tab** — eigener Mathematik-Workspace: löst Gleichungen, rechnet mit
+  SymPy/NumPy/SciPy, **LaTeX standardmäßig**, Export als **LaTeX/PDF**. **Funktionsgraphen**
+  werden **zuverlässig deterministisch serverseitig** gezeichnet (nicht modellabhängig) — der
+  Plot-Schalter sitzt direkt an der Chatzeile. **🎓 Tutor-Modus** führt Schritt für Schritt
+  zur Lösung (adaptiv-sokratisch), statt sie zu verraten — und prüft deine Zwischenschritte
+  **werkzeuggeprüft** (serverseitig mit SymPy verifiziert). Teilt sich das Modell mit dem Code-Tab
+- 🩺 **Medizin-Tab** — Demonstration einer **2-Modell-Pipeline**: das Standardmodell
+  bereitet die Anfrage auf, ein medizinisches Modell (z. B. MedGemma) prüft auf fehlende
+  Angaben und stellt **Rückfragen**, gibt dann eine Einschätzung; auf Wunsch in einfaches
+  Deutsch übersetzt. Mit **Patienten-Akten** (eigene RAG je Patient) und Datei-Upload.
+  *Kein Ersatz für ärztliche Beratung.*
+- 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail und Logs lassen sich im Profil
+  ein-/ausblenden; beim **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
 - 📋 **Diagnose-Logger** — zuschaltbares Protokoll zur Fehlersuche
 - 👤 **Nutzerprofil & Projekte** — Modell-Rollen, Dokument-Footer, Projektzuordnung
 - 💾 **Backup/Restore** — **alle** Nutzerdaten als ZIP: Profil, Projekte, Gespräche,
@@ -176,6 +192,12 @@ Ein Eindruck der wichtigsten Tabs (Screenshots aus der Anwendung):
 
 ![Code](static/onboarding/code.png)
 *💻 Code — IDE mit Canvas-Vorschau und JSON-Editor.*
+
+![Medizin](static/onboarding/medizin.png)
+*🩺 Medizin — Zwei-Modell-Pipeline mit Rückfragen und Patienten-Akten.*
+
+![Mathe](static/onboarding/mathe.png)
+*🔢 Mathe — Workspace mit Plots, SymPy und Tutor-Modus (werkzeuggeprüft).*
 
 ![Diagnose-Logger](static/onboarding/log_file.png)
 *📋 Diagnose-Logger — zuschaltbares Protokoll zur Fehlersuche.*

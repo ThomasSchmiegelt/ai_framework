@@ -181,6 +181,8 @@ const Chat = (() => {
               insertImage(bubbleContent, event.data);
             } else if (event.type === 'map') {
               insertMap(bubbleContent, event.data);
+            } else if (event.type === 'diagram') {
+              insertDiagram(bubbleContent, event.data);
             } else if (event.type === 'rag') {
               insertRagSources(bubbleContent, textEl, event.sources);
             } else if (event.type === 'adaptive') {
@@ -318,6 +320,44 @@ const Chat = (() => {
     scrollToBottom();
   }
 
+  let _mermaidReady = false;
+  function _ensureMermaid() {
+    if (_mermaidReady || typeof mermaid === 'undefined') return;
+    mermaid.initialize({ startOnLoad: false, theme: 'dark',
+      themeVariables: { background: '#1e1e2e', primaryColor: '#3b76ba',
+                        primaryTextColor: '#d4e8f8', lineColor: '#a3c8eb' } });
+    _mermaidReady = true;
+  }
+
+  async function _renderMermaid(el, definition) {
+    _ensureMermaid();
+    if (typeof mermaid === 'undefined') { el.textContent = definition; return; }
+    const id = 'mm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    try {
+      const { svg } = await mermaid.render(id, definition);
+      el.innerHTML = svg;
+    } catch (_) {
+      el.textContent = definition;
+    }
+  }
+
+  function insertDiagram(container, data) {
+    const card = document.createElement('div');
+    card.className = 'diagram-card';
+    if (data.title) {
+      const t = document.createElement('div');
+      t.className = 'diagram-card-title';
+      t.textContent = data.title;
+      card.appendChild(t);
+    }
+    const diagramEl = document.createElement('div');
+    diagramEl.className = 'diagram-body';
+    card.appendChild(diagramEl);
+    container.appendChild(card);
+    _renderMermaid(diagramEl, data.definition);
+    scrollToBottom();
+  }
+
   function showToolStatus(row, toolName, args) {
     const TOOL_LABELS = {
       web_search:          `🔍 Suche: "${args?.query || ''}"`,
@@ -331,6 +371,7 @@ const Chat = (() => {
       bolt_calculator:     `🔧 Schraubenauslegung M${args?.d_nom ?? ''}`,
       generate_report:     `📄 Bericht erstellen: ${args?.title ?? ''}`,
       route_planner:       `🗺️ Route: ${args?.origin ?? ''} → ${args?.destination ?? ''}`,
+      create_diagram:      `📐 Diagramm: ${args?.title || args?.diagram_type || ''}`,
     };
     const status = document.createElement('div');
     status.className = 'tool-status';
@@ -537,7 +578,15 @@ const Chat = (() => {
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
       });
-      // Code-Highlighting
+      // Mermaid-Codeblöcke ersetzen bevor hljs sie verfärbt
+      el.querySelectorAll('pre code.language-mermaid').forEach(block => {
+        const def = block.textContent;
+        const diagramEl = document.createElement('div');
+        diagramEl.className = 'diagram-body';
+        block.closest('pre').replaceWith(diagramEl);
+        _renderMermaid(diagramEl, def);
+      });
+      // Code-Highlighting (alle anderen Sprachen)
       el.querySelectorAll('pre code').forEach(block => {
         if (typeof hljs !== 'undefined') hljs.highlightElement(block);
       });

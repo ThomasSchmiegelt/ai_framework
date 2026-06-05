@@ -17,12 +17,14 @@
   <!-- Leaflet für OpenStreetMap-Routenanzeige -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Mermaid.js für Ablauf-/Datenfluss-/Sequenzdiagramme -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <!-- KaTeX für mathematische Formeln (Formelzeichen) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260604e" />
+  <link rel="stylesheet" href="/css/app.css?v=20260612" />
 </head>
 <body>
 
@@ -108,6 +110,8 @@
       <button class="tab-btn" data-tab="rag">📚 RAG</button>
       <button class="tab-btn" data-tab="mail">📧 Mail</button>
       <button class="tab-btn" data-tab="logs">📋 Logs</button>
+      <button class="tab-btn" data-tab="medizin">🩺 Medizin</button>
+      <button class="tab-btn" data-tab="mathe">🔢 Mathe</button>
     </div>
 
     <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
@@ -167,14 +171,16 @@
             <button id="btn-upload" class="tool-toggle" title="Datei anhängen (PDF, Bild, DOCX, XLSX…)">
               📎 Datei
             </button>
-            <button id="btn-rag-toggle" class="tool-toggle" title="Wissenssammlung (RAG) für die Antwort nutzen">
-              📚 RAG
-            </button>
+            <div id="rag-chat-wrap" style="position:relative;display:inline-flex">
+              <button id="btn-rag-toggle" class="tool-toggle" title="Wissenssammlung (RAG) für die Antwort nutzen">
+                📚 RAG
+              </button>
+              <!-- Custom-Dropdown ersetzt nativen <select multiple> -->
+              <div id="rag-chat-panel" style="display:none"></div>
+            </div>
             <button id="btn-thinking-toggle" class="tool-toggle" title="Denkprozess des Modells im rechten Panel anzeigen">
               🧠 Denkprozess
             </button>
-            <select id="rag-chat-select" class="sidebar-select" multiple size="1"
-              title="Sammlung(en) wählen" style="display:none;max-width:200px;height:32px"></select>
 
             <!-- Export-Buttons (nur in Toolbar als kleine Optionen) -->
             <button class="tool-toggle" id="btn-export-docx" title="Chat als Word exportieren">
@@ -364,7 +370,7 @@
      <div id="rag-body">
       <div id="rag-left">
       <div id="rag-config">
-        <div id="research-header-block">
+        <div id="rag-header-block">
           <h2>📚 Wissensdatenbanken (RAG)</h2>
           <p>Lege Wissensdatenbanken an und lade Dokumente hoch. Im Chat aktivierst du den
              📚-Umschalter und wählst eine Datenbank – passende Auszüge werden der Antwort
@@ -431,8 +437,30 @@
       <div id="rag-splitter" title="Ziehen zum Verschieben · Doppelklick = Standard"></div>
 
       <div id="rag-right">
-        <h3 style="font-size:15px;font-weight:600;margin-bottom:10px">Vorhandene Wissensdatenbanken</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="font-size:15px;font-weight:600;margin:0">Vorhandene Wissensdatenbanken</h3>
+          <button id="btn-rag-clone-server" class="export-btn" title="Geteilte RAG-Sammlung von einem Serverpfad klonen">🗂 Von Server klonen</button>
+        </div>
         <div id="rag-collections-list"></div>
+      </div>
+
+      <!-- Clone-Overlay -->
+      <div id="rag-clone-overlay" class="modal-overlay-base">
+        <div class="modal-base">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <strong>🗂 RAG-Sammlung von Server klonen</strong>
+            <button id="btn-rag-clone-close" class="export-btn">✕ Schließen</button>
+          </div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
+            Gib den Serverpfad (z.B. Netzlaufwerk) ein, der <code>.ragpack.json</code>-Dateien enthält.
+          </p>
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <input type="text" id="rag-clone-dir" class="sidebar-select" style="flex:1"
+              placeholder="/mnt/share/rag  oder  \\server\rag" />
+            <button id="btn-rag-clone-scan" class="export-btn">🔍 Suchen</button>
+          </div>
+          <div id="rag-clone-list" style="max-height:300px;overflow-y:auto;font-size:13px"></div>
+        </div>
       </div>
      </div>
       <input type="file" id="rag-file-input" style="display:none"
@@ -443,8 +471,8 @@
     <div id="mail-panel" class="panel">
      <div id="mail-body">
       <div id="mail-left">
-      <div id="research-config">
-        <div id="research-header-block">
+      <div id="mail-config">
+        <div id="mail-header-block">
           <h2>📧 Mail-Bearbeitung</h2>
           <p class="research-intro">
             E-Mails (read-only) abrufen, nach <strong>Absender / Betreff / Domäne</strong> filtern
@@ -581,8 +609,8 @@
     <div id="docgen-panel" class="panel">
      <div id="docgen-body">
       <div id="docgen-left">
-      <div id="research-config">
-        <div id="research-header-block">
+      <div id="docgen-config">
+        <div id="docgen-header-block">
           <h2>📄 Dokumentengenerator</h2>
           <p>Wähle einen <strong>Dokument-Agenten</strong> (im Tab 🤖 Agenten anlegen, Kategorie
              „Dokumentation"), optional eine oder mehrere Wissensdatenbanken als Quelle, und
@@ -660,6 +688,53 @@
         <div id="docgen-output"></div>
       </div>
      </div>
+
+     <!-- ── Verfeinerungsschleife (Multi-Agent) ──────────────────────────── -->
+     <details id="refine-section" style="border-top:1px solid var(--border);padding:14px 18px">
+       <summary style="cursor:pointer;user-select:none;font-size:14px;font-weight:600">
+         🔁 Verfeinerungsschleife — Dokument durch mehrere Agenten iterativ verbessern
+       </summary>
+       <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+         <div>
+           <label style="font-size:13px">Dokument <span class="label-hint">(einfügen oder aus obigem Ergebnis übernehmen)</span></label>
+           <div style="display:flex;gap:6px;margin-bottom:6px">
+             <button id="btn-refine-from-docgen" class="export-btn" style="font-size:12px">⬆ Aus Dokumentengenerator</button>
+             <button id="btn-refine-clear" class="export-btn" style="font-size:12px">🗑 Leeren</button>
+           </div>
+           <textarea id="refine-text" rows="10" placeholder="Dokument hier einfügen…" style="font-size:12px"></textarea>
+         </div>
+         <div>
+           <label style="font-size:13px">Agenten <span class="label-hint">(werden der Reihe nach eingesetzt)</span></label>
+           <div id="refine-agent-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+           <button id="btn-refine-add-agent" class="export-btn" style="font-size:12px">＋ Agent hinzufügen</button>
+           <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+             <div>
+               <label style="font-size:12px">Schwelle (% Änderungen, Stop wenn &lt; Wert)</label>
+               <input type="number" id="refine-threshold" value="2" min="0.1" max="50" step="0.1" class="sidebar-select" style="font-size:12px" />
+             </div>
+             <div>
+               <label style="font-size:12px">Max. Iterationen</label>
+               <input type="number" id="refine-max-iter" value="10" min="1" max="50" class="sidebar-select" style="font-size:12px" />
+             </div>
+           </div>
+           <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
+             <button id="btn-refine-run" style="background:var(--accent);color:#fff;border:none;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer">▶ Starten</button>
+             <button id="btn-refine-stop" class="export-btn" style="display:none">⏹ Stop</button>
+             <span id="refine-status" class="planner-muted" style="font-size:12px"></span>
+           </div>
+         </div>
+       </div>
+       <!-- Fortschritts-Chart und Ergebnis -->
+       <div id="refine-chart-wrap" style="margin-top:14px;display:none">
+         <svg id="refine-chart" style="width:100%;height:80px;display:block"></svg>
+       </div>
+       <div id="refine-log" style="margin-top:10px;font-size:12px;max-height:120px;overflow-y:auto;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px;display:none"></div>
+       <div style="margin-top:12px;display:none;gap:8px" id="refine-export-row">
+         <button id="btn-refine-use-docgen" class="export-btn">📄 In Dokumentengenerator übernehmen</button>
+         <button id="btn-refine-export-docx" class="export-btn">📝 Als DOCX</button>
+         <button id="btn-refine-export-rag" class="export-btn">📚 In Wissensdatenbank</button>
+       </div>
+     </details>
     </div>
 
     <!-- ── Planer-Panel ──────────────────────────────────────────────────── -->
@@ -705,9 +780,13 @@
             <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Projektstart – legt fest, ab wann die Tage als Kalenderdaten gerechnet werden">
               🗓 Start <input type="date" id="planner-start-date" class="sidebar-select" style="max-width:140px;font-size:12px" />
             </label>
+            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Deadline – bei gesetztem Enddatum ohne Startdatum wird der Projektstart rückwärts errechnet">
+              🏁 Ende <input type="date" id="planner-end-date" class="sidebar-select" style="max-width:140px;font-size:12px" />
+            </label>
             <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Tage als Arbeitstage rechnen (Wochenenden überspringen)">
               <input type="checkbox" id="planner-workdays" /> Arbeitstage
             </label>
+            <button id="btn-plan-evaluate" class="export-btn" style="font-size:12px" title="Bis zu 3 Pläne KI-gestützt vergleichen und zu einem verbesserten Plan zusammenführen">📊 Pläne vergleichen</button>
           </div>
           <span id="planner-warn" class="planner-warn"></span>
           <span id="planner-agent-status" class="planner-muted"></span>
@@ -725,11 +804,13 @@
             <button id="btn-beautify" class="export-btn" style="font-size:12px" title="Verknüpfungen säubern, nach Ablaufreihenfolge sortieren und Netzplan neu zeichnen">✨ Mach schön</button>
             <button id="btn-insert-between" class="export-btn" style="font-size:12px" title="Neuen Vorgang zwischen zwei Aufgaben einfügen – KI schlägt passende Tätigkeiten vor">➕ Dazwischen</button>
             <button id="btn-schedule" class="export-btn" style="font-size:12px" title="Ressourcen-/Bestellplan: wann wird welche Ressource gebraucht und bis wann bestellt">📅 Bestellplan</button>
+            <button id="btn-from-list" class="export-btn" style="font-size:12px" title="Aus einer einfachen Aufgabenliste (Anfrage/Ausschreibung) einen strukturierten Projektplan generieren">📋 Aus Liste</button>
             <button id="btn-research-all" class="export-btn" style="font-size:12px" title="Alle noch nicht recherchierten Tätigkeiten wissenschaftlich recherchieren → Dossiers ins Plan-RAG">🔬 Alle recherchieren</button>
             <button id="btn-research-stop" class="export-btn" style="font-size:12px;display:none">⏹ Stop</button>
             <progress id="planner-research-bar" max="100" value="0" style="display:none;width:140px;height:10px;vertical-align:middle"></progress>
             <span id="planner-research-progress" class="planner-muted" style="font-size:11px"></span>
           </div>
+          <datalist id="plan-area-list"></datalist>
           <div id="planner-table-scroll">
             <table id="task-table">
               <thead>
@@ -740,6 +821,7 @@
                   <th>Dauer (d)</th>
                   <th>Vorgänger</th>
                   <th>Nachfolger</th>
+                  <th title="Projektbereich / Phase – gleiche Bereiche werden farblich gruppiert">Bereich</th>
                   <th>Ressourcen / Kosten</th>
                   <th>ES</th><th>EF</th><th>LS</th><th>LF</th><th>Puffer</th>
                   <th></th>
@@ -770,10 +852,65 @@
 
       <!-- KI-Assistent für Planer -->
       <div id="planner-ai-panel">
+        <div id="planner-selected-info" style="display:none;font-size:12px;padding:3px 8px;background:var(--bg-hover);border-bottom:1px solid var(--border);color:var(--accent)"></div>
         <div id="planner-ai-messages"></div>
         <div id="planner-ai-input-row">
-          <textarea id="planner-ai-input" placeholder="KI-Frage: z.B. 'Welche Aufgaben fehlen?', 'Prüfe den Plan auf Konsistenz', 'Detailliere Aufgabe T2'…" rows="2"></textarea>
+          <div style="display:flex;flex-direction:column;gap:3px;padding:4px 2px">
+            <button id="btn-plan-ai-web" class="export-btn toggle-btn" title="Websuche für diese Anfrage aktivieren" style="font-size:11px;padding:2px 6px">🌐</button>
+            <button id="btn-plan-ai-rag" class="export-btn toggle-btn" title="Plan-Wissensdatenbank für diese Anfrage nutzen" style="font-size:11px;padding:2px 6px">📚</button>
+          </div>
+          <textarea id="planner-ai-input" placeholder="KI-Frage: z.B. 'Welche Aufgaben fehlen?', 'Prüfe den Plan auf Konsistenz', 'Detailliere Aufgabe T2'… (Aufgabe in der Tabelle anklicken, um sie in den Kontext zu laden)" rows="2"></textarea>
           <button id="btn-planner-ai-send">↑</button>
+        </div>
+      </div>
+
+      <!-- Plan-Vergleichs-Overlay -->
+      <div id="plan-eval-overlay" class="modal-overlay-base">
+        <div class="modal-base" style="width:min(700px,96vw);max-height:90vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <strong>📊 Pläne vergleichen &amp; verbessern</strong>
+            <button id="btn-plan-eval-close" class="export-btn">✕ Schließen</button>
+          </div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+            Wähle bis zu 3 gespeicherte Pläne. Die KI analysiert jeden Plan (~80 % korrekt),
+            identifiziert Lücken und erzeugt einen verbesserten gemeinsamen Plan (~99 % korrekt).
+          </p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+            <div><label style="font-size:12px">Plan 1 (Pflicht)</label><select id="plan-eval-sel-1" class="sidebar-select"></select></div>
+            <div><label style="font-size:12px">Plan 2 (optional)</label><select id="plan-eval-sel-2" class="sidebar-select"><option value="">— keiner —</option></select></div>
+            <div><label style="font-size:12px">Plan 3 (optional)</label><select id="plan-eval-sel-3" class="sidebar-select"><option value="">— keiner —</option></select></div>
+          </div>
+          <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
+            <button id="btn-plan-eval-run" class="export-btn" style="background:var(--accent);color:#fff;font-weight:600">▶ Vergleichen &amp; verbessern</button>
+            <button id="btn-plan-eval-import" class="export-btn" style="display:none">📥 Verbesserter Plan laden</button>
+            <span id="plan-eval-status" class="planner-muted" style="font-size:12px"></span>
+          </div>
+          <div id="plan-eval-output" style="font-size:13px;line-height:1.6;white-space:pre-wrap"></div>
+        </div>
+      </div>
+
+      <!-- Plan aus flacher Aufgabenliste generieren -->
+      <div id="plan-from-list-overlay" class="modal-overlay-base">
+        <div class="modal-base" style="width:min(640px,96vw);max-height:90vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <strong>📋 Projekt aus Aufgabenliste generieren</strong>
+            <button id="btn-from-list-close" class="export-btn">✕ Schließen</button>
+          </div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
+            Füge eine einfache Aufgabenliste (z.B. aus einer Anfrage oder Ausschreibung) ein.
+            Die KI generiert daraus einen strukturierten Projektplan mit Abhängigkeiten und Dauern.
+          </p>
+          <label style="font-size:12px;display:block;margin-bottom:4px">Projektname</label>
+          <input type="text" id="plan-from-list-name" class="sidebar-select" placeholder="z.B. Maschinenbau-Auftrag 2026"
+            style="width:100%;margin-bottom:10px;font-size:13px" />
+          <label style="font-size:12px;display:block;margin-bottom:4px">Aufgabenliste (eine Aufgabe pro Zeile oder nummeriert)</label>
+          <textarea id="plan-from-list-text" style="width:100%;height:180px;font-size:13px;resize:vertical;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px"
+            placeholder="1. Anforderungen klären&#10;2. Konzept erstellen&#10;3. Konstruktion&#10;4. Prototyp bauen&#10;5. Tests durchführen&#10;…"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <button id="btn-from-list-run" class="export-btn" style="background:var(--accent);color:#fff;font-weight:600">▶ Plan generieren</button>
+            <button id="btn-from-list-load" class="export-btn" style="display:none;background:#16a34a;color:#fff">📥 Plan laden &amp; bearbeiten</button>
+            <span id="plan-from-list-status" style="font-size:12px;color:var(--text-muted)"></span>
+          </div>
         </div>
       </div>
     </div>
@@ -946,6 +1083,159 @@ Beispiele:
       <div id="log-entries"></div>
 
     </div>
+
+    <!-- ── Medizin-Panel ──────────────────────────────────────────────────── -->
+    <div id="medizin-panel" class="panel">
+
+      <!-- Kopfleiste: Disclaimer + Steuerung -->
+      <div id="medizin-topbar">
+        <div id="medizin-title-row">
+          <span style="font-size:17px;font-weight:700">🩺 Medizin-Assistent</span>
+          <span class="medizin-disclaimer-badge">⚠️ Kein Ersatz für ärztliche Beratung</span>
+        </div>
+
+        <div id="medizin-controls-row">
+          <!-- Patienten-Akte (RAG) -->
+          <div class="medizin-ctrl-group">
+            <label class="medizin-ctrl-label">Patienten-Akte</label>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <select id="medizin-rag-select" class="sidebar-select" style="max-width:200px">
+                <option value="">— Allgemein (keine Akte) —</option>
+              </select>
+              <div id="medizin-new-rag-form" style="display:flex;gap:4px;align-items:center">
+                <input type="text" id="medizin-new-rag-name" placeholder="Name der Akte…"
+                  class="sidebar-select" style="display:none;width:180px;padding:5px 8px;font-size:12px" />
+                <button id="btn-medizin-new-rag" class="export-btn" title="Neue Patienten-Akte anlegen">+ Neue Akte</button>
+                <button id="btn-medizin-new-rag-ok" class="export-btn" style="display:none;background:var(--accent);color:#fff">✓</button>
+                <button id="btn-medizin-new-rag-cancel" class="export-btn" style="display:none">✕</button>
+              </div>
+              <button id="btn-medizin-doc-to-rag" class="export-btn" style="display:none" title="Dokument oder Bild in die Akte einlesen">📄 Zur Akte</button>
+              <span id="medizin-rag-doc-count" class="planner-muted" style="font-size:11px;display:none"></span>
+              <input type="file" id="medizin-rag-file-input" multiple accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" style="display:none" />
+            </div>
+          </div>
+
+          <!-- Modell -->
+          <div class="medizin-ctrl-group">
+            <label class="medizin-ctrl-label">Modell</label>
+            <select id="medizin-model-select" class="sidebar-select" style="max-width:200px">
+              <option>Lade…</option>
+            </select>
+          </div>
+
+          <!-- Aktions-Buttons -->
+          <div style="display:flex;gap:6px;align-self:flex-end;align-items:center">
+            <button id="btn-medizin-expert" class="export-btn active" title="Experten-Pipeline: Anfrage wird von zwei Modellen bearbeitet (Aufbereitung → MedGemma-Analyse → Rückfragen → Einschätzung)">🔬 Experten-Pipeline</button>
+            <button id="btn-medizin-quick-toggle" class="export-btn">💡 Schnellstart</button>
+            <button id="btn-medizin-clear" class="export-btn" title="Gesprächsverlauf leeren">🗑 Leeren</button>
+          </div>
+        </div>
+
+        <!-- Schnellstart-Prompts (ausklappbar) -->
+        <div id="medizin-quick-grid" style="display:none">
+          <button class="medizin-prompt-btn" data-prompt="Was sind typische Symptome einer Grippe und wie unterscheidet sie sich von einer Erkältung?">🤧 Grippe vs. Erkältung</button>
+          <button class="medizin-prompt-btn" data-prompt="Erkläre mir den Unterschied zwischen systolischem und diastolischem Blutdruck und was normale Werte sind.">❤️ Blutdruckwerte</button>
+          <button class="medizin-prompt-btn" data-prompt="Welche Wechselwirkungen können bei der gleichzeitigen Einnahme von Ibuprofen und Aspirin auftreten?">💊 Medikamenten-Wechselwirkungen</button>
+          <button class="medizin-prompt-btn" data-prompt="Erkläre die Symptome eines Herzinfarkts und was man im Notfall tun sollte.">🚨 Herzinfarkt-Notfall</button>
+          <button class="medizin-prompt-btn" data-prompt="Was bedeuten erhöhte Leberwerte (ALT, AST, GGT) im Blutbild und was kann sie verursachen?">🩸 Laborwerte — Leber</button>
+          <button class="medizin-prompt-btn" data-prompt="Was ist der Unterschied zwischen Typ-1- und Typ-2-Diabetes? Erkläre Ursachen, Symptome und Behandlung.">🍬 Diabetes Typ 1 vs. 2</button>
+          <button class="medizin-prompt-btn" data-prompt="Erkläre die Wirkungsweise von Antibiotika und warum man sie nicht bei Virusinfektionen einsetzen sollte.">🦠 Antibiotika</button>
+          <button class="medizin-prompt-btn" data-prompt="Was versteht man unter dem Immunsystem und wie funktioniert die Impfung (Vakzination)?">💉 Immunsystem &amp; Impfung</button>
+          <button class="medizin-prompt-btn" data-prompt="Was sind die Kriterien für das metabolische Syndrom und welche Risiken bringt es mit sich?">📊 Metabolisches Syndrom</button>
+          <button class="medizin-prompt-btn" data-prompt="Erkläre die häufigsten Schilddrüsenerkrankungen (Hypothyreose, Hyperthyreose, Hashimoto).">🦋 Schilddrüse</button>
+        </div>
+      </div>
+
+      <!-- Chat-Nachrichten -->
+      <div id="medizin-messages">
+        <div class="medizin-welcome">
+          <div style="font-size:36px;margin-bottom:12px">🩺</div>
+          <div style="font-weight:600;font-size:15px;margin-bottom:6px">Medizin-Assistent</div>
+          <div style="color:var(--text-muted);font-size:13px;max-width:400px;text-align:center">
+            Stellen Sie medizinische Fragen, laden Sie Befunde oder Bilder hoch.<br>
+            Legen Sie eine Patienten-Akte an, um Dokumente dauerhaft zu verwalten.
+          </div>
+          <div class="medizin-disclaimer" style="margin-top:14px;max-width:480px;text-align:left">
+            <strong>⚠️ Hinweis:</strong> Dieser Assistent ersetzt keine ärztliche Beratung, Diagnose oder Behandlung.
+            Bei Notfällen: Notruf <strong>112</strong> anrufen.
+          </div>
+        </div>
+      </div>
+
+      <!-- Eingabebereich -->
+      <div id="medizin-input-area">
+        <div id="medizin-attachments"></div>
+        <div id="medizin-input-row">
+          <button id="btn-medizin-attach" class="medizin-attach-btn" title="Bild oder Dokument anhängen (wird als Kontext mitgeschickt)">📎</button>
+          <input type="file" id="medizin-chat-file-input" multiple accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" style="display:none" />
+          <textarea id="medizin-input" placeholder="Medizinische Frage eingeben… (Shift+Enter = Zeilenumbruch)" rows="2"></textarea>
+          <button id="btn-medizin-send" class="btn-medizin-send">↑</button>
+        </div>
+      </div>
+
+    </div><!-- /medizin-panel -->
+
+    <!-- ── Mathe-Panel ───────────────────────────────────────────────────── -->
+    <div id="mathe-panel" class="panel">
+
+      <!-- Kopfleiste -->
+      <div id="mathe-topbar">
+        <div id="mathe-title-row">
+          <span style="font-size:17px;font-weight:700">🔢 Mathe-Assistent</span>
+          <div style="display:flex;gap:6px">
+            <button id="btn-mathe-quick-toggle" class="export-btn">💡 Schnellstart</button>
+            <button id="btn-mathe-clear" class="export-btn" title="Verlauf leeren">🗑 Leeren</button>
+          </div>
+        </div>
+
+        <!-- Schnellstart-Prompts -->
+        <div id="mathe-quick-grid" style="display:none">
+          <button class="mathe-prompt-btn" data-prompt="Berechne das Integral von f(x) = x² · sin(x) von 0 bis π. Zeige den Rechenweg und plotte die Funktion.">∫ Integral berechnen</button>
+          <button class="mathe-prompt-btn" data-prompt="Löse das lineare Gleichungssystem: 2x + 3y = 7, x - y = 1. Zeige den Lösungsweg.">⚖️ Gleichungssystem</button>
+          <button class="mathe-prompt-btn" data-prompt="Plotte f(x) = sin(x) und g(x) = cos(x) im Bereich -2π bis 2π und markiere die Schnittpunkte.">📈 Funktionen plotten</button>
+          <button class="mathe-prompt-btn" data-prompt="Berechne die Eigenwerte und Eigenvektoren der Matrix A = [[2,1],[1,3]]. Plotte die Transformation.">🔷 Eigenwerte &amp; Vektoren</button>
+          <button class="mathe-prompt-btn" data-prompt="Löse die Differentialgleichung y'' + 2y' + y = 0 mit Anfangsbedingungen y(0)=1, y'(0)=0. Plotte die Lösung.">📐 Differentialgleichung</button>
+          <button class="mathe-prompt-btn" data-prompt="Führe eine lineare Regression für folgende Datenpunkte durch: x=[1,2,3,4,5], y=[2.1,3.9,6.2,7.8,10.1]. Plotte Daten und Regressionsgerade.">📊 Lineare Regression</button>
+          <button class="mathe-prompt-btn" data-prompt="Berechne die Taylor-Reihe von e^x bis zum 6. Grad um x=0 und plotte sie gegen die exakte Funktion.">〽 Taylor-Reihe</button>
+          <button class="mathe-prompt-btn" data-prompt="Erstelle einen LaTeX-Bericht mit der Herleitung der Euler-Formel e^(iπ) + 1 = 0 und exportiere ihn als PDF.">📋 LaTeX-Bericht</button>
+        </div>
+      </div>
+
+      <!-- Chat-Verlauf -->
+      <div id="mathe-messages">
+        <div class="mathe-welcome">
+          <div style="font-size:36px;margin-bottom:12px">🔢</div>
+          <div style="font-weight:600;font-size:15px;margin-bottom:8px">Mathe-Assistent</div>
+          <div style="color:var(--text-muted);font-size:13px;max-width:440px;text-align:center">
+            Löst Gleichungen, plottet Funktionen, rechnet Integrals und erstellt LaTeX-Berichte.<br>
+            Nutzt SymPy, NumPy, SciPy und Matplotlib direkt im Chat.
+          </div>
+          <div class="mathe-feature-chips">
+            <span>∫ Analysis</span><span>📐 Algebra</span><span>📈 Plots</span>
+            <span>📊 Statistik</span><span>📋 LaTeX/PDF</span><span>🔢 Numerik</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Eingabebereich -->
+      <div id="mathe-input-area">
+        <div id="mathe-attachments"></div>
+        <div id="mathe-input-toolbar">
+          <label class="mathe-inline-opt" title="Funktionsgraphen automatisch zeichnen">
+            <input type="checkbox" id="mathe-opt-plot" checked /> 📈 Plot
+          </label>
+          <button id="btn-mathe-tutor" class="mathe-toolbar-btn" title="Tutor-Modus: führt dich Schritt für Schritt zur Lösung (werkzeuggeprüft), statt sie sofort zu verraten">🎓 Tutor</button>
+          <button id="btn-mathe-solution" class="mathe-toolbar-btn" style="display:none" title="Vollständige Lösung anzeigen">💡 Lösung zeigen</button>
+        </div>
+        <div id="mathe-input-row">
+          <button id="btn-mathe-attach" class="mathe-attach-btn" title="Datei anhängen (Bild, PDF)">📎</button>
+          <input type="file" id="mathe-chat-file-input" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.csv" style="display:none" />
+          <textarea id="mathe-input" placeholder="Mathematische Aufgabe… Gleichungen, Plots, Beweise (Shift+Enter = Zeilenumbruch)" rows="2"></textarea>
+          <button id="btn-mathe-send" class="btn-mathe-send">↑</button>
+        </div>
+      </div>
+
+    </div><!-- /mathe-panel -->
 
   </main>
 </div>
@@ -1153,18 +1443,22 @@ Beispiele:
       Standardmäßig läuft nur <strong>ministral-3:3b</strong>. Hier kannst du je Einsatzzweck ein
       anderes installiertes Modell zuweisen – es wird bei Bedarf nachgeladen (jeweils nur eines aktiv).
     </p>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
       <div class="form-group">
         <label>Allgemein <span class="planner-muted" style="font-size:11px">Chat</span></label>
         <select id="profile-model-general" class="sidebar-select"></select>
       </div>
       <div class="form-group">
-        <label>Programmieren <span class="planner-muted" style="font-size:11px">Code-IDE</span></label>
+        <label>Programmieren / Mathe <span class="planner-muted" style="font-size:11px">Code-IDE & Mathe-Tab</span></label>
         <select id="profile-model-coding" class="sidebar-select"></select>
       </div>
       <div class="form-group">
         <label>Wissenschaftlich <span class="planner-muted" style="font-size:11px">Recherche</span></label>
         <select id="profile-model-science" class="sidebar-select"></select>
+      </div>
+      <div class="form-group">
+        <label>Medizin <span class="planner-muted" style="font-size:11px">Medizin-Tab</span></label>
+        <select id="profile-model-medical" class="sidebar-select"></select>
       </div>
     </div>
 
@@ -1213,6 +1507,32 @@ Beispiele:
         <input type="file" id="file-header" accept="image/*" />
         <button class="export-btn profile-asset-del" data-kind="header" style="font-size:11px">entfernen</button>
       </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <h4 style="margin-bottom:8px">📑 Sichtbare Tabs</h4>
+    <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
+      Diese Tabs sind optional und können ausgeblendet werden.
+    </p>
+    <div id="profile-tab-vis" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:4px">
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="rag" /> 📚 RAG
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="ide" /> 💻 Code
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="mathe" /> 🔢 Mathe
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="medizin" /> 🩺 Medizin
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="mail" /> 📧 Mail
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="logs" /> 📋 Logs
+      </label>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
@@ -1423,8 +1743,9 @@ Beispiele:
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260603"></script>
 <script src="/js/doc_generator.js?v=20260603"></script>
+<script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260603"></script>
+<script src="/js/profile.js?v=20260611"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260603"></script>
 <script src="/js/matrix_research.js?v=20260603"></script>
@@ -1433,8 +1754,10 @@ Beispiele:
 <script src="/js/json_editor.js?v=20260603"></script>
 <script src="/js/logger.js?v=20260603"></script>
 <script src="/js/ide.js?v=20260603"></script>
-<script src="/js/onboarding.js?v=20260604g"></script>
-<script src="/js/app.js?v=20260603"></script>
+<script src="/js/onboarding.js?v=20260612"></script>
+<script src="/js/medizin.js?v=20260610"></script>
+<script src="/js/mathe.js?v=20260612"></script>
+<script src="/js/app.js?v=20260608"></script>
 
 </body>
 </html>

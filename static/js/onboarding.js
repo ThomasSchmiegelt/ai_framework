@@ -97,15 +97,33 @@ const Onboarding = (() => {
            + 'Im Reiter <strong>JSON-Editor</strong> reparierst du defekte JSON-Dateien mit Live-Prüfung.',
     },
     {
+      image: 'medizin.png',
+      title: '11 · Medizin',
+      text: 'Demonstriert eine <strong>Zwei-Modell-Pipeline</strong>: das Standardmodell bereitet deine '
+           + 'Frage auf, ein medizinisches Modell (z. B. MedGemma) prüft auf fehlende Angaben und stellt '
+           + '<strong>Rückfragen</strong>, bevor es eine fundierte Einschätzung gibt – auf Wunsch in '
+           + 'einfaches Deutsch übersetzt. Mit <strong>Patienten-Akten</strong> (eigene Wissensbasis je '
+           + 'Patient) und Datei-Upload. <em>Kein Ersatz für ärztliche Beratung.</em>',
+    },
+    {
+      image: 'mathe.png',
+      title: '12 · Mathe',
+      text: 'Ein eigener <strong>Mathematik-Workspace</strong>: löse Gleichungen, Integrale und '
+           + 'Matrizen mit SymPy/NumPy/SciPy, lass <strong>Funktionsgraphen</strong> automatisch '
+           + 'zeichnen und exportiere Berichte als <strong>LaTeX/PDF</strong>. Im '
+           + '<strong>🎓 Tutor-Modus</strong> führt dich die KI Schritt für Schritt selbst zur Lösung '
+           + '– <strong>werkzeuggeprüft</strong> mit SymPy, statt sie sofort zu verraten.',
+    },
+    {
       image: 'Mail_System.png',
-      title: '11 · Mail-Bearbeitung',
+      title: '13 · Mail-Bearbeitung',
       text: 'Lies Postfächer (IMAP/POP3) und verarbeite Mails per Regeln: in eine Wissensdatenbank '
            + 'übernehmen, als Agenten-Aufgabe, an den Dokumentengenerator oder als Notiz. Der '
            + 'Versand bleibt <strong>immer manuell</strong>. <em>(🚧 in Entwicklung)</em>',
     },
     {
       image: 'log_file.png',
-      title: '12 · Log-Datei',
+      title: '14 · Log-Datei',
       text: 'Im <strong>Log-Tab</strong> siehst du bei Bedarf, was im Hintergrund passiert: '
            + 'Modell-Antworten, Tool-Aufrufe und Diagnosen. Praktisch zur Fehlersuche – '
            + 'ein- und ausschaltbar und als Datei exportierbar.',
@@ -113,13 +131,28 @@ const Onboarding = (() => {
   ];
 
   let _idx = 0;
-  const _form = { first_name: '', company: '', custom_mode_name: '', custom_mode_prompt: '' };
+  const _form = { first_name: '', company: '', custom_mode_name: '', custom_mode_prompt: '',
+                  model_general: '', enable_systemd: false, data_dir: '' };
+  let _models = [];       // Liste der installierten Ollama-Modelle
+  let _isLinux = false;   // Plattform-Info vom Backend
+  let _embedOk = true;    // Embed-Modell vorhanden?
+  let _embedModel = '';   // Name des konfigurierten Embed-Modells
 
   const IMG_BASE = '/onboarding/';
 
   function _el(id) { return document.getElementById(id); }
 
   function _renderFormSlide(s) {
+    const modelOptions = _models.length
+      ? _models.map(m => `<option value="${m.name}">${m.name}</option>`).join('')
+      : '<option value="">Ollama nicht erreichbar – später im Profil wählen</option>';
+    const systemdRow = _isLinux ? `
+          <div class="ob-field">
+            <label class="ob-checkbox-label">
+              <input type="checkbox" id="ob-systemd" />
+              App beim Systemstart automatisch starten (systemd)
+            </label>
+          </div>` : '';
     return `
       <div class="ob-slide ob-slide--form" style="background-image:url('${IMG_BASE}${s.image}')">
         <div class="ob-form-panel">
@@ -133,6 +166,27 @@ const Onboarding = (() => {
             <label>Firma <span class="ob-opt">(optional)</span></label>
             <input type="text" id="ob-company" class="ob-input" placeholder="z. B. Muster GmbH" autocomplete="off" />
           </div>
+          <div class="ob-divider">⚙ Standard-Einstellungen</div>
+          <div class="ob-field">
+            <label>Standard-Modell <span class="ob-opt">(jederzeit im Profil änderbar)</span></label>
+            <select id="ob-model" class="ob-input">${modelOptions}</select>
+          </div>
+          <div class="ob-field" id="ob-embed-warn" style="display:none">
+            <span style="color:#ffb347;font-size:12.5px">
+              ⚠ Embedding-Modell <strong id="ob-embed-name"></strong> nicht gefunden –
+              RAG-Wissensdatenbanken werden erst nach
+              <code style="background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:4px">ollama pull <span id="ob-embed-name2"></span></code>
+              funktionieren.
+            </span>
+          </div>
+          <div class="ob-field">
+            <label>Datenverzeichnis <span class="ob-opt">(optional – für Netzlaufwerke oder abweichenden Pfad)</span></label>
+            <input type="text" id="ob-data-dir" class="ob-input" placeholder="data" autocomplete="off" />
+            <span style="font-size:11px;color:rgba(255,255,255,.4);margin-top:3px;display:block">
+              Relativ zum App-Verzeichnis oder absoluter Pfad. Wirkt nach einem Neustart.
+            </span>
+          </div>
+          ${systemdRow}
           <div class="ob-divider">★ Dein eigener Modus ★</div>
           <div class="ob-field">
             <label>Name des Modus</label>
@@ -178,10 +232,16 @@ const Onboarding = (() => {
 
     // Formularwerte (Folie 1) wiederherstellen, falls der Nutzer zurückblättert
     if (s.kind === 'form') {
-      _el('ob-first-name').value   = _form.first_name;
-      _el('ob-company').value      = _form.company;
-      _el('ob-mode-name').value    = _form.custom_mode_name;
-      _el('ob-mode-prompt').value  = _form.custom_mode_prompt;
+      _el('ob-first-name').value  = _form.first_name;
+      _el('ob-company').value     = _form.company;
+      _el('ob-mode-name').value   = _form.custom_mode_name;
+      _el('ob-mode-prompt').value = _form.custom_mode_prompt;
+      const sel = _el('ob-model');
+      if (sel && _form.model_general) sel.value = _form.model_general;
+      const dirInp = _el('ob-data-dir');
+      if (dirInp) dirInp.value = _form.data_dir;
+      const chk = _el('ob-systemd');
+      if (chk) chk.checked = _form.enable_systemd;
       setTimeout(() => _el('ob-first-name').focus(), 50);
     }
 
@@ -198,10 +258,16 @@ const Onboarding = (() => {
 
   function _captureForm() {
     if (SLIDES[_idx].kind !== 'form') return;
-    _form.first_name        = _el('ob-first-name').value.trim();
-    _form.company           = _el('ob-company').value.trim();
-    _form.custom_mode_name  = _el('ob-mode-name').value.trim();
+    _form.first_name         = _el('ob-first-name').value.trim();
+    _form.company            = _el('ob-company').value.trim();
+    _form.custom_mode_name   = _el('ob-mode-name').value.trim();
     _form.custom_mode_prompt = _el('ob-mode-prompt').value.trim();
+    const sel = _el('ob-model');
+    if (sel) _form.model_general = sel.value;
+    const dirInp = _el('ob-data-dir');
+    if (dirInp) _form.data_dir = dirInp.value.trim();
+    const chk = _el('ob-systemd');
+    if (chk) _form.enable_systemd = chk.checked;
   }
 
   function next() {
@@ -225,9 +291,8 @@ const Onboarding = (() => {
   async function finish() {
     _captureForm();
     // Bestehendes Profil als Basis übernehmen, damit vorhandene Angaben
-    // (Modell-Rollen, Persona, Abteilung …) NICHT überschrieben werden.
+    // (Persona, Abteilung …) NICHT überschrieben werden.
     const base = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}) : {};
-    // Profil speichern – Framework startet danach im „eigenen Modus" (violett)
     const payload = Object.assign({}, base, {
       first_name:         _form.first_name || base.first_name || '',
       company:            _form.company    || base.company    || '',
@@ -238,6 +303,9 @@ const Onboarding = (() => {
       onboarding_done:    true,
       replay_intro:       false,
     });
+    // Gewähltes Modell als model_general ins Profil übernehmen
+    if (_form.model_general) payload.model_general = _form.model_general;
+
     try {
       await fetch('/api/profile', {
         method: 'PUT',
@@ -246,6 +314,30 @@ const Onboarding = (() => {
       });
     } catch (_) { /* lokal – im Zweifel trotzdem schließen */ }
 
+    // Standard-Modell und Datenverzeichnis in config.json persistieren
+    if (_form.model_general || _form.data_dir) {
+      try {
+        const cfg = { default_model: _form.model_general };
+        if (_form.data_dir) cfg.data_dir = _form.data_dir;
+        await fetch('/api/setup/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cfg),
+        });
+      } catch (_) {}
+    }
+
+    // Systemd-Autostart einrichten (nur Linux, nur wenn Checkbox aktiv)
+    if (_form.enable_systemd) {
+      try {
+        const r = await fetch('/api/setup/systemd', { method: 'POST' });
+        const d = await r.json();
+        if (!d.ok && typeof showToast === 'function') {
+          showToast(`⚠ Systemd: ${d.hint || d.errors?.[0] || 'Fehler'}`, 6000);
+        }
+      } catch (_) {}
+    }
+
     // Profil neu laden (damit Modal/Branding den gespeicherten Stand zeigen)
     if (typeof Profile !== 'undefined' && Profile.load) { try { await Profile.load(); } catch (_) {} }
     if (typeof Profile !== 'undefined' && Profile.applyMode) Profile.applyMode('custom');
@@ -253,7 +345,7 @@ const Onboarding = (() => {
     if (typeof showToast === 'function') showToast('🌌 Viel Erfolg im eigenen Modus!');
   }
 
-  function show() {
+  async function show() {
     _idx = 0;
     // Formular aus bestehendem Profil vorbefüllen (z. B. bei „erneut abspielen")
     const base = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}) : {};
@@ -261,9 +353,53 @@ const Onboarding = (() => {
     _form.company            = base.company || '';
     _form.custom_mode_name   = base.custom_mode_name || '';
     _form.custom_mode_prompt = base.custom_mode_prompt || '';
+    _form.model_general      = base.model_general || '';
+    _form.enable_systemd     = false;
+    _form.data_dir           = '';
     _el('onboarding-overlay').style.display = 'flex';
     document.body.style.overflow = 'hidden';
+
+    // Modelle + Plattform + Embed-Check + aktuelle Config parallel laden
+    try {
+      const [modelsResp, platResp, embedResp, cfgResp] = await Promise.all([
+        fetch('/api/models'),
+        fetch('/api/platform'),
+        fetch('/api/setup/embed-check'),
+        fetch('/api/setup/config'),
+      ]);
+      const modelsData = await modelsResp.json();
+      _models = modelsData.models || [];
+      const platData = await platResp.json();
+      _isLinux = platData.platform === 'linux';
+      const embedData = await embedResp.json();
+      _embedOk = embedData.ok !== false;
+      _embedModel = embedData.embed_model || '';
+      try {
+        const cfgData = await cfgResp.json();
+        if (!_form.data_dir && cfgData.data_dir && cfgData.data_dir !== 'data') {
+          _form.data_dir = cfgData.data_dir;
+        }
+      } catch (_) {}
+
+      // Vorauswahl: gespeichertes Modell, sonst "ministral-3:3b", sonst erstes
+      if (!_form.model_general) {
+        const preferred = 'ministral-3:3b';
+        const found = _models.find(m => m.name === preferred);
+        _form.model_general = found ? preferred : (_models[0]?.name || '');
+      }
+    } catch (_) {}
+
     render();
+
+    // Embed-Warnung einblenden wenn Modell fehlt (nach render(), damit DOM bereit)
+    if (!_embedOk && _embedModel) {
+      const warn = _el('ob-embed-warn');
+      if (warn) {
+        _el('ob-embed-name').textContent  = _embedModel;
+        _el('ob-embed-name2').textContent = _embedModel;
+        warn.style.display = 'block';
+      }
+    }
   }
 
   function hide() {

@@ -1,6 +1,6 @@
 ﻿# AI_Framework_Thomas — Entwicklerdokumentation
 
-**Stand:** Mai 2026 · Für Entwickler, die AI_Framework_Thomas erweitern oder warten.
+**Stand:** Juni 2026 · Für Entwickler, die AI_Framework_Thomas erweitern oder warten.
 Bedienung aus Nutzersicht: siehe [BEDIENUNGSANLEITUNG.md](../BEDIENUNGSANLEITUNG.md).
 
 ---
@@ -11,7 +11,7 @@ Bedienung aus Nutzersicht: siehe [BEDIENUNGSANLEITUNG.md](../BEDIENUNGSANLEITUNG
 Browser (Vanilla JS, SPA)                 static/index.html + static/js/*.js
         │  fetch + SSE (Server-Sent Events)
         ▼
-FastAPI / Uvicorn (async)                 main.py  (~1900 Zeilen)
+FastAPI / Uvicorn (async)                 main.py  (~5400 Zeilen)
         │  httpx                          tools/*.py   (Tool-Implementierungen)
         ▼                                 db.py        (SQLite via aiosqlite)
 Ollama (lokales LLM)                      http://localhost:11434
@@ -44,7 +44,9 @@ Der `/api/chat`-Endpunkt durchläuft maximal **8 Iterationen**:
 4. Sobald keine Tool-Calls mehr kommen: Antwort als SSE streamen.
 
 **SSE-Frames** (`data: {...}`), unterschieden über `type`:
-`text`, `canvas`, `image`, `tool_start`, `tool_done`, `error`, `done`.
+`text`, `canvas`, `image`, `map` (Route), `tool_start`, `tool_done`, `error`, `done`
+(sowie `rag`/`adaptive` als Info-Leisten). Die Medizin-Pipeline ergänzt `stage` und
+`question` (siehe 2.3).
 
 ### 2.3 VRAM-Schutz — nur EIN Modell gleichzeitig
 Bei begrenztem VRAM (z. B. 6 GB) darf nie mehr als ein Modell gleichzeitig
@@ -73,14 +75,41 @@ Chat→Skill, Agent-Prompt-Generierung, Planer-KI (Streaming).
 
 #### Modell-Rollen (Profil)
 Es gibt kein fest verdrahtetes Modell außer `DEFAULT_MODEL` (`ministral-3:3b`).
-Das Profil hält drei optionale Zuweisungen: `model_general`, `model_coding`,
-`model_science` (UI: **Allgemein / Programmieren / Wissenschaftlich**). `_model_for(role)`
-liefert das zugewiesene Modell oder `DEFAULT_MODEL`. `_pick_model(m, fallback)`
-akzeptiert jedes installierte Modell und weist Platzhalter (`Lade…`, das veraltete
-`qwen3.6-16k:latest`) ab. `/api/models` filtert **nicht** mehr nach `allowed_models`
-(liefert alle installierten Modelle; `allowed_models` ist nur noch Sortier-Reihenfolge).
-Wiring: Sidebar-Default = `model_general`; Code-IDE + `code_ide`-fähige Agenten →
-`model_coding`; `/api/research` + Wissenschaftspfad → `model_science`.
+Das Profil hält **vier** optionale Zuweisungen: `model_general`, `model_coding`,
+`model_science`, `model_medical` (UI: **Allgemein / Programmieren · Mathe / Wissenschaftlich /
+Medizin**). `_model_for(role)` liefert das zugewiesene Modell oder `DEFAULT_MODEL`.
+`_pick_model(m, fallback)` akzeptiert jedes installierte Modell und weist Platzhalter
+(`Lade…`, das veraltete `qwen3.6-16k:latest`) ab. `/api/models` filtert **nicht** mehr
+nach `allowed_models` (liefert alle installierten Modelle; `allowed_models` ist nur noch
+Sortier-Reihenfolge). Wiring: Sidebar-Default = `model_general`; Code-IDE + **Mathe-Tab**
+(`mathe.js` `_model()`) + `code_ide`-fähige Agenten → `model_coding` (gemeinsames Modell,
+keiner der beiden Tabs hat ein eigenes Auswahlfeld); `/api/research` + Wissenschaftspfad →
+`model_science`; 🩺 Medizin-Pipeline (MedGemma-Rolle) → `model_medical`
+(empfohlen `alibayram/medgemma`).
+
+#### Funktionsgraphen: deterministisch, nicht modellgetrieben
+`plot_function` wird dem Modell **nicht** als Ollama-Tool angeboten (in `_chat_generator`
+aus `active_tools` herausgefiltert): kleine Modelle erzeugen beim Tool-Aufruf ungültige
+LaTeX-Escapes `\( … \)` in den Argumenten → Ollama antwortet mit **HTTP 500**. Stattdessen
+erkennt `_extract_plot_request(text)` einen Plot-Wunsch (Funktion[en], Bereich „von … bis …")
+und zeichnet den Graphen **serverseitig** über `plot_function` — als Fallback nach der Antwort
+**und** im `except`-Zweig des Ollama-Aufrufs, sodass der Graph auch bei einem 500 erscheint.
+Gilt für Chat- und Mathe-Tab (beide `/api/chat`). `plot_chart` (explizite Wertereihen) bleibt
+modell-aufrufbar. `_PLOT_RULE` sagt dem Modell, dass die App automatisch zeichnet.
+
+#### Medizin-Pipeline & Mathe-Tutor (mehrstufige Endpunkte)
+- **`POST /api/medizin/consult`** (SSE): 2-Modell-Konsultation mit Human-in-the-Loop.
+  Stufen `refine` (Ministral strukturiert) → `analyze` (MedGemma prüft auf fehlende
+  Angaben) → `formulate`/`question` (Rückfrage, max. `_MED_MAX_ROUNDS`=2 Runden) → `final`
+  (MedGemma streamt die Einschätzung, `think:False`). Jede Stufe in eigenem
+  `_model_session`-Block (Modellwechsel serialisiert). Frames: `stage`, `question`, `text`,
+  `done {needs_followup, round}`, `error`. **`POST /api/medizin/translate`** übersetzt eine
+  Einschätzung per Allgemein-Modell in Laiendeutsch (SSE).
+- **`POST /api/mathe/ground`**: extrahiert die Aufgabe als SymPy-Ausdruck (ein LLM-Aufruf)
+  und berechnet die **Grundwahrheit deterministisch** (`_mathe_sympy_facts`). Der Tutor-Modus
+  (`mathe_tutor`-Agent) injiziert diese verifizierten Fakten in die `/api/chat`-Anfrage, weil
+  kleine Modelle Verifikations-Tools im Dialog nicht zuverlässig selbst aufrufen. Theorie-/
+  Wortaufgaben → leere Fakten → rein sokratisch.
 
 ### 2.4 Berechnungs-Sandbox (`_safe_exec`)
 Das Tool `calculate` führt Python in einem eingeschränkten `exec()` aus:
@@ -124,6 +153,9 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `POST /api/plans/generate` | Kompletten Projektplan per LLM generieren (`max_tasks` frei bis 200, **keine 20er-Grenze** mehr; `format:"json"` + `num_ctx 8192` bei großen Plänen; Rettungs-Parser für abgeschnittenes JSON; gibt `warning` zurück, wenn viel angefordert wird / das Modell zu wenig liefert; IDs/Vorgänger validiert, Nachfolger abgeleitet) |
 | `POST /api/derive-persona` | Bild-Analyse-Persona aus Präsentationsbeschreibung ableiten |
 | `POST /api/analyze-image` | Einzelbild per Vision-Modell beschreiben → `{title, bullets, caption}` |
+| `POST /api/medizin/consult` | 🩺 2-Modell-Konsultation (SSE: `stage`/`question`/`text`/`done`/`error`); Rückfragen bis 2 Runden, dann Einschätzung |
+| `POST /api/medizin/translate` | Medizinische Einschätzung in Laiendeutsch übersetzen (SSE, Allgemein-Modell) |
+| `POST /api/mathe/ground` | 🎓 Tutor: Aufgabe extrahieren + SymPy-Grundwahrheit berechnen → `{facts}` (leer bei Theorie) |
 | `GET/POST/DELETE /api/code[/{id}]` | IDE-Programme-CRUD |
 | `GET/DELETE /api/logs` · `PUT /api/logs/config` · `GET /api/logs/active` · `POST /api/logs/entry` · `GET /api/logs/download` | Diagnose-Logger |
 | `GET /api/backup` · `POST /api/restore` | Komplett-Backup/-Restore (ZIP) |
@@ -183,9 +215,11 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `doc_generator.js` | **Dokumentengenerator**: Dokument/Präsentation per Agent + RAG + Quellmaterial erzeugen; Export DOCX/PDF/**LaTeX**; **Besprechungsnotizen** im Einfügefeld (Autospeichern in `localStorage`, Auto-Leeren nach Export) |
 | `mail.js` | *🚧 in Entwicklung.* Mail-Tab: Abruf, Live-Filter (Absender/Betreff/Domäne), **Aktions-Set (max. 4)** (RAG/Agent/Doku/Notiz), **Regeln** (`/api/mail/rules`), Ergebnis-Karten rechts; Agent-Entwurf mit Kopieren/mailto/→Doku — **Versand stets manuell** |
 | `json_editor.js` | **JSON-Editor**: Datei öffnen, Live-Validierung (Zeile/Spalte), formatieren, herunterladen — Untertab des **💻 Code**-Tabs (kein eigener Tab mehr) |
-| `ide.js` | Code-IDE (Untertab): Editor, Canvas-Vorschau, KI-Assistent (Modell = Profil-Rolle „Programmieren"), Auto-Repair |
+| `ide.js` | Code-IDE (Untertab): Editor, Canvas-Vorschau, KI-Assistent (Modell = Profil-Rolle „Programmieren · Mathe"), Auto-Repair |
+| `medizin.js` | **🩺 Medizin-Tab**: 2-Modell-**Pipeline** (`/api/medizin/consult`) mit aufklappbaren Stufen, Rückfragen (max. 2 Runden), Laien-Übersetzung (`/api/medizin/translate`); Umschalter **🔬 Experten-Pipeline** (sonst einfacher Direkt-Chat). **Patienten-Akten** = RAG-Sammlungen `Patient:…` (inline anlegen/Dateien einlesen) |
+| `mathe.js` | **🔢 Mathe-Tab**: Löser über `mathe_experte`, **🎓 Tutor-Modus** über `mathe_tutor` mit SymPy-Grundwahrheit (`/api/mathe/ground`) + **💡 Lösung zeigen**. Modell = `Profile.modelFor('coding')` (mit Code geteilt, kein eigenes Auswahlfeld), LaTeX immer an; Plot-Schalter + Tutor-Button an der Chatzeile; Plot-`image`-Frames inline, LaTeX/PDF-Export bei Formeln |
 | `logger.js` | Diagnose-Logger-Oberfläche |
-| `profile.js` / `projects.js` | Nutzerprofil bzw. Projektverwaltung |
+| `profile.js` / `projects.js` | Nutzerprofil (vier Modell-Rollen, Tab-Sichtbarkeit über `data-tabs`-Häkchen) bzw. Projektverwaltung |
 
 ### 6.1 IDE-Canvas-Framework (`ide.js`)
 Der generierte/eingegebene Code läuft in einem **sandboxed iframe**, das ein
@@ -201,8 +235,8 @@ ai_framework_thomas_run(draw);   // PFLICHT am Ende — registriert + zeichnet, 
 - `ai_framework_thomas_input(id, label, default, opts)` erzeugt automatisch ein Eingabefeld
   unter dem Canvas und gibt den aktuellen Wert zurück; bei Änderung wird neu gezeichnet.
 - `ai_framework_thomas_run(fn)` registriert die Zeichenfunktion und ruft sie auf (auch bei Resize).
-- **KI-Assistent**: nutzt das Profil-Modell der Rolle **Programmieren**
-  (`Profile.modelFor('coding')`, Fallback `ministral-3:3b`). System-Prompt
+- **KI-Assistent**: nutzt das Profil-Modell der Rolle **Programmieren / Mathe**
+  (`Profile.modelFor('coding')`, mit dem Mathe-Tab geteilt, Fallback `ministral-3:3b`). System-Prompt
   erzwingt reines Vanilla-JS (kein `require`/`import`/Chart.js).
 - **Auto-Repair**: bei Laufzeitfehlern in der Konsole erscheint ein Button, der
   Code + Fehlermeldung erneut an die KI schickt.
@@ -216,10 +250,10 @@ ai_framework_thomas_run(draw);   // PFLICHT am Ende — registriert + zeichnet, 
 | Pfad | Format |
 |---|---|
 | `data/ai_framework_thomas.db` | SQLite (Gespräche, Nachrichten, FTS) |
-| `data/agents/<slug>.json` | `{id, name, description, system_prompt, tools[], model?, icon, category}` |
+| `data/agents/<slug>.json` | `{id, name, description, system_prompt, tools[], model?, icon, category, favorite}` — Standard-Agenten u. a. `latex_experte`, `mathe_experte`, `mathe_tutor`, `medizin_assistent` |
 | `data/plans/<slug>_<id8>.json` | `{id, name, description, system_prompt, resource_mode, resource_catalog[{kind,name,rate}], start_date, workdays, tasks[…], timestamps}` — Task: `{id, name, duration, predecessors[], successors[], resource_list[{kind,name,qty,hours,rate,lead}], is_start, is_end, notes}` |
 | `data/code/<slug>_<id6>.json` | `{id, name, code, updated_at}` |
-| `data/user_profile.json` | `{first_name, last_name, company, department, position, email, phone, default_project}` |
+| `data/user_profile.json` | `{first_name, last_name, company, department, position, email, phone, default_project, lang, mode, tone, model_general, model_coding, model_science, model_medical, hidden_tabs[], …}` — `hidden_tabs` blendet optionale Tabs aus (Erstaufruf: alle sechs) |
 | `data/projects.json` | `[{id, name, number, description, created_at}]` |
 | `data/uploads/` | temporäre Uploads |
 | `data/mail.json` | Postfach-Zugang `{protocol, host, port, user, ssl, password}` — **nicht** im Backup/git (Passwort im Klartext) |

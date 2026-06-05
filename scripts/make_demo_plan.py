@@ -222,7 +222,9 @@ def main():
     print(f"\n✓ Plan gespeichert (id={pid}), {len(tasks)} Aufgaben.")
 
     # Beispiel-Ressourcenliste (importierbar: Typ;Name;Satz)
-    out = "C:/Users/user/AI_Framework_Thomas/Beispiel_Ressourcenliste.csv"
+    import pathlib
+    out = str(pathlib.Path(__file__).parent.parent / "samples" / "Beispiel_Ressourcenliste.csv")
+    pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8-sig", newline="") as f:
         f.write("Typ;Name;Satz\r\n")
         de = {"human": "Mensch", "hardware": "Hardware", "software": "Software"}

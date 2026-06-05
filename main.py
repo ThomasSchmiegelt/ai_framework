@@ -34,13 +34,12 @@ if _CONFIG_FILE.exists():
 
 OLLAMA_BASE: str = _CONFIG.get("ollama_base", "http://localhost:11434")
 ALLOWED_MODELS: list[str] = _CONFIG.get("allowed_models", [])
-DEFAULT_MODEL: str = _CONFIG.get("default_model", "qwen3.6-16k:latest")
+DEFAULT_MODEL: str = _CONFIG.get("default_model", "ministral-3:3b")
 
 
 # Platzhalter-Werte aus den Frontend-Selektoren (kein echtes Modell)
 _MODEL_PLACEHOLDERS = {
     "Lade…", "Lade...", "Ollama nicht erreichbar", "Fehler beim Laden",
-    "qwen3.6-16k:latest",  # veralteter Default einiger Frontends
 }
 
 
@@ -53,7 +52,9 @@ def _pick_model(m, fallback: Optional[str] = None) -> str:
         return m
     return fallback or DEFAULT_MODEL
 
-DATA_DIR = Path(__file__).parent / "data"
+_raw_data_dir = _CONFIG.get("data_dir", "data")
+DATA_DIR = Path(_raw_data_dir) if Path(_raw_data_dir).is_absolute() else Path(__file__).parent / _raw_data_dir
+_db.set_db_path(DATA_DIR / "ai_framework_thomas.db")
 UPLOADS_DIR = DATA_DIR / "uploads"
 CONVERSATIONS_DIR = DATA_DIR / "conversations"
 AGENTS_DIR = DATA_DIR / "agents"
@@ -262,7 +263,14 @@ _MODEL_ROLES = {
     "general": "model_general",
     "coding":  "model_coding",
     "science": "model_science",
+    "medical": "model_medical",
 }
+
+# Optionale Tabs, die im Profil ein-/ausgeblendet werden können. Beim ERSTAUFRUF
+# (noch kein user_profile.json) sind sie alle ausgeblendet – der Nutzer schaltet
+# Gewünschtes im Profil frei.
+_OPTIONAL_TABS = {"rag", "ide", "mail", "logs", "medizin", "mathe"}
+_DEFAULT_HIDDEN_TABS = ["rag", "ide", "mail", "logs", "medizin", "mathe"]
 
 
 def _model_for(role: str) -> str:
@@ -289,10 +297,18 @@ _FORMULA_RULE = (
 
 # Funktionen/Kennlinien zusätzlich als Graph zeichnen (tone-/modusunabhängig)
 _PLOT_RULE = (
-    "Wenn der Nutzer eine mathematische Funktion nennt oder du eine berechnest bzw. "
-    "herleitest (z. B. Kennlinie, Verlauf, Kurve) und eine grafische Darstellung das "
-    "Verständnis fördert, zeichne sie mit dem Werkzeug plot_function – unabhängig vom "
-    "gewählten Antwortstil. Den Graphen zeigt die App direkt an."
+    "Wenn der Nutzer eine mathematische Funktion zum Zeichnen nennt (etwa plotte "
+    "f(x)=x^2 oder zeichne sin(x)), zeichnet die App den Graphen automatisch selbst – "
+    "du musst dafür KEIN Werkzeug aufrufen und keine ASCII-Kurve malen. Beschreibe die "
+    "Funktion höchstens kurz; der Graph wird ohnehin angezeigt."
+)
+
+# Ablauf-/Datenfluss-/Systemdiagramme grafisch darstellen (tone-/modusunabhängig)
+_DIAGRAM_RULE = (
+    "Wenn du einen Prozessablauf, Datenfluss, eine Systemarchitektur, Zustandsmaschine "
+    "oder Beziehungen zwischen Komponenten zeigst, nutze das Werkzeug create_diagram "
+    "mit Mermaid-Syntax statt einer reinen Textdarstellung – die App rendert das "
+    "Diagramm direkt als Grafik."
 )
 
 # Zitate von Normen/Gesetzen/Quellen als Link (Detail-URLs ergänzt die App selbst)
@@ -317,6 +333,16 @@ _SCIENCE_PROMPT = (
 )
 
 
+_RAG_OPTIMIZE_SYSTEM = (
+    "Du bist ein Spezialist für die Aufbereitung von Texten für semantische Suche (RAG). "
+    "Überarbeite den gegebenen Textabschnitt so, dass er bei einer Vektorsuche optimal "
+    "gefunden werden kann: Löse Abkürzungen auf, wandle Tabellen und Listen in klaren "
+    "Fließtext um, ergänze fehlenden Kontext (z.B. Einheit, Bauteil, Produktname) direkt "
+    "im Satz, entferne Kopf-/Fußzeilen und Seitenzahlen, korrigiere OCR-Fehler. "
+    "Erhalte ALLE fachlichen Informationen vollständig – kürze nichts und erfinde nichts. "
+    "Antworte NUR mit dem überarbeiteten Text, ohne Erklärungen oder Kommentare."
+)
+
 _LANG_RULE_EN = (
     "Always respond in English, regardless of the language of the question, "
     "unless the user explicitly asks for a reply in another language."
@@ -338,7 +364,7 @@ def _augment_prefix(user_text: str = "") -> str:
     if _load_profile().get("pure_llm"):
         return _lang_rule()
     parts = [_BASE_GUARD, _mode_prefix(user_text), _persona_prefix(),
-             _FORMULA_RULE, _PLOT_RULE, _CITATION_RULE, _lang_rule()]
+             _FORMULA_RULE, _PLOT_RULE, _DIAGRAM_RULE, _CITATION_RULE, _lang_rule()]
     return "\n\n".join(p for p in parts if p)
 
 # Stichwörter je Modus: Die Fachbrille wird nur angewandt, wenn die aktuelle
@@ -812,6 +838,38 @@ TOOL_DEFS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_diagram",
+            "description": (
+                "Erstellt ein Datenfluss-, Ablauf-, Sequenz-, Klassen- oder "
+                "Zustandsdiagramm mit Mermaid-Syntax. Verwende dieses Tool immer, "
+                "wenn du einen Prozess, Datenfluss, eine Systemarchitektur oder "
+                "Abhängigkeiten zwischen Komponenten grafisch darstellen möchtest."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "diagram_type": {
+                        "type": "string",
+                        "enum": ["flowchart", "sequenceDiagram", "classDiagram",
+                                 "stateDiagram-v2", "erDiagram", "gantt", "pie"],
+                        "description": "Mermaid-Diagrammtyp",
+                    },
+                    "definition": {
+                        "type": "string",
+                        "description": "Vollständige Mermaid-Diagrammdefinition",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optionaler Titel des Diagramms",
+                    },
+                },
+                "required": ["diagram_type", "definition"],
+            },
+        },
+    },
 ]
 
 ALL_TOOL_NAMES = {t["function"]["name"] for t in TOOL_DEFS}
@@ -1064,6 +1122,93 @@ async def rag_add_document(cid: str, file: UploadFile = File(...)):
     return {"ok": True, "filename": file.filename, "n_chunks": n}
 
 
+async def _optimize_chunk_for_rag(chunk: str, model: str) -> str:
+    """Ruft das LLM auf, um einen Textabschnitt RAG-konform aufzubereiten."""
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": model,
+                "think": False,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": _RAG_OPTIMIZE_SYSTEM},
+                    {"role": "user", "content": chunk},
+                ],
+            })
+            resp.raise_for_status()
+            content = resp.json().get("message", {}).get("content", "").strip()
+            # Thinking-Tags und Code-Fences entfernen
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            content = re.sub(r"^```[^\n]*\n?|```$", "", content, flags=re.MULTILINE).strip()
+            return content if content else chunk
+    except Exception:
+        return chunk  # Fallback: Originaltext
+
+
+@app.post("/api/rag/collections/{cid}/documents/optimized")
+async def rag_add_document_optimized(cid: str, file: UploadFile = File(...)):
+    """Lädt ein Dokument hoch, optimiert es per LLM für RAG und ingestiert es.
+    Gibt SSE-Fortschrittsereignisse zurück."""
+    from tools.rag import ingest_file
+
+    async def _stream():
+        coll = await _db.rag_get_collection(cid)
+        if not coll:
+            yield _sse({"type": "error", "message": "Sammlung nicht gefunden"})
+            return
+
+        # Datei temporär speichern und Text extrahieren
+        tmp = UPLOADS_DIR / f"rag_opt_{uuid.uuid4().hex}_{file.filename}"
+        async with aiofiles.open(tmp, "wb") as fh:
+            await fh.write(await file.read())
+        try:
+            raw_text = _extract_text(tmp)
+        finally:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+
+        if not raw_text or raw_text.startswith("[Lesefehler"):
+            yield _sse({"type": "error", "message": f"Text konnte nicht extrahiert werden: {raw_text}"})
+            return
+
+        # Text in ~2 500-Zeichen-Abschnitte aufteilen (für LLM-Verarbeitung)
+        CHUNK = 2500
+        STEP  = 2300
+        chunks = [raw_text[i:i + CHUNK] for i in range(0, len(raw_text), STEP)]
+        total = len(chunks)
+        yield _sse({"type": "progress", "step": f"Extrahiert: {len(raw_text):,} Zeichen, {total} Abschnitte", "pct": 5})
+
+        model = _model_for("general")
+        optimized_parts: list[str] = []
+        async with _model_session(model):
+            for idx, chunk in enumerate(chunks):
+                pct = 5 + int((idx / total) * 85)
+                yield _sse({"type": "progress",
+                             "step": f"Abschnitt {idx + 1}/{total} wird optimiert…",
+                             "pct": pct})
+                opt = await _optimize_chunk_for_rag(chunk, model)
+                optimized_parts.append(opt)
+
+        optimized_text = "\n\n".join(optimized_parts)
+        yield _sse({"type": "progress", "step": "Einbetten und speichern…", "pct": 92})
+
+        try:
+            n = await ingest_file(coll, optimized_text, file.filename, f"doc_{uuid.uuid4().hex[:12]}")
+        except Exception as e:
+            yield _sse({"type": "error", "message": str(e)})
+            return
+
+        yield _sse({"type": "done", "filename": file.filename, "n_chunks": n})
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.delete("/api/rag/documents/{did}")
 async def rag_delete_document(did: str):
     await _db.rag_delete_document(did)
@@ -1192,6 +1337,59 @@ async def _derive_adaptive_prompt(user_text: str, model: str):
     return (data.get("rolle") or "Experte").strip(), (data.get("system_prompt") or "").strip()
 
 
+# Plot-Absicht + Funktion(en) deterministisch aus dem Nutzertext ziehen, damit ein
+# Funktionsgraph auch dann erscheint, wenn das kleine Modell plot_function NICHT von
+# selbst aufruft. Wird als Fallback genutzt (nur wenn das Modell nicht schon geplottet hat).
+_PLOT_INTENT = re.compile(
+    r"(?i)\b(plotte?|plotten|zeichne|graph|graf|grafik|verlauf|kennlinie|skizziere|plot)\b")
+_PLOT_RANGE = re.compile(
+    r"(?i)(?:von|from)\s*(-?\d+(?:[.,]\d+)?)\s*(?:bis|to|–|—|\.\.+|-)\s*(-?\d+(?:[.,]\d+)?)")
+
+
+def _extract_plot_request(text: str):
+    """Gibt (expression, x_min, x_max) zurück, wenn der Text einen Funktionsplot
+    verlangt, sonst None. expression kann mehrere Terme mit ``;`` enthalten."""
+    if not text or not _PLOT_INTENT.search(text):
+        return None
+    x_min, x_max = -10.0, 10.0
+    work = text
+    m = _PLOT_RANGE.search(text)
+    if m:
+        try:
+            x_min = float(m.group(1).replace(",", "."))
+            x_max = float(m.group(2).replace(",", "."))
+        except ValueError:
+            pass
+        work = text[:m.start()] + " ; " + text[m.end():]
+    # Plot-Verben + typische Füllwörter entfernen, damit nur die Funktion übrig bleibt
+    work = _PLOT_INTENT.sub(" ", work)
+    work = re.sub(r"(?i)\b(den|der|die|das|von|vom|im|bereich|funktion|term|kurve|"
+                  r"mir|bitte|einmal|mal|als|graphen?)\b", " ", work)
+    # Verbindungen → Trenner, damit „x^2 und cos(x)" zwei Funktionen werden
+    work = re.sub(r"(?i)\s+(und|and|sowie|,)\s+", " ; ", work)
+    exprs = []
+    # 1) explizite f(x)=… / y=… Definitionen
+    for mm in re.finditer(r"(?:[A-Za-z]\w*\s*\([^)]*\)|y)\s*=\s*([^;]+)", work):
+        exprs.append(mm.group(1))
+    # 2) sonst: math-artige Tokens, die die Variable x enthalten
+    if not exprs:
+        for tok in re.split(r"[;]+", work):
+            tok = tok.strip()
+            if "x" in tok and re.search(r"(?i)[\^*/+]|x\d|\dx|sin|cos|tan|sqrt|exp|log|abs|x\^|x\b", tok):
+                cand = re.search(r"[0-9A-Za-z_.^*/+()\-\s]*x[0-9A-Za-z_.^*/+()\-\s]*", tok)
+                if cand:
+                    exprs.append(cand.group(0))
+    # säubern: Rand-Whitespace/Satzzeichen weg, muss die Variable x enthalten
+    cleaned = []
+    for e in exprs:
+        e = e.strip(" .:;,").strip()
+        if e and "x" in e and re.search(r"[0-9x)]\s*$", e):
+            cleaned.append(e)
+    if not cleaned:
+        return None
+    return ";".join(cleaned[:4]), x_min, x_max
+
+
 async def _chat_generator(request: ChatRequest):
     system_prompt: Optional[str] = None
     active_tools = TOOL_DEFS
@@ -1239,6 +1437,14 @@ async def _chat_generator(request: ChatRequest):
     if not (request.web_search or request.science):
         active_tools = [t for t in active_tools
                         if t["function"]["name"] != "web_search"]
+
+    # plot_function dem Modell NICHT als Ollama-Tool anbieten: kleine Modelle (z. B.
+    # ministral-3:3b) erzeugen dabei häufig ungültige LaTeX-Escapes (\( … \)) in den
+    # Argumenten, an denen Ollama beim Parsen mit HTTP 500 scheitert. Funktionsgraphen
+    # werden stattdessen deterministisch serverseitig erzeugt (_extract_plot_request →
+    # plot_function als Fallback nach der Antwort). plot_chart bleibt verfügbar.
+    active_tools = [t for t in active_tools
+                    if t["function"]["name"] != "plot_function"]
 
     # Rollen-Modell wählen, sofern der Agent keines fest vorgibt:
     #  • Programmier-Agent (code_ide) → Programmier-Modell
@@ -1325,6 +1531,7 @@ async def _chat_generator(request: ChatRequest):
         t.get("function", {}).get("name") == "create_presentation" for t in active_tools
     )
     canvas_emitted = False   # über alle Loop-Iterationen: wurde schon ein Canvas gesendet?
+    image_emitted = False    # wurde schon ein Funktionsgraph/Diagramm-Bild gesendet?
 
     # Niedrige Temperatur reduziert Halluzinationen kleiner Modelle deutlich und
     # macht das Tool-Calling zuverlässiger. Für Wissenschaft/Recherche noch strenger.
@@ -1354,6 +1561,23 @@ async def _chat_generator(request: ChatRequest):
                 resp.raise_for_status()
                 result = resp.json()
         except Exception as e:
+            # Bekannte Ollama-Fragilität: kleine Modelle erzeugen beim Tool-Calling
+            # gelegentlich ungültige Escapes (\( … ) → HTTP 500. Wollte der Nutzer einen
+            # Funktionsplot, liefern wir ihn deterministisch, statt nur einen Fehler zu zeigen.
+            if not image_emitted:
+                _pr = _extract_plot_request(_last_user)
+                if _pr:
+                    try:
+                        from tools.engineering import plot_function
+                        _pe, _pmn, _pmx = _pr
+                        _ppi = json.loads(plot_function(_pe, x_min=_pmn, x_max=_pmx))
+                        if _ppi.get("type") == "image":
+                            yield _sse({"type": "image", "data": _ppi["data"]})
+                            yield _sse({"type": "text", "content": "Hier ist der Graph der Funktion."})
+                            yield _sse({"type": "done"})
+                            return
+                    except Exception:
+                        pass
             yield _sse({"type": "error", "message": str(e)})
             return
 
@@ -1448,6 +1672,23 @@ async def _chat_generator(request: ChatRequest):
                     yield _sse({"type": "canvas", "data": canvas_data})
                     canvas_emitted = True
 
+            # Deterministischer Plot-Fallback: hat das Modell trotz Plot-Wunsch nicht
+            # selbst geplottet, ziehen wir die Funktion aus dem Nutzertext und zeichnen
+            # sie serverseitig (kleine Modelle rufen plot_function oft nicht zuverlässig auf).
+            if not image_emitted:
+                _plot_req = _extract_plot_request(_last_user)
+                if _plot_req:
+                    try:
+                        from tools.engineering import plot_function
+                        _expr, _xmin, _xmax = _plot_req
+                        _pres = plot_function(_expr, x_min=_xmin, x_max=_xmax)
+                        _pimg = json.loads(_pres)
+                        if _pimg.get("type") == "image":
+                            yield _sse({"type": "image", "data": _pimg["data"]})
+                            image_emitted = True
+                    except Exception:
+                        pass
+
             # Programmier-Agent: Code aus der Antwort als Basis in die Code-IDE übernehmen
             if code_capable:
                 code_block = _extract_code_block(content)
@@ -1521,7 +1762,21 @@ async def _chat_generator(request: ChatRequest):
                     img_data = json.loads(tool_result)
                     if img_data.get("type") == "image":
                         yield _sse({"type": "image", "data": img_data["data"]})
+                        image_emitted = True
                         tool_result = "Diagramm wurde erstellt und wird angezeigt."
+                except Exception:
+                    pass
+
+            # Mermaid-Diagramm sofort streamen
+            if fn == "create_diagram":
+                try:
+                    diag = json.loads(tool_result)
+                    yield _sse({"type": "diagram", "data": diag})
+                    tool_result = (
+                        f"Diagramm '{diag.get('title', diag.get('diagram_type', ''))}' "
+                        f"wird dem Nutzer bereits angezeigt. "
+                        f"Beschreibe es kurz in 1–2 Sätzen."
+                    )
                 except Exception:
                     pass
 
@@ -1649,6 +1904,14 @@ async def _execute_tool(name: str, args: dict) -> str:
             destination=str(args.get("destination", "")),
             profile=str(args.get("profile", "driving")),
         )
+
+    if name == "create_diagram":
+        return json.dumps({
+            "type": "diagram",
+            "diagram_type": str(args.get("diagram_type", "flowchart")),
+            "definition": str(args.get("definition", "")),
+            "title": str(args.get("title", "")),
+        }, ensure_ascii=False)
 
     return f"Unbekanntes Tool: {name}"
 
@@ -2036,7 +2299,7 @@ async def compress_conversation(cid: str):
         raise HTTPException(404, "Nicht gefunden")
 
     msgs = data["messages"]
-    model = data.get("model") or "qwen3.6-16k:latest"
+    model = data.get("model") or DEFAULT_MODEL
 
     full_text = ""
     for m in msgs:
@@ -2094,7 +2357,7 @@ async def conversation_to_skill(cid: str):
         raise HTTPException(404, "Nicht gefunden")
 
     msgs = data["messages"]
-    model = data.get("model") or "qwen3.6-16k:latest"
+    model = data.get("model") or DEFAULT_MODEL
 
     full_text = ""
     for m in msgs:
@@ -2945,7 +3208,11 @@ async def export_latex(req: Request):
 
 @app.get("/api/profile")
 async def get_profile():
-    return _load_profile()
+    p = _load_profile()
+    # Erstaufruf (noch kein Profil gespeichert): optionale Tabs standardmäßig aus.
+    if not PROFILE_FILE.exists():
+        p.setdefault("hidden_tabs", list(_DEFAULT_HIDDEN_TABS))
+    return p
 
 
 @app.put("/api/profile")
@@ -2989,6 +3256,14 @@ async def save_profile(req: Request):
     # Erst-Start-Einleitung: einmal absolviert? + beim nächsten Start erneut zeigen?
     profile["onboarding_done"] = bool(body.get("onboarding_done", False))
     profile["replay_intro"] = bool(body.get("replay_intro", False))
+    # Ausgeblendete optionale Tabs. Nur überschreiben, wenn das Feld explizit
+    # mitgesendet wird (Profil-Modal). Fehlt es (z. B. Onboarding-Speicherung),
+    # gilt die Erstaufruf-Voreinstellung: alle optionalen Tabs ausgeblendet.
+    if "hidden_tabs" in body:
+        raw_hidden = body.get("hidden_tabs") or []
+        profile["hidden_tabs"] = [t for t in raw_hidden if t in _OPTIONAL_TABS]
+    else:
+        profile["hidden_tabs"] = list(_DEFAULT_HIDDEN_TABS)
     PROFILE_FILE.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
     return profile
 
@@ -3144,6 +3419,8 @@ async def plan_ai(pid: str, req: Request):
     tasks = plan.get("tasks") or body.get("tasks", [])
     model = _pick_model(body.get("model"))
     user_message = body.get("message", "")
+    use_web = body.get("use_web", False)
+    use_rag = body.get("use_rag", False)
     tasks_summary = json.dumps(tasks, ensure_ascii=False)
 
     system_prompt = (
@@ -3153,9 +3430,35 @@ async def plan_ai(pid: str, req: Request):
         "Wenn du Aufgaben vorschlägst, nenne sie als JSON-Liste mit Feldern: id, name, duration, predecessors, successors."
     )
 
+    context_parts = [f"Aktueller Plan '{plan.get('name', 'Plan')}':\n\nAufgaben:\n{tasks_summary}"]
+
+    if use_web:
+        from tools.search import search_with_sources
+        try:
+            _, search_text = await search_with_sources(user_message, 4)
+            if search_text:
+                context_parts.append(f"Websuche-Ergebnisse:\n{search_text[:3000]}")
+        except Exception:
+            pass
+
+    if use_rag:
+        cid = plan.get("rag_collection_id")
+        if cid:
+            coll = await _db.rag_get_collection(cid)
+            if coll:
+                from tools.rag import query_collections
+                try:
+                    hits = await query_collections([coll], user_message)
+                    if hits:
+                        rag_text = "\n\n".join(h.get("text", "") for h in hits[:6])
+                        context_parts.append(f"Aus Plan-Wissensdatenbank:\n{rag_text[:3000]}")
+                except Exception:
+                    pass
+
+    user_content = "\n\n".join(context_parts) + f"\n\nFrage: {user_message}"
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Aktueller Plan '{plan.get('name', 'Plan')}':\n\nAufgaben:\n{tasks_summary}\n\nFrage: {user_message}"},
+        {"role": "user", "content": user_content},
     ]
 
     async def _stream():
@@ -3180,6 +3483,89 @@ async def plan_ai(pid: str, req: Request):
                         pass
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/plans/evaluate")
+async def plan_evaluate(req: Request):
+    """Vergleicht bis zu 3 Pläne KI-gestützt und erzeugt einen verbesserten gemeinsamen Plan."""
+    body = await req.json()
+    plan_ids = (body.get("plan_ids") or [])[:3]
+    model = _pick_model(body.get("model"))
+    if not plan_ids:
+        raise HTTPException(400, "Mindestens eine plan_id erforderlich")
+
+    plans = []
+    for pid in plan_ids:
+        fp = _plan_path_by_id(pid)
+        if fp and fp.exists():
+            try:
+                plans.append(json.loads(fp.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+    if not plans:
+        raise HTTPException(404, "Keine Pläne geladen")
+
+    def _plan_summary(p):
+        tasks = p.get("tasks", [])
+        tlines = "\n".join(f"  - {t.get('name','')} (Dauer {t.get('duration',0)}d, Vorgänger: {t.get('predecessors',[])})" for t in tasks[:40])
+        return (f"Plan: {p.get('name','')}\nBeschreibung: {p.get('description','')}\n"
+                f"Aufgaben ({len(tasks)}):\n{tlines}")
+
+    plan_texts = "\n\n---\n\n".join(f"## Plan {i+1}\n{_plan_summary(p)}" for i, p in enumerate(plans))
+
+    prompt = (
+        f"Du erhältst {len(plans)} Projektplan{'e' if len(plans)>1 else ''} zum gleichen Projektvorhaben. "
+        f"Jeder Plan ist ca. 80 % korrekt und vollständig. Analysiere jeden Plan, identifiziere:\n"
+        f"1. Stärken (gut durchdacht, vollständig)\n"
+        f"2. Lücken (fehlende Aufgaben, falsche Abhängigkeiten, unrealistische Dauern)\n"
+        f"Erstelle dann einen **verbesserten gemeinsamen Plan** der alle Stärken vereint (Ziel: ~99 % Korrektheit).\n\n"
+        f"Antworte auf Deutsch. Gib am Ende den verbesserten Plan als JSON in folgendem Format aus:\n"
+        f"```json\n{{\"name\":\"...\",\"description\":\"...\",\"tasks\":[{{\"id\":\"T1\",\"name\":\"...\","
+        f"\"duration\":1,\"predecessors\":[],\"successors\":[\"T2\"]}},...]}}\n```\n\n"
+        f"Hier die Pläne:\n\n{plan_texts}"
+    )
+
+    async def _stream():
+        text_buf = ""
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+                "model": model, "think": False,
+                "messages": [{"role": "system", "content": _SCIENCE_PROMPT},
+                             {"role": "user", "content": prompt}],
+                "stream": True,
+            }) as resp:
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            text_buf += token
+                            yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
+                        if chunk.get("done"):
+                            break
+                    except Exception:
+                        pass
+
+        # Verbesserten Plan aus JSON-Block extrahieren
+        text_clean = re.sub(r"<think>.*?</think>", "", text_buf, flags=re.DOTALL).strip()
+        m = re.search(r"```json\s*(\{.*?\})\s*```", text_clean, re.DOTALL)
+        if not m:
+            m = re.search(r"(\{\"name\".*\})", text_clean, re.DOTALL)
+        if m:
+            try:
+                improved = json.loads(m.group(1))
+                improved["name"] = improved.get("name", "Verbesserter Plan") + " (KI-Synthese)"
+                yield f"data: {json.dumps({'type': 'plan', 'plan': improved})}\n\n"
+            except Exception:
+                pass
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        _stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 async def _ensure_plan_rag(plan: dict) -> dict:
@@ -3783,6 +4169,123 @@ async def insert_between(req: Request):
             pass
 
     return {"tasks": tasks}
+
+
+@app.post("/api/plans/from-list")
+async def plan_from_list(req: Request):
+    """Konvertiert eine flache Aufgabenliste (aus Anfrage/Ausschreibung) in einen
+    strukturierten Projektplan mit Abhängigkeiten, Dauern und Bereichen.
+    Streaming-SSE-Endpunkt."""
+    import re
+
+    body = await req.json()
+    task_list = (body.get("task_list") or "").strip()
+    if not task_list:
+        raise HTTPException(400, "Keine Aufgabenliste angegeben")
+    name = (body.get("name") or "Projekt aus Liste").strip()
+    _model = _pick_model(body.get("model"))
+
+    async def _gen():
+        yield _sse({"type": "status", "message": "Analysiere Aufgabenliste…"})
+        system = (
+            "Du bist ein erfahrener Projektmanager. Du erhältst eine einfache, unstrukturierte "
+            "Aufgabenliste (z. B. aus einer Anfrage oder Ausschreibung). Deine Aufgabe: "
+            "Erstelle daraus einen vollständigen, logisch geordneten Projektplan mit realistischen "
+            "Dauern und Abhängigkeiten. Fasse verwandte Tätigkeiten in Bereiche (area) zusammen."
+        )
+        user = (
+            f"Aufgabenliste:\n{task_list}\n\n"
+            "Erzeuge einen strukturierten Projektplan. Verwende fortlaufende IDs T1, T2, … "
+            "Weise jeder Aufgabe einen 'area' (Bereich/Phase, z. B. 'Planung', 'Konstruktion', "
+            "'Test', 'Abnahme') zu. Schätze realistische Dauern in Arbeitstagen. "
+            "Setze 'predecessors' als Liste direkter Vorgänger-IDs.\n\n"
+            "Antworte NUR mit JSON ohne Markdown, ohne Erklärung:\n"
+            '{"tasks":[{"id":"T1","name":"Aufgabe","duration":3,"predecessors":[],"area":"Planung"},'
+            '{"id":"T2","name":"Aufgabe","duration":2,"predecessors":["T1"],"area":"Planung"}]}'
+        )
+        payload = {
+            "model": _model,
+            "think": False,
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": system + " Antworte ausschließlich mit gültigem JSON."},
+                {"role": "user",   "content": user},
+            ],
+            "stream": False,
+            "options": {"num_ctx": 8192},
+        }
+        try:
+            async with _model_session(_model), httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+                resp.raise_for_status()
+                raw = resp.json().get("message", {}).get("content", "")
+        except Exception as e:
+            yield _sse({"type": "error", "message": str(e)})
+            return
+
+        yield _sse({"type": "status", "message": "Verarbeite Antwort…"})
+
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
+        raw = re.sub(r"\s*```$", "", raw).strip()
+
+        rawtasks = []
+        m = re.search(r"\{[\s\S]*\}", raw)
+        if m:
+            try:
+                rawtasks = json.loads(m.group(0)).get("tasks") or []
+            except Exception:
+                rawtasks = []
+
+        if not rawtasks:
+            yield _sse({"type": "error", "message":
+                "Das Modell lieferte kein verwertbares JSON. Bitte ein größeres Modell verwenden."})
+            return
+
+        tasks, seen = [], set()
+        for i, t in enumerate(rawtasks, start=1):
+            if not isinstance(t, dict):
+                continue
+            tid = str(t.get("id") or f"T{i}").strip() or f"T{i}"
+            while tid in seen:
+                tid = f"{tid}_{i}"
+            seen.add(tid)
+            try:
+                dur = max(1, float(t.get("duration", 1)))
+            except Exception:
+                dur = 1
+            preds = [str(p).strip() for p in (t.get("predecessors") or []) if str(p).strip()]
+            tasks.append({
+                "id": tid,
+                "name": str(t.get("name", tid)).strip()[:120],
+                "duration": dur,
+                "predecessors": preds,
+                "successors": [],
+                "resources": "",
+                "resource_list": [],
+                "notes": "",
+                "area": str(t.get("area") or "").strip()[:40],
+                "is_start": False,
+                "is_end": False,
+            })
+
+        ids = {t["id"] for t in tasks}
+        by_id = {t["id"]: t for t in tasks}
+        for t in tasks:
+            t["predecessors"] = [p for p in t["predecessors"] if p in ids and p != t["id"]]
+        for t in tasks:
+            for p in t["predecessors"]:
+                by_id[p]["successors"].append(t["id"])
+        for t in tasks:
+            if not t["predecessors"]:
+                t["is_start"] = True
+            if not t["successors"]:
+                t["is_end"] = True
+
+        plan = {"name": name, "description": "", "tasks": tasks}
+        yield _sse({"type": "plan", "plan": plan})
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 @app.post("/api/plans/generate")
@@ -4393,6 +4896,684 @@ async def download_logs():
         media_type="application/octet-stream",
         filename=f"ai_framework_thomas_{time.strftime('%Y-%m-%d_%H-%M')}.log",
     )
+
+
+# ── Setup-Endpunkte (Erststart-Konfiguration) ─────────────────────────────────
+
+@app.get("/api/setup/embed-check")
+async def setup_embed_check():
+    """Prüft ob das konfigurierte Embedding-Modell in Ollama vorhanden ist."""
+    embed_model = _CONFIG.get("embed_model", "nomic-embed-text")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{OLLAMA_BASE}/api/tags")
+            names = {m["name"] for m in resp.json().get("models", [])}
+            return {"ok": embed_model in names, "embed_model": embed_model}
+    except Exception:
+        return {"ok": False, "embed_model": embed_model}
+
+
+@app.get("/api/platform")
+async def get_platform():
+    """Liefert die Betriebssystem-Plattform für die Onboarding-Maske."""
+    import sys
+    return {"platform": sys.platform}  # "linux", "win32", "darwin"
+
+
+@app.post("/api/refine-document")
+async def refine_document(req: Request):
+    """Multi-Agenten-Verfeinerungsschleife: verbessert ein Dokument iterativ
+    durch mehrere Agenten bis die Änderungsrate unter den Schwellwert fällt."""
+    import difflib
+    body = await req.json()
+    text = (body.get("text") or "").strip()
+    agents = body.get("agents") or []   # [{id, system_prompt, name}]
+    threshold = float(body.get("threshold") or 2.0)   # % Änderungen für Stop
+    max_iter = min(int(body.get("max_iterations") or 10), 50)
+    model = _pick_model(body.get("model"))
+    if not text:
+        raise HTTPException(400, "Kein Dokumenttext")
+    if not agents:
+        raise HTTPException(400, "Mindestens ein Agent erforderlich")
+
+    def _word_change_pct(old: str, new: str) -> float:
+        a = old.split(); b = new.split()
+        if not a and not b:
+            return 0.0
+        ratio = difflib.SequenceMatcher(None, a, b).ratio()
+        return round((1.0 - ratio) * 100, 1)
+
+    async def _refine_once(current: str, agent: dict) -> str:
+        sys_prompt = agent.get("system_prompt") or (
+            "Verbessere den folgenden Text: korrigiere Fehler, verbessere Klarheit und Struktur. "
+            "Gib NUR den verbesserten Text zurück, ohne Kommentare."
+        )
+        # Große Dokumente: in ~2000-Zeichen-Abschnitte aufteilen
+        MAX = 4000
+        if len(current) <= MAX:
+            chunks = [current]
+        else:
+            paragraphs = current.split("\n\n")
+            chunks, buf = [], ""
+            for p in paragraphs:
+                if len(buf) + len(p) > MAX and buf:
+                    chunks.append(buf.strip())
+                    buf = p
+                else:
+                    buf += ("\n\n" if buf else "") + p
+            if buf:
+                chunks.append(buf.strip())
+
+        refined_parts = []
+        for chunk in chunks:
+            try:
+                async with httpx.AsyncClient(timeout=180) as client:
+                    resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                        "model": model, "think": False, "stream": False,
+                        "messages": [{"role": "system", "content": sys_prompt},
+                                     {"role": "user", "content": chunk}],
+                    })
+                    resp.raise_for_status()
+                    content = resp.json().get("message", {}).get("content", "").strip()
+                    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                    refined_parts.append(content if content else chunk)
+            except Exception:
+                refined_parts.append(chunk)
+        return "\n\n".join(refined_parts)
+
+    async def _stream():
+        current = text
+        async with _model_session(model):
+            for iteration in range(1, max_iter + 1):
+                agent = agents[(iteration - 1) % len(agents)]
+                yield _sse({"type": "iteration_start", "n": iteration,
+                            "agent": agent.get("name", f"Agent {iteration}")})
+                try:
+                    new_text = await _refine_once(current, agent)
+                except Exception as e:
+                    yield _sse({"type": "error", "message": str(e)})
+                    return
+                change_pct = _word_change_pct(current, new_text)
+                current = new_text
+                yield _sse({"type": "iteration_done", "n": iteration,
+                            "agent": agent.get("name", f"Agent {iteration}"),
+                            "change_pct": change_pct, "text": current})
+                if change_pct < threshold:
+                    yield _sse({"type": "converged", "n": iteration, "change_pct": change_pct,
+                                "message": f"Konvergiert nach {iteration} Iterationen ({change_pct} % < {threshold} % Schwelle)"})
+                    break
+            yield _sse({"type": "done", "text": current})
+
+    return StreamingResponse(
+        _stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/setup/config")
+async def get_setup_config():
+    """Gibt die aktuell aktiven Konfigurationswerte zurück (für Onboarding/Einstellungen)."""
+    return {
+        "default_model": _CONFIG.get("default_model", DEFAULT_MODEL),
+        "data_dir": _CONFIG.get("data_dir", "data"),
+    }
+
+
+@app.put("/api/rag/collections/{cid}/server-path")
+async def rag_set_server_path_endpoint(cid: str, req: Request):
+    """Setzt oder löscht den Serverpfad einer RAG-Sammlung."""
+    body = await req.json()
+    sp = (body.get("server_path") or "").strip() or None
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(404, "Sammlung nicht gefunden")
+    await _db.rag_set_server_path(cid, sp)
+    return {"ok": True, "server_path": sp}
+
+
+@app.post("/api/rag/collections/{cid}/publish")
+async def rag_publish_collection(cid: str):
+    """Exportiert eine RAG-Sammlung als .ragpack.json in den gespeicherten Serverpfad."""
+    import base64
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(404, "Sammlung nicht gefunden")
+    sp = (coll.get("server_path") or "").strip()
+    if not sp:
+        raise HTTPException(400, "Kein Serverpfad für diese Sammlung gesetzt")
+    server_dir = Path(sp)
+    if not server_dir.exists():
+        raise HTTPException(400, f"Verzeichnis existiert nicht: {sp}")
+    if not server_dir.is_dir():
+        raise HTTPException(400, f"Pfad ist kein Verzeichnis: {sp}")
+    data = await _db.rag_export_collection(cid)
+    if not data:
+        raise HTTPException(500, "Export fehlgeschlagen")
+    # Embeddings base64-kodieren für JSON-Serialisierung
+    for d in data["documents"]:
+        for ch in d.get("chunks", []):
+            ch["embedding"] = base64.b64encode(ch["embedding"]).decode()
+    slug = re.sub(r"[^\w\-]+", "_", coll["name"])[:40] or cid[:8]
+    out_file = server_dir / f"{slug}.ragpack.json"
+    out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "file": str(out_file), "n_chunks": sum(len(d.get("chunks", [])) for d in data["documents"])}
+
+
+@app.get("/api/rag/server-packs")
+async def rag_server_packs(dir: str = ""):
+    """Listet alle .ragpack.json-Dateien in einem Verzeichnis auf."""
+    p = Path(dir.strip())
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(400, f"Verzeichnis nicht gefunden: {dir}")
+    packs = []
+    for f in sorted(p.glob("*.ragpack.json")):
+        try:
+            meta = json.loads(f.read_text(encoding="utf-8"))
+            c = meta.get("collection", {})
+            packs.append({
+                "file": str(f),
+                "name": c.get("name", f.stem),
+                "n_docs": len(meta.get("documents", [])),
+                "n_chunks": sum(len(d.get("chunks", [])) for d in meta.get("documents", [])),
+                "created_at": c.get("created_at"),
+            })
+        except Exception:
+            pass
+    return packs
+
+
+@app.post("/api/rag/collections/clone")
+async def rag_clone_collection(req: Request):
+    """Klont eine .ragpack.json-Datei in die lokale Datenbank (neue ID, kein server_path)."""
+    import base64
+    body = await req.json()
+    file_path = (body.get("file_path") or "").strip()
+    if not file_path:
+        raise HTTPException(400, "file_path fehlt")
+    p = Path(file_path)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(400, f"Datei nicht gefunden: {file_path}")
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(400, f"Datei konnte nicht gelesen werden: {e}")
+    coll = data.get("collection", {})
+    docs = data.get("documents", [])
+    # Neue IDs generieren um Kollisionen zu vermeiden
+    new_cid = uuid.uuid4().hex
+    coll = dict(coll)
+    coll["id"] = new_cid
+    coll.pop("server_path", None)  # Klon hat keinen Serverpfad
+    id_map = {}
+    new_docs = []
+    for d in docs:
+        new_did = f"doc_{uuid.uuid4().hex[:12]}"
+        id_map[d["id"]] = new_did
+        nd = dict(d)
+        nd["id"] = new_did
+        for ch in nd.get("chunks", []):
+            if isinstance(ch.get("embedding"), str):
+                ch["embedding"] = base64.b64decode(ch["embedding"])
+        new_docs.append(nd)
+    await _db.rag_import_collection(coll, new_docs)
+    return {"ok": True, "id": new_cid, "name": coll.get("name"), "n_docs": len(new_docs)}
+
+
+@app.post("/api/setup/config")
+async def setup_config(req: Request):
+    """Schreibt das gewählte Standard-Modell und optionalen Datenpfad in config.json."""
+    global _CONFIG, DEFAULT_MODEL
+    body = await req.json()
+    model = _pick_model(body.get("default_model", ""))
+    _CONFIG["default_model"] = model
+    DEFAULT_MODEL = model
+    if "data_dir" in body:
+        raw = (body["data_dir"] or "").strip() or "data"
+        _CONFIG["data_dir"] = raw
+    try:
+        _CONFIG_FILE.write_text(
+            json.dumps({k: v for k, v in _CONFIG.items()}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        raise HTTPException(500, f"config.json konnte nicht gespeichert werden: {e}")
+    return {"ok": True, "default_model": model, "data_dir": _CONFIG.get("data_dir", "data")}
+
+
+@app.post("/api/setup/systemd")
+async def setup_systemd():
+    """Richtet einen User-Systemd-Service ein (nur Linux, kein sudo nötig)."""
+    import sys
+    import subprocess
+    if sys.platform != "linux":
+        raise HTTPException(400, "Systemd ist nur unter Linux verfügbar.")
+
+    app_dir = Path(__file__).parent.resolve()
+    uvicorn_bin = app_dir / "venv" / "bin" / "uvicorn"
+    host = _CONFIG.get("host", "127.0.0.1")
+    port = _CONFIG.get("port", 8780)
+
+    service = f"""[Unit]
+Description=AI Framework Thomas
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={app_dir}
+ExecStart={uvicorn_bin} main:app --host {host} --port {port}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"""
+    systemd_dir = Path.home() / ".config" / "systemd" / "user"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+    service_file = systemd_dir / "ai_framework_thomas.service"
+    service_file.write_text(service, encoding="utf-8")
+
+    errors = []
+    for cmd in [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "enable", "--now", "ai_framework_thomas"],
+    ]:
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+        except Exception as e:
+            errors.append(str(e))
+
+    if errors:
+        return {
+            "ok": False,
+            "errors": errors,
+            "service_file": str(service_file),
+            "hint": "systemctl --user enable --now ai_framework_thomas",
+        }
+    return {"ok": True, "service_file": str(service_file)}
+
+
+# ── Medizin-Pipeline (2-Modell-Konsultation: Ministral ↔ MedGemma) ───────────
+#
+# Ablauf je Nutzer-Eingabe (human-in-the-loop, max. 2 Rückfrage-Runden):
+#   1. Ministral (Allgemein) strukturiert die Eingabe medizinisch sauber  (Stage „refine")
+#   2. MedGemma (Medizin) prüft auf fehlende Angaben                       (Stage „analyze")
+#   3a. Fehlt etwas & Runde < 2 → Ministral formuliert Rückfrage → warten  (Frame „question")
+#   3b. Vollständig (oder Runde erschöpft) → MedGemma erstellt die finale
+#       Einschätzung, gestreamt                                            (Stage „final" + text)
+# Optional danach: /api/medizin/translate übersetzt das Ergebnis per
+# Ministral in laienverständliches Deutsch.
+#
+# Jeder Schritt läuft sequenziell in einem eigenen _model_session-Block, damit
+# der VRAM-Guard die Modellwechsel serialisiert (nie zwei Modelle gleichzeitig).
+
+_MED_MAX_ROUNDS = 2  # Höchstzahl an Rückfrage-Runden, dann zwingend Ergebnis
+
+_MED_DISCLAIMER = (
+    "Wichtig: Du bist ein medizinisches Assistenzsystem, KEIN Arzt. Stelle keine "
+    "endgültige Diagnose und ersetze keine ärztliche Untersuchung. Weise am Ende kurz "
+    "darauf hin, dass die Einschätzung ärztlich geprüft werden muss, und nenne ggf. "
+    "Warnsignale, bei denen sofort ärztliche Hilfe nötig ist."
+)
+
+
+async def _med_call(client, model: str, system: str, user: str, *, think: bool = False) -> str:
+    """Ein nicht-streamender Ollama-Chat-Aufruf, gibt den reinen Text zurück."""
+    resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        "model": model,
+        "think": think,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    })
+    resp.raise_for_status()
+    raw = resp.json().get("message", {}).get("content", "") or ""
+    return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+
+async def _med_rag_context(rag_collections: list, query: str) -> str:
+    """Sucht passende Passagen aus den (Patienten-)Wissensdatenbanken."""
+    if not rag_collections:
+        return ""
+    try:
+        from tools.rag import query_collections
+        hits = await query_collections(rag_collections, query)
+        if hits:
+            joined = "\n\n".join(h.get("text", "") for h in hits[:6])
+            return joined[:3000]
+    except Exception:
+        pass
+    return ""
+
+
+def _med_transcript(messages: list) -> str:
+    """Formt den bisherigen Verlauf in einen lesbaren Gesprächstext."""
+    lines = []
+    for m in messages:
+        role = m.get("role")
+        content = str(m.get("content", "")).strip()
+        if not content:
+            continue
+        if role == "user":
+            lines.append(f"Patient: {content}")
+        elif role == "assistant":
+            lines.append(f"Assistent: {content}")
+    return "\n".join(lines)
+
+
+@app.post("/api/medizin/consult")
+async def medizin_consult(req: Request):
+    """Eine Stufe der Medizin-Konsultation (siehe Beschreibung oben). Streamt
+    SSE-Frames: stage / question / text / done / error."""
+    body = await req.json()
+    messages = body.get("messages") or []
+    rag_collections = body.get("rag_collections") or []
+    try:
+        rnd = int(body.get("round", 0))
+    except Exception:
+        rnd = 0
+
+    model_general = _pick_model(body.get("model_general"), _model_for("general"))
+    model_medical = _pick_model(body.get("model_medical"), _model_for("medical"))
+
+    transcript = _med_transcript(messages)
+    latest = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            latest = str(m.get("content", "")).strip()
+            break
+
+    async def _stream():
+        if not transcript:
+            yield _sse({"type": "error", "content": "Keine Eingabe erhalten."})
+            return
+
+        # ── Stage 1: Ministral strukturiert die Anfrage medizinisch ──────────
+        yield _sse({"type": "stage", "stage": "refine", "status": "start",
+                     "label": f"{model_general} strukturiert die Anfrage…"})
+        try:
+            async with _model_session(model_general), httpx.AsyncClient(timeout=120) as client:
+                refined = await _med_call(
+                    client, model_general,
+                    ("Du bereitest Patientenanfragen für einen medizinischen Fachkollegen auf. "
+                     "Formuliere aus dem Gesprächsverlauf eine sachliche, strukturierte medizinische "
+                     "Falldarstellung in Stichpunkten (Anliegen, bekannte Angaben wie Alter/Geschlecht/"
+                     "Symptome/Dauer/Vorerkrankungen/Medikamente, soweit genannt). Erfinde nichts, "
+                     "ergänze keine nicht genannten Fakten. Nur die Falldarstellung, kein Vorwort."),
+                    f"Gesprächsverlauf:\n{transcript}",
+                )
+        except Exception as e:
+            yield _sse({"type": "error", "content": f"Aufbereitung fehlgeschlagen: {e}"})
+            return
+        if not refined:
+            refined = latest
+        yield _sse({"type": "stage", "stage": "refine", "status": "done", "content": refined})
+
+        # ── Stage 2: MedGemma prüft auf fehlende Angaben ─────────────────────
+        rag_ctx = await _med_rag_context(rag_collections, refined or latest)
+        forced_final = rnd >= _MED_MAX_ROUNDS
+        if not forced_final:
+            yield _sse({"type": "stage", "stage": "analyze", "status": "start",
+                         "label": f"{model_medical} prüft auf fehlende Angaben…"})
+            analyze_user = f"Strukturierte Falldarstellung:\n{refined}"
+            if rag_ctx:
+                analyze_user += f"\n\nPatientenakte (Auszug):\n{rag_ctx}"
+            try:
+                async with _model_session(model_medical), httpx.AsyncClient(timeout=180) as client:
+                    analysis = await _med_call(
+                        client, model_medical,
+                        ("Du bist ein erfahrener Mediziner. Prüfe, ob für eine fundierte erste "
+                         "Einschätzung wesentliche Angaben fehlen (z. B. Alter, Geschlecht, Dauer/"
+                         "Verlauf, Schweregrad, Begleitsymptome, Vorerkrankungen, Medikamente, "
+                         "Allergien). Wenn alles Wesentliche vorhanden ist, antworte mit GENAU dem "
+                         "Wort VOLLSTAENDIG. Andernfalls beginne mit FEHLT: und liste danach in "
+                         "kurzen Stichpunkten (max. 4) nur die wirklich fehlenden Angaben."),
+                        analyze_user,
+                    )
+            except Exception as e:
+                yield _sse({"type": "error", "content": f"Analyse fehlgeschlagen: {e}"})
+                return
+            yield _sse({"type": "stage", "stage": "analyze", "status": "done", "content": analysis})
+
+            complete = "vollstaendig" in analysis.lower()[:60] or "vollständig" in analysis.lower()[:60]
+            if not complete and analysis.strip():
+                # ── Stage 3a: Ministral formuliert eine Rückfrage ────────────
+                yield _sse({"type": "stage", "stage": "formulate", "status": "start",
+                             "label": f"{model_general} formuliert die Rückfrage…"})
+                try:
+                    async with _model_session(model_general), httpx.AsyncClient(timeout=120) as client:
+                        question = await _med_call(
+                            client, model_general,
+                            ("Du sprichst freundlich und verständlich mit einem Patienten (kein "
+                             "Fachjargon). Formuliere eine kurze, klare Rückfrage auf Deutsch, die "
+                             "den Patienten genau um die unten genannten fehlenden Angaben bittet. "
+                             "Bündele sie in 1–3 einfachen Fragen. Nur die Rückfrage, kein Vorwort."),
+                            f"Ursprüngliches Anliegen:\n{latest}\n\nFehlende Angaben:\n{analysis}",
+                        )
+                except Exception as e:
+                    yield _sse({"type": "error", "content": f"Rückfrage fehlgeschlagen: {e}"})
+                    return
+                if not question:
+                    question = "Können Sie bitte noch ein paar Angaben ergänzen (Alter, Dauer, Begleitsymptome)?"
+                yield _sse({"type": "stage", "stage": "formulate", "status": "done"})
+                yield _sse({"type": "question", "content": question, "round": rnd + 1})
+                yield _sse({"type": "done", "needs_followup": True, "round": rnd + 1})
+                return
+
+        # ── Stage 3b: MedGemma erstellt die finale Einschätzung (gestreamt) ──
+        yield _sse({"type": "stage", "stage": "final", "status": "start",
+                     "label": f"{model_medical} erstellt die Einschätzung…"})
+        final_user = f"Strukturierte Falldarstellung:\n{refined}\n\nVollständiger Verlauf:\n{transcript}"
+        if rag_ctx:
+            final_user += f"\n\nPatientenakte (Auszug):\n{rag_ctx}"
+        try:
+            async with _model_session(model_medical), httpx.AsyncClient(timeout=300) as client:
+                async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+                    "model": model_medical,
+                    "think": False,   # MedGemma unterstützt Ollamas Think-Modus nicht
+                                       # (liefert dann leeren content) – immer aus.
+                    "stream": True,
+                    "messages": [
+                        {"role": "system", "content": (
+                            "Du bist ein erfahrener Mediziner und gibst eine fundierte erste "
+                            "fachliche Einschätzung auf Deutsch: mögliche Ursachen / "
+                            "Differentialdiagnosen, sinnvolle nächste Schritte und Untersuchungen, "
+                            "Dringlichkeit. Strukturiere klar mit Überschriften. " + _MED_DISCLAIMER
+                        )},
+                        {"role": "user", "content": final_user},
+                    ],
+                }) as resp:
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except Exception:
+                            continue
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yield _sse({"type": "text", "content": token})
+        except Exception as e:
+            yield _sse({"type": "error", "content": f"Einschätzung fehlgeschlagen: {e}"})
+            return
+        yield _sse({"type": "done", "needs_followup": False, "round": rnd})
+
+    return StreamingResponse(_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/medizin/translate")
+async def medizin_translate(req: Request):
+    """Übersetzt eine medizinische Einschätzung per Allgemein-Modell in
+    laienverständliches Deutsch (gestreamt)."""
+    body = await req.json()
+    text = str(body.get("text", "")).strip()
+    model_general = _pick_model(body.get("model_general"), _model_for("general"))
+    if not text:
+        raise HTTPException(status_code=400, detail="Kein Text übergeben")
+
+    async def _stream():
+        try:
+            async with _model_session(model_general), httpx.AsyncClient(timeout=180) as client:
+                async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+                    "model": model_general,
+                    "think": False,
+                    "stream": True,
+                    "messages": [
+                        {"role": "system", "content": (
+                            "Übersetze den folgenden medizinischen Text in einfaches, "
+                            "laienverständliches Deutsch ohne Fachjargon. Behalte ALLE wichtigen "
+                            "Aussagen, Empfehlungen und Warnhinweise bei, erkläre Fachbegriffe kurz. "
+                            "Erfinde nichts hinzu.")},
+                        {"role": "user", "content": text[:6000]},
+                    ],
+                }) as resp:
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except Exception:
+                            continue
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yield _sse({"type": "text", "content": token})
+        except Exception as e:
+            yield _sse({"type": "error", "content": f"Übersetzung fehlgeschlagen: {e}"})
+            return
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── Mathe-Tutor: deterministische SymPy-Grundwahrheit ────────────────────────
+#
+# Kleine lokale Modelle rufen Verifikations-Werkzeuge mitten im Tutor-Dialog NICHT
+# zuverlässig selbst auf (getestet: ministral-3:3b und qwen2.5-coder:7b ignorieren
+# sie bzw. bestätigen falsche Schritte). Damit „werkzeuggeprüft" trotzdem echt ist,
+# rechnet der Server hier die korrekte Lösung deterministisch mit SymPy und gibt sie
+# dem Tutor-Agenten als verifizierte Fakten mit – statt es dem Modell zu überlassen.
+
+
+def _mathe_sympy_facts(kind: str, sympy_str: str, goal: str) -> str:
+    """Berechnet aus einem (vom LLM extrahierten) Ausdruck deterministisch die
+    Grundwahrheit mit SymPy. Gibt eine kurze Faktenliste oder "" zurück."""
+    if not sympy_str:
+        return ""
+    # Einfacher Zeichensatz-Schutz: nur mathematische Ausdrücke zulassen
+    if not re.fullmatch(r"[0-9A-Za-z_+\-*/^().,=<>\[\] ]+", sympy_str):
+        return ""
+    expr = sympy_str.replace("^", "**").strip()
+    expr = expr.replace("==", "=")  # Modell nutzt oft Python-Gleichheit „=="
+    # „f(x) = …"-Präfix entfernen (häufige Schreibweise), reine rechte Seite behalten
+    expr = re.sub(r"^[a-zA-Z]\s*\([a-zA-Z]\)\s*=\s*", "", expr)
+    try:
+        import sympy as sp
+        from sympy.parsing.sympy_parser import (
+            parse_expr, standard_transformations, implicit_multiplication_application)
+        _tf = standard_transformations + (implicit_multiplication_application,)
+        def _p(s):  # robust: versteht implizite Multiplikation (z. B. „2x" → 2*x)
+            return parse_expr(s, transformations=_tf)
+        facts: list[str] = []
+        # Fall A: Modell lieferte bereits einen SymPy-Funktionsaufruf (diff(...), integrate(...), …)
+        if re.match(r"^(diff|integrate|factor|expand|simplify|solve|limit|series|nsimplify)\s*\(", expr):
+            res = sp.sympify(expr)
+            facts.append(f"Ergebnis [SymPy]: {res}")
+            return "\n".join(facts)
+        # Fall B: Gleichung (enthält genau ein '=')
+        if "=" in expr and "==" not in expr:
+            lhs_s, rhs_s = expr.split("=", 1)
+            lhs, rhs = _p(lhs_s), _p(rhs_s)
+            eq = sp.Eq(lhs, rhs)
+            syms = sorted(eq.free_symbols, key=lambda s: s.name)
+            facts.append(f"Gleichung: {expr}")
+            if syms:
+                sols = sp.solve(eq, *syms)
+                if sols:
+                    facts.append(f"Lösung(en) [SymPy]: {sols}")
+            poly = sp.expand(lhs - rhs)
+            fac = sp.factor(poly)
+            if str(fac) != str(poly):
+                facts.append(f"Faktorisierung von ({poly}): {fac}")
+            return "\n".join(facts)
+        # Fall C: reiner Ausdruck – je nach Ziel ableiten/integrieren/faktorisieren
+        e = _p(expr)
+        facts.append(f"Ausdruck: {expr}")
+        if goal == "diff":
+            facts.append(f"Ableitung [SymPy]: {sp.diff(e)}")
+        elif goal == "integrate":
+            facts.append(f"Stammfunktion [SymPy]: {sp.integrate(e)} (+ C)")
+        elif goal == "factor":
+            facts.append(f"Faktorisiert [SymPy]: {sp.factor(e)}")
+        elif goal == "solve":
+            syms = sorted(e.free_symbols, key=lambda s: s.name)
+            if syms:
+                facts.append(f"Nullstellen [SymPy]: {sp.solve(e, *syms)}")
+        else:
+            simp = sp.simplify(e)
+            facts.append(f"Vereinfacht [SymPy]: {simp}")
+            fac = sp.factor(e)
+            if str(fac) != str(e) and str(fac) != str(simp):
+                facts.append(f"Faktorisiert [SymPy]: {fac}")
+        return "\n".join(facts)
+    except Exception:
+        return ""
+
+
+@app.post("/api/mathe/ground")
+async def mathe_ground(req: Request):
+    """Extrahiert die zentrale Aufgabe aus dem Tutor-Gespräch und liefert die
+    SymPy-verifizierte Grundwahrheit als Fakten zurück (für den Tutor-Modus).
+    Gibt {facts: ""} zurück, wenn nichts deterministisch prüfbar ist."""
+    body = await req.json()
+    messages = body.get("messages") or []
+    model = _pick_model(body.get("model"), _model_for("general"))
+
+    transcript = _med_transcript(messages)  # gleiche Formatierung wie Medizin
+    if not transcript:
+        return {"facts": ""}
+
+    # Schritt 1: Aufgabe als SymPy-Ausdruck extrahieren (robustes JSON-Parsing)
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": model, "think": False, "stream": False,
+                "messages": [
+                    {"role": "system", "content": (
+                        "Extrahiere die zentrale mathematische Aufgabe aus dem Gespräch. "
+                        "Antworte NUR mit JSON in genau diesem Format, ohne weiteren Text: "
+                        '{"kind":"equation|expression|none","sympy":"<SymPy-auswertbarer Ausdruck, '
+                        'Gleichungen mit = , Potenz mit ** , keine Worte>","goal":"solve|factor|diff|'
+                        'integrate|simplify|none"}. Bei reinen Theorie-/Wortaufgaben ohne klaren '
+                        'Ausdruck: kind=none.')},
+                    {"role": "user", "content": f"Gespräch:\n{transcript[:2000]}"},
+                ],
+            })
+            resp.raise_for_status()
+            raw = resp.json().get("message", {}).get("content", "") or ""
+    except Exception:
+        return {"facts": ""}
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return {"facts": ""}
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return {"facts": ""}
+
+    kind = str(data.get("kind", "none")).strip().lower()
+    sympy_str = str(data.get("sympy", "")).strip()
+    goal = str(data.get("goal", "none")).strip().lower()
+    # kind wird vom Modell oft mit goal verwechselt → nicht hart darauf sperren.
+    # Es genügt ein auswertbarer Ausdruck; ohne solchen (Theorie/Wort) bleibt es leer.
+    if not sympy_str or sympy_str.lower() in ("none", "null"):
+        return {"facts": ""}
+    facts = _mathe_sympy_facts(kind, sympy_str, goal)
+    return {"facts": facts}
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────

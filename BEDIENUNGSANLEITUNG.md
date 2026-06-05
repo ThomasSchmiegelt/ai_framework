@@ -1,6 +1,6 @@
-﻿# 🤖 AI_Framework_Thomas — Bedienungsanleitung
+# 🤖 AI_Framework_Thomas — Bedienungsanleitung
 
-**Version:** 3.0 · **Stand:** Mai 2026
+**Version:** 3.2 · **Stand:** Juni 2026
 
 ---
 
@@ -18,21 +18,23 @@
 - [RAG — Eigene Wissenssammlungen](#rag--eigene-wissenssammlungen)
 - [Dokumentengenerator](#dokumentengenerator)
 - [Mail-Bearbeitung (Beta)](#mail-bearbeitung)
-10. [Planer (Netzplan / CPM)](#10-planer-netzplan--cpm)
-11. [Matrix-Recherche](#11-matrix-recherche)
-12. [Code-Tab (IDE + JSON-Editor)](#12-code-tab-ide--json-editor)
+10. [Medizin-Tab](#10-medizin-tab)
+11. [Mathe-Tab](#11-mathe-tab)
+12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
+13. [Matrix-Recherche](#13-matrix-recherche)
+14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
 - [JSON-Editor](#json-editor)
-13. [Diagnose-Logger](#13-diagnose-logger)
-14. [Agenten](#14-agenten)
-15. [Gespräche verwalten](#15-gespräche-verwalten)
-16. [Nutzerprofil & Projekte](#16-nutzerprofil--projekte)
-17. [Exportieren](#17-exportieren)
-18. [Backup & Wiederherstellung](#18-backup--wiederherstellung)
-19. [Modelle & VRAM](#19-modelle--vram)
-20. [Tastenkürzel](#20-tastenkürzel)
-21. [Technische Hinweise](#21-technische-hinweise)
-22. [Aktualisieren (Update)](#22-aktualisieren-update)
-23. [Deinstallation](#23-deinstallation)
+15. [Diagnose-Logger](#15-diagnose-logger)
+16. [Agenten](#16-agenten)
+17. [Gespräche verwalten](#17-gespräche-verwalten)
+18. [Nutzerprofil & Projekte](#18-nutzerprofil--projekte)
+19. [Exportieren](#19-exportieren)
+20. [Backup & Wiederherstellung](#20-backup--wiederherstellung)
+21. [Modelle & VRAM](#21-modelle--vram)
+22. [Tastenkürzel](#22-tastenkürzel)
+23. [Technische Hinweise](#23-technische-hinweise)
+24. [Aktualisieren (Update)](#24-aktualisieren-update)
+25. [Deinstallation](#25-deinstallation)
 
 ---
 
@@ -44,7 +46,8 @@ eigenen Rechner. Alle Daten bleiben lokal; nach außen geht nur die Websuche
 
 **Kernfunktionen:** Chat mit lokalen Modellen · Websuche · Berechnungen ·
 Präsentationen & Tabellen · Recherche mit Quellen · Netzplanung · Code-IDE ·
-spezialisierte Agenten · Dokument-Export mit Firmen-Design.
+spezialisierte Agenten · Dokument-Export mit Firmen-Design · Medizin-Assistent
+mit Patienten-Akten · Mathematik-Workspace mit Plots und LaTeX-Export.
 
 ---
 
@@ -79,8 +82,14 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | 💻 Code | Code-IDE + JSON-Editor |
 | 🤖 Agenten | Agenten erstellen und bearbeiten |
 | 📚 RAG | Eigene Wissenssammlungen für die KI |
-| 📧 Mail | Postfach (IMAP/POP3) read-only: filtern → bis zu 4 Aktionen (Beta) |
-| 📋 Logs | Diagnose-Protokoll |
+| 🩺 Medizin | Medizin-Assistent mit Patienten-RAG *(optional, im Profil konfigurierbar)* |
+| 🔢 Mathe | Mathematik-Workspace: Plots, SymPy, LaTeX/PDF-Export *(optional)* |
+| 📧 Mail | Postfach (IMAP/POP3) read-only: filtern → bis zu 4 Aktionen (Beta) *(optional)* |
+| 📋 Logs | Diagnose-Protokoll *(optional)* |
+
+> **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Mail** und **Logs**
+> können im Profil ausgeblendet werden (→ [Abschnitt 18 – Tab-Sichtbarkeit](#18-nutzerprofil--projekte)).
+> Sie bleiben jederzeit wieder einschaltbar.
 
 ### Sidebar (links)
 
@@ -323,8 +332,8 @@ verbessert die Trefferqualität spürbar.
 ### Im Chat nutzen
 
 1. In der Chat-Toolbar den Umschalter **📚 RAG** aktivieren — daneben erscheint eine
-   **Sammlungsauswahl**.
-2. Eine (oder mit Strg/Shift mehrere) Sammlung(en) markieren.
+   **Sammlungsauswahl** als dunkelthemenfähiges Dropdown mit Checkboxen.
+2. Eine oder mehrere Sammlung(en) anhaken.
 3. Frage stellen. Über der Antwort zeigt eine Leiste **„📚 Kontext aus
    Wissenssammlung"** an, welche Dokumente herangezogen wurden. Die KI nennt die
    Quelle und weist darauf hin, falls die Antwort nicht in den Dokumenten steht.
@@ -441,7 +450,166 @@ bleibt immer manuell per **▶**.
 
 ---
 
-## 10. Planer (Netzplan / CPM)
+## 10. Medizin-Tab
+
+> **Hinweis:** Dieser Tab dient ausschließlich als **Demonstrations- und Assistenz-Werkzeug**
+> und ersetzt keine ärztliche Diagnose oder Fachberatung. Sämtliche KI-Ausgaben müssen von
+> medizinisch ausgebildetem Personal geprüft werden.
+
+Tab **🩺 Medizin** — ein eigenständiges Chat-Interface für medizinische Fragestellungen,
+mit Patienten-RAG und Datei-Upload für Befunde und Bilder. Der Tab bleibt beim Senden
+einer Nachricht sichtbar — es wird nicht zum allgemeinen Chat-Tab gewechselt.
+
+*(Tab muss ggf. im Profil erst eingeblendet werden → Abschnitt 18, Tab-Sichtbarkeit.)*
+
+### Patienten-Akte (RAG)
+
+Der Medizin-Tab kennt das Konzept einer **Patienten-Akte**: eine dedizierte
+Wissensdatenbank, deren Name mit `Patient:` beginnt (z. B. `Patient: Max Mustermann`).
+
+- **Neue Akte anlegen:** Im Topbar den Bereich **➕ Neue Akte** öffnen — das Eingabefeld
+  erscheint direkt in der Toolbar. Namen eingeben und **✓** drücken. Die neue Akte wird
+  als RAG-Sammlung mit dem Präfix `Patient:` angelegt.
+- **Akte wählen:** Dropdown oben links — zeigt alle vorhandenen Patienten-Akten. Ist eine
+  Akte gewählt, fließt ihr Inhalt automatisch als Kontext in alle Fragen ein.
+- **Dokumente zur Akte hinzufügen:** **📎 In Akte laden** in der Toolbar — Bilder (PNG, JPG)
+  und Berichte (PDF, DOCX) werden direkt in die gewählte Akte eingebettet. So bauen sich
+  patientenspezifische Wissensdatenbanken auf, die die KI bei der Beantwortung nutzt.
+
+### 🔬 Experten-Pipeline (zwei Modelle, mit Rückfragen)
+
+Standardmäßig ist die **Experten-Pipeline** aktiv (Umschalter **🔬 Experten-Pipeline**
+in der Toolbar). Statt einer einfachen Antwort arbeiten **zwei Modelle** zusammen und
+stellen bei Bedarf Rückfragen:
+
+1. Das **Standardmodell** (z. B. Ministral) bereitet deine Frage medizinisch auf.
+2. Das **Medizin-Modell** (z. B. MedGemma) prüft, ob für eine Einschätzung **wichtige
+   Angaben fehlen** (Alter, Dauer, Begleitsymptome …).
+3. Fehlt etwas, formuliert das Standardmodell eine **freundliche Rückfrage** — du
+   ergänzt die Angaben (bis zu **zwei Rückfrage-Runden**).
+4. Dann erstellt das Medizin-Modell die **fachliche Einschätzung** (mögliche Ursachen,
+   nächste Schritte, Dringlichkeit) mit Warnhinweisen.
+
+Die einzelnen Schritte erscheinen als **aufklappbare Blöcke** über der Antwort
+(Aufbereitung / Analyse / Rückfrage) — so ist transparent, was gerade passiert. Unter
+einer fertigen Einschätzung bietet **🗣 In einfaches Deutsch übersetzen** eine
+laienverständliche Fassung an.
+
+> **Tempo:** Die Pipeline wechselt mehrfach zwischen den Modellen. Auf kleinen
+> Grafikkarten (~6 GB) wird bei jedem Wechsel ein Modell ent- und das andere geladen –
+> das dauert spürbar länger als ein normaler Chat. Die Statusschritte zeigen den Fortschritt.
+
+Über den Umschalter lässt sich auf den **einfachen Direkt-Chat** (nur ein Modell, ohne
+Rückfragen) zurückschalten.
+
+### Chat & Akten-Werkzeuge
+
+- Freitext eingeben und **Enter** senden (oder den Sende-Button).
+- **📎 Datei anhängen** — lädt eine Datei zur aktuellen Frage hoch (Vision-Modell nötig).
+  Für **dauerhafte** Befunde/Bilder besser **📎 In Akte laden** nutzen (Patienten-RAG;
+  die Pipeline nutzt die Akte automatisch als Kontext).
+- **🗑 Verlauf löschen** — Chat-Reset (die Patienten-Akte bleibt erhalten).
+- Das **Medizin-Modell** wird im Dropdown oben gewählt (Vorauswahl: das im Profil
+  hinterlegte Medizin-Modell).
+
+### Schnell-Prompts
+
+In der Toolbar gibt es vier vordefinierte Schnelleinstieg-Buttons:
+- **Anamnese** — Gesprächsleitfaden für die Anamnese
+- **DD** — Differentialdiagnosen erstellen
+- **Labor** — Laborwerte interpretieren
+- **Medikament** — Medikamenten-Informationen
+
+### Modell-Tipp
+
+Für die MedGemma-Rolle empfiehlt sich ein medizinisch trainiertes Modell. Getestet ist
+`alibayram/medgemma` (ein MedGemma-4B-Port, ~2,5 GB). Einmalig installieren und im
+Profil als **Medizin-Modell** hinterlegen:
+```bash
+ollama pull alibayram/medgemma
+```
+Ohne medizinisches Modell läuft die Pipeline gegen das Standardmodell — funktioniert,
+ist aber fachlich schwächer.
+
+---
+
+## 11. Mathe-Tab
+
+Tab **🔢 Mathe** — ein eigenständiger Mathematik-Workspace mit Chat-Interface, der
+Graphen plottet, Gleichungssysteme löst und Berichte als LaTeX/PDF exportiert.
+Der Agent **Mathe-Experte** ist voreingestellt. **LaTeX-Formelsatz ist hier Standard**
+(keine Auswahl nötig).
+
+*(Tab muss ggf. im Profil erst eingeblendet werden → Abschnitt 18, Tab-Sichtbarkeit.)*
+
+> **Modell:** Der Mathe-Tab teilt sich das Modell mit dem **Code-Tab** — eingestellt unter
+> **👤 Profil → 🧠 Modelle → „Programmieren / Mathe"** (leer = `ministral-3:3b`). Ein eigenes
+> Modell-Auswahlfeld gibt es im Mathe-Tab daher nicht.
+
+### Chat & Plots
+
+- Frage eingeben und **Enter** senden. Enthält die Anfrage eine **mathematische Funktion**
+  (z. B. `f(x) = x^2`, `sin(x)`, mehrere mit „und"; Bereich „von … bis …"), wird der
+  **Graph direkt im Chat-Verlauf** gezeichnet.
+- Der Schalter **📈 Plot** direkt an der Chatzeile steuert das automatische Zeichnen.
+  Die Graphen entstehen **zuverlässig serverseitig** — unabhängig davon, ob das kleine
+  Modell ein Zeichenwerkzeug aufruft.
+- **📎 Datei anhängen** — lädt eine Aufgabe, ein Bild oder ein Dokument hoch.
+- **🗑 Verlauf löschen** — Chat-Reset.
+
+### 🎓 Tutor-Modus (Schritt für Schritt lernen)
+
+Der Umschalter **🎓 Tutor-Modus** macht aus dem Löser einen **Lern-Tutor**: Er löst die
+Aufgabe **nicht sofort**, sondern führt dich **Schritt für Schritt** selbst zur Lösung.
+
+- **Adaptiv-sokratisch:** Der Tutor gibt einen Ansatz und eine Leitfrage und **wartet auf
+  deine Antwort**. Wenn du hängst oder dich irrst, gibt er schrittweise mehr preis.
+- **Werkzeuggeprüft:** Deine Zwischenschritte werden **serverseitig mit SymPy verifiziert** —
+  der Tutor erkennt Rechenfehler zuverlässig und zeigt dir, warum etwas nicht stimmt
+  (statt eine falsche Antwort durchgehen zu lassen).
+- **Niveau automatisch:** Schul-, Oberstufen- oder Studienniveau wird aus der Aufgabe erkannt.
+- **💡 Lösung zeigen** — fordert jederzeit die vollständige, ausführliche Lösung an.
+
+> Funktioniert am besten bei Gleichungen, Ableitungen, Integralen und Faktorisierungen
+> (dort greift die SymPy-Prüfung). Bei reinen Theoriefragen führt der Tutor rein erklärend.
+
+### Schnell-Prompts
+
+Vier vordefinierte Einsteig-Aufgaben in der Toolbar:
+- **∫ Integral** — Integrationsbeispiel
+- **Σ Summen** — Summenformel mit Herleitung
+- **Vektor** — Vektor-/Matrizenrechnung
+- **Statistik** — Statistische Auswertung
+
+### LaTeX/PDF-Export
+
+Enthält die Antwort mathematische Formeln (erkennbar am `$`-Zeichen), erscheint
+automatisch eine **Export-Leiste** unter der Antwort:
+
+- **𝐓 LaTeX** — erzeugt eine `.tex`-Datei (article-Klasse) mit echten LaTeX-Formeln,
+  direkt kompilierbar mit MiKTeX/TeX Live.
+- **📑 PDF** — erzeugt ein PDF mit Formelsatz über matplotlib-mathtext
+  (kein TeX-Install nötig).
+
+### Was der Mathe-Experte kann
+
+Der voreingestellte Agent **Mathe-Experte** verwendet folgende Tools:
+- `calculate` — Python-Sandbox mit numpy, scipy, sympy
+- `solve_equation` — algebraische und symbolische Gleichungslöser (SymPy)
+- `plot_function` — Funktionsgraphen (ein oder mehrere Funktionen mit `;`)
+- `plot_chart` — Wertereihen-Diagramme (Linien, Balken, Streuung)
+- `unit_convert` — Einheitenumrechnung (Pint)
+- `web_search` — Nachschlagen von Formeln und Definitionen
+
+**Beispiel-Prompts:**
+- *„Löse das Gleichungssystem: 2x + y = 7 und x − y = 1"*
+- *„Plotte f(x) = x^3 − 3x und g(x) = x von −3 bis 3"*
+- *„Berechne das bestimmte Integral von x^2 von 0 bis 3"*
+- *„Eigenwerte der Matrix [[2,1],[1,3]]"*
+
+---
+
+## 12. Planer (Netzplan / CPM)
 
 Tab **🗂️ Planer** — Projektplanung nach der Methode des **Kritischen Pfades**.
 
@@ -565,7 +733,7 @@ Einbettung in ein **plan-spezifisches RAG** (wird automatisch als „Plan: …" 
 
 ---
 
-## 11. Matrix-Recherche
+## 13. Matrix-Recherche
 
 Tab **📊 Matrix** — Recherche als Tabelle:
 
@@ -591,7 +759,7 @@ Tab **📊 Matrix** — Recherche als Tabelle:
 
 ---
 
-## 12. Code-Tab (IDE + JSON-Editor)
+## 14. Code-Tab (IDE + JSON-Editor)
 
 Tab **💻 Code** — oben zwei Untertabs: **IDE** und **JSON-Editor**.
 
@@ -605,7 +773,8 @@ Diagramme. Für Techniker gedacht, **ohne Programmierkenntnisse** nutzbar.
 Im blau hinterlegten Feld beschreiben, was das Programm zeigen soll, dann
 **▶ Code erstellen** klicken. Die KI schreibt den Code, übernimmt ihn in den Editor
 und führt ihn sofort aus. Welches Modell der IDE-Assistent nutzt, legst du im
-**Profil → 🧠 Modelle → Programmieren** fest (leer = `ministral-3:3b`).
+**Profil → 🧠 Modelle → „Programmieren / Mathe"** fest (gemeinsam mit dem Mathe-Tab;
+leer = `ministral-3:3b`).
 
 > *„Zeige ein Balkendiagramm der Zugfestigkeit für Stahl, Alu und Titan"*
 > *„Erstelle eine Toleranzanalyse für drei Bauteile"*
@@ -648,7 +817,7 @@ Programmierkenntnisse (z. B. eine beschädigte Export- oder Konfigurationsdatei)
 
 ---
 
-## 13. Diagnose-Logger
+## 15. Diagnose-Logger
 
 Tab **📋 Logs** — ein zuschaltbares Protokoll zur Verbesserung und Fehlersuche.
 
@@ -661,7 +830,7 @@ Tab **📋 Logs** — ein zuschaltbares Protokoll zur Verbesserung und Fehlersuc
 
 ---
 
-## 14. Agenten
+## 16. Agenten
 
 Agenten sind Profile mit eigenem System-Prompt, Tool-Set und optionalem Modell.
 
@@ -683,8 +852,21 @@ Agenten sind Profile mit eigenem System-Prompt, Tool-Set und optionalem Modell.
   **System-Prompt generieren** erzeugt einen Vorschlag per KI.
 - Agenten werden unter sprechenden Dateinamen gespeichert (`data/agents/`).
 
-Standard-Agenten: Recherche-, Ingenieur-, Analyse-, Präsentations-,
-Werkstoff-, Requirements-Agent, Kanban-Coach u. a.
+### Standard-Agenten
+
+| Agent | Kategorie | Beschreibung |
+|-------|-----------|-------------|
+| 🔬 Recherche-Agent | Wissenschaft | Quellengebundene Web-Recherche |
+| ⚙️ Ingenieur-Assistent | Maschinenbau | Technische Berechnungen & Normen |
+| 📊 Analyse-Agent | Wissenschaft | Daten- und Systemanalyse |
+| 🖥️ Präsentations-Agent | Präsentation | Folien-Erstellung im Canvas |
+| 💻 Programmier-Agent | Entwicklung | Code-Erstellung & IDE-Assistent |
+| 🏗️ Werkstoff-Experte | Maschinenbau | Werkstoff-Lookup und -Vergleich |
+| 📋 Requirements-Analyst | Dokumentation | Anforderungsanalyse |
+| 📐 LaTeX-Experte | Dokumentation | LaTeX-Dokumente, Gleichungen, Berichte |
+| 🔢 Mathe-Experte | Wissenschaft | Plots, SymPy, Gleichungssysteme, Statistik |
+| 🩺 Medizin-Assistent | Medizin | Medizinische Fragestellungen & Befundanalyse |
+| 🃏 Kanban-Coach | Prozesse | Agile Methoden und Kanban-Optimierung |
 
 **Dokument-Agenten:** Agenten der Kategorie **„Dokumentation"** dienen als Vorlagen
 im **Dokumentengenerator** (Tab 📄 Dokumente) — lege z. B. einen „Förderantrag"-Agenten
@@ -692,7 +874,7 @@ mit passendem System-Prompt an, um daraus später Anträge zu erzeugen.
 
 ---
 
-## 15. Gespräche verwalten
+## 17. Gespräche verwalten
 
 - **Neu:** **＋ Neues Gespräch** oder **Ctrl + K**.
 - **Laden:** Eintrag in der Sidebar anklicken.
@@ -705,7 +887,7 @@ mit passendem System-Prompt an, um daraus später Anträge zu erzeugen.
 
 ---
 
-## 16. Nutzerprofil & Projekte
+## 18. Nutzerprofil & Projekte
 
 ### Profil (**👤 Profil bearbeiten**)
 Vorname, Nachname, Firma, Abteilung, Position, Kontakt, Standard-Projekt.
@@ -735,6 +917,42 @@ Präsentations-Deckblatt.
   Ohne Upload bleibt die Oberfläche schlicht (Schriftzug „AI_Framework_Thomas") und Folien
   werden ohne Branding-Bild erzeugt.
 
+### 🧠 Modelle (im Profil)
+
+Unter **👤 Profil → 🧠 Modelle** weist du je Einsatzzweck ein Modell zu
+(leer = Standardmodell `ministral-3:3b`):
+
+| Rolle | Verwendet für |
+|-------|---------------|
+| **Allgemein** | normaler Chat (Standard der Sidebar-Auswahl) |
+| **Programmieren / Mathe** | KI-Assistent im Code-Tab (IDE), der Mathe-Tab und der Programmier-Agent (gemeinsames Modell) |
+| **Wissenschaftlich** | Recherche und der wissenschaftliche/quellengebundene Modus |
+| **Medizin** | Medizin-Tab (🩺) — voreingestelltes Modell für medizinische Anfragen |
+
+Die Auswahllisten enthalten **alle** in Ollama installierten Modelle; neue Modelle
+erscheinen nach `ollama pull <name>` automatisch.
+
+### 👁 Tab-Sichtbarkeit (im Profil)
+
+Unter **Sichtbare Tabs** lässt sich die Tab-Leiste bereinigen — optionale Tabs
+können ein-/ausgeblendet werden:
+
+| Häkchen | steuert |
+|---------|---------|
+| 📚 RAG | RAG-Tab |
+| 💻 Code | Code-Tab |
+| 🔢 Mathe | Mathe-Tab |
+| 🩺 Medizin | Medizin-Tab |
+| 📧 Mail | Mail-Tab |
+| 📋 Logs | Logs-Tab |
+
+> **Beim Erstaufruf** (frische Installation, noch kein Profil) sind **alle** diese Tabs
+> **ausgeblendet** — die Oberfläche startet aufgeräumt mit den Kern-Tabs. Hake hier an,
+> was du nutzen möchtest, und speichere.
+
+Ausgeblendete Tabs sind **nicht gelöscht** — sie werden sofort wieder sichtbar,
+sobald der Haken gesetzt und das Profil gespeichert wird.
+
 ### 🗜 Automatische Komprimierung (im Profil)
 Lange Chatverläufe können automatisch zusammengefasst werden, damit das
 Kontextfenster (und damit der VRAM-Bedarf) nicht überläuft:
@@ -755,7 +973,7 @@ oben in der Sidebar die Gesprächsliste nach Projekt einschränken.
 
 ---
 
-## 17. Exportieren
+## 19. Exportieren
 
 | Quelle | Button | Ergebnis |
 |--------|--------|----------|
@@ -763,6 +981,7 @@ oben in der Sidebar die Gesprächsliste nach Projekt einschränken.
 | Canvas | **📊 PPTX** | Präsentation im Corporate-Design |
 | Canvas | **📋 XLSX** | Tabelle als Excel |
 | Recherche | **📄 Als Dokument** | Bericht als DOCX mit Kopfzeile |
+| Mathe | **𝐓 LaTeX** / **📑 PDF** | Mathematischer Bericht mit Formelsatz |
 
 - Alle Exporte tragen in der **Fußzeile**: *Name · Firma · KI generierter Inhalt*.
 - KI-erzeugte Antworten werden im Dokument zusätzlich mit **„▶ Von KI generiert"**
@@ -772,12 +991,13 @@ oben in der Sidebar die Gesprächsliste nach Projekt einschränken.
 
 ---
 
-## 18. Backup & Wiederherstellung
+## 20. Backup & Wiederherstellung
 
 - **💾 Backup** (Sidebar) lädt **alle Nutzerdaten** als ZIP herunter: Profil
-  (inkl. Modell-Rollen), Projekte, Gespräche, Pläne, Agenten (inkl. Favoriten),
-  gespeicherte IDE-Programme, die **Branding-Bilder** (Logo/Deckblatt/Kopfzeile)
-  sowie die **RAG-Wissensdatenbanken** (inkl. Dokumente und Embeddings).
+  (inkl. Modell-Rollen und Tab-Sichtbarkeit), Projekte, Gespräche, Pläne, Agenten
+  (inkl. Favoriten), gespeicherte IDE-Programme, die **Branding-Bilder**
+  (Logo/Deckblatt/Kopfzeile) sowie die **RAG-Wissensdatenbanken** (inkl. Dokumente
+  und Embeddings).
 - **📥 Restore** stellt aus einem Backup-ZIP wieder her: Profil und Branding-Bilder
   werden überschrieben; bereits vorhandene Pläne, Agenten und Wissensdatenbanken
   werden übersprungen (keine Duplikate); Gespräche erhalten neue IDs. Der Bestätigungs-
@@ -785,7 +1005,7 @@ oben in der Sidebar die Gesprächsliste nach Projekt einschränken.
 
 ---
 
-## 19. Modelle & VRAM
+## 21. Modelle & VRAM
 
 Das aktive Modell wird unten in der Sidebar gewählt. Standardmäßig installiert ist
 **nur**:
@@ -796,15 +1016,19 @@ Das aktive Modell wird unten in der Sidebar gewählt. Standardmäßig installier
 | `gemma4:e2b` | Alternatives kompaktes Chat-Modell |
 | `nomic-embed-text` | RAG-Embeddings (klein; läuft auf kleinen Karten bewusst auf der CPU) |
 
-### Drei Modell-Rollen im Profil
+Empfohlen für den Medizin-Tab: `alibayram/medgemma` (MedGemma-4B-Port, ~2,5 GB; separat
+laden: `ollama pull alibayram/medgemma`).
+
+### Vier Modell-Rollen im Profil
 
 Unter **👤 Profil → 🧠 Modelle** weist du je Einsatzzweck ein Modell zu:
 
 | Rolle | Verwendet für |
 |-------|---------------|
 | **Allgemein** | normaler Chat (Standard der Sidebar-Auswahl) |
-| **Programmieren** | KI-Assistent im Code-Tab (IDE) und der Programmier-Agent |
+| **Programmieren / Mathe** | KI-Assistent im Code-Tab (IDE), der Mathe-Tab und der Programmier-Agent (gemeinsames Modell) |
 | **Wissenschaftlich** | Recherche und der wissenschaftliche/quellengebundene Modus |
+| **Medizin** | Medizin-Tab — voreingestelltes Modell für medizinische Anfragen |
 
 Leer = `ministral-3:3b`. **Andere Modelle vorher laden** (sie werden bei Bedarf
 nachgeladen): `ollama pull <modell>` — danach erscheinen sie in den Auswahllisten.
@@ -818,7 +1042,7 @@ In den Auswahllisten erscheinen **alle** in Ollama installierten Modelle;
 
 ---
 
-## 20. Tastenkürzel
+## 22. Tastenkürzel
 
 | Kürzel | Aktion |
 |--------|--------|
@@ -830,7 +1054,7 @@ In den Auswahllisten erscheinen **alle** in Ollama installierten Modelle;
 
 ---
 
-## 21. Technische Hinweise
+## 23. Technische Hinweise
 
 - **Lokal:** Gespräche in `data/ai_framework_thomas.db` (SQLite + Volltextindex), Agenten/Pläne/
   Programme als JSON in `data/`, Uploads temporär in `data/uploads/`.
@@ -839,13 +1063,13 @@ In den Auswahllisten erscheinen **alle** in Ollama installierten Modelle;
 - **Tool-Kompatibilität:** Native `tool_calls` und Inline-Formate
   (`<call_tool>`, `<tool_call>`) werden erkannt — breite Modellunterstützung.
 - **Berechnungs-Sandbox:** eingeschränktes `exec()` ohne Datei-/Netzwerkzugriff.
-- **VRAM-Schutz:** zentrale Serialisierung aller Modell-Aufrufe (siehe Abschnitt 19).
+- **VRAM-Schutz:** zentrale Serialisierung aller Modell-Aufrufe (siehe Abschnitt 21).
 
 Für tiefergehende Architektur siehe **docs/ENTWICKLUNG.md**.
 
 ---
 
-## 22. Aktualisieren (Update)
+## 24. Aktualisieren (Update)
 
 Mit **`update.bat`** wird **nur der Programmcode** (Systemdateien) ausgetauscht — alle
 **Nutzerdaten und Einstellungen bleiben erhalten**.
@@ -866,11 +1090,11 @@ Mit **`update.bat`** wird **nur der Programmcode** (Systemdateien) ausgetauscht 
 4. Auf Wunsch werden anschließend neue Python-Pakete aus `requirements.txt` installiert.
 
 > Danach **App neu starten** (`start.bat`) und im Browser mit **Strg+F5** neu laden.
-> Eine vollständige Datensicherung vorab (siehe Abschnitt **18. Backup**) ist trotzdem empfehlenswert.
+> Eine vollständige Datensicherung vorab (siehe Abschnitt **20. Backup**) ist trotzdem empfehlenswert.
 
 ---
 
-## 23. Deinstallation
+## 25. Deinstallation
 
 **Automatisch:** `uninstall.bat` doppelklicken und den Anweisungen folgen.
 Entfernt die virtuelle Umgebung (`venv/`), optional die Daten (`data/`) und

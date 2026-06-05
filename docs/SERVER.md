@@ -108,6 +108,11 @@ Die eigentliche Kapazitätsbeschränkung liegt beim **LLM-Inference** (Ollama):
 > die Worker beim Modellwechsel gegenseitig in die Quere kommen (zwei Modelle
 > gleichzeitig geladen). Dann **`workers = 1`** setzen oder ausreichend VRAM
 > vorsehen (≥ 12 GB).
+>
+> Der **🩺 Medizin-Tab** wechselt pro Anfrage mehrfach zwischen zwei Modellen
+> (Standard- ↔ Medizin-Modell). Das ist auf 6 GB mit `workers = 1` korrekt, kostet
+> aber je Stufe einen Lade-/Entlade-Vorgang — im Mehrbenutzerbetrieb entsprechend
+> mehr Wartezeit. Mehr VRAM (≥ 12 GB) glättet das spürbar.
 
 ---
 

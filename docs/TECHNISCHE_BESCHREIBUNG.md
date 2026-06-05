@@ -1,6 +1,6 @@
 ﻿# AI_Framework_Thomas — Technische Beschreibung
 
-> Stand: Mai 2026 · Bezieht sich auf `main.py` (~1900 Zeilen), `db.py`, das `tools/`-Paket
+> Stand: Juni 2026 · Bezieht sich auf `main.py` (~5400 Zeilen), `db.py`, das `tools/`-Paket
 > und das Vanilla-JS-Frontend unter `static/`.
 
 ## 1. Was AI_Framework_Thomas ist
@@ -21,8 +21,9 @@ Die einzige optionale Netzwerkfunktion ist die Web-Suche (DuckDuckGo).
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Frontend  (Vanilla JS, 8+ Tabs)                               │
-│  static/js/app.js, chat.js, canvas.js, ide.js, planner.js, …   │
+│  Frontend  (Vanilla JS, 13 Tabs)                               │
+│  app.js, chat.js, canvas.js, ide.js, planner.js, medizin.js,   │
+│  mathe.js, …                                                   │
 └───────────────┬──────────────────────────────────────────────┘
                 │  HTTP + SSE (Server-Sent Events)
 ┌───────────────▼──────────────────────────────────────────────┐
@@ -96,16 +97,21 @@ Jedes Frame ist eine JSON-Zeile `data: {...}\n\n` mit `type`-Feld:
 | `text` | Ausgabe-Token (wortweise) |
 | `canvas` | Präsentations-/Tabellen-Daten für den HTML5-Canvas |
 | `image` | Base64-Diagramm (Matplotlib) |
+| `map` | Route (Leaflet) für `route_planner` |
 | `tool_start` / `tool_done` | Tool-Ausführung beginnt/endet (mit Vorschau) |
 | `error` | Fehlermeldung |
 | `done` | Antwort abgeschlossen |
+
+> Die **Medizin-Pipeline** (`/api/medizin/consult`) ergänzt die Frames `stage`
+> (aufklappbare Zwischenschritte) und `question` (Rückfrage an den Nutzer).
 
 ## 5. VRAM-Schutz — nur EIN Modell gleichzeitig im Speicher
 
 Die Zielhardware hat begrenzten VRAM (~6 GB). Es darf **niemals mehr als ein** Modell
 gleichzeitig geladen sein. Standardmäßig ist nur `ministral-3:3b` installiert; je
-Profil-Rolle (Allgemein/Programmieren/Wissenschaftlich) kann ein anderes Modell
-zugewiesen werden, das bei Bedarf nachgeladen wird. Dafür gibt es in `main.py`:
+Profil-Rolle (Allgemein / Programmieren·Mathe / Wissenschaftlich / Medizin) kann ein anderes
+Modell zugewiesen werden, das bei Bedarf nachgeladen wird (`model_coding` deckt Code-IDE
+**und** Mathe-Tab ab). Dafür gibt es in `main.py`:
 
 - `_model_lock` (`asyncio.Lock`) — serialisiert **alle** Generierungen,
 - `_loaded_model` — merkt sich das aktuell geladene Modell,
@@ -114,6 +120,11 @@ zugewiesen werden, das bei Bedarf nachgeladen wird. Dafür gibt es in `main.py`:
 
 > **Regel:** Jede Ollama-Aufrufstelle muss in
 > `async with _model_session(model), httpx.AsyncClient(...) as client:` gekapselt sein.
+
+Die **Medizin-Pipeline** wechselt bewusst mehrfach zwischen Ministral und MedGemma —
+jede Stufe in einem eigenen `_model_session`-Block (nie verschachtelt), sodass der
+Lock die Wechsel serialisiert. Das ist auf ~6 GB VRAM korrekt, aber spürbar langsamer
+(Lade-/Entlade-Vorgänge je Stufe); die aufklappbaren Statusschritte zeigen den Fortschritt.
 
 ## 6. Werkzeuge (Tools)
 
@@ -127,7 +138,7 @@ Die Tool-Definitionen (`TOOL_DEFS` in `main.py`) werden Ollama als Funktions-Sch
 | `unit_convert` | Physikalische Einheiten umrechnen (Pint) | `tools/engineering.py` |
 | `solve_equation` | Gleichungen/Systeme symbolisch lösen (SymPy) | `tools/engineering.py` |
 | `plot_chart` | 2D-Diagramm (Linie/Balken/Streu) aus Wertereihen als Bild | `tools/engineering.py` |
-| `plot_function` | Funktionsgraph aus einem Term (`f(x)=x^2`, `sin(x)`; mehrere mit `;`) als Bild | `tools/engineering.py` |
+| `plot_function` | Funktionsgraph aus einem Term (`f(x)=x^2`, `sin(x)`; mehrere mit `;`) als Bild — **nur serverseitig** aufgerufen (deterministischer Fallback in `_chat_generator`, nicht als Modell-Tool, da kleine Modelle dabei ungültiges JSON erzeugen → Ollama 500) | `tools/engineering.py` |
 | `material_lookup` | ~40 Werkstoffe (E-Modul, Rₚ, Rₘ, Dichte …) | `tools/materials.py` |
 | `bolt_calculator` | Schraubenauslegung nach VDI 2230 (vereinfacht) | `tools/engineering.py` |
 | `generate_report` | Ingenieurbericht als PDF/DOCX (LaTeX-Formeln) | `tools/report.py` |
@@ -175,6 +186,8 @@ Pläne (`data/plans/`), Profil, Projekte und gespeicherte Code-Programme (`data/
 | Bereich | Endpunkte |
 |---|---|
 | Chat & Modelle | `GET /api/models`, `POST /api/chat`, `POST /api/research` |
+| Medizin (🩺) | `POST /api/medizin/consult` (2-Modell-Pipeline, SSE), `POST /api/medizin/translate` |
+| Mathe (🔢) | `POST /api/mathe/ground` (SymPy-Grundwahrheit für den Tutor-Modus) |
 | Gespräche | `GET/DELETE /api/conversations[/{id}]`, `…/compress`, `…/to-skill`, `…/export`, `…/import`, `…/export-all`, `…/rename`, `…/project` |
 | Suche | `GET /api/search?q=` |
 | Dateien | `POST /api/upload`, `GET /api/uploads/{id}`, `GET /api/downloads/{file}` |
@@ -204,16 +217,18 @@ Reines HTML/CSS/JS, ein Modul pro Funktionsbereich unter `static/js/`:
 | `planner.js` | Netzplan / Critical-Path-Method (CPM), Zoom/Pan, CSV-Im/Export, KI-Assistent |
 | `matrix_research.js` | Recherche-Matrix mit Agent je Spalte (nur Favoriten), `localStorage`-Speicherung + CSV-Im/Export |
 | `presentation_assistant.js` | Tabellenbasierter Präsentationsbauer (Folie für Folie) |
-| `ide.js` | Code-IDE (Untertab des Code-Tabs): Editor + Sandbox-iframe-Vorschau, KI-Assistent (Modell = Profil-Rolle „Programmieren"), Auto-Reparatur |
+| `ide.js` | Code-IDE (Untertab des Code-Tabs): Editor + Sandbox-iframe-Vorschau, KI-Assistent (Modell = Profil-Rolle „Programmieren · Mathe"), Auto-Reparatur |
 | `json_editor.js` | JSON-Editor (zweiter Untertab des Code-Tabs): öffnen, prüfen, formatieren, reparieren |
-| `profile.js` / `projects.js` | Nutzerprofil (inkl. Modell-Rollen) und Projektverwaltung |
+| `medizin.js` | 🩺 Medizin-Tab: 2-Modell-Pipeline mit Rückfragen + Laien-Übersetzung; Patienten-Akten (RAG `Patient:…`); Umschalter Experten-Pipeline / Direkt-Chat |
+| `mathe.js` | 🔢 Mathe-Tab: Löser (`mathe_experte`) bzw. **Tutor-Modus** (`mathe_tutor`) mit SymPy-Grundwahrheit; Plots inline, LaTeX/PDF-Export |
+| `profile.js` / `projects.js` | Nutzerprofil (vier Modell-Rollen, Tab-Sichtbarkeit) und Projektverwaltung |
 | `logger.js` | Diagnose-Logger-UI (Filter, Download) |
 
 ## 10. Agentensystem
 
 Agenten sind JSON-Dateien in `data/agents/` mit den Feldern: `id`, `name`,
 `description`, `system_prompt`, `tools` (Array erlaubter Tool-Namen), `model` (optional),
-`icon` (Emoji), `category`. Der `system_prompt` wird zur Laufzeit der Nutzernachricht
+`icon` (Emoji), `category`, `favorite`. Der `system_prompt` wird zur Laufzeit der Nutzernachricht
 vorangestellt; das `tools`-Array beschränkt die in der Schleife angebotenen Werkzeuge.
 Dateien werden anhand der **ID** gefunden (`_agent_path_by_id`), unabhängig vom
 Dateinamen; Namen werden zu sicheren Slugs umgesetzt (`_to_slug`, inkl. Umlaut-Ersatz).

@@ -16,6 +16,7 @@ const Planner = (() => {
   let _insertData = null;   // { aId, bId, candidates[] }
   let _replaceIdx = -1;     // Index der zu ersetzenden Aufgabe
   let _startDate = '';      // Projektstart (ISO yyyy-mm-dd) für Kalenderdaten
+  let _endDate   = '';      // Projektenddatum / Deadline (ISO yyyy-mm-dd), optional
   let _workdays = false;    // Tage als Arbeitstage rechnen (Wochenenden überspringen)
   let _cpm      = {};       // { id: { ES, EF, LS, LF, float, critical } }
   let _rank     = {};       // { id: Ablaufreihenfolge (1-basiert) }
@@ -30,11 +31,29 @@ const Planner = (() => {
   let _canvas   = null;
   let _ctx      = null;
   let _aiStreaming = false;
+  let _selectedTaskId = null; // ID der aktuell selektierten Aufgabe
+  let _areaColors = {};       // cache: Bereich-Name → {border, bg}
+  let _aiParsedTasks = null;  // vom KI-Chat geparste Aufgabenliste (für "übernehmen")
 
   const NODE_W  = 180;
   const NODE_H  = 72;
   const HGAP    = 60;
   const VGAP    = 24;
+
+  /* ── Bereichs-Farben (hash-basiert) ─────────────────────────────── */
+  function _areaColor(area) {
+    if (!area) return null;
+    if (_areaColors[area]) return _areaColors[area];
+    let h = 0;
+    for (const c of area) h = (Math.imul(31, h) + c.charCodeAt(0)) | 0;
+    const hue = ((h >>> 0) % 18) * 20; // 18 Töne, je 20° Abstand
+    _areaColors[area] = {
+      border: `hsl(${hue},65%,55%)`,
+      bg:     `hsla(${hue},55%,22%,0.88)`,
+      row:    `hsla(${hue},55%,45%,0.13)`,
+    };
+    return _areaColors[area];
+  }
 
   /* ── CPM-Berechnung ──────────────────────────────────────────────── */
   function _computeCPM() {
@@ -219,9 +238,25 @@ const Planner = (() => {
     }
     return d;
   }
+  function _effectiveStartDate() {
+    if (_startDate) return _startDate;
+    if (_endDate && Object.keys(_cpm).length) {
+      const maxEF = Math.max(...Object.values(_cpm).map(r => r.EF), 0);
+      if (maxEF > 0) {
+        const end = new Date(_endDate + 'T00:00:00');
+        if (!isNaN(end)) {
+          const derived = _workdays ? _addWorkdays(end, -maxEF) : new Date(end.getTime() - maxEF * 86400000);
+          return derived.toISOString().slice(0, 10);
+        }
+      }
+    }
+    return null;
+  }
+
   function _dayToDate(day) {
-    if (!_startDate) return null;
-    const base = new Date(_startDate + 'T00:00:00');
+    const sd = _effectiveStartDate();
+    if (!sd) return null;
+    const base = new Date(sd + 'T00:00:00');
     if (isNaN(base)) return null;
     if (_workdays) return _addWorkdays(base, Number(day) || 0);
     base.setDate(base.getDate() + Math.round(Number(day) || 0));
@@ -344,8 +379,9 @@ const Planner = (() => {
   function _drawNode(x, y, task, cpm) {
     const W = NODE_W, H = NODE_H;
     const isCrit = cpm.critical;
-    const borderColor = isCrit ? '#ef4444' : '#3b82f6';
-    const bgColor = isCrit ? 'rgba(239,68,68,.1)' : 'rgba(15,22,35,.85)';
+    const areaCol = (!isCrit && task.area) ? _areaColor(task.area) : null;
+    const borderColor = isCrit ? '#ef4444' : (areaCol ? areaCol.border : '#3b82f6');
+    const bgColor     = isCrit ? 'rgba(239,68,68,.1)' : (areaCol ? areaCol.bg : 'rgba(15,22,35,.85)');
 
     // Hintergrund
     _ctx.fillStyle = bgColor;
@@ -427,6 +463,16 @@ const Planner = (() => {
     const tbody = document.getElementById('task-tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
+
+    // Datalist für Bereich-Autocomplete aktualisieren (steht im HTML außerhalb der Tabelle)
+    const dl = document.getElementById('plan-area-list');
+    if (dl) {
+      dl.innerHTML = '';
+      [...new Set(_tasks.map(t => t.area || '').filter(Boolean))].forEach(a => {
+        const o = document.createElement('option'); o.value = a; dl.appendChild(o);
+      });
+    }
+
     for (let i = 0; i < _tasks.length; i++) {
       const t = _tasks[i];
       const cpm = _cpm[t.id] || {};
@@ -434,9 +480,13 @@ const Planner = (() => {
       const resLabel = cost > 0
         ? `${_fmtEur(cost)} · ${(t.resource_list||[]).length} Res.`
         : '＋ Ressourcen';
+      const areaCol = t.area ? _areaColor(t.area) : null;
       const tr = document.createElement('tr');
       tr.dataset.i = i;
       if (cpm.critical) tr.classList.add('critical');
+      if (t.id === _selectedTaskId) tr.classList.add('task-row-selected');
+      if (areaCol && !cpm.critical) tr.style.background = areaCol.row;
+      if (areaCol) tr.style.borderLeft = `3px solid ${areaCol.border}`;
       tr.innerHTML = `
         <td style="text-align:center;color:var(--text-dim);font-size:11px">${_rank[t.id] ?? ''}</td>
         <td><input value="${escHtml(t.id)}" data-f="id" style="width:50px" /></td>
@@ -444,6 +494,7 @@ const Planner = (() => {
         <td><input value="${t.duration}" data-f="duration" type="number" min="0" style="width:50px" /></td>
         <td><input value="${escHtml((t.predecessors||[]).join(','))}" data-f="predecessors" placeholder="T1,T2" style="width:80px" /></td>
         <td><input value="${escHtml((t.successors||[]).join(','))}" data-f="successors" placeholder="T3" style="width:80px" /></td>
+        <td><input value="${escHtml(t.area||'')}" data-f="area" list="plan-area-list" placeholder="Bereich…" style="width:90px" /></td>
         <td><button class="btn-task-res" data-i="${i}" title="Ressourcen & Kosten bearbeiten">${escHtml(resLabel)}</button></td>
         <td style="color:var(--text-dim);font-size:11px;text-align:right">${cpm.ES??''}</td>
         <td style="color:var(--text-dim);font-size:11px;text-align:right">${cpm.EF??''}</td>
@@ -461,8 +512,19 @@ const Planner = (() => {
           <button class="btn-del-task" data-i="${i}" title="Aufgabe löschen (Verknüpfungen werden neu verbunden)">🗑</button>
         </td>
       `;
+      // Zeile klicken (außerhalb von Inputs/Buttons) → Aufgabe selektieren
+      tr.addEventListener('click', e => {
+        if (['INPUT','BUTTON','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+        _selectedTaskId = _selectedTaskId === t.id ? null : t.id;
+        tbody.querySelectorAll('tr[data-i]').forEach(r => {
+          r.classList.toggle('task-row-selected', _tasks[+r.dataset.i]?.id === _selectedTaskId);
+        });
+        _updateSelectedInfo();
+      });
       tbody.appendChild(tr);
     }
+
+    _updateSelectedInfo();
 
     // Events
     tbody.querySelectorAll('input[data-f]').forEach(inp => {
@@ -481,6 +543,10 @@ const Planner = (() => {
           _recalcAndRender();
         } else if (f === 'duration') {
           _tasks[i][f] = Number(inp.value) || 0;
+          _recalcAndRender();
+        } else if (f === 'area') {
+          _tasks[i].area = inp.value.trim();
+          _areaColors = {}; // cache invalidieren falls neue Bereiche entstehen
           _recalcAndRender();
         } else {
           _tasks[i][f] = inp.value.trim();
@@ -680,9 +746,12 @@ const Planner = (() => {
       _catalog = plan.resource_catalog || [];
       _resMode = plan.resource_mode || 'free';
       _startDate = plan.start_date || '';
+      _endDate   = plan.end_date   || '';
       _workdays = !!plan.workdays;
       const sd = document.getElementById('planner-start-date');
       if (sd) sd.value = _startDate;
+      const ed = document.getElementById('planner-end-date');
+      if (ed) ed.value = _endDate;
       const wd = document.getElementById('planner-workdays');
       if (wd) wd.checked = _workdays;
       document.getElementById('planner-plan-name').value = plan.name || '';
@@ -706,7 +775,7 @@ const Planner = (() => {
     _desc = (document.getElementById('planner-desc')?.value || '').trim();
     const payload = { name, tasks: _tasks, description: _desc, system_prompt: _systemPrompt,
                       resource_catalog: _catalog, resource_mode: _resMode, start_date: _startDate,
-                      workdays: _workdays };
+                      end_date: _endDate, workdays: _workdays };
     try {
       if (_planId) {
         await fetch(`/api/plans/${_planId}`, {
@@ -746,7 +815,7 @@ const Planner = (() => {
     const name = document.getElementById('planner-plan-name').value.trim() || 'Unbenannt';
     const payload = { name, tasks: _tasks, description: _desc, system_prompt: _systemPrompt,
                       resource_catalog: _catalog, resource_mode: _resMode, start_date: _startDate,
-                      workdays: _workdays };
+                      end_date: _endDate, workdays: _workdays };
     try {
       await fetch(`/api/plans/${_planId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -827,18 +896,34 @@ const Planner = (() => {
     input.value = '';
 
     const model = document.getElementById('planner-model-select')?.value || 'qwen3.6-16k:latest';
-    _appendAIMsg('user', msg);
+
+    // Selektierte Aufgabe als Kontext hinzufügen
+    const selTask = _selectedTaskId ? _tasks.find(t => t.id === _selectedTaskId) : null;
+    let contextMsg = msg;
+    if (selTask) {
+      contextMsg = `[Ausgewählte Aufgabe: ${JSON.stringify({
+        id: selTask.id, name: selTask.name, duration: selTask.duration,
+        area: selTask.area || '', predecessors: selTask.predecessors, successors: selTask.successors,
+        notes: selTask.notes || '',
+      })}]\n\n${msg}`;
+    }
+
+    _appendAIMsg('user', msg); // Anzeige ohne Kontext-Prefix
     const assistantDiv = _appendAIMsg('assistant', '');
     _aiStreaming = true;
+    // Alte Action-Buttons entfernen
+    document.querySelectorAll('.planner-ai-action').forEach(el => el.remove());
 
     const pid = _planId || 'unsaved';
     const url = `/api/plans/${pid}/ai`;
 
     try {
+      const useWeb = document.getElementById('btn-plan-ai-web')?.classList.contains('active');
+      const useRag = document.getElementById('btn-plan-ai-rag')?.classList.contains('active');
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, model, tasks: _tasks }),
+        body: JSON.stringify({ message: contextMsg, model, tasks: _tasks, use_web: useWeb, use_rag: useRag }),
       });
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -861,11 +946,26 @@ const Planner = (() => {
           } catch (_) {}
         }
       }
-      // Fertige Antwort als Markdown + LaTeX rendern (statt rohem Text)
+      // Fertige Antwort als Markdown + LaTeX rendern
       if (text && typeof marked !== 'undefined') {
         if (window._ensureKatexMarked) window._ensureKatexMarked();
         assistantDiv.innerHTML = marked.parse(text, { gfm: true, breaks: true });
         assistantDiv.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      }
+      // Nach dem Streaming: Aufgaben-JSON in der Antwort suchen
+      _aiParsedTasks = _parseTasksFromText(text);
+      if (_aiParsedTasks && _aiParsedTasks.length > 0) {
+        const actionDiv = document.createElement('div');
+        actionDiv.className = 'planner-ai-action';
+        const label = selTask
+          ? `✓ ${_aiParsedTasks.length} Aufgabe(n) übernehmen (ersetzt [${selTask.id}])`
+          : `✓ ${_aiParsedTasks.length} Aufgabe(n) zum Plan hinzufügen`;
+        actionDiv.innerHTML = `<button class="export-btn btn-ai-apply-tasks"
+          style="font-size:12px;background:var(--accent);color:#fff;margin:4px 0">${label}</button>`;
+        const container = document.getElementById('planner-ai-messages');
+        container?.appendChild(actionDiv);
+        actionDiv.querySelector('.btn-ai-apply-tasks')?.addEventListener('click', _applyAITasks);
+        container && (container.scrollTop = container.scrollHeight);
       }
     } catch (e) {
       assistantDiv.textContent = `Fehler: ${e.message}`;
@@ -883,6 +983,316 @@ const Planner = (() => {
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
     return div;
+  }
+
+  /* ── Selektions-Indikator ────────────────────────────────────────── */
+  function _updateSelectedInfo() {
+    const el = document.getElementById('planner-selected-info');
+    if (!el) return;
+    const t = _selectedTaskId ? _tasks.find(t => t.id === _selectedTaskId) : null;
+    if (t) {
+      el.style.display = '';
+      el.innerHTML = `📌 Ausgewählt: <strong>[${escHtml(t.id)}] ${escHtml(t.name)}</strong>
+        <button id="btn-deselect-task" style="font-size:10px;padding:1px 5px;margin-left:6px" class="export-btn">✕</button>`;
+      el.querySelector('#btn-deselect-task')?.addEventListener('click', () => {
+        _selectedTaskId = null;
+        const tbody = document.getElementById('task-tbody');
+        tbody?.querySelectorAll('tr[data-i]').forEach(r => r.classList.remove('task-row-selected'));
+        _updateSelectedInfo();
+      });
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
+  /* ── KI-Antwort: Aufgaben parsen & übernehmen ───────────────────── */
+  function _parseTasksFromText(text) {
+    // Balanced-bracket extractor: findet vollständige [...] und {...} ohne greedy-Backtracking
+    function _extractBalanced(str, open, close) {
+      const result = [];
+      for (let i = 0; i < str.length; i++) {
+        if (str[i] !== open) continue;
+        let depth = 0, inStr = false, escape = false;
+        let j = i;
+        for (; j < str.length; j++) {
+          const c = str[j];
+          if (escape) { escape = false; continue; }
+          if (c === '\\' && inStr) { escape = true; continue; }
+          if (c === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (c === open) depth++;
+          else if (c === close) { depth--; if (depth === 0) break; }
+        }
+        if (depth === 0) { result.push(str.slice(i, j + 1)); i = j; }
+      }
+      return result;
+    }
+
+    const _tryParse = s => {
+      try {
+        const p = JSON.parse(s.trim());
+        if (Array.isArray(p) && p.length > 0 && p[0] && p[0].name) return p;
+        if (p && Array.isArray(p.tasks) && p.tasks.length > 0) return p.tasks;
+      } catch (_) {}
+      return null;
+    };
+
+    // 1. Code-Fences zuerst (zuverlässigste Quelle)
+    const fenceRe = /```(?:json)?\s*([\s\S]*?)```/g;
+    let m;
+    while ((m = fenceRe.exec(text)) !== null) {
+      const r = _tryParse(m[1]); if (r) return r;
+    }
+    // 2. Balancierte Arrays und Objekte
+    for (const s of _extractBalanced(text, '[', ']')) { const r = _tryParse(s); if (r) return r; }
+    for (const s of _extractBalanced(text, '{', '}')) { const r = _tryParse(s); if (r) return r; }
+    return null;
+  }
+
+  function _applyAITasks() {
+    if (!_aiParsedTasks || !_aiParsedTasks.length) return;
+    const selTask = _selectedTaskId ? _tasks.find(t => t.id === _selectedTaskId) : null;
+
+    // ID-Kollisionen auflösen: KI-IDs die schon im Plan vorhanden sind → eindeutig machen
+    // Baue zuerst eine ID-Mapping-Tabelle (alte KI-ID → sichere Plan-ID)
+    const existingIds = new Set(_tasks
+      .filter(t => t.id !== _selectedTaskId)  // die zu ersetzende ID wird entfernt
+      .map(t => t.id));
+    const idMap = {};
+    const takenIds = new Set(existingIds);
+    for (const t of _aiParsedTasks) {
+      const wantedId = String(t.id || '').trim();
+      if (!wantedId || takenIds.has(wantedId)) {
+        let n = _tasks.length + 1;
+        let safe; do { safe = 'T' + n++; } while (takenIds.has(safe));
+        idMap[wantedId] = safe; takenIds.add(safe);
+      } else {
+        idMap[wantedId] = wantedId; takenIds.add(wantedId);
+      }
+    }
+
+    const normalize = (t, i) => {
+      const rawId = String(t.id || '').trim();
+      const safeId = idMap[rawId] || _uniqueTaskId();
+      return {
+        id:            safeId,
+        name:          t.name      || `KI-Aufgabe ${i + 1}`,
+        duration:      typeof t.duration === 'number' ? t.duration : (parseFloat(t.duration) || 1),
+        predecessors:  Array.isArray(t.predecessors) ? t.predecessors.map(p => idMap[String(p)] || String(p)) : [],
+        successors:    Array.isArray(t.successors)   ? t.successors.map(s => idMap[String(s)] || String(s))   : [],
+        resources:     '',
+        resource_list: Array.isArray(t.resource_list) ? t.resource_list : [],
+        notes:         t.notes  || '',
+        area:          t.area   || selTask?.area || '',
+        is_start:      false,
+        is_end:        false,
+      };
+    };
+
+    const newTasks = _aiParsedTasks.map(normalize);
+
+    if (selTask) {
+      const selIdx = _tasks.findIndex(t => t.id === _selectedTaskId);
+      const firstId = newTasks[0].id;
+      const lastId  = newTasks[newTasks.length - 1].id;
+      // Erste neue Aufgabe erbt Vorgänger der selektierten (falls KI keine gesetzt hat)
+      if (!newTasks[0].predecessors.length) newTasks[0].predecessors = [...(selTask.predecessors || [])];
+      // Letzte erbt Nachfolger
+      if (!newTasks[newTasks.length-1].successors.length)
+        newTasks[newTasks.length-1].successors = [...(selTask.successors || [])];
+      // Aufgaben des Plans, die die alte ID referenzieren → auf neue IDs umleiten
+      for (const t of _tasks) {
+        if (t.id === _selectedTaskId) continue;
+        t.predecessors = (t.predecessors||[]).map(p => p === _selectedTaskId ? firstId : p);
+        t.successors   = (t.successors  ||[]).map(s => s === _selectedTaskId ? lastId  : s);
+      }
+      _tasks.splice(selIdx, 1, ...newTasks);
+      _selectedTaskId = null;
+    } else {
+      _tasks.push(...newTasks);
+    }
+
+    _aiParsedTasks = null;
+    _normalizeLinks();
+    _recalcAndRender();
+    _updateSelectedInfo();
+    showToast(`✓ ${newTasks.length} Aufgabe(n) übernommen`);
+    // Action-Buttons entfernen
+    document.querySelectorAll('.planner-ai-action').forEach(el => el.remove());
+  }
+
+  /* ── Plan-Vergleich & Bewertung ─────────────────────────────────── */
+  let _evalImportPlan = null;  // verbesserter Plan (JSON) zum Import
+
+  async function _openEvalModal() {
+    // Plan-Selects befüllen
+    const plans = await (await fetch('/api/plans')).json();
+    [1,2,3].forEach(i => {
+      const sel = document.getElementById(`plan-eval-sel-${i}`);
+      if (!sel) return;
+      if (i > 1) sel.innerHTML = '<option value="">— keiner —</option>';
+      else sel.innerHTML = '';
+      for (const p of plans) {
+        const o = document.createElement('option');
+        o.value = p.id; o.textContent = p.name || p.id;
+        sel.appendChild(o);
+      }
+      if (i === 1 && _planId) sel.value = _planId;
+    });
+    document.getElementById('plan-eval-output').textContent = '';
+    document.getElementById('plan-eval-status').textContent = '';
+    document.getElementById('btn-plan-eval-import').style.display = 'none';
+    _evalImportPlan = null;
+    document.getElementById('plan-eval-overlay')?.classList.add('active');
+  }
+
+  async function _runEvaluation() {
+    const ids = [1,2,3].map(i => document.getElementById(`plan-eval-sel-${i}`)?.value).filter(Boolean);
+    if (!ids.length) { showToast('Mindestens Plan 1 auswählen'); return; }
+    const model = document.getElementById('planner-model-select')?.value;
+    const status = document.getElementById('plan-eval-status');
+    const output = document.getElementById('plan-eval-output');
+    const btn = document.getElementById('btn-plan-eval-run');
+    btn.disabled = true; status.textContent = '⏳ Analyse läuft…'; output.textContent = '';
+    document.getElementById('btn-plan-eval-import').style.display = 'none';
+    try {
+      const resp = await fetch('/api/plans/evaluate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_ids: ids, model }),
+      });
+      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '', text = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          try {
+            const ev = JSON.parse(line.slice(5).trim());
+            if (ev.type === 'text') { text += ev.content; output.textContent = text; output.scrollTop = output.scrollHeight; }
+            else if (ev.type === 'plan') {
+              _evalImportPlan = ev.plan;
+              document.getElementById('btn-plan-eval-import').style.display = '';
+              status.textContent = '✓ Verbesserter Plan bereit zum Laden';
+            }
+            else if (ev.type === 'done') status.textContent = '✓ Analyse abgeschlossen';
+          } catch (_) {}
+        }
+      }
+      if (window._ensureKatexMarked && typeof marked !== 'undefined') {
+        window._ensureKatexMarked();
+        output.innerHTML = marked.parse(text, { gfm: true, breaks: true });
+      }
+    } catch (e) { status.textContent = 'Fehler: ' + e.message; }
+    finally { btn.disabled = false; }
+  }
+
+  async function _importEvalPlan() {
+    if (!_evalImportPlan) return;
+    if (!confirm('Den verbesserten Plan als neuen Plan laden? Der aktuelle Plan bleibt erhalten.')) return;
+    try {
+      const r = await fetch('/api/plans', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(_evalImportPlan),
+      });
+      const p = await r.json();
+      await _loadPlanList();
+      await _loadPlan(p.id);
+      document.getElementById('plan-eval-overlay')?.classList.remove('active');
+      showToast(`✓ Verbesserter Plan geladen: ${_evalImportPlan.name || p.id}`);
+    } catch (e) { showToast('Fehler: ' + e.message); }
+  }
+
+  /* ── Plan aus flacher Aufgabenliste generieren ───────────────────── */
+  let _fromListPlan = null;
+
+  function _openFromListModal() {
+    document.getElementById('plan-from-list-overlay')?.classList.add('active');
+    const statusEl = document.getElementById('plan-from-list-status');
+    if (statusEl) statusEl.textContent = '';
+    const loadBtn = document.getElementById('btn-from-list-load');
+    if (loadBtn) loadBtn.style.display = 'none';
+    _fromListPlan = null;
+  }
+
+  async function _generateFromList() {
+    const textarea = document.getElementById('plan-from-list-text');
+    const nameInp  = document.getElementById('plan-from-list-name');
+    const taskList = (textarea?.value || '').trim();
+    if (!taskList) { showToast('Bitte Aufgabenliste einfügen'); return; }
+    const model = document.getElementById('planner-model-select')?.value || '';
+    const name  = (nameInp?.value || '').trim() || 'Projekt aus Liste';
+    const statusEl = document.getElementById('plan-from-list-status');
+    const btn = document.getElementById('btn-from-list-run');
+    if (statusEl) statusEl.textContent = '⏳ Generiere Plan…';
+    if (btn) btn.disabled = true;
+    _fromListPlan = null;
+    document.getElementById('btn-from-list-load').style.display = 'none';
+
+    try {
+      const resp = await fetch('/api/plans/from-list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_list: taskList, name, model }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const ev = JSON.parse(line.slice(6));
+            if (ev.type === 'status' && statusEl) {
+              statusEl.textContent = '⏳ ' + ev.message;
+            } else if (ev.type === 'plan') {
+              _fromListPlan = ev.plan;
+              if (statusEl) statusEl.textContent = `✓ Plan mit ${ev.plan.tasks?.length || 0} Aufgaben generiert`;
+              const loadBtn = document.getElementById('btn-from-list-load');
+              if (loadBtn) loadBtn.style.display = '';
+            } else if (ev.type === 'error') {
+              if (statusEl) statusEl.textContent = '❌ ' + ev.message;
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      if (statusEl) statusEl.textContent = '❌ Fehler: ' + e.message;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function _loadFromListPlan() {
+    if (!_fromListPlan) return;
+    const p = _fromListPlan;
+    _tasks = p.tasks || [];
+    _desc  = p.description || '';
+    _systemPrompt = '';
+    _planId = null;
+    _startDate = ''; _endDate = '';
+    const sdEl = document.getElementById('planner-start-date');
+    const edEl = document.getElementById('planner-end-date');
+    if (sdEl) sdEl.value = '';
+    if (edEl) edEl.value = '';
+    const nameEl = document.getElementById('planner-plan-name');
+    if (nameEl) nameEl.value = p.name || '';
+    const descEl = document.getElementById('planner-desc');
+    if (descEl) descEl.value = _desc;
+    document.getElementById('btn-delete-plan').style.display = 'none';
+    _normalizeLinks();
+    _recalcAndRender();
+    document.getElementById('plan-from-list-overlay')?.classList.remove('active');
+    showToast(`✓ Plan „${p.name}" geladen – ${_tasks.length} Aufgaben`);
   }
 
   /* ── Projekt-Agent ableiten ──────────────────────────────────────── */
@@ -1381,6 +1791,19 @@ const Planner = (() => {
     if (conf.length) {
       parts.push(`⚠ ${conf.length} Ressourcenkonflikt(e) – Doppelbelegung; Details im 📅 Bestellplan.`);
     }
+    // Deadline-Warnung: Projektende überschreitet gesetztes Enddatum
+    if (_endDate && _startDate && Object.keys(_cpm).length) {
+      const maxEF = Math.max(...Object.values(_cpm).map(r => r.EF), 0);
+      const sd = new Date(_startDate + 'T00:00:00'), ed = new Date(_endDate + 'T00:00:00');
+      if (!isNaN(sd) && !isNaN(ed)) {
+        const availDays = (_endDate && _startDate) ? Math.round((ed - sd) / 86400000) : Infinity;
+        if (maxEF > availDays) parts.push(`🏁 Deadline überschritten: Plan braucht ${maxEF} Tage, Enddatum erlaubt nur ${availDays}.`);
+      }
+    } else if (_endDate && !_startDate && Object.keys(_cpm).length) {
+      const maxEF = Math.max(...Object.values(_cpm).map(r => r.EF), 0);
+      const sd = _effectiveStartDate();
+      if (sd) parts.push(`📅 Rückwärts geplant: Projektstart ${sd} (aus Enddatum ${_endDate} − ${maxEF} Tage).`);
+    }
     el.textContent = parts.join('   ');
   }
 
@@ -1750,7 +2173,7 @@ const Planner = (() => {
     // Neuer Plan
     document.getElementById('btn-new-plan')?.addEventListener('click', () => {
       _planId = null; _tasks = []; _cpm = {}; _layout = {};
-      _desc = ''; _systemPrompt = ''; _catalog = []; _resMode = 'free'; _startDate = ''; _workdays = false;
+      _desc = ''; _systemPrompt = ''; _catalog = []; _resMode = 'free'; _startDate = ''; _endDate = ''; _workdays = false;
       document.getElementById('planner-plan-name').value = 'Neuer Plan';
       document.getElementById('planner-plan-select').value = '';
       const sd0 = document.getElementById('planner-start-date'); if (sd0) sd0.value = '';
@@ -1893,9 +2316,28 @@ const Planner = (() => {
     document.getElementById('btn-schedule-export')?.addEventListener('click', _exportSchedule);
     document.getElementById('btn-schedule-close')?.addEventListener('click', _closeSchedule);
 
-    // Projektstart-Datum + Arbeitstage
-    document.getElementById('planner-start-date')?.addEventListener('change', e => { _startDate = e.target.value; });
+    // Projektstart-/Enddatum + Arbeitstage
+    document.getElementById('planner-start-date')?.addEventListener('change', e => { _startDate = e.target.value; _recalcAndRender(); });
+    document.getElementById('planner-end-date')?.addEventListener('change', e => { _endDate = e.target.value; _recalcAndRender(); });
     document.getElementById('planner-workdays')?.addEventListener('change', e => { _workdays = e.target.checked; });
+
+    // AI-Panel: Web- und RAG-Toggle
+    ['btn-plan-ai-web', 'btn-plan-ai-rag'].forEach(id =>
+      document.getElementById(id)?.addEventListener('click', e => e.currentTarget.classList.toggle('active')));
+
+    // Plan-Vergleich
+    document.getElementById('btn-plan-evaluate')?.addEventListener('click', _openEvalModal);
+    document.getElementById('btn-plan-eval-close')?.addEventListener('click', () =>
+      document.getElementById('plan-eval-overlay')?.classList.remove('active'));
+    document.getElementById('btn-plan-eval-run')?.addEventListener('click', _runEvaluation);
+    document.getElementById('btn-plan-eval-import')?.addEventListener('click', _importEvalPlan);
+
+    // Plan aus Liste generieren
+    document.getElementById('btn-from-list')?.addEventListener('click', _openFromListModal);
+    document.getElementById('btn-from-list-close')?.addEventListener('click', () =>
+      document.getElementById('plan-from-list-overlay')?.classList.remove('active'));
+    document.getElementById('btn-from-list-run')?.addEventListener('click', _generateFromList);
+    document.getElementById('btn-from-list-load')?.addEventListener('click', _loadFromListPlan);
 
     // Resize
     new ResizeObserver(_recalcAndRender).observe(_canvas.parentElement);

@@ -1,9 +1,10 @@
 {
   "_comment": "Modell-Tags bitte auf https://ollama.com/library verifizieren",
-  "allowed_models": ["ministral-3:3b", "gemma4:e2b"],
+  "allowed_models": [],
   "default_model": "ministral-3:3b",
   "embed_model": "nomic-embed-text",
   "ollama_base": "http://localhost:11434",
   "port": 8780,
-  "host": "127.0.0.1"
+  "host": "127.0.0.1",
+  "data_dir": "data"
 }

@@ -546,32 +546,70 @@ def _pdf_text(ax, x, y, s, **kw):
         ax.text(x, y, s, parse_math=False, **kw)
 
 
+def _parse_md_table(lines: list[str]) -> list[list[str]]:
+    """Markdown-Tabellenzeilen (mit |) → Liste von Zell-Listen.
+    Trennzeilen (|---|---) werden übersprungen."""
+    def _cells(line: str) -> list[str]:
+        s = line.strip()
+        if s.startswith("|"): s = s[1:]
+        if s.endswith("|"): s = s[:-1]
+        return [c.strip() for c in s.split("|")]
+    return [_cells(l) for l in lines
+            if not re.match(r"^\s*\|?[\s:|-]+\|?\s*$", l)]
+
+
 def _pdf_blocks_from_markdown(content: str) -> list[dict]:
-    """Markdown → einfache Blockliste {text,size,bold,bullet,gap}. Inline-Marker
-    werden entfernt, ``$..$``-Formeln aber erhalten (matplotlib-mathtext)."""
+    """Markdown → Blockliste für den PDF-Renderer.
+    Jeder Block ist entweder Text {text,size,bold,bullet,gap}
+    oder eine Tabelle {type:'table', rows:[[...], ...]}.
+    Inline-Marker werden entfernt, Formeln erhalten."""
     def _clean(s: str) -> str:
         return _strip_md_keep_math(_math_to_mpl(s))
 
+    _HEADING_SIZES = {1: 15, 2: 13.5, 3: 12, 4: 11, 5: 10.5, 6: 10}
+
     blocks: list[dict] = []
-    for raw in (content or "").split("\n"):
-        line = raw.rstrip()
-        if not line.strip():
+    lines = (content or "").split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+        stripped = line.strip()
+
+        if not stripped:
             blocks.append({"text": "", "size": 5, "bold": False, "bullet": False, "gap": True})
+            i += 1
             continue
-        if line.startswith("#### "):
-            blocks.append({"text": _clean(line[5:]), "size": 11, "bold": True, "bullet": False})
-        elif line.startswith("### "):
-            blocks.append({"text": _clean(line[4:]), "size": 12, "bold": True, "bullet": False})
-        elif line.startswith("## "):
-            blocks.append({"text": _clean(line[3:]), "size": 13.5, "bold": True, "bullet": False})
-        elif line.startswith("# "):
-            blocks.append({"text": _clean(line[2:]), "size": 15, "bold": True, "bullet": False})
-        elif line.startswith("- ") or line.startswith("* "):
+
+        # Markdown-Tabelle: aufeinanderfolgende |-Zeilen sammeln
+        if stripped.startswith("|"):
+            tbl_lines: list[str] = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                tbl_lines.append(lines[i])
+                i += 1
+            rows = _parse_md_table(tbl_lines)
+            if rows:
+                blocks.append({"type": "table", "rows": rows})
+            continue
+
+        # Überschriften (# bis ######, auch ohne Leerzeichen)
+        m_h = re.match(r"^(#{1,6})\s*(.*)", line)
+        if m_h:
+            level = len(m_h.group(1))
+            blocks.append({
+                "text": _clean(m_h.group(2)),
+                "size": _HEADING_SIZES.get(level, 10.5),
+                "bold": True, "bullet": False,
+            })
+            i += 1
+            continue
+
+        if line.startswith("- ") or line.startswith("* "):
             blocks.append({"text": _clean(line[2:]), "size": 10.5, "bold": False, "bullet": True})
         elif re.match(r"^\d+\.\s", line):
             blocks.append({"text": _clean(line), "size": 10.5, "bold": False, "bullet": False})
         else:
             blocks.append({"text": _clean(line), "size": 10.5, "bold": False, "bullet": False})
+        i += 1
     return blocks
 
 
@@ -617,6 +655,41 @@ def _pdf_document(data: dict, fp: Path) -> None:
         if blk.get("gap"):
             _advance(6)
             continue
+
+        # ── Tabelle ──────────────────────────────────────────────────────────
+        if blk.get("type") == "table":
+            from matplotlib.patches import Rectangle as _Rect
+            rows = blk["rows"]
+            if not rows:
+                continue
+            ncols   = max(len(r) for r in rows)
+            col_w   = (R - L) / ncols
+            row_h   = 0.021   # figure-Koordinaten, ≈18 pt bei A4
+            if y - row_h * len(rows) < BOT + 0.04:
+                _new_page()
+            for ri, row in enumerate(rows):
+                if y - row_h < BOT + 0.01:
+                    _new_page()
+                is_hdr = ri == 0
+                bg = _PDF_DARK if is_hdr else ((0.94, 0.94, 0.97) if ri % 2 == 0 else _PDF_WHITE)
+                fg = _PDF_WHITE if is_hdr else (0.1, 0.1, 0.1)
+                for ci in range(ncols):
+                    cx = L + ci * col_w
+                    ax.add_patch(_Rect(
+                        (cx, y - row_h), col_w, row_h,
+                        facecolor=bg, edgecolor=(0.75, 0.75, 0.80),
+                        linewidth=0.4, zorder=1,
+                    ))
+                    cell = _strip_md_keep_math(row[ci]) if ci < len(row) else ""
+                    ax.text(cx + 0.007, y - row_h / 2, cell,
+                            ha="left", va="center", fontsize=8.5, zorder=2,
+                            fontweight="bold" if is_hdr else "normal",
+                            color=fg, clip_on=True)
+                y -= row_h
+            _advance(6)   # Abstand nach der Tabelle
+            continue
+
+        # ── Textblock ────────────────────────────────────────────────────────
         size = blk["size"]
         chars = max(20, int(usable_pt / (0.50 * size)))
         prefix = "•  " if blk["bullet"] else ""

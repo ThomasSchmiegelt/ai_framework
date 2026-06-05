@@ -37,7 +37,9 @@ Doppelklick auf: install.bat
    - `nomic-embed-text` (RAG-Embeddings)
 
    Weitere Modelle bei Bedarf laden (`ollama pull <modell>`) und im
-   **Profil → 🧠 Modelle** den Rollen Allgemein/Programmieren/Wissenschaftlich zuweisen.
+   **Profil → 🧠 Modelle** den Rollen Allgemein / Programmieren·Mathe / Wissenschaftlich /
+   **Medizin** zuweisen (die Rolle „Programmieren / Mathe" gilt für Code-IDE und Mathe-Tab). Für den 🩺 Medizin-Tab empfiehlt sich ein medizinisches Modell:
+   `ollama pull alibayram/medgemma` (MedGemma-4B, ~2,5 GB; optional).
 5. Desktop-Verknüpfung `AI_Framework_Thomas`
 
 ---

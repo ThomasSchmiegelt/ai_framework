@@ -20,7 +20,8 @@ $STAGEROOT = Join-Path $env:TEMP "ai_framework_thomas_stage"
 $STAGE    = Join-Path $STAGEROOT "AI_Framework_Thomas"
 $DESKTOP  = [Environment]::GetFolderPath("Desktop")
 $ZIP      = if ($OutFile) { $OutFile } else { Join-Path $DESKTOP "ai_framework_thomas.zip" }
-$DEMO_PLAN = "beispiel_lokale_ki_im_unternehmen_100_au_f9e83970.json"
+$DEMO_PLAN  = "beispiel_lokale_ki_im_unternehmen_100_au_5b8a3d46.json"
+$DEMO_MATHE = "mathematik_lernprojekt_demo_b3bda529.json"
 
 Write-Host "[*] Staging vorbereiten: $STAGE" -ForegroundColor Cyan
 if (Test-Path $STAGEROOT) { Remove-Item $STAGEROOT -Recurse -Force }
@@ -40,10 +41,12 @@ foreach ($d in @("conversations","uploads","reports","code","plans","dossiers","
 if (Test-Path "$APP_DIR\data\agents") {
     Copy-Item "$APP_DIR\data\agents\*" "$STAGE\data\agents\" -Force -ErrorAction SilentlyContinue
 }
-# 100-Aufgaben-Beispielprojekt mitnehmen (zum sofortigen Testen im Planer)
-if (Test-Path "$APP_DIR\data\plans\$DEMO_PLAN") {
-    Copy-Item "$APP_DIR\data\plans\$DEMO_PLAN" "$STAGE\data\plans\$DEMO_PLAN" -Force
-    Write-Host "[*] Beispielprojekt eingepackt: $DEMO_PLAN" -ForegroundColor Gray
+# Beispielprojekte mitnehmen (zum sofortigen Testen im Planer)
+foreach ($plan in @($DEMO_PLAN, $DEMO_MATHE)) {
+    if ($plan -and (Test-Path "$APP_DIR\data\plans\$plan")) {
+        Copy-Item "$APP_DIR\data\plans\$plan" "$STAGE\data\plans\$plan" -Force
+        Write-Host "[*] Beispielprojekt eingepackt: $plan" -ForegroundColor Gray
+    }
 }
 
 # Frische, neutrale config.json sicherstellen (ohne evtl. lokale Anpassungen)

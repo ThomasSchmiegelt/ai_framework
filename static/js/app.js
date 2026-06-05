@@ -21,6 +21,9 @@ function showToast(msg, duration = 2500) {
 }
 
 function switchTab(tabId) {
+  // Don't switch to a hidden tab
+  const hidden = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get().hidden_tabs || []) : [];
+  if (hidden.includes(tabId)) return;
   AppState.currentTab = tabId;
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tabId);
@@ -190,6 +193,8 @@ function renderSearchResults(results) {
     container.appendChild(item);
   }
 }
+
+// Medizin-Tab wird von MedizinChat.init() (medizin.js) initialisiert
 
 // ── Initialisierung ────────────────────────────────────────────────────────
 
@@ -362,8 +367,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // RAG / Wissenssammlungen
   RAG.init();
 
-  // Dokumentengenerator
+  // Dokumentengenerator + Verfeinerungsschleife
   DocGen.init();
+  if (typeof Refine !== 'undefined') Refine.init();
 
   // Mail → Wissensdatenbank
   if (typeof Mail !== 'undefined') Mail.init();
@@ -467,6 +473,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         v.classList.toggle('active', v.id === `code-view-${target}`));
     });
   });
+
+  // Medizin-Tab initialisieren
+  if (typeof MedizinChat !== 'undefined') MedizinChat.init();
+
+  // Mathe-Tab initialisieren
+  if (typeof MatheChat !== 'undefined') MatheChat.init();
 
   // Diagnose-Logger (als letztes, damit alle anderen Module bereits verdrahtet sind)
   await Logger.init();

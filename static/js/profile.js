@@ -3,7 +3,7 @@
 const Profile = (() => {
   let _data = {};
   const KINDS = ['logo', 'cover', 'header'];
-  const MODEL_ROLES = { general: 'model_general', coding: 'model_coding', science: 'model_science' };
+  const MODEL_ROLES = { general: 'model_general', coding: 'model_coding', science: 'model_science', medical: 'model_medical' };
 
   // Das einer Rolle zugewiesene Modell (leer → Sidebar-Modell bzw. ministral-3:3b)
   function modelFor(role) {
@@ -42,6 +42,15 @@ const Profile = (() => {
     }
   }
 
+  function applyTabVisibility(hiddenTabs) {
+    hiddenTabs = hiddenTabs || [];
+    const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe'];
+    for (const tab of optionalTabs) {
+      const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+      if (btn) btn.style.display = hiddenTabs.includes(tab) ? 'none' : '';
+    }
+  }
+
   function applyMode(mode) {
     const m = ['maschinenbau', 'ki', 'soziales', 'marketing', 'finanz', 'geschaeftsfuehrung', 'custom'].includes(mode) ? mode : 'maschinenbau';
     document.documentElement.dataset.mode = m;
@@ -59,6 +68,7 @@ const Profile = (() => {
       _data = {};
     }
     applyMode(_data.mode);
+    applyTabVisibility(_data.hidden_tabs || []);
     if (typeof I18n !== 'undefined' && _data.lang) I18n.setLang(_data.lang);
     return _data;
   }
@@ -103,6 +113,13 @@ const Profile = (() => {
     if (replayEl) replayEl.checked = !!_data.replay_intro;
     _fillModelSelects();
     _refreshPreviews();
+    // Tab-Sichtbarkeit: ein Häkchen kann mehrere Tabs steuern (data-tabs="ide,mathe").
+    // Angehakt = alle zugehörigen Tabs sichtbar (keiner ausgeblendet).
+    const hiddenTabs = _data.hidden_tabs || [];
+    document.querySelectorAll('#profile-tab-vis input[type="checkbox"]').forEach(cb => {
+      const tabs = (cb.dataset.tabs || '').split(',').filter(Boolean);
+      cb.checked = tabs.every(t => !hiddenTabs.includes(t));
+    });
     document.getElementById('profile-modal-overlay').classList.add('active');
   }
 
@@ -171,9 +188,15 @@ const Profile = (() => {
       auto_compress:           document.getElementById('profile-auto-compress').checked,
       compress_overflow_chars: parseInt(document.getElementById('profile-compress-overflow').value, 10) || 12000,
       compress_idle_min:       parseInt(document.getElementById('profile-compress-idle').value, 10) || 10,
-      model_general: document.getElementById('profile-model-general')?.value || '',
-      model_coding:  document.getElementById('profile-model-coding')?.value || '',
-      model_science: document.getElementById('profile-model-science')?.value || '',
+      model_general:  document.getElementById('profile-model-general')?.value || '',
+      model_coding:   document.getElementById('profile-model-coding')?.value || '',
+      model_science:  document.getElementById('profile-model-science')?.value || '',
+      model_medical:  document.getElementById('profile-model-medical')?.value || '',
+      hidden_tabs: [...new Set(
+        Array.from(document.querySelectorAll('#profile-tab-vis input[type="checkbox"]'))
+          .filter(cb => !cb.checked)
+          .flatMap(cb => (cb.dataset.tabs || '').split(',').filter(Boolean))
+      )],
       // Profil gespeichert ⇒ als eingerichtet markieren; Einleitung nur auf Wunsch erneut
       onboarding_done: true,
       replay_intro: !!document.getElementById('profile-replay-intro')?.checked,
@@ -186,6 +209,7 @@ const Profile = (() => {
       });
       _data = await resp.json();
       applyMode(_data.mode);
+      applyTabVisibility(_data.hidden_tabs || []);
       if (typeof I18n !== 'undefined') I18n.setLang(_data.lang || 'de');
       showToast(typeof I18n !== 'undefined' ? I18n.t('Profil gespeichert') : 'Profil gespeichert');
       closeModal();
@@ -223,5 +247,5 @@ const Profile = (() => {
     load();
   }
 
-  return { init, load, get, openModal, closeModal, applyMode, modelFor };
+  return { init, load, get, openModal, closeModal, applyMode, modelFor, applyTabVisibility };
 })();

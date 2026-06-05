@@ -176,7 +176,7 @@ SQLite:
 | Agenten | `data/agents/*.json` | per **ID im Dateiinhalt** (`_agent_path_by_id`), unabhängig vom Dateinamen; Dateiname ist ein Slug (`_to_slug`, mit Umlaut-Ersatz, Kollisions-Suffix) |
 | Pläne (Netzplan) | `data/plans/*.json` | per ID |
 | Code-Programme (IDE) | `data/code/*.json` | per ID (`_code_path_by_id`) |
-| Profil | `data/profile.json` (Einzeldatei) | `_load_profile` |
+| Profil | `data/user_profile.json` (Einzeldatei) | `_load_profile` — enthält u. a. die vier Modell-Rollen (`model_general/coding/science/medical`) und `hidden_tabs` (ausgeblendete optionale Tabs; beim Erstaufruf alle sechs) |
 | Projekte | `data/projects.json` (Einzelliste) | `_load_projects` |
 
 Begründung dieser Trennung: Diese Objekte sind wenige, werden einzeln bearbeitet und
