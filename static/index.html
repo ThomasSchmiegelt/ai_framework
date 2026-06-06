@@ -56,12 +56,6 @@
 
     <div id="sidebar-footer">
       <div>
-        <div class="sidebar-label">Modell</div>
-        <select id="model-select" class="sidebar-select">
-          <option>Lade…</option>
-        </select>
-      </div>
-      <div>
         <div class="sidebar-label">Agent</div>
         <select id="agent-select" class="sidebar-select">
           <option value="">— Kein Agent —</option>
@@ -112,6 +106,8 @@
       <button class="tab-btn" data-tab="logs">📋 Logs</button>
       <button class="tab-btn" data-tab="medizin">🩺 Medizin</button>
       <button class="tab-btn" data-tab="mathe">🔢 Mathe</button>
+      <button class="tab-btn" data-tab="diranalyse">📁 Verzeichnis</button>
+      <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
     </div>
 
     <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
@@ -295,6 +291,9 @@
       <div id="agents-header">
         <h2>🤖 Agenten</h2>
         <button id="btn-new-agent">＋ Neuer Agent</button>
+        <button id="btn-legal-agent" title="Aus einem Gesetzestext oder einer Norm (PDF/DOCX/TXT) automatisch einen spezialisierten Agenten erzeugen">⚖️ Gesetz-/Regel-Agent</button>
+        <input type="file" id="legal-agent-file" accept=".pdf,.docx,.txt,.md" style="display:none" />
+        <button id="btn-juries" title="Bewertungs-Jurys verwalten: mehrere Agenten zu einem Gremium bündeln, das Texte bewertet">⚖️ Jurys</button>
       </div>
 
       <p style="color:var(--text-dim);font-size:14px;max-width:600px;line-height:1.6">
@@ -670,6 +669,7 @@
           <button id="btn-docgen-latex" class="export-btn" style="display:none">𝐓 Als LaTeX</button>
           <button id="btn-docgen-present" class="export-btn" style="display:none">🖥️ Als Präsentation</button>
           <button id="btn-docgen-rag" class="export-btn" style="display:none">📚 In Wissensdatenbank</button>
+          <button id="btn-docgen-jury" class="export-btn" style="display:none" title="Das erzeugte Dokument von einer Jury bewerten lassen">⚖️ Von Jury prüfen</button>
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px">
             <input type="checkbox" id="docgen-science" /> quellengebunden (wissenschaftlich)
           </label>
@@ -690,50 +690,43 @@
      </div>
 
      <!-- ── Verfeinerungsschleife (Multi-Agent) ──────────────────────────── -->
-     <details id="refine-section" style="border-top:1px solid var(--border);padding:14px 18px">
-       <summary style="cursor:pointer;user-select:none;font-size:14px;font-weight:600">
-         🔁 Verfeinerungsschleife — Dokument durch mehrere Agenten iterativ verbessern
-       </summary>
-       <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
-         <div>
-           <label style="font-size:13px">Dokument <span class="label-hint">(einfügen oder aus obigem Ergebnis übernehmen)</span></label>
-           <div style="display:flex;gap:6px;margin-bottom:6px">
-             <button id="btn-refine-from-docgen" class="export-btn" style="font-size:12px">⬆ Aus Dokumentengenerator</button>
-             <button id="btn-refine-clear" class="export-btn" style="font-size:12px">🗑 Leeren</button>
+     <details id="refine-section">
+       <summary>🔁 Verfeinerungsschleife — Dokument durch mehrere Agenten iterativ verbessern</summary>
+       <div class="refine-grid">
+         <div class="refine-col">
+           <label>Quelle <span class="label-hint">(Ausgangstext für die Verfeinerung)</span></label>
+           <div class="refine-source">
+             <label><input type="radio" name="refine-source" value="output" checked /> Erzeugtes Dokument</label>
+             <label><input type="radio" name="refine-source" value="paste" /> Bestehender Text (eingefügt)</label>
            </div>
-           <textarea id="refine-text" rows="10" placeholder="Dokument hier einfügen…" style="font-size:12px"></textarea>
+           <span id="refine-source-hint" class="planner-muted" style="font-size:12px"></span>
          </div>
-         <div>
-           <label style="font-size:13px">Agenten <span class="label-hint">(werden der Reihe nach eingesetzt)</span></label>
-           <div id="refine-agent-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-           <button id="btn-refine-add-agent" class="export-btn" style="font-size:12px">＋ Agent hinzufügen</button>
-           <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+         <div class="refine-col">
+           <label>Agenten <span class="label-hint">(werden der Reihe nach eingesetzt — nur Favoriten)</span></label>
+           <div id="refine-agent-list"></div>
+           <button id="btn-refine-add-agent" class="export-btn">＋ Agent hinzufügen</button>
+           <div class="refine-params">
              <div>
-               <label style="font-size:12px">Schwelle (% Änderungen, Stop wenn &lt; Wert)</label>
-               <input type="number" id="refine-threshold" value="2" min="0.1" max="50" step="0.1" class="sidebar-select" style="font-size:12px" />
+               <label>Schwelle (% Änderungen, Stop &lt; Wert)</label>
+               <input type="number" id="refine-threshold" value="2" min="0.1" max="50" step="0.1" class="sidebar-select" />
              </div>
              <div>
-               <label style="font-size:12px">Max. Iterationen</label>
-               <input type="number" id="refine-max-iter" value="10" min="1" max="50" class="sidebar-select" style="font-size:12px" />
+               <label>Max. Iterationen</label>
+               <input type="number" id="refine-max-iter" value="10" min="1" max="50" class="sidebar-select" />
              </div>
            </div>
-           <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
-             <button id="btn-refine-run" style="background:var(--accent);color:#fff;border:none;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer">▶ Starten</button>
+           <div class="refine-actions">
+             <button id="btn-refine-run">▶ Starten</button>
              <button id="btn-refine-stop" class="export-btn" style="display:none">⏹ Stop</button>
              <span id="refine-status" class="planner-muted" style="font-size:12px"></span>
            </div>
          </div>
        </div>
-       <!-- Fortschritts-Chart und Ergebnis -->
-       <div id="refine-chart-wrap" style="margin-top:14px;display:none">
-         <svg id="refine-chart" style="width:100%;height:80px;display:block"></svg>
+       <!-- Fortschritts-Chart; das verfeinerte Ergebnis erscheint im erzeugten Dokument rechts -->
+       <div id="refine-chart-wrap" style="display:none">
+         <svg id="refine-chart"></svg>
        </div>
-       <div id="refine-log" style="margin-top:10px;font-size:12px;max-height:120px;overflow-y:auto;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px;display:none"></div>
-       <div style="margin-top:12px;display:none;gap:8px" id="refine-export-row">
-         <button id="btn-refine-use-docgen" class="export-btn">📄 In Dokumentengenerator übernehmen</button>
-         <button id="btn-refine-export-docx" class="export-btn">📝 Als DOCX</button>
-         <button id="btn-refine-export-rag" class="export-btn">📚 In Wissensdatenbank</button>
-       </div>
+       <div id="refine-log" style="display:none"></div>
      </details>
     </div>
 
@@ -750,9 +743,6 @@
         <button id="btn-plan-export-csv" class="export-btn" style="font-size:12px">⬇ CSV</button>
         <button id="btn-plan-import-csv" class="export-btn" style="font-size:12px">⬆ CSV</button>
         <input type="file" id="plan-csv-input" accept=".csv" style="display:none" />
-        <select id="planner-model-select" class="sidebar-select" style="max-width:160px">
-          <option>Lade…</option>
-        </select>
       </div>
 
       <!-- Projektkontext + abgeleiteter Agent -->
@@ -762,6 +752,7 @@
         <div id="planner-project-actions">
           <div class="planner-action-line">
             <button id="btn-derive-agent" class="export-btn" style="font-size:12px">🧠 Projekt-Agent ableiten</button>
+            <button id="btn-planner-agent-jury" class="export-btn" style="font-size:12px" title="Den abgeleiteten Projekt-Agenten-Prompt von einer Jury prüfen lassen">⚖️ Agent prüfen</button>
             <button id="btn-generate-plan" class="export-btn" style="font-size:12px">🪄 KI-Projekt generieren</button>
             <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Gewünschte Aufgabenzahl. Große Pläne überfordern kleine lokale Modelle – dann ein größeres Modell verwenden.">
               Aufgaben <input type="number" id="planner-task-count" min="5" max="200" value="12" class="sidebar-select" style="max-width:70px;font-size:12px" />
@@ -928,9 +919,6 @@
         <button id="btn-matrix-import-csv" class="export-btn">⬆ CSV Import</button>
         <input type="file" id="matrix-csv-input" accept=".csv" style="display:none" />
         <button id="btn-matrix-clear" class="export-btn btn-danger-sm">✕ Leeren</button>
-        <select id="matrix-model-select" class="sidebar-select" style="max-width:160px">
-          <option>Lade…</option>
-        </select>
       </div>
       <div style="padding:8px 12px 4px;font-size:13px;color:var(--text-dim);display:flex;justify-content:space-between;align-items:center">
         <span>Spalte 1 = Themen/Informationen · Kopfzeile ab Spalte 2 = Suchprompt + Agent (pro Spalte wählbar) · Zellen werden durch KI-Websuche befüllt</span>
@@ -1115,14 +1103,6 @@ Beispiele:
             </div>
           </div>
 
-          <!-- Modell -->
-          <div class="medizin-ctrl-group">
-            <label class="medizin-ctrl-label">Modell</label>
-            <select id="medizin-model-select" class="sidebar-select" style="max-width:200px">
-              <option>Lade…</option>
-            </select>
-          </div>
-
           <!-- Aktions-Buttons -->
           <div style="display:flex;gap:6px;align-self:flex-end;align-items:center">
             <button id="btn-medizin-expert" class="export-btn active" title="Experten-Pipeline: Anfrage wird von zwei Modellen bearbeitet (Aufbereitung → MedGemma-Analyse → Rückfragen → Einschätzung)">🔬 Experten-Pipeline</button>
@@ -1237,6 +1217,56 @@ Beispiele:
 
     </div><!-- /mathe-panel -->
 
+    <!-- ── Verzeichnis-Analyse-Panel ────────────────────────────────────── -->
+    <div id="diranalyse-panel" class="panel">
+      <div id="dir-toolbar">
+        <h2 style="font-size:16px">📁 Verzeichnis-Analyse</h2>
+        <input type="text" id="dir-path" placeholder="Server-Pfad zum Ordner, z. B. /home/thomas/projekt" />
+        <button id="btn-dir-scan" class="export-btn">🔍 Scannen</button>
+        <span class="dir-opt dir-locked" title="Personenbezogene Daten in Dateiinhalten werden immer geschwärzt (Datei-/Ordnernamen bleiben sichtbar)">🔒 Personendaten werden anonymisiert</span>
+        <label class="dir-opt" title="Zusätzlicher KI-Namens-Pass (langsamer, findet zusätzliche Namen)">
+          <input type="checkbox" id="dir-llm-ner" /> + KI-Namenssuche
+        </label>
+      </div>
+      <div class="dir-hint">Liest einen lokalen Ordner auf dem Server, gibt einen KI-Überblick + interessante Dateien, analysiert Dateien per Klick und schreibt eine Index-Datei (<code>_KI_INDEX.md</code>) zurück. Personendaten in Inhalten werden immer anonymisiert.</div>
+      <div id="dir-body">
+        <div id="dir-left">
+          <div id="dir-summary"></div>
+          <div id="dir-tree-list"></div>
+        </div>
+        <div id="dir-detail"></div>
+      </div>
+      <div id="dir-actions" style="display:none">
+        <button id="btn-dir-save" class="export-btn">📥 Index in Ordner speichern</button>
+        <button id="btn-dir-save-rag" class="export-btn">📚 In Wissensdatenbank</button>
+      </div>
+    </div><!-- /diranalyse-panel -->
+
+    <!-- ── Morphologischer-Kasten-Panel ─────────────────────────────────── -->
+    <div id="morph-panel" class="panel">
+      <div id="morph-toolbar">
+        <h2 style="font-size:16px">🧩 Morphologischer Kasten</h2>
+        <button id="btn-morph-add-param" class="export-btn" style="font-size:12px">＋ Parameter</button>
+        <button id="btn-morph-eval" class="export-btn">📊 KI: Kombination bewerten</button>
+        <button id="btn-morph-export-docx" class="export-btn">📋 DOCX</button>
+        <button id="btn-morph-export-doku" class="export-btn">📄 → Doku</button>
+        <button id="btn-morph-export-rag" class="export-btn">📚 Wissensdatenbank</button>
+        <button id="btn-morph-export-csv" class="export-btn">⬇ CSV</button>
+        <button id="btn-morph-import-csv" class="export-btn">⬆ CSV Import</button>
+        <input type="file" id="morph-csv-input" accept=".csv" style="display:none" />
+        <button id="btn-morph-clear" class="export-btn btn-danger-sm">✕ Leeren</button>
+        <span id="morph-autosave" style="font-size:11px;color:var(--text-muted);display:none">💾 Gespeichert</span>
+      </div>
+      <div id="morph-head">
+        <textarea id="morph-problem" rows="2" placeholder="Aufgabenstellung / Problem, z. B. „Konzept für ein modulares Lastenfahrrad"…"></textarea>
+        <button id="btn-morph-generate" class="export-btn">🤖 Parameter generieren</button>
+      </div>
+      <div class="dir-hint">Zeile = Parameter, Chips = Ausprägungen. Klick auf einen Chip = für die Lösung wählen · Doppelklick = bearbeiten · ✨ ausformulieren · 💬 Alternativen.</div>
+      <div id="morph-solution"></div>
+      <div id="morph-grid"></div>
+      <div id="morph-eval" style="display:none"></div>
+    </div><!-- /morph-panel -->
+
   </main>
 </div>
 
@@ -1299,7 +1329,9 @@ Beispiele:
 
     <!-- System-Prompt -->
     <div class="form-group">
-      <label>System-Prompt <span class="label-hint">(automatisch befüllt oder manuell eingeben)</span></label>
+      <label>System-Prompt <span class="label-hint">(automatisch befüllt oder manuell eingeben)</span>
+        <button type="button" id="btn-agent-prompt-jury" class="export-btn" style="float:right;font-size:11.5px" title="Diesen System-Prompt von einer Jury bewerten lassen">⚖️ Von Jury prüfen</button>
+      </label>
       <textarea id="field-agent-prompt"
         placeholder="Du bist ein spezialisierter Assistent für…&#10;&#10;Antworte immer auf Deutsch."
       ></textarea>
@@ -1463,6 +1495,32 @@ Beispiele:
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <h4 style="margin-bottom:6px">☁ KI-Anbieter (externe API)</h4>
+    <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
+      Optional zusätzlich zu lokalem Ollama einen OpenAI-kompatiblen Anbieter
+      (OpenRouter, OpenAI, Groq, Together …) einbinden. Dessen Modelle erscheinen oben
+      in den Rollen-Listen. <strong>Der API-Schlüssel bleibt lokal</strong> (nicht in
+      Backup/Git). Hinweis: Remote-Aufrufe verlassen den Rechner und belegen kein VRAM.
+    </p>
+    <div id="provider-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1.4fr 1fr auto;gap:8px;align-items:end">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="provider-name" placeholder="z. B. OpenRouter" />
+      </div>
+      <div class="form-group">
+        <label>Base-URL</label>
+        <input type="text" id="provider-url" placeholder="https://openrouter.ai/api/v1" />
+      </div>
+      <div class="form-group">
+        <label>API-Schlüssel</label>
+        <input type="password" id="provider-key" placeholder="sk-…" />
+      </div>
+      <button id="btn-provider-add" class="export-btn" style="height:38px">＋ Hinzufügen</button>
+    </div>
+    <div id="provider-msg" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
     <h4 style="margin-bottom:10px">🗜 Automatische Komprimierung</h4>
     <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end">
       <div class="form-group">
@@ -1532,6 +1590,12 @@ Beispiele:
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="logs" /> 📋 Logs
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="diranalyse" /> 📁 Verzeichnis
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="morph" /> 🧩 Morph-Kasten
       </label>
     </div>
 
@@ -1731,6 +1795,57 @@ Beispiele:
   </div>
 </div>
 
+<!-- ── Jury-Verwaltung (Bewertungs-Gremien aus Agenten) ─────────────────────── -->
+<div id="jury-modal-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="width:min(640px,95vw)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <h3 style="margin:0;margin-right:auto">⚖️ Bewertungs-Jurys</h3>
+      <button id="btn-jury-close" class="export-btn">✕</button>
+    </div>
+    <p class="planner-muted" style="font-size:12px;margin:0 0 10px">
+      Eine Jury bündelt mehrere Agenten (z. B. Gesetz-Agenten). Sie bewertet einen Text —
+      auch KI-generierten — mit je einem Votum pro Mitglied und einem Gesamturteil.
+    </p>
+    <div id="jury-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:8px 0" />
+    <div class="form-group">
+      <label id="jury-form-title">Neue Jury</label>
+      <input type="text" id="jury-name" placeholder="Name der Jury, z. B. „Rechts-Check"" />
+    </div>
+    <div class="form-group">
+      <label>Beschreibung (optional)</label>
+      <input type="text" id="jury-desc" placeholder="Wofür ist diese Jury?" />
+    </div>
+    <div class="form-group">
+      <label>Mitglieder (Agenten)</label>
+      <div id="jury-members" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:4px"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button id="btn-jury-save" class="export-btn">💾 Speichern</button>
+      <button id="btn-jury-new" class="export-btn">＋ Neue Jury</button>
+      <span id="jury-msg" class="planner-muted" style="font-size:11.5px;align-self:center"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Jury-Bewertung (wiederverwendbares Overlay) ──────────────────────────── -->
+<div id="jury-eval-overlay" class="modal-overlay-base">
+  <div class="modal-base" style="width:min(760px,95vw);max-height:88vh;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <h3 id="jury-eval-title" style="margin:0;margin-right:auto">⚖️ Jury-Bewertung</h3>
+      <button id="btn-jury-eval-close" class="export-btn">✕</button>
+    </div>
+    <div id="jury-eval-pick" style="display:flex;gap:8px;align-items:end;margin-bottom:10px">
+      <div class="form-group" style="flex:1">
+        <label>Jury wählen</label>
+        <select id="jury-eval-select" class="sidebar-select"></select>
+      </div>
+      <button id="btn-jury-eval-run" class="export-btn" style="height:38px">▶ Bewerten</button>
+    </div>
+    <div id="jury-eval-body" style="overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
 <!-- ── Toast ──────────────────────────────────────────────────────────────── -->
 <div id="toast"></div>
 
@@ -1738,16 +1853,17 @@ Beispiele:
 <script src="/js/i18n.js?v=20260604"></script>
 <script src="/js/canvas.js?v=20260603"></script>
 <script src="/js/canvas_editor.js?v=20260603"></script>
-<script src="/js/agents.js?v=20260603"></script>
+<script src="/js/agents.js?v=20260606j"></script>
+<script src="/js/jury.js?v=20260606"></script>
 <script src="/js/chat.js?v=20260604"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260603"></script>
-<script src="/js/doc_generator.js?v=20260603"></script>
+<script src="/js/doc_generator.js?v=20260606j"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260611"></script>
+<script src="/js/profile.js?v=20260606p1"></script>
 <script src="/js/projects.js?v=20260603"></script>
-<script src="/js/planner.js?v=20260603"></script>
+<script src="/js/planner.js?v=20260606j"></script>
 <script src="/js/matrix_research.js?v=20260603"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260603"></script>
@@ -1757,7 +1873,9 @@ Beispiele:
 <script src="/js/onboarding.js?v=20260612"></script>
 <script src="/js/medizin.js?v=20260612"></script>
 <script src="/js/mathe.js?v=20260612"></script>
-<script src="/js/app.js?v=20260608"></script>
+<script src="/js/dir_analysis.js?v=20260606b"></script>
+<script src="/js/morph_box.js?v=20260606"></script>
+<script src="/js/app.js?v=20260606j"></script>
 
 </body>
 </html>

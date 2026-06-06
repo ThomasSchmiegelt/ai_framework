@@ -118,7 +118,7 @@ const DocGen = (() => {
   // Aktionsknöpfe (DOCX / Präsentation / Wissensdatenbank) ein- bzw. ausblenden
   function _showActions(show) {
     const disp = show ? '' : 'none';
-    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-latex', 'btn-docgen-present', 'btn-docgen-rag'].forEach(id => {
+    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-latex', 'btn-docgen-present', 'btn-docgen-rag', 'btn-docgen-jury'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = disp;
     });
@@ -133,7 +133,7 @@ const DocGen = (() => {
   // Erzeugtes Dokument als Präsentation in den Canvas/Präsentations-Bereich schieben
   async function _present() {
     if (!_docText.trim()) return;
-    const model = document.getElementById('model-select')?.value;
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
     showToast('🖥️ Präsentation wird erstellt…');
     try {
       const r = await fetch('/api/presentation/from-text', {
@@ -193,7 +193,7 @@ const DocGen = (() => {
     const brief = document.getElementById('docgen-brief').value.trim();
     if (!brief) { showToast('Bitte beschreibe das gewünschte Dokument'); return; }
     const agentId = document.getElementById('docgen-agent').value || undefined;
-    const model = document.getElementById('model-select')?.value;
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
     const ragSel = document.getElementById('docgen-rag');
     const rag = Array.from(ragSel.selectedOptions).map(o => o.value);
     const science = document.getElementById('docgen-science').checked;
@@ -395,6 +395,19 @@ const DocGen = (() => {
     if (!auto) showToast('✓ Notiz geleert');
   }
 
+  // Fertiges Dokument von außen (z. B. Verfeinerungsschleife) anzeigen:
+  // rendern, Platzhalter weg, Export-/Übernahme-Knöpfe einblenden.
+  function showResult(text) {
+    _docText = (text || '').trim();
+    if (!_docText) return;
+    _docTitle = _docText.split('\n')[0].replace(/^#+\s*/, '').slice(0, 60) || 'Dokument';
+    _renderDoc(document.getElementById('docgen-output'), _docText);
+    const st = document.getElementById('docgen-status');
+    if (st) st.textContent = '✓ Verfeinert';
+    _hidePlaceholder();
+    _showActions(true);
+  }
+
   // Aus dem Chat übernommenen (komprimierten) Verlauf als Quellmaterial laden.
   function loadFromChat(title, text) {
     const ta = document.getElementById('docgen-paste');
@@ -431,9 +444,12 @@ const DocGen = (() => {
     document.getElementById('btn-docgen-rag')?.addEventListener('click', () => {
       if (typeof RAG !== 'undefined') RAG.ingestText(_docTitle, _docText);
     });
+    document.getElementById('btn-docgen-jury')?.addEventListener('click', () => {
+      if (typeof Jury !== 'undefined') Jury.evaluate(_docText, { title: 'Dokumentenprüfung' });
+    });
     // Beim Öffnen des Tabs Agenten + Wissensdatenbanken auffrischen
     document.querySelector('.tab-btn[data-tab="docgen"]')?.addEventListener('click', refresh);
   }
 
-  return { init, refresh, loadFromChat, getText: () => _docText, setText: t => { _docText = t; } };
+  return { init, refresh, loadFromChat, showResult, getText: () => _docText, setText: t => { _docText = t; } };
 })();

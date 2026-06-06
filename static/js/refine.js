@@ -10,10 +10,11 @@ const Refine = (() => {
   let _iterHistory = [];   // [{n, agent, change_pct}] für Chart
   let _finalText = '';
 
-  // ── Agenten laden ─────────────────────────────────────────────────────────
+  // ── Agenten laden (nur Favoriten — wie der Dokument-Agent-Selektor) ───────
   async function _loadAgents() {
     try {
-      _agents = await (await fetch('/api/agents')).json();
+      const all = await (await fetch('/api/agents')).json();
+      _agents = (all || []).filter(a => a.favorite);
     } catch (_) { _agents = []; }
   }
 
@@ -74,23 +75,45 @@ const Refine = (() => {
     svg.innerHTML = bars;
   }
 
+  // Ausgangstext je nach gewählter Quelle: erzeugtes Dokument oder eingefügter Text
+  function _sourceMode() {
+    return document.querySelector('input[name="refine-source"]:checked')?.value || 'output';
+  }
+  function _sourceText() {
+    if (_sourceMode() === 'paste') {
+      return (document.getElementById('docgen-paste')?.value || '').trim();
+    }
+    return (typeof DocGen !== 'undefined' ? DocGen.getText() : '').trim();
+  }
+  function _updateSourceHint() {
+    const el = document.getElementById('refine-source-hint');
+    if (!el) return;
+    const n = _sourceText().length;
+    el.textContent = _sourceMode() === 'paste'
+      ? (n ? `Eingefügter Text: ${n} Zeichen` : 'Noch kein Text im Feld „Bestehenden Text einfügen".')
+      : (n ? `Erzeugtes Dokument: ${n} Zeichen` : 'Noch kein Dokument erzeugt.');
+  }
+
   // ── Haupt-Schleife ────────────────────────────────────────────────────────
   async function _run() {
-    const text = (document.getElementById('refine-text')?.value || '').trim();
-    if (!text) { showToast('Bitte Dokumenttext einfügen'); return; }
+    const text = _sourceText();
+    if (!text) {
+      showToast(_sourceMode() === 'paste'
+        ? 'Kein eingefügter Text — Quelle prüfen'
+        : 'Noch kein Dokument erzeugt — Quelle prüfen');
+      return;
+    }
     if (!_selectedAgents.length) { showToast('Mindestens einen Agenten hinzufügen'); return; }
 
     const threshold = parseFloat(document.getElementById('refine-threshold')?.value) || 2.0;
     const maxIter   = parseInt(document.getElementById('refine-max-iter')?.value)    || 10;
-    const model = document.getElementById('planner-model-select')?.value ||
-                  document.getElementById('docgen-model')?.value || '';
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || '';
 
     _iterHistory = [];
     _finalText   = text;
     document.getElementById('refine-log').style.display = 'block';
     document.getElementById('refine-log').textContent = '';
     document.getElementById('refine-chart-wrap').style.display = 'none';
-    document.getElementById('refine-export-row').style.display  = 'none';
     document.getElementById('btn-refine-stop').style.display = '';
     document.getElementById('btn-refine-run').disabled = true;
     document.getElementById('refine-status').textContent = '⏳ Läuft…';
@@ -139,10 +162,12 @@ const Refine = (() => {
               document.getElementById('refine-status').textContent = `✅ ${ev.message}`;
             } else if (ev.type === 'done') {
               _finalText = ev.text || _finalText;
-              document.getElementById('refine-text').value = _finalText;
-              document.getElementById('refine-export-row').style.display = '';
+              // Ergebnis ins erzeugte Dokument (rechts) schieben — dort stehen
+              // bereits alle Export-/Übernahme-Knöpfe (DOCX/PDF/LaTeX/RAG).
+              if (typeof DocGen !== 'undefined' && DocGen.showResult) DocGen.showResult(_finalText);
+              _updateSourceHint();
               if (!document.getElementById('refine-status').textContent.startsWith('✅')) {
-                document.getElementById('refine-status').textContent = `✓ Abgeschlossen (${_iterHistory.length} Iterationen)`;
+                document.getElementById('refine-status').textContent = `✓ Abgeschlossen (${_iterHistory.length} Iterationen) — Ergebnis im erzeugten Dokument`;
               }
             } else if (ev.type === 'error') {
               _log('❌ Fehler: ' + ev.message);
@@ -179,50 +204,19 @@ const Refine = (() => {
       _renderAgentRows();
     });
 
-    document.getElementById('btn-refine-from-docgen')?.addEventListener('click', () => {
-      const t = typeof DocGen !== 'undefined' ? DocGen.getText() : '';
-      if (!t) { showToast('Dokumentengenerator hat noch keinen Text erzeugt'); return; }
-      document.getElementById('refine-text').value = t;
-      showToast('✓ Text übernommen');
-    });
-
-    document.getElementById('btn-refine-clear')?.addEventListener('click', () => {
-      document.getElementById('refine-text').value = '';
-    });
-
     document.getElementById('btn-refine-run')?.addEventListener('click', _run);
     document.getElementById('btn-refine-stop')?.addEventListener('click', _stop);
 
-    document.getElementById('btn-refine-use-docgen')?.addEventListener('click', () => {
-      if (!_finalText) return;
-      if (typeof DocGen !== 'undefined') { DocGen.setText(_finalText); }
-      document.getElementById('docgen-output').textContent = _finalText;
-      showToast('✓ In Dokumentengenerator übernommen');
-    });
+    // Quellen-Umschalter: Hinweis (Zeichenzahl) aktuell halten
+    document.querySelectorAll('input[name="refine-source"]').forEach(r =>
+      r.addEventListener('change', _updateSourceHint));
+    _updateSourceHint();
 
-    document.getElementById('btn-refine-export-docx')?.addEventListener('click', async () => {
-      if (!_finalText) return;
-      try {
-        const r = await fetch('/api/export/docx', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: _finalText, title: 'Verfeinertes Dokument' }),
-        });
-        if (!r.ok) throw new Error(r.status);
-        const blob = await r.blob();
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = 'verfeinertes_dokument.docx'; a.click();
-      } catch (e) { showToast('DOCX-Export fehlgeschlagen: ' + e.message); }
-    });
-
-    document.getElementById('btn-refine-export-rag')?.addEventListener('click', () => {
-      if (!_finalText || typeof RAG === 'undefined') return;
-      RAG.ingestText('Verfeinertes Dokument', _finalText);
-    });
-
-    // Tab-Wechsel: Agentenliste auffrischen
+    // Tab-Wechsel: Agentenliste + Quellen-Hinweis auffrischen
     document.querySelector('.tab-btn[data-tab="docgen"]')?.addEventListener('click', async () => {
       await _loadAgents();
       _renderAgentRows();
+      _updateSourceHint();
     });
   }
 

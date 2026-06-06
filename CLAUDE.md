@@ -39,16 +39,18 @@ Ollama must be running separately on `http://localhost:11434` with at least one 
 ## Architecture
 
 ```
-Frontend (Vanilla JS, 13 tabs) static/js/app.js, chat.js, canvas.js, ide.js, planner.js, medizin.js, mathe.js, …
+Frontend (Vanilla JS, 15 tabs) static/js/app.js, chat.js, canvas.js, ide.js, planner.js, medizin.js, mathe.js, dir_analysis.js, morph_box.js, jury.js, …
        ↓ SSE streaming
-Backend (FastAPI)              main.py  (~5400 lines)
-       ↓ httpx
-Ollama (local LLM)             localhost:11434
+Backend (FastAPI)              main.py  (~5800 lines)
+       ↓ tools/llm.py (unified)
+Ollama (local)  ──or──  external OpenAI-compatible API (OpenRouter, OpenAI, Groq …)
        ↓
 SQLite (aiosqlite)             data/ai_framework_thomas.db  — schema in db.py
 ```
 
-The backend is async throughout (httpx, aiofiles, aiosqlite).
+The backend is async throughout (httpx, aiofiles, aiosqlite). **All LLM calls go
+through `tools/llm.py`** (`_llm.chat` / `_llm.stream`), which transparently routes to
+local Ollama or an external OpenAI-compatible provider depending on the model name.
 
 Full developer documentation: `docs/ENTWICKLUNG.md`. End-user manual: `BEDIENUNGSANLEITUNG.md`.
 
@@ -106,16 +108,77 @@ frame carries the full `data:` URI (don't double the prefix). The Mathe tab shar
 `model_coding` role with Code (no own model selector), LaTeX output is always on, and the
 Plot toggle + Tutor button sit next to the chat input row.
 
+### Verzeichnis-Analyse & Morphologischer Kasten — backend
+
+Two optional tabs (frontend modules `dir_analysis.js` / `morph_box.js`, see Frontend
+Modules). All endpoints are registered before the static mount and pass user model
+names through `_pick_model(body.get("model"), _model_for("general"))`; every Ollama
+call is wrapped in `async with _model_session(model), httpx…`.
+
+**Verzeichnis-Analyse** (`/api/dir/scan`, `/api/dir/analyze-file`, `/api/dir/finalize`):
+reads a **server-side path** (`_dir_resolve_base` validates `is_dir`). `_dir_walk` is a
+bounded recursive walk (`_DIR_MAX_FILES`/`_DIR_MAX_DEPTH`, skips hidden + `_DIR_SKIP_DIRS`
+like `.git`/`node_modules`/`venv`, catches `PermissionError`). Snippets/full text come from
+the existing `_extract_text`. **PII is anonymized before anything reaches the LLM or the
+client** via `tools/anonymize.py` (`_anonymize()` wraps `redact_pii` + an optional LLM-NER
+pass `_llm_ner_names`); a per-request `mapping` keeps placeholders consistent. `analyze-file`
+guards traversal with `(base / file_rel).resolve().relative_to(base)` (the `/api/dossiers/load`
+pattern). `finalize` writes `_KI_INDEX.md` (UTF-8, tagged „▶ Von KI generiert") back into the
+folder and optionally creates a `Verzeichnis: <name>` RAG base (`rag_create_collection` +
+`ingest_file`). The scan/overview/per-file analyses all use `format:"json"` / Markdown with the
+standard `<think>`-strip + regex-extract + fallback. **Server-mode caveat:** arbitrary paths are
+read AND written — keep this tab hidden in multi-user/server deployments (it is optional + hidden
+by default).
+
+**Morphologischer Kasten** (`/api/morph/generate`, `/api/morph/evaluate`, `/api/morph/refine-cell`):
+all use the shared `_morph_llm(model, system, user)` helper (`format:"json"`, `_parse_llm_json`
+strips `<think>`/fences + extracts the first JSON object). `generate` returns parameters with short
+string values — `_morph_value_str` flattens the nested objects small models sometimes emit into a
+readable string. `evaluate` scores a chosen combination (score/Machbarkeit/Innovation 0–100 +
+Begründung/Risiken) and proposes alternative combinations. `refine-cell` expands or critiques a
+single value. Export is frontend-only (DOCX/DocGen/RAG) — no dedicated endpoint.
+
+### LLM abstraction & external API providers (`tools/llm.py`)
+
+All LLM calls go through **`tools/llm.py`** (imported as `_llm` in `main.py`), so the
+app can use **local Ollama or an external OpenAI-compatible provider** (OpenRouter,
+OpenAI, Groq, Together …) interchangeably. **The return shape is always Ollama-shaped**
+(`{"message": {"content", "tool_calls", "thinking"}}` / stream chunks
+`{"message": {"content"}, "done"}`), so the ~30 call sites stay almost unchanged:
+`resp = await client.post(.../api/chat, json=PAYLOAD)` → `resp = await _llm.chat(client, PAYLOAD)`
+and `client.stream(...)` → `async for chunk in _llm.stream(client, PAYLOAD)`. `_llm.chat`
+returns an `LLMResponse(dict)` that also exposes `.json()` / `.raise_for_status()` /
+`.status_code`, so downstream parsing (incl. the agentic loop's `think`-400 retry) works
+unchanged.
+
+- **Routing:** a model name with the prefix `"<provider_id>::<model>"` (local Ollama
+  names never contain `::`) is remote; `_llm.resolve()` looks up the provider in
+  `data/api_providers.json`. Remote requests translate Ollama→OpenAI: `options.temperature`
+  →`temperature`, `format:"json"`→`response_format:{type:"json_object"}`, `think` dropped,
+  images→`image_url` content parts; the OpenAI response/stream is translated back to the
+  Ollama shape (tool-call `arguments` JSON-string → dict).
+- **Providers:** stored in `data/api_providers.json` (**contains API keys → gitignored,
+  excluded from `/api/backup` and the `make_*` bundles**; mirrors `data/mail.json`). CRUD:
+  `GET/POST/DELETE /api/providers` + `POST /api/providers/test` (fetches `{base}/models`).
+  `_provider_public()` strips the key for the frontend. `/api/models` merges local Ollama
+  tags with the providers' models (prefixed, `remote:true`); the profile role selects list
+  both (`profile.js` `_fillModelSelects`, labelled `☁ model (Provider)`).
+- **Config wiring:** `_llm.set_config(OLLAMA_BASE, API_PROVIDERS_FILE)` is called once at
+  startup. Provider management lives in the **profile modal** („☁ KI-Anbieter (API)").
+
 ### VRAM guard — only ONE model resident at a time
 
-Target hardware has limited VRAM (~6 GB), so only one model may be resident at a
+Target hardware has limited VRAM (~6 GB), so only one **local** model may be resident at a
 time. By default only `ministral-3:3b` is installed/loaded; any other model is
 pulled on demand and assigned per role in the profile (see **Model roles** below).
 `main.py` defines `_model_lock` (asyncio.Lock), `_loaded_model`,
 and the `_model_session(model)` async context manager: on model switch it unloads
 the previous model (`Ollama keep_alive=0`) before the new one loads, and the lock
 serializes all generations so concurrent requests can't load two models at once.
-**Every Ollama call site must be wrapped in `async with _model_session(model), httpx…:`.**
+**Every LLM call site must be wrapped in `async with _model_session(model), httpx…:`**
+(using `_llm.chat`/`_llm.stream` inside). For **remote** models `_model_session` is a
+**no-op** (they use no local VRAM, so no lock/unload — a remote call also never blocks a
+local generation).
 
 ### Model roles (profile)
 
@@ -125,19 +188,29 @@ holds **four** optional role assignments — `model_general`, `model_coding`,
 Programmieren / Mathe / Wissenschaftlich / Medizin** (`model_coding` drives both the
 Code-IDE and the Mathe tab; selects populated from all installed
 Ollama models via `/api/models`, which no longer filters by `allowed_models`).
+**Models are chosen ONLY in the profile** — there are no per-tab model dropdowns
+anymore. The former selectors in the **sidebar** (`#model-select`), **Planer**
+(`#planner-model-select`), **Medizin** (`#medizin-model-select`) and **Matrix**
+(`#matrix-model-select`) were removed; every consumer reads `Profile.modelFor(role)`
+instead (Chat/DocGen/Presentation → `general`, Research/Matrix → `science`,
+Medizin → `medical`, Code/Mathe → `coding`). The first-run onboarding still offers
+one model picker (`#ob-model`) which writes `model_general` into the new profile.
 `_MODEL_ROLES` maps role→profile key; `_model_for(role)` in `main.py` returns the
 assigned model or `DEFAULT_MODEL`. Wiring:
-- **Allgemein** → the sidebar model selector defaults to it (`app.js loadModels`).
+- **Allgemein** → Chat (`chat.js` → `Profile.modelFor('general')`), DocGen, presentation
+  builders, Planer (`planner.js` `_model()`) and the refine loop.
 - **Programmieren / Mathe** → the Code-IDE assistant (`ide.js` uses `Profile.modelFor('coding')`),
   the **Mathe tab** (`mathe.js` `_model()` → `Profile.modelFor('coding')`; the two tabs share one
   model, neither has its own selector), and in `_chat_generator` any `code_ide`-capable agent
   (e.g. the `coder` agent, whose own `model` is now `null`).
 - **Wissenschaftlich** → `/api/research` (`_pick_model(request.model, _model_for("science"))`)
-  and the science path in `_chat_generator` (when no specific non-general model was chosen).
+  and the science path in `_chat_generator` (when no specific non-general model was chosen);
+  the Matrix research grid (`matrix_research.js` `_getModel()` → `science`).
 - **Medizin** → the 🩺 Medizin tab; the consultation pipeline uses it as the MedGemma role
-  (`_model_for("medical")`), the Medizin model selector defaults to it. Recommended:
-  `alibayram/medgemma:latest` (a MedGemma-4B port; `ollama pull alibayram/medgemma`).
-`Profile.modelFor(role)` (`profile.js`) exposes the same resolution to the frontend.
+  (`_model_for("medical")`); `medizin.js` resolves `Profile.modelFor('medical')` directly.
+  Recommended: `alibayram/medgemma:latest` (a MedGemma-4B port; `ollama pull alibayram/medgemma`).
+`Profile.modelFor(role)` (`profile.js`) exposes the same resolution to the frontend
+(fallback `ministral-3:3b`; no longer reads any selector).
 `_pick_model(m, fallback)` accepts any installed model name and rejects placeholders
 (`Lade…`, the legacy `qwen3.6-16k:latest`), falling back to `fallback or DEFAULT_MODEL`.
 
@@ -163,6 +236,8 @@ favorite. `coder` and `presenter` ship as favorites by default.
 | `report.py` | PDF/DOCX report generation with LaTeX equation support |
 | `routing.py` | Route planning for the `route_planner` chat tool: geocoding (Nominatim) + routing (OSRM); returns a `map` frame rendered as an interactive Leaflet map in `chat.js` (needs internet) |
 | `imaging.py` | Image helpers for the illustrated-presentation feature: descriptive-filename heuristic + Pillow downscale |
+| `anonymize.py` | **PII redaction for the Verzeichnis-Analyse tab** (stdlib regex only, no new dependency). `redact_pii(text, mapping)` replaces e-mails, phone numbers, IBAN, URLs and — heuristically (Anrede/title + name tokens) — person names with stable placeholders (`[EMAIL_1]`, `[TEL_1]`, `[PERSON_1]`…), keeping a **consistent mapping per scan session**. `redact_names(text, found_names, mapping)` applies a concrete name list (e.g. from an optional LLM-NER pass). Redacts **contents**, not file/folder names; the mapping stays local and is **not** written into the index file. |
+| `llm.py` | **Unified LLM access (local Ollama ⇄ external OpenAI-compatible API).** `chat(client, payload)` / `stream(client, payload)` take an Ollama-style payload and return an Ollama-shaped `LLMResponse`/chunk dicts; `is_remote`/`resolve` route by the `"<provider_id>::<model>"` prefix; `list_remote_models`/`fetch_provider_models` for `/api/models` and provider testing. Translates request/response/stream both ways. Only `httpx`. See the **LLM abstraction** section. |
 | `mail.py` | **🚧 in development.** Read-only IMAP/POP3 mailbox access (stdlib only: `imaplib`/`poplib`/`email`). `domain_of()` parses the sender domain; `clean_mail_text()` strips quoted history/signature/disclaimer before RAG ingest. Drives the Mail tab (filter by sender/subject/domain → up to 4 actions per mail: RAG/agent-task/→docgen/note; reusable rules in `data/mail_rules.json`; endpoints `/api/mail/{config,list,message,to-rag,rules,action/rag,action/agent}`). **Sending is always manual** (clipboard/mailto) — no SMTP/auto-send. |
 | `rag.py` | RAG engine: document cleanup (`clean_text`), char-based overlapping `chunk_text`, Ollama embeddings (`embed`, forced to CPU via `num_gpu=0` on small-VRAM tiers so they don't evict the chat model), and NumPy brute-force cosine search (`query_collections`). VRAM tiers (`none`/`4gb`/`6gb`/`12gb`) preset chunk size, overlap, top-k, embed device **and `char_limit`** (max chars of injected context — enforced per query in `query_collections`, using the largest limit among the selected collections). Per-base `strictness` (`kreativ`/`ausgewogen`/`korrekt`) selects the RAG injection wording (strictest among selected bases wins). Embeddings stored as float32 BLOBs in SQLite (`rag_collections`/`rag_documents`/`rag_chunks` in `db.py`; `char_limit` and `strictness` columns added with migrations). Ingest sources: a document upload, a conversation (`POST /api/rag/collections/{id}/from-conversation`, optional `delete_after` = move), or arbitrary text (`POST /api/rag/collections/{id}/from-text` — used by the "📚 In Wissensdatenbank" buttons in research/matrix). `rag.js` exposes reusable `pickCollection()`/`ingestText()` (collection-picker modal). Embedding model from `config.json` `embed_model` (default `nomic-embed-text`, **must be pulled in Ollama**). |
 
@@ -175,9 +250,9 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 - `messages_fts` FTS5 virtual table for full-text search with auto-maintenance triggers
 - On startup, legacy JSON files in `data/conversations/` are migrated into SQLite automatically
 
-### Frontend Modules (13 tabs: Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail [🚧 in development], Planer, Matrix, Code, Logs)
+### Frontend Modules (15 tabs: Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail [🚧 in development], Planer, Matrix, Code, Verzeichnis-Analyse, Morph-Kasten, Logs)
 
-**Optional tabs / first-run defaults:** RAG, Code (`ide`), Mathe, Medizin, Mail and Logs are *optional* and toggled in the profile (`#profile-tab-vis`, applied by `Profile.applyTabVisibility` → hides the `.tab-btn`; `switchTab` also guards). **On first run (no `user_profile.json`) all six are hidden** — `GET /api/profile` and the `PUT` handler default `hidden_tabs` to `_DEFAULT_HIDDEN_TABS` when the field is absent (onboarding doesn't send it); the profile modal always sends an explicit `hidden_tabs`. In the profile each optional tab is its own checkbox (Code and Mathe are **separate**, `data-tabs="ide"` / `data-tabs="mathe"`); `profile.js` expands `data-tabs` (comma-split, deduped — a single box may still carry several tabs) on save and checks a box only if all its tabs are visible.
+**Optional tabs / first-run defaults:** RAG, Code (`ide`), Mathe, Medizin, Mail, Logs, **Verzeichnis-Analyse (`diranalyse`)** and **Morphologischer Kasten (`morph`)** are *optional* and toggled in the profile (`#profile-tab-vis`, applied by `Profile.applyTabVisibility` → hides the `.tab-btn`; `switchTab` also guards). **On first run (no `user_profile.json`) all eight are hidden** — `GET /api/profile` and the `PUT` handler default `hidden_tabs` to `_DEFAULT_HIDDEN_TABS` when the field is absent (onboarding doesn't send it); the profile modal always sends an explicit `hidden_tabs`. In the profile each optional tab is its own checkbox (Code and Mathe are **separate**, `data-tabs="ide"` / `data-tabs="mathe"`); `profile.js` expands `data-tabs` (comma-split, deduped — a single box may still carry several tabs) on save and checks a box only if all its tabs are visible.
 
 - `app.js` — Global state, model loading, tab switching, backup/restore, module init
 - `chat.js` — SSE streaming consumer, message rendering, file uploads, conversation rename/import. Renders `rag`/`adaptive` SSE frames as info bars above the answer; markdown links get `target="_blank"`. **Math:** `renderMarkdown` registers a KaTeX **marked extension** (`_ensureMathExtension`, lazy once `katex` is loaded; also on `window._ensureKatexMarked` for other modules) so formulas (`$…$`/`$$…$$`/`\(…\)`/`\[…\]`) are rendered *during* markdown parsing — marked never sees/mangles the LaTeX. (The earlier post-parse auto-render approach broke on `_`/`\`.) **Citation linkifier:** `linkifyCitations` walks text nodes (skipping `a`/`code`/`pre`) and turns recognized norms (DIN/EN/ISO/IEC/VDI/VDE/ASTM) and German law refs (`§/Art. … <ABK>`) into links — laws → deterministic `gesetze-im-internet.de/<abk>/__<n>.html`, norms → DIN-Media search. **Auto-compression:** when enabled in the profile (`auto_compress`, `compress_overflow_chars`, `compress_idle_min`), it calls the existing `/api/conversations/{id}/compress` on overflow (after a response) or on idle-timer, on the currently open conversation, with a notification toast
@@ -185,7 +260,8 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 - `canvas_editor.js` — WYSIWYG slide editor: click slide text → in-place overlay input; swap image; per-slide toolbar (move/delete/regenerate text)
 - `agents.js` — Agent CRUD (stored as JSON files in `data/agents/`)
 - `research.js` — Aspect-based search with sources + DOCX export with header image
-- `doc_generator.js` — Dokumentengenerator tab (`docgen`): generate documents (e.g. a funding application) with a **document agent** (any agent; those with category `Dokumentation` are listed first) optionally grounded in one or more RAG bases. Posts to `/api/chat` (`agent_id` + `rag_collections` + optional `science`), renders the streamed Markdown (with KaTeX/links), and exports via `/api/export/docx` or back into a RAG base (`RAG.ingestText`). Document agents are created in the normal 🤖 Agenten tab — no separate agent store. **Quellmaterial (source material):** the task can be grounded on (a) **uploaded external documents** (`/api/upload` → attached as `files[]` on the chat message, server extracts the text), (b) a **dossier** picked from the Planer-Recherche dossiers (`GET /api/dossiers` list + `GET /api/dossiers/load?id=` content, path-traversal-guarded), and (c) **pasted text** — all appended as „Quellmaterial" context to the brief. „Text übernehmen" (`_usePasted`) instead loads pasted text *directly* as the finished document. The chat toolbar's **→ Doku** button (`chatToDocGen` in `app.js`) hands the current conversation as compressed source material to `DocGen.loadFromChat()` and switches to this tab (e.g. to plan a meeting from a chat).
+- `doc_generator.js` — Dokumentengenerator tab (`docgen`): generate documents (e.g. a funding application) with a **document agent** (any agent; those with category `Dokumentation` are listed first) optionally grounded in one or more RAG bases. Posts to `/api/chat` (`agent_id` + `rag_collections` + optional `science`), renders the streamed Markdown (with KaTeX/links), and exports via `/api/export/docx` or back into a RAG base (`RAG.ingestText`). Document agents are created in the normal 🤖 Agenten tab — no separate agent store. **Quellmaterial (source material):** the task can be grounded on (a) **uploaded external documents** (`/api/upload` → attached as `files[]` on the chat message, server extracts the text), (b) a **dossier** picked from the Planer-Recherche dossiers (`GET /api/dossiers` list + `GET /api/dossiers/load?id=` content, path-traversal-guarded), and (c) **pasted text** — all appended as „Quellmaterial" context to the brief. „Text übernehmen" (`_usePasted`) instead loads pasted text *directly* as the finished document. The chat toolbar's **→ Doku** button (`chatToDocGen` in `app.js`) hands the current conversation as compressed source material to `DocGen.loadFromChat()` and switches to this tab (e.g. to plan a meeting from a chat). `DocGen.showResult(text)` renders an externally produced document into the output pane and reveals the export buttons (used by the refine loop below).
+- `refine.js` — **Verfeinerungsschleife** (multi-agent), visually integrated at the bottom of the Dokumente tab (`#refine-section`, CSS-classed to match the generator, no white textarea). Its input is a **source toggle** (no own text field): „Erzeugtes Dokument" (`DocGen.getText()`) or „Bestehender Text" (`#docgen-paste`). The agent dropdowns list **favorites only** (like the document-agent selector). Iterates a document through the selected agents via `POST /api/refine-document` until the change rate falls below the threshold; the result is pushed back into the generated-document pane via `DocGen.showResult()` (export handled there). Model = `Profile.modelFor('general')`.
 - `rag.js` — RAG tab ("Wissensdatenbanken"): create/delete knowledge bases via two **sliders** — "schnell ↔ gründlich" (maps to chunk size/overlap/top-k/char_limit presets in `rag.js`) and "kreativ ↔ korrekt" (`strictness`) — plus a cleanup toggle and a prominent "📚 Wissensdatenbank anlegen" button. Upload documents and move/copy a conversation into a base (`/api/rag/collections/{id}/from-conversation`). In chat, the `📚 RAG` toggle + multi-select inject retrieved passages; the RAG system instruction wording follows the strictest selected base's `strictness`; a `rag` SSE frame shows the used sources (rendered by `chat.js`). Each base's document list is **collapsible** (native `<details>`, open by default when ≤4 docs)
 - `planner.js` — Network diagram / CPM, zoom/pan, CSV im/export; AI (derive project agent, generate full plan, suggest predecessors/successors, detail a task, **insert task between two** via `/api/plans/insert-between`); structured resources with cost/rollup + lead time, resource catalog (import/export, free/extend/strict). Structure tools: stable task IDs with cascade-rename + separate computed **execution-order column (#)**, link-consistency normalizer (symmetric, dedup), delete-with-rebridge, **🔁 replace** task (by existing → inherits links, or new), **✨ Mach schön** (normalize + sort by order + redraw), **📅 Bestellplan** (resource schedule: needed-on = task ES, order-by = ES − lead, against project start date, optional **workdays** mode skipping weekends). Warnings line (`#planner-warn`) flags **cycles** (Kahn-unreached tasks) and **resource conflicts** (same human/hardware in overlapping ES…EF windows; also shown in the Bestellplan modal). The task table ↔ network-diagram split is a **draggable splitter** (`#planner-splitter`, `_initSplitter`; width persisted in `localStorage`, double-click resets) — the existing `ResizeObserver` on the canvas redraws automatically.
 - `matrix_research.js` — Research matrix with live `localStorage` save + CSV im/export
@@ -195,6 +271,8 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 - `ide.js` — Code-IDE: editor + sandboxed-iframe Canvas preview, AI assistant (uses the profile **Programmieren / Mathe** model via `Profile.modelFor('coding')` — shared with the Mathe tab, fallback `ministral-3:3b`), auto-repair. Provides the `ai_framework_thomas_input()` / `ai_framework_thomas_run()` iframe framework so generated programs get interactive input fields and a responsive canvas. The editor ↔ preview columns have a **draggable splitter** (`#ide-splitter`, `_initSplitter`; left width via the `--ide-left-w` CSS var on `#ide-body`, persisted in `localStorage`, double-click resets).
 - `medizin.js` — 🩺 Medizin tab: 2-model consultation **pipeline** (`_sendPipeline` → `/api/medizin/consult`) with collapsible stage blocks (`refine/analyze/formulate/final`), follow-up `question` handling (`_round`, max 2), `🗣 In einfaches Deutsch übersetzen` (`/api/medizin/translate`), plus a plain single-model fallback (`_sendSimple`) toggled by `🔬 Experten-Pipeline`. Patient files = RAG collections named `Patient:…` (create/upload inline in the topbar).
 - `mathe.js` — 🔢 Mathe tab: solver via the `mathe_experte` agent, or `🎓 Tutor-Modus` via the `mathe_tutor` agent with **deterministic SymPy grounding** (`/api/mathe/ground` facts injected into the chat request) + `💡 Lösung zeigen`. Model = `Profile.modelFor('coding')` (shared with Code, no own selector); LaTeX always on; the Plot toggle + Tutor/Lösung buttons sit in a toolbar at the chat input row. Renders `image` plot frames inline (full `data:` URI as-is), offers LaTeX/PDF export when the answer contains `$`.
+- `dir_analysis.js` — 📁 Verzeichnis-Analyse tab: enter a **server-side folder path** → `POST /api/dir/scan` (structure tree + KI overview + flagged „interesting" files), click a file → `POST /api/dir/analyze-file` (deep Markdown analysis), then „📥 Index speichern" / „📚 In Wissensdatenbank" → `POST /api/dir/finalize` (writes `_KI_INDEX.md` back into the folder, optionally a `Verzeichnis: <name>` RAG base). **Personal data in file contents is ALWAYS anonymized — mandatory, not switchable** (the backend forces `anonymize=True` and ignores any client flag); an optional `+ KI-Namenssuche` checkbox adds a slower LLM-NER pass that only finds *additional* names. **File analyses run through a client-side serial queue** (`_queue`/`_processQueue`, one at a time) — the VRAM lock serializes them server-side anyway, and firing them in parallel made idle connections abort as „Failed to fetch". Failed analyses show a `↻ Erneut` retry button. Model = `Profile.modelFor('general')`; last path in `localStorage`. Optional tab, hidden by default — do not enable in multi-user/server mode (arbitrary paths are read/written).
+- `morph_box.js` — 🧩 Morphologischer Kasten (Zwicky box) tab: ideation grid of parameters (rows) × values (chips). KI: `🤖 Parameter generieren` (`/api/morph/generate`), `📊 Kombination bewerten` (`/api/morph/evaluate` → score/Machbarkeit/Innovation bars + suggested combinations to apply), per-chip `✨ ausformulieren` / `💬 Alternativen` (`/api/morph/refine-cell`). A selection = one chip per parameter (click to (de)select, double-click to edit). State (`_problem`/`_params`/`_selection`) persists in `localStorage`; CSV im/export; export the chosen solution via DOCX (`/api/export/docx`), → Doku (`DocGen.showResult`) or Wissensdatenbank (`RAG.ingestText`). Model = `Profile.modelFor('general')`.
 - `onboarding.js` — First-run wizard: shown when `user_profile.json` is absent (or profile flag set). Slide 1 is an interactive form (name, custom mode definition); slides 2–14 are info screens with screenshots (incl. Medizin and Mathe). On finish, saves the profile and launches in custom mode.
 - `logger.js` — Diagnostic logger UI (toggle, filter, download)
 - `profile.js` / `projects.js` — User profile (incl. the four model roles `Profile.modelFor`, and tab visibility via `data-tabs` checkboxes) and project management
@@ -202,11 +280,12 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 ### Backup & Restore
 
 `GET /api/backup` builds a ZIP of **all** user data: `profile.json`, `projects.json`,
-conversations (from SQLite), `plans/`, `agents/` (incl. `favorite`), `code/`,
+conversations (from SQLite), `plans/`, `agents/` (incl. `favorite`), `juries/`, `code/`,
 **`profile_assets/`** (logo/cover/header), and **`rag/collections.json`** — a full
 dump of the RAG knowledge bases incl. documents, chunks and float32 embeddings
-(base64-encoded). `POST /api/restore` re-imports everything: profile/assets overwrite;
-projects merge; plans skip by name; agents/code skip by existing id; **RAG collections
+(base64-encoded). **`api_providers.json` is deliberately excluded** (contains API keys).
+`POST /api/restore` re-imports everything: profile/assets overwrite;
+projects merge; plans skip by name; agents/juries/code skip by existing id; **RAG collections
 skip by existing id**; conversations are always added as new (re-restoring duplicates
 them). DB helpers `rag_export()` / `rag_collection_exists()` / `rag_import_collection()`
 live in `db.py`. `app.js` shows per-category counts in the restore toast and reloads
@@ -225,19 +304,48 @@ Endpoints: `POST/GET/DELETE /api/profile/asset/{kind}` (kind ∈ logo|cover|head
 
 ### Agent System
 
-Agents are JSON files in `data/agents/` with fields: `id`, `name`, `description`, `system_prompt`, `tools` (array), `model` (optional override), `icon` (emoji), `category`, `favorite`. The system prompt is prepended to the user message at request time. Domain agents shipped include `latex_experte`, `mathe_experte`, `mathe_tutor` (tutor mode), `medizin_assistent`, alongside the engineering/research/presentation defaults.
+Agents are JSON files in `data/agents/` with fields: `id`, `name`, `description`, `system_prompt`, `tools` (array), `model` (optional override), `icon` (emoji), `category`, `favorite`, **`rag_collections`** (optional list of knowledge-base ids bound to the agent — auto-activated in `_chat_generator` and merged into the request's RAG selection). The system prompt is prepended to the user message at request time. Domain agents shipped include `latex_experte`, `mathe_experte`, `mathe_tutor` (tutor mode), `medizin_assistent`, alongside the engineering/research/presentation defaults.
+
+**Gesetz-/Regel-Agent aus Datei:** the 🤖 Agenten tab has a **⚖️ Gesetz-/Regel-Agent** button (`agents.js` `createLegalAgent` → `POST /api/agents/from-legal`, multipart `file`+`title`). The backend extracts the text (`_extract_text`), converts it to Markdown **deterministically** (`_legal_to_md` — regex turns `§ …`/`Art. …` line-starts into `###` headings, no LLM), then **decides by length** (`_LEGAL_PROMPT_LIMIT`, 8000 chars): short → the Markdown goes straight into the agent's `system_prompt`; long → it is embedded into a dedicated RAG base named `Gesetz: <title>` (`strictness:"korrekt"`) and bound via the agent's `rag_collections`. The agent is created with `icon:"⚖️"`, `category:"Recht"`, `favorite:true`. Returns `{agent_id, name, mode:"prompt"|"rag", chars, rag_collection_id}`.
 
 **Adaptive agent:** the special `agent_id == "__adaptive__"` (a fixed entry in the sidebar agent selector) triggers `_derive_adaptive_prompt()` in `main.py` — a preliminary non-streaming LLM call that analyzes the latest user message and returns a question-specific `system_prompt` (JSON `{rolle, system_prompt}`), which is then used for the actual answer. Emits an `adaptive` SSE frame with the derived role (rendered above the answer by `chat.js`).
+
+### Jury — multi-agent evaluation of a text
+
+A **jury** bundles several agents (typically ⚖️ legal agents) into a reusable panel that
+evaluates any text — including AI-generated content (a document, a system prompt, a
+planner-derived project agent). Stored as JSON files in `data/juries/`
+(`{id, name, description, member_agent_ids[], created_at}` — backed up like agents,
+restored by id; gitignored). CRUD: `GET/POST/PUT/DELETE /api/juries`.
+
+**Evaluation engine** `POST /api/jury/evaluate` (SSE), body `{jury_id | member_agent_ids[],
+text, context?, criteria?}`: for each member it loads the agent's `system_prompt` + bound
+`rag_collections` (legal text passages injected via `query_collections`), runs a verdict
+call (`format:"json"`, model = `agent.model` or `_model_for("science")`) **sequentially
+under `_model_session`**, and streams a `member` frame `{agent, icon, score, befund,
+risiken[], empfehlung}`. After all members a **synthesis** call (general model) streams a
+`summary` frame `{gesamturteil, score, konsens, hauptkritik[], empfehlungen[]}` (fallback
+score = mean of member scores), then `done`. Reuses `_parse_llm_json` + `_sse`.
+
+**Frontend (`jury.js`, no new tab):** management modal opened from the 🤖 Agenten tab
+(`#btn-juries`) to create/edit juries (member checkboxes, legal/favourite agents first);
+a reusable overlay **`Jury.evaluate(text, {title, context})`** streams the verdicts/summary
+as cards. Wired into workflows via buttons: **Dokumente** (`#btn-docgen-jury` → checks the
+generated document), the **agent edit modal** (`#btn-agent-prompt-jury` → checks the
+system-prompt field), and the **Planer** (`#btn-planner-agent-jury` → checks the derived
+project-agent prompt with the project description as context).
 
 ### Data File Formats (`data/`)
 
 | Path | Schema |
 |---|---|
 | `data/ai_framework_thomas.db` | SQLite: conversations, messages, messages_fts, RAG tables |
-| `data/agents/<slug>.json` | `{id, name, description, system_prompt, tools[], model?, icon, category, favorite}` |
+| `data/agents/<slug>.json` | `{id, name, description, system_prompt, tools[], model?, icon, category, favorite, rag_collections[]}` |
 | `data/plans/<slug>_<id8>.json` | `{id, name, description, system_prompt, resource_mode, resource_catalog[], start_date, workdays, tasks[{id, name, duration, predecessors[], successors[], resource_list[], is_start, is_end, notes}]}` |
 | `data/code/<slug>_<id6>.json` | `{id, name, code, updated_at}` |
-| `data/user_profile.json` | user name/company/position + mode, lang, tone, **model roles** (`model_general/coding/science/medical`), **`hidden_tabs`** (optional tabs hidden; defaults to all six on first run), etc. |
+| `data/juries/<slug>_<id6>.json` | `{id, name, description, member_agent_ids[], created_at}` — in backup, gitignored |
+| `data/user_profile.json` | user name/company/position + mode, lang, tone, **model roles** (`model_general/coding/science/medical`), **`hidden_tabs`** (optional tabs hidden; defaults to all eight on first run), etc. |
+| `data/api_providers.json` | `[{id, name, base_url, api_key, models[]}]` external OpenAI-compatible providers — **contains API keys → not in backup/git/bundles** |
 | `data/mail.json` | `{protocol, host, port, user, ssl, password}` — **not** in backup/git |
 | `data/mail_rules.json` | `[{id, name, filter:{from,subject,domain}, actions:[…≤4]}]` — not in git |
 

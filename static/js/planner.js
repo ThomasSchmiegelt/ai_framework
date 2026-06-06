@@ -827,7 +827,7 @@ const Planner = (() => {
     const t = _tasks[idx];
     if (!t) return false;
     if (!(await _ensureSaved())) { showToast('Plan konnte nicht gespeichert werden'); return false; }
-    const model = document.getElementById('planner-model-select')?.value || undefined;
+    const model = _model() || undefined;
     showToast(`🔬 Recherchiere „${t.name}"…`);
     try {
       const r = await fetch(`/api/plans/${_planId}/research-task`, {
@@ -895,7 +895,7 @@ const Planner = (() => {
     if (!msg) return;
     input.value = '';
 
-    const model = document.getElementById('planner-model-select')?.value || 'qwen3.6-16k:latest';
+    const model = _model() || 'qwen3.6-16k:latest';
 
     // Selektierte Aufgabe als Kontext hinzufügen
     const selTask = _selectedTaskId ? _tasks.find(t => t.id === _selectedTaskId) : null;
@@ -1149,7 +1149,7 @@ const Planner = (() => {
   async function _runEvaluation() {
     const ids = [1,2,3].map(i => document.getElementById(`plan-eval-sel-${i}`)?.value).filter(Boolean);
     if (!ids.length) { showToast('Mindestens Plan 1 auswählen'); return; }
-    const model = document.getElementById('planner-model-select')?.value;
+    const model = _model();
     const status = document.getElementById('plan-eval-status');
     const output = document.getElementById('plan-eval-output');
     const btn = document.getElementById('btn-plan-eval-run');
@@ -1224,7 +1224,7 @@ const Planner = (() => {
     const nameInp  = document.getElementById('plan-from-list-name');
     const taskList = (textarea?.value || '').trim();
     if (!taskList) { showToast('Bitte Aufgabenliste einfügen'); return; }
-    const model = document.getElementById('planner-model-select')?.value || '';
+    const model = _model() || '';
     const name  = (nameInp?.value || '').trim() || 'Projekt aus Liste';
     const statusEl = document.getElementById('plan-from-list-status');
     const btn = document.getElementById('btn-from-list-run');
@@ -1304,7 +1304,7 @@ const Planner = (() => {
     const status = document.getElementById('planner-agent-status');
     if (btn) { btn.disabled = true; btn.textContent = '🧠 wird abgeleitet…'; }
     try {
-      const model = document.getElementById('planner-model-select')?.value;
+      const model = _model();
       const r = await fetch('/api/plans/derive-agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: desc, model }),
@@ -1337,7 +1337,7 @@ const Planner = (() => {
     if (_tasks.length && !confirm('Bestehende Aufgaben durch ein neu generiertes Projekt ersetzen?')) return;
     _desc = desc;
     const btn = document.getElementById('btn-generate-plan');
-    const model = document.getElementById('planner-model-select')?.value;
+    const model = _model();
     if (btn) { btn.disabled = true; btn.textContent = '🪄 generiert…'; }
     showToast(`🪄 KI erstellt den Projektplan (${count} Aufgaben)… ${count > 30 ? 'das kann dauern' : ''}`);
     try {
@@ -1373,7 +1373,7 @@ const Planner = (() => {
     const anchor = _tasks[idx];
     if (!anchor) return;
     _desc = (document.getElementById('planner-desc')?.value || '').trim();
-    const model = document.getElementById('planner-model-select')?.value;
+    const model = _model();
     showToast('✨ KI sucht Vorgänger/Nachfolger…');
     try {
       const r = await fetch('/api/plans/suggest-tasks', {
@@ -1462,7 +1462,7 @@ const Planner = (() => {
     const task = _tasks[idx];
     if (!task) return;
     _desc = (document.getElementById('planner-desc')?.value || '').trim();
-    const model = document.getElementById('planner-model-select')?.value;
+    const model = _model();
     showToast('📝 KI detailliert die Aufgabe…');
     try {
       const r = await fetch('/api/plans/detail-task', {
@@ -1663,7 +1663,7 @@ const Planner = (() => {
     if (!aId || !bId || aId === bId) { showToast('Bitte zwei verschiedene Aufgaben wählen'); return; }
     const a = _tasks.find(t => t.id === aId), b = _tasks.find(t => t.id === bId);
     _desc = (document.getElementById('planner-desc')?.value || '').trim();
-    const model = document.getElementById('planner-model-select')?.value;
+    const model = _model();
     const body = document.getElementById('insert-modal-body');
     body.innerHTML = '<div class="planner-muted" style="padding:6px 0">✨ KI überlegt passende Zwischenvorgänge…</div>';
     try {
@@ -2148,13 +2148,9 @@ const Planner = (() => {
     _render();
   }
 
-  /* ── Modell-Selektor befüllen ────────────────────────────────────── */
-  function _syncModelSelector() {
-    const src = document.getElementById('model-select');
-    const dst = document.getElementById('planner-model-select');
-    if (!src || !dst) return;
-    dst.innerHTML = src.innerHTML;
-    dst.value = src.value;
+  /* ── Modell: zentral aus dem Profil (Rolle „Allgemein") ──────────── */
+  function _model() {
+    return (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
   }
 
   /* ── init ────────────────────────────────────────────────────────── */
@@ -2162,10 +2158,6 @@ const Planner = (() => {
     _canvas = document.getElementById('planner-canvas');
     if (!_canvas) return;
     _ctx = _canvas.getContext('2d');
-
-    // Modell synchronisieren
-    _syncModelSelector();
-    document.getElementById('model-select')?.addEventListener('change', _syncModelSelector);
 
     // Pläne laden
     _loadPlanList();
@@ -2273,6 +2265,12 @@ const Planner = (() => {
 
     // Projekt-Agent ableiten + Komplett-Generierung
     document.getElementById('btn-derive-agent')?.addEventListener('click', _deriveAgent);
+    document.getElementById('btn-planner-agent-jury')?.addEventListener('click', () => {
+      if (!_systemPrompt) { showToast('Erst „Projekt-Agent ableiten"'); return; }
+      if (typeof Jury !== 'undefined') {
+        Jury.evaluate(_systemPrompt, { title: 'Projekt-Agent prüfen', context: _desc });
+      }
+    });
     document.getElementById('btn-generate-plan')?.addEventListener('click', _generatePlan);
 
     // Ressourcen-Katalog: Modus, Import, Export
@@ -2349,7 +2347,6 @@ const Planner = (() => {
 
     // Tab-Wechsel
     document.querySelector('[data-tab="planner"]')?.addEventListener('click', () => {
-      _syncModelSelector();
       setTimeout(_recalcAndRender, 50);
     });
 

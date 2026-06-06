@@ -17,33 +17,6 @@ const MedizinChat = (() => {
   // keine allgemeinen Chat-Modelle und keine Community-Ports.
   function _isMedModel(name) { return /^medgemma:/i.test(name || ''); }
 
-  async function _syncModelSelect() {
-    const dst = document.getElementById('medizin-model-select');
-    if (!dst) return;
-    let names = [];
-    // Zuerst aus der bereits geladenen Sidebar-Liste, sonst direkt abrufen
-    const src = document.getElementById('model-select');
-    if (src) names = Array.from(src.options).map(o => o.value).filter(Boolean);
-    if (!names.some(_isMedModel)) {
-      try {
-        const r = await fetch('/api/models');
-        const d = await r.json();
-        names = (d.models || []).map(m => m.name);
-      } catch (_) {}
-    }
-    const medModel = (typeof Profile !== 'undefined' && Profile.get)
-      ? (Profile.get().model_medical || '') : '';
-    const medgemma = names.filter(_isMedModel);
-    if (!medgemma.length) {
-      dst.innerHTML = '<option value="">Kein medgemma-Modell – „ollama pull medgemma:4b"</option>';
-      return;
-    }
-    dst.innerHTML = medgemma.map(v => `<option value="${v}">${v}</option>`).join('');
-    // Vorauswahl: hinterlegtes Medizin-Modell (falls medgemma), sonst erstes medgemma
-    dst.value = (medModel && _isMedModel(medModel) && medgemma.includes(medModel))
-      ? medModel : medgemma[0];
-  }
-
   // ── Patienten-RAG ────────────────────────────────────────────────────────
 
   async function _loadPatientRags() {
@@ -273,7 +246,7 @@ const MedizinChat = (() => {
     const text  = (input?.value || '').trim();
     if (!text && !_attachedFiles.length) return;
 
-    const model   = document.getElementById('medizin-model-select')?.value || 'ministral-3:3b';
+    const model   = (typeof Profile !== 'undefined' ? Profile.modelFor('medical') : '') || 'ministral-3:3b';
     const ragSel  = document.getElementById('medizin-rag-select')?.value || '';
     const fileIds = _attachedFiles.map(f => f.id);
 
@@ -386,7 +359,8 @@ const MedizinChat = (() => {
     if (!text) return;
 
     const ragSel = document.getElementById('medizin-rag-select')?.value || '';
-    const modelMedical = document.getElementById('medizin-model-select')?.value || '';
+    const modelMedical = (typeof Profile !== 'undefined' && Profile.modelFor)
+      ? Profile.modelFor('medical') : '';
     const modelGeneral = (typeof Profile !== 'undefined' && Profile.modelFor)
       ? Profile.modelFor('general') : '';
 
@@ -577,9 +551,7 @@ const MedizinChat = (() => {
   // ── Init ──────────────────────────────────────────────────────────────────
 
   function init() {
-    // Modell-Selektor
-    _syncModelSelect();
-    document.getElementById('model-select')?.addEventListener('change', _syncModelSelect);
+    // Modell kommt aus dem Profil (Rolle „Medizin", MedGemma) — kein Selektor mehr.
 
     // Patienten-RAG
     _loadPatientRags();

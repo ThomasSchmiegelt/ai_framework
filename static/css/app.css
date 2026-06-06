@@ -910,12 +910,13 @@ html, body {
 #agents-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
 }
 
 #agents-header h2 {
   font-size: 20px;
   font-weight: 600;
+  margin-right: auto;   /* schiebt die Buttons nach rechts */
 }
 
 #btn-new-agent {
@@ -933,6 +934,23 @@ html, body {
 }
 
 #btn-new-agent:hover { background: var(--accent-hover); }
+
+/* Sekundär-Button: Gesetz-/Regel-Agent aus Datei */
+#btn-legal-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background .12s, border-color .12s;
+}
+#btn-legal-agent:hover { background: var(--bg-hover); border-color: var(--accent); }
 
 #agents-grid {
   display: grid;
@@ -1591,12 +1609,71 @@ html, body {
 }
 #docgen-output:empty { display: none; }
 
-/* Auftrag- und Paste-Feld auf gleiche, feste (nicht horizontal ziehbare) Breite */
+/* Auftrag- und Paste-Feld auf gleiche, feste (nicht horizontal ziehbare) Breite
+   und durchgängig im Theme (sonst browser-default = weiß). */
 #docgen-brief,
 #docgen-paste {
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13.5px;
+}
+#docgen-brief:focus,
+#docgen-paste:focus { outline: none; border-color: var(--accent); }
+#docgen-brief::placeholder,
+#docgen-paste::placeholder { color: var(--text-muted); }
+
+/* ── Verfeinerungsschleife: optisch in den Dokumente-Tab integriert ────── */
+#refine-section {
+  border-top: 1px solid var(--border);
+  padding: 18px 28px;
+}
+#refine-section > summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+#refine-section .refine-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+#refine-section .refine-col > label { display: block; font-size: 13px; margin-bottom: 8px; }
+#refine-section .refine-source { display: flex; flex-direction: column; gap: 8px; }
+#refine-section .refine-source > label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; padding: 9px 12px; margin-bottom: 0;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer;
+}
+#refine-section .refine-source input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
+#refine-agent-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+#refine-section .refine-params { margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#refine-section .refine-params label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--text-dim); }
+#refine-section .refine-actions { display: flex; gap: 8px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+#btn-refine-run {
+  background: var(--accent); color: #fff; border: none;
+  padding: 9px 18px; border-radius: 8px; font-weight: 600; cursor: pointer;
+  transition: background .15s;
+}
+#btn-refine-run:hover { background: var(--accent-hover); }
+#btn-refine-run:disabled { background: var(--text-muted); cursor: not-allowed; }
+#refine-chart-wrap { margin-top: 16px; }
+#refine-chart { width: 100%; height: 80px; display: block; }
+#refine-log {
+  margin-top: 12px; font-size: 12px; max-height: 120px; overflow-y: auto;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px; white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-dim);
 }
 
 /* Primär-Knöpfe im Dokumentengenerator (waren browser-default = scharfkantig) */
@@ -3570,3 +3647,113 @@ select.ob-input option {
   display: flex; align-items: center; justify-content: center; transition: filter .12s;
 }
 .btn-mathe-send:hover { filter: brightness(1.12); }
+
+/* ── Verzeichnis-Analyse (📁) ──────────────────────────────────────────────── */
+#diranalyse-panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+#diranalyse-panel.active { display: flex; }
+#dir-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+#dir-path {
+  flex: 1; min-width: 240px; background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; font-size: 13px;
+}
+#dir-path:focus { outline: none; border-color: var(--accent); }
+.dir-opt { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; }
+.dir-hint { padding: 8px 14px; font-size: 12.5px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+.dir-hint code { background: var(--bg-input); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+#dir-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+#dir-left { width: 42%; min-width: 280px; border-right: 1px solid var(--border); overflow-y: auto; padding: 12px 14px; }
+#dir-detail { flex: 1; overflow-y: auto; padding: 12px 16px; }
+#dir-summary { margin-bottom: 12px; }
+.dir-meta { font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; }
+.dir-summary-text { font-size: 13.5px; line-height: 1.55; }
+.dir-tree-head { font-size: 12px; font-weight: 600; color: var(--text-dim); margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+.dir-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; border-radius: 6px;
+  font-size: 13px; cursor: default;
+}
+.dir-row--file { cursor: pointer; }
+.dir-row--file:hover { background: var(--bg-hover, var(--accent-dim)); }
+.dir-row--dir { color: var(--text-dim); }
+.dir-row--int { background: var(--accent-dim); }
+.dir-row-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dir-row-reason { font-size: 11.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+.dir-analysis-block { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+.dir-analysis-title { background: var(--bg-input); padding: 8px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); }
+.dir-analysis-body { padding: 10px 14px; font-size: 13.5px; line-height: 1.55; }
+#dir-actions { display: flex; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--border); }
+
+/* ── Morphologischer Kasten (🧩) ───────────────────────────────────────────── */
+#morph-panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+#morph-panel.active { display: flex; }
+#morph-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+#morph-head { display: flex; gap: 10px; align-items: stretch; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+#morph-problem {
+  flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 12px; font-family: inherit; font-size: 13.5px; resize: vertical;
+}
+#morph-problem:focus { outline: none; border-color: var(--accent); }
+#morph-solution { padding: 6px 14px; font-size: 13px; color: var(--accent); font-weight: 600; min-height: 0; }
+#morph-solution:empty { display: none; }
+#morph-grid { flex: 1; overflow-y: auto; padding: 8px 14px 16px; }
+.morph-row { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.morph-param { width: 200px; flex-shrink: 0; display: flex; gap: 4px; align-items: center; padding-top: 4px; }
+.morph-param-name {
+  flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 13px; font-weight: 600;
+}
+.morph-param-name:focus { outline: none; border-color: var(--accent); }
+.morph-param-del { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 2px 4px; }
+.morph-param-del:hover { color: var(--danger, #e66); }
+.morph-cells { flex: 1; display: flex; flex-wrap: wrap; gap: 7px; }
+.morph-chip {
+  display: inline-flex; align-items: center; gap: 4px; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 16px; padding: 4px 6px 4px 12px;
+  font-size: 12.5px; max-width: 320px;
+}
+.morph-chip--sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+.morph-chip--sel .morph-chip-tools button { color: rgba(255,255,255,.85); }
+.morph-chip-txt { cursor: pointer; white-space: normal; }
+.morph-chip-tools { display: inline-flex; gap: 1px; }
+.morph-chip-tools button { background: none; border: none; cursor: pointer; font-size: 11px; padding: 1px 3px; color: var(--text-muted); border-radius: 4px; }
+.morph-chip-tools button:hover { background: rgba(var(--accent-rgb), .25); }
+.morph-chip-add {
+  background: none; border: 1px dashed var(--border); border-radius: 16px; color: var(--text-dim);
+  cursor: pointer; font-size: 13px; padding: 4px 12px;
+}
+.morph-chip-add:hover { border-color: var(--accent); color: var(--accent); }
+.morph-chip-edit { background: var(--bg-main); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 7px; font-size: 12.5px; min-width: 120px; }
+.morph-chip-edit:focus { outline: none; }
+#morph-eval { margin: 0 14px 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); font-size: 13px; }
+.morph-eval-head { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.morph-eval-sub { font-weight: 600; margin: 12px 0 4px; }
+.morph-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12.5px; }
+.morph-bar > span { width: 96px; flex-shrink: 0; color: var(--text-dim); }
+.morph-bar-track { flex: 1; height: 8px; background: var(--bg-main); border-radius: 4px; overflow: hidden; }
+.morph-bar-fill { height: 100%; background: var(--accent); }
+.morph-bar > b { width: 30px; text-align: right; }
+.morph-suggest { padding: 8px 10px; margin: 6px 0; background: var(--bg-main); border-radius: 8px; font-size: 12.5px; }
+.morph-suggest-score { color: var(--accent); font-weight: 600; }
+.morph-apply { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; }
+.morph-apply:hover { filter: brightness(1.1); }
+.dir-locked { color: var(--accent); font-weight: 600; cursor: default; }
+.dir-retry { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; margin-left: 4px; }
+.dir-retry:hover { border-color: var(--accent); }
+
+/* ── Jury (Bewertungs-Gremien) ─────────────────────────────────────────────── */
+#btn-juries { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+#btn-juries:hover { background: var(--bg-hover, var(--accent-dim)); border-color: var(--accent); }
+.jury-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; background: var(--bg-main); }
+.jury-card.jury-summary { border-color: var(--accent); background: var(--accent-dim); }
+.jury-card-head { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 6px; }
+.jury-score { margin-left: auto; font-weight: 700; font-size: 16px; }
+.jury-befund { font-size: 13px; line-height: 1.5; margin: 4px 0; }
+.jury-risks { margin: 4px 0 4px 18px; font-size: 12.5px; line-height: 1.5; }
+.jury-risks li { margin: 2px 0; }
+.jury-emp { font-size: 12.5px; margin: 6px 0 0; }
+.jury-sub { font-weight: 600; font-size: 12px; margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }

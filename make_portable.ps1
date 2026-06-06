@@ -79,7 +79,7 @@ New-Item -ItemType Directory -Path $BUNDLE_DIR | Out-Null
 $robocopyArgs = @(
     $APP_DIR, "$BUNDLE_DIR\app",
     "/E", "/XD", "venv", "__pycache__", ".git", ".claude", "AI_Framework_Thomas_Portable*", "AI_Framework_Thomas_Server*",
-    "/XF", "*.pyc", "server.log", "/NFL", "/NDL", "/NJH", "/NJS"
+    "/XF", "*.pyc", "server.log", "mail.json", "api_providers.json", "/NFL", "/NDL", "/NJH", "/NJS"
 )
 robocopy @robocopyArgs | Out-Null
 Write-OK "App kopiert nach $BUNDLE_DIR\app"

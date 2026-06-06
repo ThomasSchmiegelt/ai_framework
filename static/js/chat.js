@@ -99,7 +99,7 @@ const Chat = (() => {
     // Denkprozess-Panel für die neue Antwort leeren
     resetThinking();
 
-    const model = document.getElementById('model-select').value;
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
     const agentId = document.getElementById('agent-select').value || null;
     const useSearch = document.getElementById('btn-search-toggle').classList.contains('active');
 

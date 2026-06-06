@@ -464,6 +464,32 @@ const AgentManager = (() => {
 
   function getAgents() { return agents; }
 
+  // Aus einem hochgeladenen Gesetzestext / einer Norm einen spezialisierten
+  // Agenten erzeugen. Der Server konvertiert den Text nach Markdown und legt ihn
+  // je nach Länge direkt in den Prompt oder in eine eigene Wissensdatenbank.
+  async function createLegalAgent(file) {
+    if (!file) return;
+    const def = (file.name || 'Gesetz').replace(/\.[^.]+$/, '');
+    const title = prompt('Titel des Gesetzes / der Norm (z. B. „DIN EN ISO 9001" oder „BGB"):', def);
+    if (title === null) return;   // abgebrochen
+    showToast('⚖️ Gesetz-/Regel-Agent wird erstellt…');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('title', (title || '').trim());
+    try {
+      const r = await fetch('/api/agents/from-legal', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
+      const data = await r.json();
+      await load();
+      const where = data.mode === 'rag'
+        ? `mit eigener Wissensdatenbank „Gesetz: ${data.name}"`
+        : 'mit Text direkt im Prompt';
+      showToast(`✓ Agent „${data.name}" erstellt (${where}, ${data.chars} Zeichen)`);
+    } catch (e) {
+      showToast('Erstellung fehlgeschlagen: ' + e.message);
+    }
+  }
+
   return {
     load,
     openModal,
@@ -476,5 +502,6 @@ const AgentManager = (() => {
     copyJson,
     getAgents,
     initSearch,
+    createLegalAgent,
   };
 })();

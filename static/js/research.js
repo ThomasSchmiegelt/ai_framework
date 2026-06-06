@@ -76,7 +76,7 @@ const Research = (() => {
     _reportTopic = topic;
     _reportText = '';
 
-    const model = document.getElementById('model-select')?.value || 'qwen3.6-16k:latest';
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('science') : '') || undefined;
 
     // UI-Zustand
     document.getElementById('btn-start-research').disabled = true;
@@ -285,7 +285,7 @@ const Research = (() => {
   // erhalten und werden auf dem Canvas via KaTeX gerendert.
   async function present() {
     if (!_reportText) { showToast('Kein Bericht'); return; }
-    const model = document.getElementById('model-select')?.value;
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
     showToast('🖥️ Präsentation wird erstellt…');
     try {
       const r = await fetch('/api/presentation/from-text', {

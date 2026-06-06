@@ -77,7 +77,7 @@ if (Test-Path $SERVER_DIR) {
 
 robocopy $APP_DIR $SERVER_DIR /E `
     /XD "venv" "__pycache__" ".git" ".claude" "AI_Framework_Thomas_Portable*" "AI_Framework_Thomas_Server" `
-    /XF "*.pyc" "server.log" /NFL /NDL /NJH /NJS | Out-Null
+    /XF "*.pyc" "server.log" "mail.json" "api_providers.json" /NFL /NDL /NJH /NJS | Out-Null
 
 Write-OK "Dateien kopiert"
 

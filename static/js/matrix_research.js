@@ -55,9 +55,9 @@ const MatrixResearch = (() => {
     _cells = _rows.map(() => _cols.map(() => ({ status: 'empty', text: '' })));
   }
 
-  /* ── Modell ───────────────────────────────────────────────────────── */
+  /* ── Modell: zentral aus dem Profil (Matrix nutzt science:true) ───── */
   function _getModel() {
-    return document.getElementById('matrix-model-select')?.value || 'qwen3.6-16k:latest';
+    return (typeof Profile !== 'undefined' ? Profile.modelFor('science') : '') || undefined;
   }
 
   /* ── Recherche-/Prüf-Agenten (pro Spalte wählbar) ─────────────────── */
@@ -415,21 +415,10 @@ const MatrixResearch = (() => {
     _render();
   }
 
-  /* ── Modell synchronisieren ──────────────────────────────────────── */
-  function _syncModelSelector() {
-    const src = document.getElementById('model-select');
-    const dst = document.getElementById('matrix-model-select');
-    if (!src || !dst) return;
-    dst.innerHTML = src.innerHTML;
-    dst.value = src.value;
-  }
-
   /* ── init ────────────────────────────────────────────────────────── */
   function init() {
     if (!_loadState()) _initCells();
 
-    _syncModelSelector();
-    document.getElementById('model-select')?.addEventListener('change', _syncModelSelector);
     _loadAgents();
 
     document.getElementById('btn-matrix-add-row')?.addEventListener('click', () => {
@@ -460,7 +449,6 @@ const MatrixResearch = (() => {
     });
 
     document.querySelector('[data-tab="matrix"]')?.addEventListener('click', () => {
-      _syncModelSelector();
       _loadAgents();
       _render();
     });

@@ -149,7 +149,7 @@ const PresentationAssistant = (() => {
       if (progress) { progress.style.display = ''; progress.textContent = msg; }
     };
 
-    const model = document.getElementById('model-select')?.value || 'qwen3.6-16k:latest';
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
     const slides = [];
 
     // Profil laden

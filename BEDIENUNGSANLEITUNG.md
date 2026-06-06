@@ -20,12 +20,15 @@
 - [Mail-Bearbeitung (Beta)](#mail-bearbeitung)
 10. [Medizin-Tab](#10-medizin-tab)
 11. [Mathe-Tab](#11-mathe-tab)
+- [Verzeichnis-Analyse-Tab](#11a-verzeichnis-analyse-tab)
+- [Morphologischer-Kasten-Tab](#11b-morphologischer-kasten-tab)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
 13. [Matrix-Recherche](#13-matrix-recherche)
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
 - [JSON-Editor](#json-editor)
 15. [Diagnose-Logger](#15-diagnose-logger)
 16. [Agenten](#16-agenten)
+- [Bewertungs-Jurys](#16a-bewertungs-jurys-)
 17. [Gespräche verwalten](#17-gespräche-verwalten)
 18. [Nutzerprofil & Projekte](#18-nutzerprofil--projekte)
 19. [Exportieren](#19-exportieren)
@@ -84,11 +87,14 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | 📚 RAG | Eigene Wissenssammlungen für die KI |
 | 🩺 Medizin | Medizin-Assistent mit Patienten-RAG *(optional, im Profil konfigurierbar)* |
 | 🔢 Mathe | Mathematik-Workspace: Plots, SymPy, LaTeX/PDF-Export *(optional)* |
+| 📁 Verzeichnis | Ordner analysieren, Index schreiben, Personendaten anonymisieren *(optional)* |
+| 🧩 Morph-Kasten | Morphologischer Kasten (Zwicky-Box) mit KI *(optional)* |
 | 📧 Mail | Postfach (IMAP/POP3) read-only: filtern → bis zu 4 Aktionen (Beta) *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
-> **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Mail** und **Logs**
-> können im Profil ausgeblendet werden (→ [Abschnitt 18 – Tab-Sichtbarkeit](#18-nutzerprofil--projekte)).
+> **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Verzeichnis**,
+> **Morph-Kasten**, **Mail** und **Logs** können im Profil ausgeblendet werden
+> (→ [Abschnitt 18 – Tab-Sichtbarkeit](#18-nutzerprofil--projekte)).
 > Sie bleiben jederzeit wieder einschaltbar.
 
 ### Sidebar (links)
@@ -97,8 +103,12 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 - **＋ Neues Gespräch**
 - **🔍 Suche** über alle gespeicherten Gespräche
 - **Gesprächsliste** (Klick lädt, Doppelklick benennt um)
-- **Projekt-Filter** (oben) und unten: **Modell**, **Agent**,
+- **Projekt-Filter** (oben) und unten: **Agent**,
   **Chat→Projekt-Zuordnung**
+  > Es gibt **keinen Modell-Auswahlkasten** mehr in der Seitenleiste (auch nicht im
+  > Planer, in Medizin oder Matrix). Welches Modell verwendet wird, stellst du
+  > zentral unter **👤 Profil bearbeiten** pro Rolle ein (Allgemein / Programmieren /
+  > Wissenschaftlich / Medizin).
 - Buttons: **📁 Projekte**, **🤖 Agenten**, Gespräch-Im/Export,
   **💾 Backup**, **📥 Restore**, **👤 Profil bearbeiten**
 
@@ -509,9 +519,10 @@ Rückfragen) zurückschalten.
   Für **dauerhafte** Befunde/Bilder besser **📎 In Akte laden** nutzen (Patienten-RAG;
   die Pipeline nutzt die Akte automatisch als Kontext).
 - **🗑 Verlauf löschen** — Chat-Reset (die Patienten-Akte bleibt erhalten).
-- Das **Medizin-Modell** wird im Dropdown oben gewählt — hier sind **nur MedGemma-Modelle**
-  (`medgemma:4b` / `medgemma:27b`) zugelassen, keine allgemeinen Chat-Modelle. Ist keins
-  installiert, weist ein Hinweis auf `ollama pull medgemma:4b` hin.
+- Das **Medizin-Modell** stellst du unter **👤 Profil bearbeiten** als Rolle **Medizin**
+  ein (empfohlen ein MedGemma-Modell wie `medgemma:4b`). Es gibt kein eigenes Modell-Dropdown
+  mehr im Medizin-Tab. Ist kein medizinisches Modell hinterlegt, läuft die Pipeline gegen das
+  Standardmodell (`ollama pull medgemma:4b` für die beste Qualität).
 
 ### Schnell-Prompts
 
@@ -607,6 +618,72 @@ Der voreingestellte Agent **Mathe-Experte** verwendet folgende Tools:
 - *„Plotte f(x) = x^3 − 3x und g(x) = x von −3 bis 3"*
 - *„Berechne das bestimmte Integral von x^2 von 0 bis 3"*
 - *„Eigenwerte der Matrix [[2,1],[1,3]]"*
+
+---
+
+## 11a. Verzeichnis-Analyse-Tab
+
+Tab **📁 Verzeichnis** — liest einen lokalen Ordner ein, verschafft dir per KI einen
+Überblick, hebt interessante Dateien hervor, analysiert einzelne Dateien auf Wunsch
+vertieft und schreibt am Ende eine Index-Datei (`_KI_INDEX.md`) in den Ordner zurück.
+
+*(Tab muss ggf. im Profil erst eingeblendet werden → Abschnitt 18, Tab-Sichtbarkeit.)*
+
+> **🔒 Datenschutz:** Personenbezogene Daten in den **Dateiinhalten** (E-Mail-Adressen,
+> Telefonnummern, IBAN, URLs und erkannte Namen) werden **anonymisiert**, bevor sie an
+> die KI oder in die Anzeige gehen — ersetzt durch Platzhalter wie `[EMAIL_1]`,
+> `[PERSON_1]`. Datei- und Ordnernamen bleiben sichtbar. Die Zuordnungstabelle bleibt
+> lokal und wird **nicht** in die Index-Datei geschrieben.
+
+### Ablauf
+
+1. **Server-Pfad eingeben** (z. B. `/home/thomas/projekt`) und **🔍 Scannen**.
+   Es erscheinen: ein KI-Überblick, die Verzeichnisstruktur und eine Liste
+   **⭐ interessanter Dateien** mit Begründung.
+2. **Datei anklicken** → vertiefte Analyse als Markdown rechts im Detailbereich.
+3. **📥 Index in Ordner speichern** schreibt `_KI_INDEX.md` mit Überblick und allen
+   Detailanalysen in den Ordner. **📚 In Wissensdatenbank** legt zusätzlich eine
+   RAG-Sammlung „Verzeichnis: …" an, die du anschließend im Chat befragen kannst.
+
+> **Anonymisierung ist Pflicht** und lässt sich **nicht abschalten** — Personendaten
+> werden bei jedem Scan und jeder Analyse geschwärzt. Optional kannst du zusätzlich
+> **`+ KI-Namenssuche`** aktivieren (ein langsamerer KI-Pass, der weitere Namen findet);
+> diese Option kann die Anonymisierung nur **verstärken**, nie reduzieren.
+
+> **Tipp:** Klicke ruhig mehrere Dateien an — die Analysen werden **nacheinander**
+> abgearbeitet (Warteschlange). Schlägt eine fehl, erscheint ein **↻ Erneut**-Knopf.
+
+> **Hinweis (Servermodus):** Da beliebige Server-Pfade gelesen **und** beschrieben
+> werden, ist dieser Tab für den Mehrnutzer-/Servereinsatz nicht gedacht — er bleibt
+> dort am besten ausgeblendet.
+
+---
+
+## 11b. Morphologischer-Kasten-Tab
+
+Tab **🧩 Morph-Kasten** — ein KI-gestützter morphologischer Kasten (Zwicky-Box) für
+die systematische Ideenfindung: Zeilen sind **Parameter** (Merkmale einer Lösung),
+die **Chips** je Zeile sind die möglichen **Ausprägungen**. Eine Lösung entsteht,
+indem du je Parameter eine Ausprägung wählst.
+
+*(Tab muss ggf. im Profil erst eingeblendet werden → Abschnitt 18, Tab-Sichtbarkeit.)*
+
+### Ablauf
+
+1. **Aufgabenstellung** eingeben (z. B. „Konzept für ein modulares Lastenfahrrad")
+   und **🤖 Parameter generieren** — die KI füllt das Raster mit Parametern und
+   Ausprägungen.
+2. **Ausprägungen wählen:** Chip anklicken = für die Lösung auswählen (erneut klicken
+   = abwählen). **Doppelklick** = Text bearbeiten. Die aktuelle Lösung wird oben
+   angezeigt.
+3. **Verfeinern:** pro Chip **✨** (ausformulieren) oder **💬** (Kritik & Alternativen).
+   Eigene Parameter/Ausprägungen über **＋ Parameter** bzw. **＋** in der Zeile.
+4. **📊 KI: Kombination bewerten** — bewertet die gewählte Lösung (Gesamt-/Machbarkeits-/
+   Innovations-Score, Begründung, Risiken) und schlägt interessante Kombinationen vor,
+   die du per **Übernehmen** ins Raster setzt.
+5. **Exportieren:** **DOCX**, **→ Doku** (in den Dokumentengenerator) oder
+   **Wissensdatenbank**, außerdem **CSV-Im-/Export**. Der Stand wird automatisch
+   im Browser gespeichert (übersteht einen Reload).
 
 ---
 
@@ -851,7 +928,42 @@ Agenten sind Profile mit eigenem System-Prompt, Tool-Set und optionalem Modell.
 - **Erstellen:** Tab **🤖 Agenten** → **＋ Neuer Agent**, Formular ausfüllen
   (Name, Icon, Beschreibung, System-Prompt, Modell, Tools). Der Button
   **System-Prompt generieren** erzeugt einen Vorschlag per KI.
+- **⚖️ Gesetz-/Regel-Agent aus Datei:** Lade einen Gesetzestext oder eine Norm
+  (PDF/DOCX/TXT) hoch und vergib einen Titel — daraus entsteht **automatisch** ein
+  spezialisierter Agent. Der Text wird beim Hochladen nach Markdown umgewandelt
+  (Paragrafen/Artikel werden zu Überschriften). Kurze Texte landen direkt im
+  System-Prompt; lange Texte werden in eine eigene Wissensdatenbank
+  („Gesetz: …") ausgelagert und fest an den Agenten gebunden. Der Agent antwortet
+  dann ausschließlich auf Basis dieses Textes und nennt die Fundstelle (§ / Artikel).
+  > Für lange Gesetze muss das Embedding-Modell installiert sein (`ollama pull nomic-embed-text`).
+- **⚖️ Jurys:** Über den Button **⚖️ Jurys** mehrere Agenten zu einem
+  **Bewertungs-Gremium** bündeln (siehe Abschnitt 16a). Eine Jury bewertet einen Text
+  — z. B. ein erzeugtes Dokument, einen System-Prompt oder den im Profil/Planer
+  abgeleiteten Projekt-Agenten.
+- **⚖️ Von Jury prüfen** im Agenten-Bearbeiten-Dialog lässt den aktuellen
+  System-Prompt von einer Jury bewerten.
 - Agenten werden unter sprechenden Dateinamen gespeichert (`data/agents/`).
+
+### 16a. Bewertungs-Jurys (⚖️)
+
+Eine **Jury** ist ein gespeichertes Gremium aus mehreren Agenten (besonders sinnvoll
+mit ⚖️ Gesetz-Agenten). Sie bewertet einen vorgelegten Text — auch einen
+KI-generierten — und liefert **pro Mitglied ein Votum** (Score 0–100, Befund,
+Risiken/Verstöße mit Fundstelle, Empfehlung) plus ein **Gesamturteil**.
+
+**Jury anlegen:** im Agenten-Tab auf **⚖️ Jurys** → Name vergeben, Mitglieder
+(Agenten) ankreuzen, speichern. Jurys lassen sich später bearbeiten und löschen.
+
+**Bewerten lassen** kannst du an mehreren Stellen — überall öffnet sich dasselbe
+Bewertungs-Fenster (Jury wählen → ▶ Bewerten):
+- **Dokumente-Tab:** Button **⚖️ Von Jury prüfen** neben den Export-Knöpfen prüft das
+  erzeugte Dokument.
+- **Agenten-Tab:** im Bearbeiten-Dialog **⚖️ Von Jury prüfen** prüft den System-Prompt.
+- **Planer-Tab:** nach **🧠 Projekt-Agent ableiten** prüft **⚖️ Agent prüfen** den
+  abgeleiteten Agenten (mit der Projektbeschreibung als Kontext).
+
+> Tipp: Binde an die Jury-Mitglieder die einschlägigen Gesetz-Agenten (mit hinterlegtem
+> Normtext), dann werden konkrete Fundstellen (§/Artikel) in den Befunden genannt.
 
 ### Standard-Agenten
 
@@ -931,7 +1043,27 @@ Unter **👤 Profil → 🧠 Modelle** weist du je Einsatzzweck ein Modell zu
 | **Medizin** | Medizin-Tab (🩺) — voreingestelltes Modell für medizinische Anfragen |
 
 Die Auswahllisten enthalten **alle** in Ollama installierten Modelle; neue Modelle
-erscheinen nach `ollama pull <name>` automatisch.
+erscheinen nach `ollama pull <name>` automatisch — sowie zusätzlich die Modelle
+konfigurierter externer Anbieter (mit ☁ markiert, siehe nächster Abschnitt).
+
+### ☁ KI-Anbieter (externe API, im Profil)
+
+Optional kannst du zusätzlich zu lokalem Ollama einen **OpenAI-kompatiblen
+API-Anbieter** einbinden (z. B. **OpenRouter**, OpenAI, Groq, Together):
+
+1. **👤 Profil → ☁ KI-Anbieter (API)**: Name, **Base-URL** (z. B.
+   `https://openrouter.ai/api/v1`) und **API-Schlüssel** eingeben → **＋ Hinzufügen**.
+   Die App lädt die verfügbaren Modelle des Anbieters.
+2. Die Anbieter-Modelle erscheinen danach **oben in den Modell-Rollen** (mit ☁
+   gekennzeichnet) und können jeder Rolle zugewiesen werden — z. B. ein starkes
+   Cloud-Modell für die Jury-Bewertung oder Recherche.
+
+> **Wichtig:**
+> - Der **API-Schlüssel bleibt lokal** auf diesem Rechner und wird **nicht** ins
+>   Backup und **nicht** ins Git/in Pakete übernommen.
+> - **Remote-Aufrufe verlassen deinen Rechner** (Daten gehen an den Anbieter) und
+>   belegen **kein** lokales VRAM — die Ein-Modell-Beschränkung gilt nur für lokale
+>   Ollama-Modelle.
 
 ### 👁 Tab-Sichtbarkeit (im Profil)
 
@@ -944,6 +1076,8 @@ können ein-/ausgeblendet werden:
 | 💻 Code | Code-Tab |
 | 🔢 Mathe | Mathe-Tab |
 | 🩺 Medizin | Medizin-Tab |
+| 📁 Verzeichnis | Verzeichnis-Analyse-Tab |
+| 🧩 Morph-Kasten | Morphologischer-Kasten-Tab |
 | 📧 Mail | Mail-Tab |
 | 📋 Logs | Logs-Tab |
 

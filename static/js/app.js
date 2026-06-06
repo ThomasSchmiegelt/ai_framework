@@ -42,7 +42,10 @@ function switchTab(tabId) {
 // ── Modelle laden ──────────────────────────────────────────────────────────
 
 async function loadModels() {
+  // Es gibt keinen Sidebar-Modellselektor mehr — Modelle werden im Profil pro
+  // Rolle gewählt. Funktion bleibt als sicherer No-op erhalten (Aufrufer unverändert).
   const sel = document.getElementById('model-select');
+  if (!sel) return;
   try {
     const resp = await fetch('/api/models');
     const data = await resp.json();
@@ -290,6 +293,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Agenten-Verwaltung
   document.getElementById('btn-agents').addEventListener('click', () => switchTab('agents'));
   document.getElementById('btn-new-agent').addEventListener('click', () => AgentManager.openModal());
+  // Gesetz-/Regel-Agent aus Datei: Datei wählen → an /api/agents/from-legal
+  document.getElementById('btn-legal-agent')?.addEventListener('click', () =>
+    document.getElementById('legal-agent-file')?.click());
+  document.getElementById('legal-agent-file')?.addEventListener('change', e => {
+    if (e.target.files[0]) AgentManager.createLegalAgent(e.target.files[0]);
+    e.target.value = '';
+  });
   AgentManager.initSearch();
 
   // Agenten-Selektor Änderung
@@ -349,6 +359,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.target === document.getElementById('modal-overlay')) AgentManager.closeModal();
   });
   document.getElementById('btn-generate-prompt').addEventListener('click', () => AgentManager.generatePrompt());
+  document.getElementById('btn-agent-prompt-jury')?.addEventListener('click', () => {
+    const txt = document.getElementById('field-agent-prompt')?.value || '';
+    if (typeof Jury !== 'undefined') Jury.evaluate(txt, { title: 'System-Prompt-Prüfung' });
+  });
   document.getElementById('btn-toggle-json').addEventListener('click', () => AgentManager.toggleJson());
   document.getElementById('btn-copy-json').addEventListener('click', () => AgentManager.copyJson());
 
@@ -479,6 +493,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Mathe-Tab initialisieren
   if (typeof MatheChat !== 'undefined') MatheChat.init();
+
+  // Verzeichnis-Analyse + Morphologischer Kasten (optionale Tabs)
+  if (typeof DirAnalysis !== 'undefined') DirAnalysis.init();
+  if (typeof MorphBox !== 'undefined') MorphBox.init();
+
+  // Jury (Bewertungs-Gremien)
+  if (typeof Jury !== 'undefined') Jury.init();
 
   // Diagnose-Logger (als letztes, damit alle anderen Module bereits verdrahtet sind)
   await Logger.init();

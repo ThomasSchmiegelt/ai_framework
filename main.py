@@ -16,11 +16,12 @@ from typing import List, Optional
 
 import aiofiles
 import httpx
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 import db as _db
+from tools import llm as _llm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -62,14 +63,20 @@ REPORTS_DIR = DATA_DIR / "reports"
 PLANS_DIR = DATA_DIR / "plans"
 DOSSIERS_DIR = DATA_DIR / "dossiers"   # automatisch exportierte Planer-Recherche-Dossiers (.md)
 CODE_DIR = DATA_DIR / "code"
+JURIES_DIR = DATA_DIR / "juries"   # gespeicherte Bewertungs-Jurys (Gruppen von Agenten)
 BILDER_DIR = Path(__file__).parent / "bilder"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
 PROFILE_ASSETS_DIR = DATA_DIR / "profile_assets"
 PROJECTS_FILE = DATA_DIR / "projects.json"
+# Externe OpenAI-kompatible KI-Anbieter (enthält API-Keys → gitignored, NICHT im Backup)
+API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, PROFILE_ASSETS_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, PROFILE_ASSETS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
+
+# LLM-Abstraktion konfigurieren (lokal Ollama + ggf. externe API-Anbieter)
+_llm.set_config(OLLAMA_BASE, API_PROVIDERS_FILE)
 
 # ── Modi (fachliche Ausrichtung) ──────────────────────────────────────────────
 # AI_Framework_Thomas kennt vier Modi; jeder prägt Farben (Frontend) und – wenn aktiv – die
@@ -186,8 +193,15 @@ async def _unload_model(name: str) -> None:
 async def _model_session(model: str):
     """Hält den Modell-Lock für die Dauer einer Ollama-Generierung und stellt
     sicher, dass nur ein Modell im VRAM liegt. Beim Modellwechsel wird das
-    zuvor geladene Modell zuerst entladen."""
+    zuvor geladene Modell zuerst entladen.
+
+    Für **Remote-Modelle** (externe API-Anbieter) ist dies ein No-op: sie belegen
+    kein lokales VRAM, brauchen also weder Lock noch Entladen — so blockiert ein
+    Remote-Aufruf auch nicht die lokale Generierung."""
     global _loaded_model
+    if _llm.is_remote(model):
+        yield
+        return
     async with _model_lock:
         if _loaded_model and _loaded_model != model:
             await _unload_model(_loaded_model)
@@ -269,8 +283,8 @@ _MODEL_ROLES = {
 # Optionale Tabs, die im Profil ein-/ausgeblendet werden können. Beim ERSTAUFRUF
 # (noch kein user_profile.json) sind sie alle ausgeblendet – der Nutzer schaltet
 # Gewünschtes im Profil frei.
-_OPTIONAL_TABS = {"rag", "ide", "mail", "logs", "medizin", "mathe"}
-_DEFAULT_HIDDEN_TABS = ["rag", "ide", "mail", "logs", "medizin", "mathe"]
+_OPTIONAL_TABS = {"rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph"}
+_DEFAULT_HIDDEN_TABS = ["rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph"]
 
 
 def _model_for(role: str) -> str:
@@ -906,6 +920,9 @@ class AgentDef(BaseModel):
     icon: str = "🤖"
     category: str = "Sonstige"
     favorite: bool = False   # nur Favoriten erscheinen im Sidebar-Agentenselektor
+    # Fest an den Agenten gebundene Wissensdatenbanken (z. B. ein Gesetzes-/Regel-
+    # Agent mit hinterlegtem Normtext); werden im Chat automatisch aktiviert.
+    rag_collections: List[str] = []
 
 
 class ResearchRequest(BaseModel):
@@ -919,22 +936,132 @@ class ResearchRequest(BaseModel):
 
 @app.get("/api/models")
 async def get_models():
+    # Lokale Ollama-Modelle + konfigurierte Remote-Modelle (externe API-Anbieter)
+    # in EINER Liste, damit die Profil-Rollen-Selects beide anbieten. Remote-Modelle
+    # tragen das Präfix "<provider_id>::<model>" und sind mit remote:True markiert.
+    result = {"models": []}
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.get(f"{OLLAMA_BASE}/api/tags")
             data = resp.json()
-            # Alle installierten Modelle zurückgeben (kein harter Filter mehr),
-            # damit beliebige nachgeladene Modelle im Profil wählbar sind.
-            # allowed_models dient nur noch als weiche Sortier-Reihenfolge.
             if ALLOWED_MODELS:
                 order = {n: i for i, n in enumerate(ALLOWED_MODELS)}
                 data["models"] = sorted(
                     data.get("models", []),
                     key=lambda m: order.get(m["name"], 999),
                 )
-            return data
+            result["models"] = data.get("models", [])
         except Exception as e:
-            return {"models": [], "error": str(e)}
+            result["error"] = str(e)
+    try:
+        remote = await _llm.list_remote_models()
+        result["models"] = list(result["models"]) + remote
+    except Exception:
+        pass
+    return result
+
+
+# ── Externe KI-Anbieter (OpenAI-kompatibel) ─────────────────────────────────────
+# Konfiguration in data/api_providers.json (enthält API-Keys → gitignored, NICHT im
+# Backup). Modelle dieser Anbieter erscheinen präfigiert in /api/models und damit in
+# den Profil-Rollen-Selects; die LLM-Abstraktion (tools/llm.py) routet Aufrufe an
+# „<id>::<model>" automatisch an den jeweiligen Anbieter.
+
+def _load_api_providers() -> list:
+    if not API_PROVIDERS_FILE.exists():
+        return []
+    try:
+        data = json.loads(API_PROVIDERS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_api_providers(items: list) -> None:
+    API_PROVIDERS_FILE.write_text(json.dumps(items, ensure_ascii=False, indent=2),
+                                  encoding="utf-8")
+
+
+def _provider_public(p: dict) -> dict:
+    """Anbieter ohne API-Key (für die Anzeige im Frontend)."""
+    return {"id": p.get("id"), "name": p.get("name"), "base_url": p.get("base_url"),
+            "models": p.get("models", []), "has_key": bool(p.get("api_key"))}
+
+
+@app.get("/api/providers")
+async def list_providers():
+    return [_provider_public(p) for p in _load_api_providers()]
+
+
+@app.post("/api/providers")
+async def save_provider(req: Request):
+    """Anbieter anlegen oder aktualisieren. Body: {id?, name, base_url, api_key?,
+    models?}. Ist keine Modell-Liste angegeben, wird sie (best effort) vom Anbieter
+    geholt. Ein leeres api_key bei vorhandenem Anbieter behält den alten Key."""
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    base_url = (body.get("base_url") or "").strip().rstrip("/")
+    if not name or not base_url:
+        raise HTTPException(status_code=400, detail="Name und Base-URL erforderlich")
+    items = _load_api_providers()
+    pid = (body.get("id") or "").strip()
+    existing = next((p for p in items if p.get("id") == pid), None) if pid else None
+
+    api_key = body.get("api_key")
+    if not api_key and existing:
+        api_key = existing.get("api_key", "")
+    api_key = (api_key or "").strip()
+
+    if not pid:
+        pid = _to_slug(name)[:20] or "provider"
+        # Kollision vermeiden
+        base_pid, i = pid, 2
+        while any(p.get("id") == pid for p in items):
+            pid = f"{base_pid}{i}"; i += 1
+
+    models = body.get("models") or []
+    prov = {"id": pid, "name": name, "base_url": base_url, "api_key": api_key,
+            "models": [str(m) for m in models]}
+    if not prov["models"]:
+        try:
+            prov["models"] = await _llm.fetch_provider_models(prov)
+        except Exception:
+            prov["models"] = []
+
+    if existing:
+        existing.update(prov)
+    else:
+        items.append(prov)
+    _save_api_providers(items)
+    return _provider_public(prov)
+
+
+@app.delete("/api/providers/{pid}")
+async def delete_provider(pid: str):
+    items = [p for p in _load_api_providers() if p.get("id") != pid]
+    _save_api_providers(items)
+    return {"ok": True}
+
+
+@app.post("/api/providers/test")
+async def test_provider(req: Request):
+    """Verbindung testen / Modell-Liste holen. Body: {base_url, api_key} ODER {id}."""
+    body = await req.json()
+    pid = (body.get("id") or "").strip()
+    if pid:
+        prov = next((p for p in _load_api_providers() if p.get("id") == pid), None)
+        if not prov:
+            raise HTTPException(status_code=404, detail="Anbieter nicht gefunden")
+    else:
+        prov = {"base_url": (body.get("base_url") or "").strip().rstrip("/"),
+                "api_key": (body.get("api_key") or "").strip()}
+        if not prov["base_url"]:
+            raise HTTPException(status_code=400, detail="Base-URL erforderlich")
+    try:
+        models = await _llm.fetch_provider_models(prov)
+        return {"ok": True, "models": models}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/api/research")
@@ -1000,7 +1127,7 @@ async def _research_generator(request: ResearchRequest):
             _r_msgs.append({"role": "system", "content": _r_sys})
         _r_msgs.append({"role": "user", "content": synthesis_prompt})
         async with _model_session(_r_model), httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            resp = await _llm.chat(client,{
                 "model": _r_model,
                 "think": False,
                 "messages": _r_msgs,
@@ -1126,7 +1253,7 @@ async def _optimize_chunk_for_rag(chunk: str, model: str) -> str:
     """Ruft das LLM auf, um einen Textabschnitt RAG-konform aufzubereiten."""
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            resp = await _llm.chat(client,{
                 "model": model,
                 "think": False,
                 "stream": False,
@@ -1308,7 +1435,7 @@ async def _derive_adaptive_prompt(user_text: str, model: str):
         return "", ""
     try:
         async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            resp = await _llm.chat(client,{
                 "model": model,
                 "think": False,
                 "stream": False,
@@ -1417,6 +1544,11 @@ async def _chat_generator(request: ChatRequest):
             if agent.get("model"):
                 model = agent["model"]
                 _agent_fixed_model = True
+            # Fest an den Agenten gebundene Wissensdatenbank(en) automatisch aktivieren
+            # (z. B. Gesetzes-/Regel-Agent mit hinterlegtem Normtext). Doppelte vermeiden.
+            _agent_rag = agent.get("rag_collections") or []
+            if _agent_rag:
+                request.rag_collections = list(dict.fromkeys(list(request.rag_collections) + _agent_rag))
             allowed = set(agent.get("tools", list(ALL_TOOL_NAMES)))
             active_tools = [t for t in TOOL_DEFS if t["function"]["name"] in allowed]
             # Marker-„Tool" code_ide kennzeichnet den Programmier-Agenten (kein echtes
@@ -1552,12 +1684,12 @@ async def _chat_generator(request: ChatRequest):
 
         try:
             async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
-                resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+                resp = await _llm.chat(client,payload)
                 # Modelle ohne Reasoning lehnen 'think' mit 400 ab → ohne erneut versuchen
                 if resp.status_code == 400 and _think_on:
                     _think_on = False
                     payload.pop("think", None)
-                    resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+                    resp = await _llm.chat(client,payload)
                 resp.raise_for_status()
                 result = resp.json()
         except Exception as e:
@@ -2238,7 +2370,7 @@ async def _text_to_presentation(text: str, model: str) -> Optional[dict]:
     )
     try:
         async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
-            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            resp = await _llm.chat(client,{
                 "model": model,
                 "think": False,
                 "format": "json",
@@ -2317,7 +2449,7 @@ async def compress_conversation(cid: str):
     )
 
     async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": model,
             "think": False,
             "messages": [{"role": "user", "content": prompt}],
@@ -2381,7 +2513,7 @@ async def conversation_to_skill(cid: str):
     )
 
     async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": model,
             "think": False,
             "messages": [{"role": "user", "content": prompt}],
@@ -2822,7 +2954,7 @@ async def mail_action_agent(req: Request):
     )
     try:
         async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
-            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            resp = await _llm.chat(client,{
                 "model": model,
                 "think": False,
                 "messages": [
@@ -2900,7 +3032,7 @@ async def generate_agent_prompt(req: Request):
     _gp_model = _pick_model(body.get("model"))
 
     async with _model_session(_gp_model), httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": _gp_model,
             "think": False,
             "messages": [
@@ -2950,7 +3082,7 @@ async def derive_persona(req: Request):
     _model = _pick_model(body.get("model"))
 
     async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": _model,
             "think": False,
             "messages": [
@@ -3057,7 +3189,7 @@ async def analyze_image(req: Request):
     )
 
     async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": _model,
             "think": False,
             "messages": [
@@ -3127,6 +3259,828 @@ async def delete_agent(aid: str):
     if fp:
         fp.unlink(missing_ok=True)
     return {"ok": True}
+
+
+# Schwelle (Zeichen): bis hierher Text direkt in den system_prompt, darüber RAG-Basis.
+_LEGAL_PROMPT_LIMIT = 8000
+
+# Zeilenanfänge wie „§ 433", „§§ 305 ff.", „Artikel 5", „Art. 12a" → Markdown-Überschrift.
+_LEGAL_HEAD_RE = re.compile(
+    r"^\s*(§{1,2}\s*\d+\s*[a-z]?|Art(?:ikel|\.)\s*\d+\s*[a-z]?)\b.*$", re.IGNORECASE)
+
+
+def _legal_to_md(text: str, title: str = "") -> str:
+    """Wandelt einen extrahierten Gesetzes-/Normtext deterministisch nach Markdown:
+    Paragraphen/Artikel werden zu Überschriften, überflüssige Leerzeilen entfernt.
+    Bewusst ohne LLM (schnell, robust, keine VRAM-Last)."""
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out = [f"# {title}".rstrip()] if title else []
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            out.append("")
+        elif _LEGAL_HEAD_RE.match(s):
+            out.append("")
+            out.append(f"### {s}")
+        else:
+            out.append(s)
+    md = "\n".join(out)
+    return re.sub(r"\n{3,}", "\n\n", md).strip()
+
+
+@app.post("/api/agents/from-legal")
+async def create_legal_agent(
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    web_search: bool = Form(False),
+):
+    """Erzeugt aus einem hochgeladenen Gesetzestext / einer Norm einen spezialisierten
+    Gesetzes-/Regel-Agenten. Der Text wird beim Hochladen nach Markdown konvertiert;
+    bei kurzem Text direkt in den system_prompt eingebettet, bei langem Text in eine
+    eigene Wissensdatenbank ('Gesetz: …') ausgelagert und fest an den Agenten gebunden
+    (rag_collections) — die Entscheidung fällt automatisch nach Länge."""
+    from tools.rag import ingest_file
+    tmp = UPLOADS_DIR / f"legal_{uuid.uuid4().hex}_{file.filename}"
+    async with aiofiles.open(tmp, "wb") as fh:
+        await fh.write(await file.read())
+    try:
+        raw = _extract_text(tmp)
+    finally:
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+    if not raw or raw.startswith("[Lesefehler"):
+        raise HTTPException(status_code=400, detail=f"Text konnte nicht extrahiert werden: {raw}")
+
+    name = (title or "").strip() or Path(file.filename or "Gesetz").stem
+    md = _legal_to_md(raw, name)
+    tools_list = ["web_search"] if web_search else []
+
+    if len(md) <= _LEGAL_PROMPT_LIMIT:
+        mode, rag_ids = "prompt", []
+        system_prompt = (
+            f"Du bist ein juristischer Fachassistent für „{name}“. Beantworte Fragen "
+            f"AUSSCHLIESSLICH auf Basis des folgenden Regel-/Gesetzestextes und nenne immer "
+            f"die einschlägige Fundstelle (§ bzw. Artikel). Steht die Antwort nicht im Text, "
+            f"sage das klar und rate nicht. Antworte präzise und auf Deutsch.\n\n"
+            f"--- {name} ---\n\n{md}"
+        )
+    else:
+        mode = "rag"
+        coll = {
+            "id": f"rag_{uuid.uuid4().hex[:12]}",
+            "name": f"Gesetz: {name}",
+            "embed_model": EMBED_MODEL,
+            "tier": "korrekt",
+            "chunk_size": 1200, "chunk_overlap": 200, "top_k": 6,
+            "embed_gpu": False, "clean": True, "char_limit": 6000,
+            "strictness": "korrekt", "created_at": time.time(),
+        }
+        await _db.rag_create_collection(coll)
+        try:
+            await ingest_file(coll, md, f"{name}.md", f"doc_{uuid.uuid4().hex[:12]}")
+        except Exception as e:
+            await _db.rag_delete_collection(coll["id"])
+            raise HTTPException(
+                status_code=500,
+                detail=f"Einbetten fehlgeschlagen — ist das Embedding-Modell '{EMBED_MODEL}' gepullt? ({e})")
+        rag_ids = [coll["id"]]
+        system_prompt = (
+            f"Du bist ein juristischer Fachassistent für „{name}“. Dir ist der vollständige "
+            f"Regel-/Gesetzestext als Wissensdatenbank hinterlegt. Beantworte Fragen "
+            f"AUSSCHLIESSLICH anhand der eingeblendeten Auszüge und nenne immer die "
+            f"einschlägige Fundstelle (§ bzw. Artikel). Steht die Antwort nicht in den "
+            f"Auszügen, sage das klar und rate nicht. Antworte präzise und auf Deutsch."
+        )
+
+    agent = AgentDef(
+        id=_to_slug(name) + "_" + uuid.uuid4().hex[:4],
+        name=name,
+        description=f"Gesetzes-/Regel-Agent zu „{name}“ (automatisch aus hochgeladenem Text erstellt).",
+        system_prompt=system_prompt,
+        tools=tools_list,
+        icon="⚖️",
+        category="Recht",
+        favorite=True,
+        rag_collections=rag_ids,
+    )
+    fp = _unique_agent_path(agent.name or agent.id, exclude_id=agent.id)
+    fp.write_text(json.dumps(agent.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "agent_id": agent.id, "name": name, "mode": mode, "chars": len(md),
+        "rag_collection_id": (rag_ids[0] if rag_ids else None),
+    }
+
+
+# ── Jury (gespeicherte Bewertungs-Gremien aus Agenten) ──────────────────────────
+# Eine Jury bündelt mehrere Agenten (z. B. ⚖️ Gesetz-Agenten). Sie bewertet einen
+# beliebigen Text — auch KI-generierten — mit je einem Votum pro Mitglied plus einem
+# synthetisierten Gesamturteil. Dateibasiert wie Agenten/Pläne (data/juries/).
+
+def _jury_path_by_id(jid: str) -> Optional[Path]:
+    for fp in JURIES_DIR.glob("*.json"):
+        try:
+            if json.loads(fp.read_text(encoding="utf-8")).get("id") == jid:
+                return fp
+        except Exception:
+            pass
+    return None
+
+
+def _load_agent_dict(aid: str) -> Optional[dict]:
+    fp = _agent_path_by_id(aid)
+    if fp and fp.exists():
+        try:
+            return json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+@app.get("/api/juries")
+async def list_juries():
+    out = []
+    for fp in sorted(JURIES_DIR.glob("*.json")):
+        try:
+            out.append(json.loads(fp.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return out
+
+
+@app.post("/api/juries")
+async def create_jury(req: Request):
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name fehlt")
+    members = [str(m) for m in (body.get("member_agent_ids") or [])]
+    jury = {
+        "id": _to_slug(name) + "_" + uuid.uuid4().hex[:6],
+        "name": name,
+        "description": (body.get("description") or "").strip(),
+        "member_agent_ids": members,
+        "created_at": time.time(),
+    }
+    fp = JURIES_DIR / f"{_to_slug(name)}_{jury['id'][-6:]}.json"
+    fp.write_text(json.dumps(jury, ensure_ascii=False, indent=2), encoding="utf-8")
+    return jury
+
+
+@app.put("/api/juries/{jid}")
+async def update_jury(jid: str, req: Request):
+    fp = _jury_path_by_id(jid)
+    if not fp:
+        raise HTTPException(status_code=404, detail="Jury nicht gefunden")
+    jury = json.loads(fp.read_text(encoding="utf-8"))
+    body = await req.json()
+    if "name" in body:
+        jury["name"] = (body.get("name") or jury["name"]).strip()
+    if "description" in body:
+        jury["description"] = (body.get("description") or "").strip()
+    if "member_agent_ids" in body:
+        jury["member_agent_ids"] = [str(m) for m in (body.get("member_agent_ids") or [])]
+    fp.write_text(json.dumps(jury, ensure_ascii=False, indent=2), encoding="utf-8")
+    return jury
+
+
+@app.delete("/api/juries/{jid}")
+async def delete_jury(jid: str):
+    fp = _jury_path_by_id(jid)
+    if fp:
+        fp.unlink()
+    return {"ok": True}
+
+
+_JURY_MEMBER_SYSTEM = (
+    "Du bewertest einen vorgelegten Text aus deiner Fachperspektive (siehe deine Rolle). "
+    "Sei konkret und belege Kritik. Wenn dir Fachgrundlagen (Auszüge aus Gesetzen/Normen/"
+    "Wissensdatenbank) eingeblendet sind, prüfe ausschließlich anhand dieser und nenne die "
+    "Fundstelle (§/Artikel/Quelle). Erfinde nichts. Antworte NUR mit JSON in genau diesem "
+    'Format: {"score":0-100,"befund":"kurzer Gesamtbefund","risiken":["Verstoß/Risiko mit '
+    'Fundstelle", "..."],"empfehlung":"konkrete Empfehlung"}'
+)
+
+_JURY_SYNTH_SYSTEM = (
+    "Du fasst die Einzelvoten einer Bewertungs-Jury zu einem Gesamturteil zusammen. "
+    "Gewichte fachlich, hebe Konsens und Streitpunkte hervor. Antworte NUR mit JSON: "
+    '{"gesamturteil":"…","score":0-100,"konsens":"…","hauptkritik":["…"],'
+    '"empfehlungen":["…"]}'
+)
+
+
+@app.post("/api/jury/evaluate")
+async def jury_evaluate(req: Request):
+    """Bewertet einen Text mit allen Mitgliedern einer Jury (SSE-Stream).
+    Body: {jury_id | member_agent_ids[], text, context?, criteria?}.
+    Frames: member (pro Votum), summary (Gesamturteil), error, done."""
+    body = await req.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Kein Text zum Bewerten")
+    context = (body.get("context") or "").strip()
+    criteria = (body.get("criteria") or "").strip()
+
+    member_ids = body.get("member_agent_ids") or []
+    if not member_ids and body.get("jury_id"):
+        jfp = _jury_path_by_id(body["jury_id"])
+        if jfp:
+            try:
+                member_ids = json.loads(jfp.read_text(encoding="utf-8")).get("member_agent_ids", [])
+            except Exception:
+                member_ids = []
+    member_ids = [str(m) for m in member_ids]
+    if not member_ids:
+        raise HTTPException(status_code=400, detail="Jury hat keine Mitglieder")
+
+    async def _stream():
+        verdicts = []
+        for aid in member_ids:
+            agent = _load_agent_dict(aid)
+            if not agent:
+                continue
+            aname = agent.get("name", aid)
+            aicon = agent.get("icon", "⚖️")
+            yield _sse({"type": "member", "status": "start", "agent": aname, "icon": aicon})
+
+            # Fachgrundlagen aus gebundenen Wissensdatenbanken (z. B. Gesetzestext) ziehen
+            rag_ctx = ""
+            rag_ids = agent.get("rag_collections") or []
+            if rag_ids:
+                try:
+                    from tools.rag import query_collections
+                    hits = await query_collections(rag_ids, text[:2000])
+                    if hits:
+                        rag_ctx = "\n\n".join(
+                            f"[Quelle {i+1}: {h.get('filename','')}]\n{h.get('text','')}"
+                            for i, h in enumerate(hits[:6]))
+                except Exception:
+                    rag_ctx = ""
+
+            sys_prompt = (agent.get("system_prompt") or "").strip()
+            member_sys = sys_prompt + "\n\n" + _JURY_MEMBER_SYSTEM if sys_prompt else _JURY_MEMBER_SYSTEM
+            user_parts = []
+            if context:
+                user_parts.append(f"Kontext:\n{context}")
+            if criteria:
+                user_parts.append(f"Bewertungskriterien:\n{criteria}")
+            if rag_ctx:
+                user_parts.append(f"Eingeblendete Fachgrundlagen:\n{rag_ctx[:6000]}")
+            user_parts.append(f"Zu bewertender Text:\n{text[:8000]}")
+            user_content = "\n\n".join(user_parts)
+
+            mdl = _pick_model(agent.get("model"), _model_for("science"))
+            data = None
+            try:
+                async with _model_session(mdl), httpx.AsyncClient(timeout=180) as client:
+                    resp = await _llm.chat(client, {
+                        "model": mdl, "think": False, "stream": False,
+                        "format": "json",
+                        "messages": [
+                            {"role": "system", "content": member_sys},
+                            {"role": "user", "content": user_content},
+                        ],
+                    })
+                    resp.raise_for_status()
+                    data = _parse_llm_json(resp.json().get("message", {}).get("content", ""))
+            except Exception as e:
+                yield _sse({"type": "member", "status": "error", "agent": aname,
+                            "icon": aicon, "message": str(e)})
+                continue
+
+            verdict = {
+                "agent": aname, "icon": aicon,
+                "score": (data or {}).get("score"),
+                "befund": ((data or {}).get("befund") or "").strip(),
+                "risiken": [str(r) for r in ((data or {}).get("risiken") or [])],
+                "empfehlung": ((data or {}).get("empfehlung") or "").strip(),
+            }
+            verdicts.append(verdict)
+            yield _sse({"type": "member", "status": "done", **verdict})
+
+        if not verdicts:
+            yield _sse({"type": "error", "message": "Kein Mitglied lieferte ein Votum."})
+            yield _sse({"type": "done"})
+            return
+
+        # Synthese / Gesamturteil
+        votes_txt = "\n\n".join(
+            f"## {v['agent']} (Score {v['score']})\nBefund: {v['befund']}\n"
+            f"Risiken: {'; '.join(v['risiken'])}\nEmpfehlung: {v['empfehlung']}"
+            for v in verdicts)
+        gmodel = _model_for("general")
+        try:
+            async with _model_session(gmodel), httpx.AsyncClient(timeout=180) as client:
+                resp = await _llm.chat(client, {
+                    "model": gmodel, "think": False, "stream": False, "format": "json",
+                    "messages": [
+                        {"role": "system", "content": _JURY_SYNTH_SYSTEM},
+                        {"role": "user", "content": f"Einzelvoten der Jury:\n\n{votes_txt}"},
+                    ],
+                })
+                resp.raise_for_status()
+                synth = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+        except Exception:
+            synth = {}
+        # Fallback-Gesamtscore: Mittelwert der Einzel-Scores
+        scores = [v["score"] for v in verdicts if isinstance(v["score"], (int, float))]
+        avg = round(sum(scores) / len(scores)) if scores else None
+        yield _sse({"type": "summary",
+                    "gesamturteil": (synth.get("gesamturteil") or "").strip(),
+                    "score": synth.get("score", avg),
+                    "konsens": (synth.get("konsens") or "").strip(),
+                    "hauptkritik": [str(x) for x in (synth.get("hauptkritik") or [])],
+                    "empfehlungen": [str(x) for x in (synth.get("empfehlungen") or [])]})
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── Verzeichnis-Analyse ─────────────────────────────────────────────────────────
+# Liest einen lokalen Ordner (Server-Pfad), gibt einen Überblick + interessante
+# Dateien zurück, analysiert einzelne Dateien vertieft und schreibt eine
+# Index-/„init"-Datei (_KI_INDEX.md) zurück in den Ordner. Personenbezogene Daten
+# in den DATEIINHALTEN werden anonymisiert (Datei-/Ordnernamen bleiben sichtbar).
+# Da beliebige Server-Pfade gelesen/geschrieben werden, ist der Tab optional und
+# per Default ausgeblendet — im Mehrnutzer-/Servermodus nicht freischalten.
+
+_DIR_MAX_FILES = 2000           # Obergrenze gescannter Dateien
+_DIR_MAX_DEPTH = 8              # maximale Verschachtelungstiefe
+_DIR_SNIPPET_FILES = 40         # so viele Dateien liefern einen Inhalts-Snippet
+_DIR_SNIPPET_CHARS = 800        # Snippet-Länge je Datei (vor Anonymisierung)
+_DIR_FILE_MAX_BYTES = 5_000_000 # Dateien größer als das werden nicht eingelesen
+_DIR_SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv",
+                  ".idea", ".vscode", "dist", "build", ".cache"}
+_DIR_TEXT_EXT = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt",
+                 ".md", ".py", ".js", ".json", ".yaml", ".yml", ".html", ".css"}
+
+
+def _dir_resolve_base(path: str) -> Path:
+    """Validiert einen Server-Pfad und gibt das aufgelöste Verzeichnis zurück."""
+    raw = (path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Pfad fehlt")
+    try:
+        base = Path(raw).expanduser().resolve()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültiger Pfad")
+    if not base.exists():
+        raise HTTPException(status_code=404, detail="Verzeichnis nicht gefunden")
+    if not base.is_dir():
+        raise HTTPException(status_code=400, detail="Pfad ist kein Verzeichnis")
+    return base
+
+
+def _dir_safe_child(base: Path, rel: str) -> Path:
+    """Pfad-Traversal-Schutz: stellt sicher, dass rel innerhalb von base liegt
+    (Muster wie /api/dossiers/load)."""
+    target = (base / rel).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ungültiger Pfad")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    return target
+
+
+def _dir_walk(base: Path):
+    """Bounded rekursiver Walk. Liefert eine Liste von
+    {rel, name, size, ext, is_dir} und überspringt versteckte/ausgeschlossene
+    Verzeichnisse. Fängt PermissionError ab."""
+    files: List[dict] = []
+    count = 0
+
+    def _recurse(d: Path, depth: int):
+        nonlocal count
+        if depth > _DIR_MAX_DEPTH or count >= _DIR_MAX_FILES:
+            return
+        try:
+            entries = sorted(d.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except (PermissionError, OSError):
+            return
+        for p in entries:
+            if count >= _DIR_MAX_FILES:
+                return
+            name = p.name
+            if name.startswith("."):
+                continue
+            try:
+                rel = str(p.relative_to(base))
+            except ValueError:
+                continue
+            if p.is_dir():
+                if name in _DIR_SKIP_DIRS:
+                    continue
+                files.append({"rel": rel, "name": name, "size": 0,
+                              "ext": "", "is_dir": True})
+                count += 1
+                _recurse(p, depth + 1)
+            elif p.is_file():
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    size = 0
+                files.append({"rel": rel, "name": name, "size": size,
+                              "ext": p.suffix.lower(), "is_dir": False})
+                count += 1
+
+    _recurse(base, 0)
+    return files
+
+
+async def _llm_ner_names(text: str, model: str) -> List[str]:
+    """Optionaler LLM-NER-Pass: liefert eine Liste zu schwärzender Personennamen.
+    Best effort — bei jedem Fehler leere Liste."""
+    snippet = (text or "")[:4000]
+    if not snippet.strip():
+        return []
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client,{
+                "model": model,
+                "think": False,
+                "stream": False,
+                "format": "json",
+                "messages": [
+                    {"role": "system", "content": (
+                        "Extrahiere ALLE vorkommenden Personennamen (Vor- und/oder "
+                        "Nachnamen echter Menschen) aus dem Text. Keine Firmen, Orte, "
+                        "Produkte. Antworte NUR mit JSON: {\"namen\":[\"…\"]}")},
+                    {"role": "user", "content": snippet},
+                ],
+            })
+            resp.raise_for_status()
+            raw = resp.json().get("message", {}).get("content", "")
+    except Exception:
+        return []
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(0))
+        names = data.get("namen") or data.get("names") or []
+        return [str(n) for n in names if isinstance(n, (str,)) and n.strip()]
+    except Exception:
+        return []
+
+
+async def _anonymize(text: str, mapping: dict, model: str, use_llm: bool):
+    """Anonymisiert Text deterministisch (regex) und optional per LLM-NER."""
+    from tools.anonymize import redact_pii, redact_names
+    clean, mapping = redact_pii(text, mapping)
+    if use_llm:
+        names = await _llm_ner_names(text, model)
+        if names:
+            clean, mapping = redact_names(clean, names, mapping)
+    return clean, mapping
+
+
+@app.post("/api/dir/scan")
+async def dir_scan(req: Request):
+    """Erster Scan: Struktur + Inhalts-Snippets (anonymisiert) → KI-Überblick
+    mit Markierung interessanter Dateien."""
+    body = await req.json()
+    base = _dir_resolve_base(body.get("path", ""))
+    anonymize = True   # Anonymisierung von Personendaten ist PFLICHT (nicht abschaltbar)
+    use_llm_ner = bool(body.get("llm_ner", False))   # zusätzlicher NER-Pass (langsamer)
+    model = _pick_model(body.get("model"), _model_for("general"))
+
+    files = _dir_walk(base)
+    text_files = [f for f in files
+                  if not f["is_dir"] and f["ext"] in _DIR_TEXT_EXT
+                  and 0 < f["size"] <= _DIR_FILE_MAX_BYTES]
+    text_files.sort(key=lambda f: f["size"])
+
+    mapping: dict = {}
+    snippets = []
+    for f in text_files[:_DIR_SNIPPET_FILES]:
+        try:
+            txt = _extract_text(base / f["rel"])
+        except Exception:
+            continue
+        if not txt or txt.startswith("[Lesefehler"):
+            continue
+        snip = txt[:_DIR_SNIPPET_CHARS]
+        if anonymize:
+            snip, mapping = await _anonymize(snip, mapping, model, use_llm_ner)
+        snippets.append({"file": f["rel"], "snippet": snip})
+
+    # Kompakte Auflistung für das LLM
+    n_dirs = sum(1 for f in files if f["is_dir"])
+    n_files = sum(1 for f in files if not f["is_dir"])
+    listing = "\n".join(
+        f"- {f['rel']}" + ("/" if f["is_dir"] else f" ({f['size']} B)")
+        for f in files[:300])
+    snip_block = "\n\n".join(
+        f"### {s['file']}\n{s['snippet']}" for s in snippets)
+
+    summary, interesting = "", []
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client,{
+                "model": model,
+                "think": False,
+                "stream": False,
+                "format": "json",
+                "messages": [
+                    {"role": "system", "content": (
+                        "Du analysierst ein Dateiverzeichnis. Gib einen knappen "
+                        "Überblick (worum geht es, welche Arten von Dateien) und "
+                        "markiere die interessantesten Dateien, die eine genauere "
+                        "Analyse lohnen. Antworte NUR mit JSON: {\"summary\":\"…\","
+                        "\"interesting\":[{\"file\":\"relativer/pfad\",\"reason\":\"…\"}]}")},
+                    {"role": "user", "content": (
+                        f"Verzeichnis: {base.name}\n"
+                        f"{n_dirs} Unterordner, {n_files} Dateien.\n\n"
+                        f"Struktur:\n{listing}\n\n"
+                        f"Inhalts-Auszüge:\n{snip_block}")},
+                ],
+            })
+            resp.raise_for_status()
+            raw = resp.json().get("message", {}).get("content", "")
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        m = re.search(r"\{[\s\S]*\}", raw)
+        if m:
+            data = json.loads(m.group(0))
+            summary = (data.get("summary") or "").strip()
+            for it in (data.get("interesting") or []):
+                if isinstance(it, dict) and it.get("file"):
+                    interesting.append({"file": str(it["file"]),
+                                        "reason": str(it.get("reason", ""))})
+    except Exception as e:
+        summary = f"(KI-Überblick nicht verfügbar: {e})"
+
+    return {
+        "base": str(base),
+        "name": base.name,
+        "n_dirs": n_dirs,
+        "n_files": n_files,
+        "truncated": len(files) >= _DIR_MAX_FILES,
+        "tree": files,
+        "summary": summary,
+        "interesting": interesting,
+        "redacted": len(mapping),
+    }
+
+
+@app.post("/api/dir/analyze-file")
+async def dir_analyze_file(req: Request):
+    """Vertiefte Analyse einer einzelnen Datei (Volltext, anonymisiert) → Markdown."""
+    body = await req.json()
+    base = _dir_resolve_base(body.get("path", ""))
+    file_rel = (body.get("file_rel") or "").strip()
+    if not file_rel:
+        raise HTTPException(status_code=400, detail="file_rel fehlt")
+    target = _dir_safe_child(base, file_rel)
+    use_llm_ner = bool(body.get("llm_ner", False))
+    model = _pick_model(body.get("model"), _model_for("general"))
+
+    try:
+        if target.stat().st_size > 25_000_000:
+            raise HTTPException(status_code=400, detail="Datei zu groß für die Detailanalyse (> 25 MB)")
+    except OSError:
+        pass
+    txt = _extract_text(target)
+    if not txt or txt.startswith("[Lesefehler"):
+        raise HTTPException(status_code=400, detail=f"Text nicht lesbar: {txt}")
+    # Anonymisierung von Personendaten ist PFLICHT (nicht abschaltbar)
+    mapping: dict = {}
+    txt, mapping = await _anonymize(txt[:16000], mapping, model, use_llm_ner)
+
+    analysis = ""
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=240) as client:
+            resp = await _llm.chat(client,{
+                "model": model,
+                "think": False,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": (
+                        "Analysiere die folgende Datei und fasse präzise auf Deutsch "
+                        "zusammen: Worum geht es, wichtigste Inhalte/Aussagen, "
+                        "Auffälligkeiten. Antworte in Markdown. Erfinde nichts.")},
+                    {"role": "user", "content": f"Datei: {file_rel}\n\n{txt}"},
+                ],
+            })
+            resp.raise_for_status()
+            analysis = resp.json().get("message", {}).get("content", "").strip()
+            analysis = re.sub(r"<think>.*?</think>", "", analysis, flags=re.DOTALL).strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analyse fehlgeschlagen: {e}")
+
+    return {"file": file_rel, "analysis": analysis, "redacted": len(mapping)}
+
+
+@app.post("/api/dir/finalize")
+async def dir_finalize(req: Request):
+    """Schreibt die Index-/„init"-Datei (_KI_INDEX.md) in den Ordner und legt
+    optional eine Wissensdatenbank ('Verzeichnis: …') aus dem Inhalt an."""
+    body = await req.json()
+    base = _dir_resolve_base(body.get("path", ""))
+    content = (body.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Inhalt fehlt")
+    to_rag = bool(body.get("to_rag", False))
+    filename = (body.get("filename") or "_KI_INDEX.md").strip() or "_KI_INDEX.md"
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        filename = "_KI_INDEX.md"
+
+    header = (f"# KI-Verzeichnisanalyse: {base.name}\n\n"
+              f"▶ Von KI generiert · {time.strftime('%Y-%m-%d %H:%M')} · "
+              f"Personendaten in Inhalten anonymisiert.\n\n")
+    full = header + content
+    target = base / filename
+    try:
+        target.write_text(full, encoding="utf-8")
+    except (PermissionError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"Schreiben fehlgeschlagen: {e}")
+
+    rag_id = None
+    if to_rag:
+        from tools.rag import ingest_file
+        coll = {
+            "id": f"rag_{uuid.uuid4().hex[:12]}",
+            "name": f"Verzeichnis: {base.name}",
+            "embed_model": EMBED_MODEL,
+            "tier": "ausgewogen",
+            "chunk_size": 1000, "chunk_overlap": 150, "top_k": 6,
+            "embed_gpu": False, "clean": True, "char_limit": 6000,
+            "strictness": "ausgewogen", "created_at": time.time(),
+        }
+        await _db.rag_create_collection(coll)
+        try:
+            await ingest_file(coll, full, f"{base.name}.md", f"doc_{uuid.uuid4().hex[:12]}")
+        except Exception as e:
+            await _db.rag_delete_collection(coll["id"])
+            raise HTTPException(
+                status_code=500,
+                detail=f"Einbetten fehlgeschlagen — ist '{EMBED_MODEL}' gepullt? ({e})")
+        rag_id = coll["id"]
+
+    return {"ok": True, "path": str(target), "rag_collection_id": rag_id}
+
+
+# ── Morphologischer Kasten (Zwicky-Box) ─────────────────────────────────────────
+# KI-gestütztes Ideenfindungs-Raster: Parameter (Zeilen) × Ausprägungen (Werte).
+# Eine Lösung = je Parameter eine Ausprägung. Die KI generiert Parameter/
+# Ausprägungen, bewertet gewählte Kombinationen (+ schlägt interessante vor) und
+# verfeinert einzelne Zellen. Export läuft über bestehende Wege (DOCX/Doku/RAG)
+# im Frontend — kein eigener Endpunkt.
+
+
+def _morph_value_str(v) -> str:
+    """Normalisiert eine Ausprägung auf einen lesbaren String. Kleine Modelle
+    liefern statt eines Strings manchmal ein verschachteltes Objekt/Listen —
+    das wird kompakt als „Schlüssel: Wert · …" geglättet."""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, dict):
+        parts = []
+        for k, val in v.items():
+            if isinstance(val, (list, tuple)):
+                val = ", ".join(str(x) for x in val)
+            elif isinstance(val, dict):
+                val = "; ".join(f"{a}: {b}" for a, b in val.items())
+            parts.append(f"{k}: {val}")
+        return " · ".join(parts).strip()
+    if isinstance(v, (list, tuple)):
+        return ", ".join(_morph_value_str(x) for x in v).strip()
+    return str(v).strip()
+
+
+def _parse_llm_json(raw: str) -> Optional[dict]:
+    """Strippt <think>/Code-Fences und extrahiert das erste JSON-Objekt."""
+    raw = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL)
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+async def _morph_llm(model: str, system: str, user: str) -> Optional[dict]:
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client,{
+                "model": model,
+                "think": False,
+                "stream": False,
+                "format": "json",
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            })
+            resp.raise_for_status()
+            return _parse_llm_json(resp.json().get("message", {}).get("content", ""))
+    except Exception:
+        return None
+
+
+@app.post("/api/morph/generate")
+async def morph_generate(req: Request):
+    """Erzeugt Parameter (Zeilen) und je Parameter mehrere Ausprägungen (Werte)
+    für ein Problem."""
+    body = await req.json()
+    problem = (body.get("problem") or "").strip()
+    if not problem:
+        raise HTTPException(status_code=400, detail="Problem fehlt")
+    model = _pick_model(body.get("model"), _model_for("general"))
+    data = await _morph_llm(
+        model,
+        ("Du erstellst einen morphologischen Kasten (Zwicky-Box) für eine "
+         "Aufgabenstellung. Bestimme 4–7 unabhängige Parameter (Merkmale, die eine "
+         "Lösung beschreiben) und je Parameter 3–5 konkrete Ausprägungen. Jede "
+         "Ausprägung ist ein KURZER Text (Stichwort, max. ~6 Wörter) — KEIN Objekt, "
+         "keine verschachtelten Felder. Antworte NUR mit JSON: "
+         "{\"parameters\":[{\"name\":\"Parameter\",\"values\":"
+         "[\"Ausprägung 1\",\"Ausprägung 2\"]}]}"),
+        f"Aufgabenstellung:\n{problem}")
+    params = []
+    if data:
+        for p in (data.get("parameters") or []):
+            if isinstance(p, dict) and p.get("name"):
+                vals = [s for s in (_morph_value_str(v) for v in (p.get("values") or [])) if s]
+                if vals:
+                    params.append({"name": str(p["name"]).strip(), "values": vals})
+    if not params:
+        raise HTTPException(status_code=502, detail="KI lieferte keine verwertbaren Parameter")
+    return {"parameters": params}
+
+
+@app.post("/api/morph/evaluate")
+async def morph_evaluate(req: Request):
+    """Bewertet eine gewählte Kombination und schlägt interessante Alternativen vor.
+    selection = Liste von {parameter, value}."""
+    body = await req.json()
+    problem = (body.get("problem") or "").strip()
+    selection = body.get("selection") or []
+    if not problem or not selection:
+        raise HTTPException(status_code=400, detail="Problem oder Auswahl fehlt")
+    model = _pick_model(body.get("model"), _model_for("general"))
+    sel_txt = "\n".join(
+        f"- {s.get('parameter','?')}: {s.get('value','?')}"
+        for s in selection if isinstance(s, dict))
+    params_txt = ""
+    if body.get("parameters"):
+        params_txt = "\n\nVerfügbare Parameter/Ausprägungen:\n" + "\n".join(
+            f"- {p.get('name','?')}: {', '.join(p.get('values', []))}"
+            for p in body["parameters"] if isinstance(p, dict))
+    data = await _morph_llm(
+        model,
+        ("Du bewertest eine Lösungskombination aus einem morphologischen Kasten. "
+         "Gib eine Gesamtbewertung (score 0–100), Einschätzungen zu Machbarkeit und "
+         "Innovationsgrad (jeweils 0–100), eine kurze Begründung und Risiken. "
+         "Schlage außerdem bis zu drei interessante alternative Kombinationen vor. "
+         "Antworte NUR mit JSON: {\"score\":0,\"machbarkeit\":0,\"innovation\":0,"
+         "\"begruendung\":\"…\",\"risiken\":[\"…\"],\"vorschlaege\":[{\"picks\":"
+         "[{\"parameter\":\"…\",\"value\":\"…\"}],\"score\":0,\"begruendung\":\"…\"}]}"),
+        f"Aufgabenstellung:\n{problem}\n\nGewählte Kombination:\n{sel_txt}{params_txt}")
+    if not data:
+        raise HTTPException(status_code=502, detail="KI-Bewertung fehlgeschlagen")
+    return {
+        "score": data.get("score"),
+        "machbarkeit": data.get("machbarkeit"),
+        "innovation": data.get("innovation"),
+        "begruendung": (data.get("begruendung") or "").strip(),
+        "risiken": [str(r) for r in (data.get("risiken") or [])],
+        "vorschlaege": data.get("vorschlaege") or [],
+    }
+
+
+@app.post("/api/morph/refine-cell")
+async def morph_refine_cell(req: Request):
+    """Verfeinert eine einzelne Zelle: ausformulieren (expand) oder
+    Alternativen/Kritik (critique)."""
+    body = await req.json()
+    problem = (body.get("problem") or "").strip()
+    parameter = (body.get("parameter") or "").strip()
+    value = (body.get("value") or "").strip()
+    action = (body.get("action") or "expand").strip().lower()
+    if not value:
+        raise HTTPException(status_code=400, detail="Ausprägung fehlt")
+    model = _pick_model(body.get("model"), _model_for("general"))
+    if action == "critique":
+        system = ("Du kritisierst eine Ausprägung in einem morphologischen Kasten und "
+                  "schlägst bessere/zusätzliche Alternativen vor. Antworte NUR mit JSON: "
+                  "{\"text\":\"kurze Kritik\",\"alternativen\":[\"…\"]}")
+    else:
+        system = ("Du formulierst eine Ausprägung in einem morphologischen Kasten "
+                  "konkreter und anschaulicher aus (1–3 Sätze). Antworte NUR mit JSON: "
+                  "{\"text\":\"…\",\"alternativen\":[]}")
+    data = await _morph_llm(
+        model, system,
+        f"Aufgabenstellung:\n{problem}\n\nParameter: {parameter}\nAusprägung: {value}")
+    if not data:
+        raise HTTPException(status_code=502, detail="KI-Verfeinerung fehlgeschlagen")
+    return {"text": (data.get("text") or "").strip(),
+            "alternativen": [str(a) for a in (data.get("alternativen") or [])]}
 
 
 # ── Export-API ────────────────────────────────────────────────────────────────
@@ -3463,24 +4417,20 @@ async def plan_ai(pid: str, req: Request):
 
     async def _stream():
         async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
-            async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+            async for chunk in _llm.stream(client, {
                 "model": model,
                 "think": False,
                 "messages": messages,
                 "stream": True,
-            }) as resp:
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
-                        if chunk.get("done"):
-                            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                    except Exception:
-                        pass
+            }):
+                try:
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
+                    if chunk.get("done"):
+                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                except Exception:
+                    pass
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
@@ -3528,25 +4478,21 @@ async def plan_evaluate(req: Request):
     async def _stream():
         text_buf = ""
         async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
-            async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+            async for chunk in _llm.stream(client, {
                 "model": model, "think": False,
                 "messages": [{"role": "system", "content": _SCIENCE_PROMPT},
                              {"role": "user", "content": prompt}],
                 "stream": True,
-            }) as resp:
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            text_buf += token
-                            yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
-                        if chunk.get("done"):
-                            break
-                    except Exception:
-                        pass
+            }):
+                try:
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        text_buf += token
+                        yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
+                    if chunk.get("done"):
+                        break
+                except Exception:
+                    pass
 
         # Verbesserten Plan aus JSON-Block extrahieren
         text_clean = re.sub(r"<think>.*?</think>", "", text_buf, flags=re.DOTALL).strip()
@@ -3639,7 +4585,7 @@ async def plan_research_task(pid: str, req: Request):
     )
     try:
         async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            resp = await _llm.chat(client,{
                 "model": model, "think": False, "stream": False,
                 "messages": [{"role": "system", "content": _sys},
                              {"role": "user", "content": prompt}],
@@ -3709,7 +4655,7 @@ async def plan_derive_agent(req: Request):
     _model = _pick_model(body.get("model"))
 
     async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": _model,
             "think": False,
             "messages": [
@@ -3960,7 +4906,7 @@ async def suggest_tasks(req: Request):
     )
 
     async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": _model,
             "think": False,
             "messages": [
@@ -4044,7 +4990,7 @@ async def detail_task(req: Request):
     )
 
     async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": _model,
             "think": False,
             "messages": [
@@ -4137,7 +5083,7 @@ async def insert_between(req: Request):
     )
 
     async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+        resp = await _llm.chat(client,{
             "model": _model,
             "think": False,
             "messages": [
@@ -4216,7 +5162,7 @@ async def plan_from_list(req: Request):
         }
         try:
             async with _model_session(_model), httpx.AsyncClient(timeout=300) as client:
-                resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+                resp = await _llm.chat(client,payload)
                 resp.raise_for_status()
                 raw = resp.json().get("message", {}).get("content", "")
         except Exception as e:
@@ -4343,7 +5289,7 @@ async def generate_plan(req: Request):
         payload["options"] = {"num_ctx": 8192}
 
     async with _model_session(_model), httpx.AsyncClient(timeout=600 if big_request else 300) as client:
-        resp = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+        resp = await _llm.chat(client,payload)
         resp.raise_for_status()
         raw = resp.json().get("message", {}).get("content", "")
 
@@ -4486,6 +5432,10 @@ async def create_backup():
         for fp in sorted(AGENTS_DIR.glob("*.json")):
             zf.write(fp, f"agents/{fp.name}")
 
+        # Jurys (Bewertungs-Gremien)
+        for fp in sorted(JURIES_DIR.glob("*.json")):
+            zf.write(fp, f"juries/{fp.name}")
+
         # Code-Programme (IDE)
         for fp in sorted(CODE_DIR.glob("*.json")):
             zf.write(fp, f"code/{fp.name}")
@@ -4524,7 +5474,7 @@ async def restore_backup(file: UploadFile = File(...)):
     import io, zipfile
 
     content = await file.read()
-    stats = {"conversations": 0, "plans": 0, "agents": 0,
+    stats = {"conversations": 0, "plans": 0, "agents": 0, "juries": 0,
              "profile": False, "projects": False,
              "profile_assets": 0, "rag_collections": 0, "errors": []}
 
@@ -4619,6 +5569,22 @@ async def restore_backup(file: UploadFile = File(...)):
                     dest = _unique_agent_path(agent_name or agent_id, exclude_id=agent_id)
                     dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                     stats["agents"] += 1
+                except Exception as e:
+                    stats["errors"].append(f"{name}: {e}")
+
+            # Jurys (überspringt wenn ID bereits existiert)
+            for name in names:
+                if not name.startswith("juries/") or not name.endswith(".json"):
+                    continue
+                try:
+                    data = json.loads(zf.read(name).decode("utf-8"))
+                    jid = data.get("id") or _to_slug(data.get("name", "jury")) + "_" + uuid.uuid4().hex[:6]
+                    data["id"] = jid
+                    if _jury_path_by_id(jid):
+                        continue  # bereits vorhanden
+                    dest = JURIES_DIR / f"{_to_slug(data.get('name', 'jury'))}_{jid[-6:]}.json"
+                    dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    stats["juries"] += 1
                 except Exception as e:
                     stats["errors"].append(f"{name}: {e}")
 
@@ -4968,7 +5934,7 @@ async def refine_document(req: Request):
         for chunk in chunks:
             try:
                 async with httpx.AsyncClient(timeout=180) as client:
-                    resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                    resp = await _llm.chat(client,{
                         "model": model, "think": False, "stream": False,
                         "messages": [{"role": "system", "content": sys_prompt},
                                      {"role": "user", "content": chunk}],
@@ -5218,7 +6184,7 @@ _MED_DISCLAIMER = (
 
 async def _med_call(client, model: str, system: str, user: str, *, think: bool = False) -> str:
     """Ein nicht-streamender Ollama-Chat-Aufruf, gibt den reinen Text zurück."""
-    resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+    resp = await _llm.chat(client,{
         "model": model,
         "think": think,
         "stream": False,
@@ -5369,7 +6335,7 @@ async def medizin_consult(req: Request):
             final_user += f"\n\nPatientenakte (Auszug):\n{rag_ctx}"
         try:
             async with _model_session(model_medical), httpx.AsyncClient(timeout=300) as client:
-                async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+                async for chunk in _llm.stream(client, {
                     "model": model_medical,
                     "think": False,   # MedGemma unterstützt Ollamas Think-Modus nicht
                                        # (liefert dann leeren content) – immer aus.
@@ -5383,17 +6349,10 @@ async def medizin_consult(req: Request):
                         )},
                         {"role": "user", "content": final_user},
                     ],
-                }) as resp:
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        try:
-                            chunk = json.loads(line)
-                        except Exception:
-                            continue
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            yield _sse({"type": "text", "content": token})
+                }):
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        yield _sse({"type": "text", "content": token})
         except Exception as e:
             yield _sse({"type": "error", "content": f"Einschätzung fehlgeschlagen: {e}"})
             return
@@ -5416,7 +6375,7 @@ async def medizin_translate(req: Request):
     async def _stream():
         try:
             async with _model_session(model_general), httpx.AsyncClient(timeout=180) as client:
-                async with client.stream("POST", f"{OLLAMA_BASE}/api/chat", json={
+                async for chunk in _llm.stream(client, {
                     "model": model_general,
                     "think": False,
                     "stream": True,
@@ -5428,17 +6387,10 @@ async def medizin_translate(req: Request):
                             "Erfinde nichts hinzu.")},
                         {"role": "user", "content": text[:6000]},
                     ],
-                }) as resp:
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        try:
-                            chunk = json.loads(line)
-                        except Exception:
-                            continue
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            yield _sse({"type": "text", "content": token})
+                }):
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        yield _sse({"type": "text", "content": token})
         except Exception as e:
             yield _sse({"type": "error", "content": f"Übersetzung fehlgeschlagen: {e}"})
             return
@@ -5538,7 +6490,7 @@ async def mathe_ground(req: Request):
     # Schritt 1: Aufgabe als SymPy-Ausdruck extrahieren (robustes JSON-Parsing)
     try:
         async with _model_session(model), httpx.AsyncClient(timeout=90) as client:
-            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+            resp = await _llm.chat(client,{
                 "model": model, "think": False, "stream": False,
                 "messages": [
                     {"role": "system", "content": (
