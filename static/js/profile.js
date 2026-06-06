@@ -48,7 +48,7 @@ const Profile = (() => {
 
   function applyTabVisibility(hiddenTabs) {
     hiddenTabs = hiddenTabs || [];
-    const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'morph'];
+    const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'morph', 'jury'];
     for (const tab of optionalTabs) {
       const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
       if (btn) btn.style.display = hiddenTabs.includes(tab) ? 'none' : '';
@@ -73,6 +73,9 @@ const Profile = (() => {
     }
     applyMode(_data.mode);
     applyTabVisibility(_data.hidden_tabs || []);
+    // Installer-Flag: API-Anbieter-Abschnitt nur zeigen, wenn aktiviert (Default: an)
+    const provSec = document.getElementById('provider-section');
+    if (provSec) provSec.style.display = (_data.enable_api === false) ? 'none' : '';
     if (typeof I18n !== 'undefined' && _data.lang) I18n.setLang(_data.lang);
     return _data;
   }

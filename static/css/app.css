@@ -392,6 +392,22 @@ html, body {
   display: flex;
 }
 
+/* Gemeinsamer ziehbarer Pane-Trenner (wie im Planer) */
+.pane-splitter {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--border);
+  position: relative;
+  transition: background .15s;
+}
+.pane-splitter:hover,
+.pane-splitter.dragging { background: var(--accent); }
+.pane-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -4px; right: -4px;
+}
+
 /* Denkprozess-Panel (rechts, umschaltbar) */
 #thinking-panel {
   width: 340px;
@@ -3616,6 +3632,18 @@ select.ob-input option {
 .mathe-plot-row { display: flex; justify-content: center; padding: 4px 0; }
 .mathe-plot-img { max-width: 100%; max-height: 400px; border-radius: 8px; border: 1px solid var(--border); }
 
+/* Auto-Verifizieren: Stufen-Blöcke + Status-Badge */
+.mathe-stages { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+.mathe-stage { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); font-size: 13px; }
+.mathe-stage > summary { cursor: pointer; padding: 6px 10px; font-weight: 600; user-select: none; }
+.mathe-stage-body { padding: 4px 10px 10px; }
+.mathe-stage-pre { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; margin: 0; color: var(--text-dim); }
+.mathe-stage-spin { color: var(--accent); }
+.mathe-verify-badge { display: inline-block; margin-top: 8px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.mathe-verify-badge.ok { background: #16653433; color: #22c55e; border: 1px solid #22c55e66; }
+.mathe-verify-badge.warn { background: #78350f33; color: #f59e0b; border: 1px solid #f59e0b66; }
+.mathe-verify-badge.info { background: var(--bg-hover); color: var(--text-dim); border: 1px solid var(--border); }
+
 .mathe-export-bar {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px; background: var(--bg-hover); border: 1px solid var(--border);
@@ -3664,7 +3692,7 @@ select.ob-input option {
 .dir-hint { padding: 8px 14px; font-size: 12.5px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
 .dir-hint code { background: var(--bg-input); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 #dir-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
-#dir-left { width: 42%; min-width: 280px; border-right: 1px solid var(--border); overflow-y: auto; padding: 12px 14px; }
+#dir-left { width: 42%; flex: none; min-width: 280px; overflow-y: auto; padding: 12px 14px; }
 #dir-detail { flex: 1; overflow-y: auto; padding: 12px 16px; }
 #dir-summary { margin-bottom: 12px; }
 .dir-meta { font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; }
@@ -3741,6 +3769,16 @@ select.ob-input option {
 .morph-suggest-score { color: var(--accent); font-weight: 600; }
 .morph-apply { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; }
 .morph-apply:hover { filter: brightness(1.1); }
+
+/* Gemerkte Lösungen */
+#morph-solutions { margin: 0 14px 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); font-size: 13px; }
+.morph-sol-item { padding: 8px 10px; margin: 6px 0; background: var(--bg-main); border-radius: 8px; }
+.morph-sol-head { display: flex; align-items: center; gap: 8px; }
+.morph-sol-head > b { margin-right: 2px; }
+.morph-sol-actions { margin-left: auto; display: flex; gap: 6px; }
+.morph-sol-load, .morph-sol-del { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 2px 9px; font-size: 11.5px; cursor: pointer; }
+.morph-sol-load:hover, .morph-sol-del:hover { border-color: var(--accent); }
+.morph-sol-combo { margin: 5px 0; color: var(--text-dim); font-size: 12.5px; }
 .dir-locked { color: var(--accent); font-weight: 600; cursor: default; }
 .dir-retry { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; margin-left: 4px; }
 .dir-retry:hover { border-color: var(--accent); }
@@ -3757,3 +3795,21 @@ select.ob-input option {
 .jury-risks li { margin: 2px 0; }
 .jury-emp { font-size: 12.5px; margin: 6px 0 0; }
 .jury-sub { font-weight: 600; font-size: 12px; margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
+
+/* Jury-Tab (Dokument-Werkbank) */
+/* display NUR an .active koppeln (sonst gewinnt ID-Spezifität gegen .panel{display:none}) */
+#jury-panel { flex-direction: column; overflow: hidden; padding: 0; }
+#jury-panel.active { display: flex; }
+#jury-tab-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+#jury-tab-left { width: 280px; flex: none; min-width: 200px; border-right: 1px solid var(--border); overflow-y: auto; padding: 12px 14px; }
+#jury-tab-right { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.jury-tab-sec-head { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.jury-tab-listitem { display: flex; align-items: center; gap: 6px; padding: 5px 8px; margin: 3px 0; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-main); font-size: 12.5px; cursor: pointer; }
+.jury-tab-listitem:hover { border-color: var(--accent); }
+.jury-tab-listitem.active { border-color: var(--accent); background: var(--accent-dim); }
+#jury-tab-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+#jury-doc-name { flex: 1; min-width: 160px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 6px 10px; font-size: 13px; }
+#jury-doc-jury { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 6px 8px; font-size: 12.5px; }
+#jury-doc-text { flex: 1; min-height: 0; resize: none; margin: 12px 14px; padding: 12px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 8px; font-size: 14px; line-height: 1.6; font-family: inherit; }
+#jury-doc-preview { flex: 1; min-height: 0; overflow-y: auto; margin: 12px 14px; padding: 12px 16px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; font-size: 14px; line-height: 1.6; }
+#jury-tab-eval { max-height: 42%; overflow-y: auto; padding: 0 14px 12px; }

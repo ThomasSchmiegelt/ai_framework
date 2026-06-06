@@ -34,10 +34,47 @@ venv/bin/pip install --upgrade pip --quiet
 venv/bin/pip install -r requirements.txt --quiet
 
 # Datenverzeichnisse anlegen (falls nicht vorhanden)
-for dir in data/uploads data/reports data/code data/plans data/dossiers data/profile_assets; do
+for dir in data/uploads data/reports data/code data/plans data/dossiers data/profile_assets data/jury_docs; do
   mkdir -p "$dir"
   touch "$dir/.gitkeep" 2>/dev/null || true
 done
+
+# ── Funktionsauswahl (optionale Tabs) + lokal/API ────────────────────────────
+# Schreibt die Vorbelegung nach config.json: hidden_tabs_default (NICHT gewählte
+# optionale Tabs) und enable_api. Nicht-interaktiv (kein TTY) → Standard belassen.
+if [ -t 0 ]; then
+  echo ""
+  echo "=== Funktionsauswahl (optionale Tabs) ==="
+  echo "Jeweils [j/N]. Diese Tabs sind beim Erststart sonst ausgeblendet."
+  OPT_TABS="rag:Wissensdatenbanken-(RAG) ide:Code-IDE mathe:Mathe medizin:Medizin mail:Mail logs:Logs diranalyse:Verzeichnis-Analyse morph:Morphologischer-Kasten jury:Jury"
+  HIDDEN=""
+  for entry in $OPT_TABS; do
+    tab="${entry%%:*}"; label="${entry#*:}"
+    read -r -p "  ${label//-/ } aktivieren? [j/N] " ans || ans=""
+    case "$ans" in
+      [jJyY]*) : ;;                      # aktiv → nicht verbergen
+      *) HIDDEN="$HIDDEN${HIDDEN:+,}\"$tab\"" ;;
+    esac
+  done
+  echo ""
+  read -r -p "Externe KI-Anbieter (API, z. B. OpenRouter) zusätzlich zu lokal nutzen? [j/N] " api_ans || api_ans=""
+  case "$api_ans" in [jJyY]*) ENABLE_API=true ;; *) ENABLE_API=false ;; esac
+
+  HIDDEN_JSON="[$HIDDEN]"
+  echo "Schreibe Auswahl nach config.json …"
+  HIDDEN_JSON="$HIDDEN_JSON" ENABLE_API="$ENABLE_API" "$PYTHON" - <<'PYEOF'
+import json, os, pathlib
+p = pathlib.Path("config.json")
+cfg = {}
+if p.exists():
+    try: cfg = json.loads(p.read_text(encoding="utf-8"))
+    except Exception: cfg = {}
+cfg["hidden_tabs_default"] = json.loads(os.environ["HIDDEN_JSON"])
+cfg["enable_api"] = os.environ["ENABLE_API"] == "true"
+p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+print("  ok: hidden_tabs_default=%s enable_api=%s" % (cfg["hidden_tabs_default"], cfg["enable_api"]))
+PYEOF
+fi
 
 echo ""
 echo "=== Installation abgeschlossen ==="

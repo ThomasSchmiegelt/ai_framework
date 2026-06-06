@@ -89,8 +89,22 @@ const Chat = (() => {
     if (isStreaming) return;
 
     const input = document.getElementById('message-input');
-    const text = input.value.trim();
+    let text = input.value.trim();
     if (!text && pendingFiles.length === 0) return;
+
+    // Slash-Agent: führendes „/Name" wählt nur für DIESE Nachricht einen Agenten
+    let slashAgent = null;
+    const slash = _resolveSlashAgent(text);
+    if (slash && slash.agent) {
+      slashAgent = slash.agent;
+      text = slash.rest.trim();
+      if (!text && pendingFiles.length === 0) {
+        showToast('Bitte nach /' + (slashAgent.name || '') + ' noch eine Frage eingeben');
+        return;
+      }
+    } else if (slash && slash.notFound) {
+      showToast('Kein Agent für „/' + slash.token + '" gefunden – Nachricht wird normal gesendet');
+    }
 
     showWelcome(false);
     isStreaming = true;
@@ -100,7 +114,8 @@ const Chat = (() => {
     resetThinking();
 
     const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
-    const agentId = document.getElementById('agent-select').value || null;
+    // Slash-Agent hat Vorrang (nur für diese Nachricht), sonst der Selektor
+    const agentId = slashAgent ? slashAgent.id : (document.getElementById('agent-select').value || null);
     const useSearch = document.getElementById('btn-search-toggle').classList.contains('active');
 
     // Datei-IDs sammeln
@@ -127,6 +142,7 @@ const Chat = (() => {
     const textEl = document.createElement('div');
     textEl.className = 'bubble-text';
     bubbleContent.appendChild(textEl);
+    if (slashAgent) insertAgentNote(bubbleContent, textEl, slashAgent);
     let fullText = '';
 
     // Tool-Status-Element
@@ -242,6 +258,34 @@ const Chat = (() => {
     } else if (event.type === 'error') {
       textEl.innerHTML = `<em style="color:#ef4444">Fehler: ${escHtml(event.message)}</em>`;
     }
+  }
+
+  // Löst ein führendes „/Name" am Nachrichtenanfang in einen Agenten auf.
+  // Rückgabe: {agent, rest} bei Treffer, {notFound, token, rest} sonst, null wenn kein „/".
+  function _resolveSlashAgent(text) {
+    const m = text.match(/^\/(\S+)\s*([\s\S]*)$/);
+    if (!m) return null;
+    const token = m[1].toLowerCase();
+    const rest = m[2];
+    let agents = [];
+    try { agents = (typeof AgentManager !== 'undefined' && AgentManager.getAgents()) || []; } catch (_) {}
+    const norm = s => String(s || '').toLowerCase();
+    const slug = s => norm(s).replace(/[^a-z0-9]/g, '');
+    // 1. exakte id / exakter Name
+    let a = agents.find(x => norm(x.id) === token || norm(x.name) === token || slug(x.name) === slug(token));
+    // 2. Präfix auf id, Name oder slug(Name)
+    if (!a) a = agents.find(x => norm(x.id).startsWith(token) || norm(x.name).startsWith(token) || slug(x.name).startsWith(slug(token)));
+    if (!a) return { notFound: true, token, rest };
+    return { agent: a, rest };
+  }
+
+  function insertAgentNote(container, beforeEl, agent) {
+    if (!agent) return;
+    const box = document.createElement('div');
+    box.style.cssText = 'margin:0 0 10px;padding:6px 10px;border-left:3px solid var(--accent);background:var(--accent-dim);border-radius:6px;font-size:12px;color:var(--text-dim)';
+    box.innerHTML = `➜ <strong>Agent:</strong> ${escHtml((agent.icon ? agent.icon + ' ' : '') + (agent.name || agent.id))} <span class="planner-muted">(nur diese Frage)</span>`;
+    container.insertBefore(box, beforeEl);
+    scrollToBottom();
   }
 
   function insertAdaptiveNote(container, beforeEl, role) {
@@ -634,6 +678,46 @@ const Chat = (() => {
   function setThinkingPanelVisible(visible) {
     const panel = document.getElementById('thinking-panel');
     if (panel) panel.style.display = visible ? 'flex' : 'none';
+    const split = document.getElementById('chat-splitter');
+    if (split) split.style.display = visible ? 'block' : 'none';
+  }
+
+  // Ziehbarer Trenner zwischen Nachrichten und Denkprozess-Panel (Planer-Muster)
+  const _CHAT_SPLIT_KEY = 'chat_thinking_w';
+  function _initSplitter() {
+    const splitter = document.getElementById('chat-splitter');
+    const panel    = document.getElementById('thinking-panel');
+    const main     = document.getElementById('chat-main');
+    if (!splitter || !panel || !main) return;
+    const saved = parseInt(localStorage.getItem(_CHAT_SPLIT_KEY) || '', 10);
+    if (saved > 0) panel.style.width = saved + 'px';
+
+    const _apply = (clientX) => {
+      const rect = main.getBoundingClientRect();
+      let w = rect.right - clientX;             // Abstand vom rechten Rand
+      const max = rect.width - 320;             // Nachrichten mind. ~320px
+      w = Math.max(220, Math.min(w, max));      // Panel mind. 220px
+      panel.style.width = w + 'px';
+    };
+    const _onMove = (e) => _apply(e.clientX);
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      localStorage.setItem(_CHAT_SPLIT_KEY, String(parseInt(panel.style.width, 10) || 0));
+    };
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+    splitter.addEventListener('dblclick', () => {
+      panel.style.width = '';
+      localStorage.removeItem(_CHAT_SPLIT_KEY);
+    });
   }
 
   function resetThinking() {
@@ -667,6 +751,7 @@ const Chat = (() => {
     try { showThinking = localStorage.getItem('show_thinking') === '1'; } catch (_) {}
     const btn = document.getElementById('btn-thinking-toggle');
     if (btn) btn.classList.toggle('active', showThinking);
+    _initSplitter();
     setThinkingPanelVisible(showThinking);
     const closeBtn = document.getElementById('btn-thinking-close');
     if (closeBtn) closeBtn.addEventListener('click', () => {

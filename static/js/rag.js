@@ -505,6 +505,24 @@ const RAG = (() => {
     splitter.addEventListener('dblclick', () => { left.style.width = ''; localStorage.removeItem(_SPLIT_KEY); });
   }
 
+  // Hilfe-Wissensdatenbank + Hilfe-Agent aus der mitgelieferten Doku bauen
+  async function _buildHelp() {
+    const btn = document.getElementById('btn-rag-help-build');
+    if (btn) { btn.disabled = true; btn.textContent = '… wird erstellt'; }
+    try {
+      const resp = await fetch('/api/help/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
+      const d = await resp.json();
+      if (typeof showToast === 'function') showToast(`✓ Hilfe bereit: ${d.docs} Doku-Dateien · Agent „${d.agent_name}" (im Chat: /Hilfe)`);
+      loadCollections();
+      if (typeof AgentManager !== 'undefined' && AgentManager.load) AgentManager.load();
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Fehler: ' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Hilfe-Wissensdatenbank erstellen/aktualisieren'; }
+    }
+  }
+
   function init() {
     _loadEmbedModel();
     _updateSliderLabels();
@@ -515,6 +533,7 @@ const RAG = (() => {
     document.getElementById('rag-strict').addEventListener('input', _updateSliderLabels);
     document.getElementById('btn-rag-create').addEventListener('click', _create);
     document.getElementById('btn-rag-from-chat').addEventListener('click', _importFromChat);
+    document.getElementById('btn-rag-help-build')?.addEventListener('click', _buildHelp);
     // Beim Öffnen des RAG-Tabs die Gesprächsliste auffrischen
     document.querySelector('.tab-btn[data-tab="rag"]')?.addEventListener('click', _fillConvSelect);
     document.getElementById('rag-file-input').addEventListener('change', e => {

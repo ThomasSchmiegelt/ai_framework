@@ -5,6 +5,7 @@ const MatheChat = (() => {
   let _attachedFiles = [];
   let _history      = [];
   let _tutorMode    = false;  // 🎓 Tutor-Modus: Schritt für Schritt statt Sofortlösung
+  let _verifyMode   = false;  // 🔁 Auto-Verifizieren: lösen → SymPy-prüfen → korrigieren
 
   // ── Modell ──────────────────────────────────────────────────────────────
   // Mathe teilt sich das Modell mit dem Code-Tab → Profil-Rolle „Programmieren / Mathe".
@@ -140,6 +141,9 @@ const MatheChat = (() => {
     _attachedFiles = []; _renderAttachments();
     _streaming = true; _setBtnState(true);
 
+    // 🔁 Auto-Verifizieren: eigener Pfad (lösen → SymPy-prüfen → korrigieren)
+    if (_verifyMode) { await _sendVerified(text, assistantEl, model); return; }
+
     // Ausgehende Nachrichten aus dem sauberen Verlauf bauen; den Ausgabe-Hinweis
     // NUR an die letzte (aktuelle) Nachricht hängen und WEICH formulieren, damit
     // reine Theorie-Fragen (z. B. „Riemannsche Vermutung") nicht zu einem
@@ -230,6 +234,97 @@ const MatheChat = (() => {
     } finally {
       _streaming = false; _setBtnState(false);
     }
+  }
+
+  // ── Auto-Verifizieren (agentischer SymPy-Loop) ────────────────────────────
+
+  async function _sendVerified(text, assistantEl, model) {
+    const msgs = _history.map(m => ({ role: m.role, content: m.content }));
+    let fullText = '';
+    const stages = document.createElement('div');
+    stages.className = 'mathe-stages';
+    if (assistantEl && assistantEl.parentElement) assistantEl.parentElement.insertBefore(stages, assistantEl);
+    const state = { cur: null };
+    try {
+      const resp = await fetch('/api/mathe/solve-verified', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: msgs, model }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const ev = JSON.parse(line.slice(6));
+            if (ev.type === 'stage') {
+              _renderStage(stages, state, ev);
+            } else if (ev.type === 'text') {
+              fullText = ev.content || fullText;
+            } else if (ev.type === 'done') {
+              _renderMd(assistantEl, fullText);
+              _appendVerifyBadge(assistantEl, ev);
+            } else if (ev.type === 'error') {
+              if (assistantEl) assistantEl.textContent = 'Fehler: ' + (ev.content || 'Unbekannter Fehler');
+            }
+          } catch (_) {}
+        }
+      }
+      if (fullText) {
+        _renderMd(assistantEl, fullText);
+        _history.push({ role: 'assistant', content: fullText });
+        if (fullText.includes('$')) _offerLatexExport(fullText);
+      }
+    } catch (e) {
+      if (assistantEl) assistantEl.textContent = 'Verbindungsfehler: ' + e.message;
+    } finally {
+      _streaming = false; _setBtnState(false);
+    }
+  }
+
+  function _renderStage(container, state, ev) {
+    const labels = { solve: '🧮 Lösungsversuch', verify: '🔍 SymPy-Grundwahrheit', fix: '🔧 Korrektur' };
+    if (ev.status === 'start') {
+      const block = document.createElement('details');
+      block.className = 'mathe-stage mathe-stage--' + ev.stage;
+      block.open = (ev.stage === 'verify');
+      block.innerHTML = `<summary>${labels[ev.stage] || ev.label || ev.stage} <span class="mathe-stage-spin">…</span></summary><div class="mathe-stage-body"></div>`;
+      container.appendChild(block);
+      state.cur = block;
+    } else if (ev.status === 'done') {
+      const block = state.cur;
+      if (!block) return;
+      block.querySelector('.mathe-stage-spin')?.remove();
+      const body = block.querySelector('.mathe-stage-body');
+      if (ev.stage === 'verify') {
+        const pre = document.createElement('pre');
+        pre.className = 'mathe-stage-pre';
+        pre.textContent = ev.content || '';
+        body.appendChild(pre);
+      } else {
+        _renderMd(body, ev.content || '');
+      }
+      state.cur = null;
+    }
+    const box = document.getElementById('mathe-messages');
+    if (box) box.scrollTop = box.scrollHeight;
+  }
+
+  function _appendVerifyBadge(el, ev) {
+    if (!el) return;
+    const badge = document.createElement('div');
+    const kind = ev.verified ? 'ok' : (ev.checkable ? 'warn' : 'info');
+    badge.className = 'mathe-verify-badge ' + kind;
+    badge.textContent = ev.verified ? '✓ Mit SymPy verifiziert'
+      : ev.checkable ? '⚠ Nicht abschließend verifiziert – SymPy-Grundwahrheit siehe oben'
+      : 'ℹ Mit SymPy-Fakten gestützt (nicht strikt prüfbar)';
+    el.appendChild(badge);
   }
 
   // ── LaTeX/PDF Export ──────────────────────────────────────────────────────
@@ -355,9 +450,11 @@ const MatheChat = (() => {
     // Tutor-Modus ein-/ausschalten
     const tutorBtn = document.getElementById('btn-mathe-tutor');
     const solBtn   = document.getElementById('btn-mathe-solution');
+    const verifyBtn = document.getElementById('btn-mathe-verify');
     if (tutorBtn) {
       tutorBtn.addEventListener('click', () => {
         _tutorMode = !_tutorMode;
+        if (_tutorMode && _verifyMode) { _verifyMode = false; verifyBtn?.classList.remove('active'); }
         tutorBtn.classList.toggle('active', _tutorMode);
         if (solBtn) solBtn.style.display = _tutorMode ? '' : 'none';
         const inp = document.getElementById('mathe-input');
@@ -367,6 +464,22 @@ const MatheChat = (() => {
         if (typeof showToast === 'function') showToast(_tutorMode
           ? '🎓 Tutor-Modus aktiv – ich löse nicht sofort, sondern leite dich an'
           : 'Tutor-Modus aus – direkte Lösungen');
+      });
+    }
+
+    // Auto-Verifizieren ein-/ausschalten (schließt Tutor-Modus aus)
+    if (verifyBtn) {
+      verifyBtn.addEventListener('click', () => {
+        _verifyMode = !_verifyMode;
+        if (_verifyMode && _tutorMode) {
+          _tutorMode = false;
+          tutorBtn?.classList.remove('active');
+          if (solBtn) solBtn.style.display = 'none';
+        }
+        verifyBtn.classList.toggle('active', _verifyMode);
+        if (typeof showToast === 'function') showToast(_verifyMode
+          ? '🔁 Auto-Verifizieren aktiv – ich prüfe das Ergebnis mit SymPy und korrigiere bei Bedarf'
+          : 'Auto-Verifizieren aus');
       });
     }
 

@@ -89,11 +89,12 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | 🔢 Mathe | Mathematik-Workspace: Plots, SymPy, LaTeX/PDF-Export *(optional)* |
 | 📁 Verzeichnis | Ordner analysieren, Index schreiben, Personendaten anonymisieren *(optional)* |
 | 🧩 Morph-Kasten | Morphologischer Kasten (Zwicky-Box) mit KI *(optional)* |
+| ⚖️ Jury | Dokumente schreiben/bearbeiten und von einer Jury prüfen lassen *(optional)* |
 | 📧 Mail | Postfach (IMAP/POP3) read-only: filtern → bis zu 4 Aktionen (Beta) *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
 > **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Verzeichnis**,
-> **Morph-Kasten**, **Mail** und **Logs** können im Profil ausgeblendet werden
+> **Morph-Kasten**, **Jury**, **Mail** und **Logs** können im Profil ausgeblendet werden
 > (→ [Abschnitt 18 – Tab-Sichtbarkeit](#18-nutzerprofil--projekte)).
 > Sie bleiben jederzeit wieder einschaltbar.
 
@@ -126,6 +127,13 @@ Sitzung aktiv und startet bei jedem Neuladen wieder ausgeschaltet.
 
 Während der Antwort werden Tool-Aufrufe angezeigt (Suche, Berechnung,
 Präsentation …).
+
+**⚡ Schnell-Agent mit `/`:** Beginnst du eine Nachricht mit einem Schrägstrich und dem
+Agentennamen (z. B. `/Mathe Löse x²−4=0` oder `/Hilfe Wie lege ich eine Jury an?`), läuft
+**nur diese eine Frage** über den passenden Agenten — der Agenten-Auswahlschalter in der
+Seitenleiste bleibt unverändert. Über der Antwort erscheint ein Hinweis „➜ Agent: … (nur
+diese Frage)". Wird kein passender Agent gefunden, kommt ein kurzer Hinweis und die
+Nachricht wird normal gesendet.
 
 **Formeln & Quellen:** Berechnungen werden als **mathematische Formeln mit
 Formelzeichen** dargestellt (z. B. σ = F/A, sauber gesetzt). Erkennt die Antwort
@@ -307,6 +315,12 @@ Dokumente verlassen den Rechner nicht.
 > sie das Chat-Modell nicht aus den 6 GB VRAM verdrängen. Der Regler *gründlich* erhöht
 > nur Chunk-Größe und Trefferzahl — den VRAM-Bedarf steuerst du indirekt über den
 > Kontext, der dem Chat-Modell vorgelegt wird (kleiner = sparsamer).
+
+> **🆘 Hilfe zum Tool:** Der Knopf **„Hilfe-Wissensdatenbank erstellen/aktualisieren"**
+> (oben im RAG-Tab) liest die mitgelieferte Bedienungs- und Entwicklerdoku in eine
+> Wissensdatenbank „Hilfe: LOCAL AI" ein und legt einen **Hilfe-Assistenten** an. Danach
+> kannst du im Chat per **`/Hilfe …`** Fragen zur Bedienung stellen, die direkt aus der
+> Doku beantwortet werden. Ein erneuter Klick aktualisiert die Datenbank.
 
 ### Dokumente hinzufügen
 
@@ -585,6 +599,21 @@ Aufgabe **nicht sofort**, sondern führt dich **Schritt für Schritt** selbst zu
 > Funktioniert am besten bei Gleichungen, Ableitungen, Integralen und Faktorisierungen
 > (dort greift die SymPy-Prüfung). Bei reinen Theoriefragen führt der Tutor rein erklärend.
 
+### 🔁 Auto-Verifizieren (selbstprüfende Lösung)
+
+Der Umschalter **🔁 Auto-Verifizieren** löst die Aufgabe und **prüft das Ergebnis
+automatisch mit SymPy** — eine freie, vollständig lokale Umsetzung der Idee „die KI rechnet,
+ein deterministisches Werkzeug verifiziert". Stimmt das Ergebnis nicht mit der SymPy-Berechnung
+überein, fließt die Grundwahrheit als Korrekturhinweis zurück und das Modell rechnet erneut
+(bis zu zwei Korrekturrunden).
+
+- Die Zwischenschritte erscheinen als **aufklappbare Blöcke** (🔍 SymPy-Grundwahrheit,
+  🧮 Lösungsversuch, 🔧 Korrektur).
+- Am Ende zeigt ein **Abzeichen** den Status: **✓ verifiziert**, **⚠ nicht abschließend
+  verifiziert** (mit sichtbarer SymPy-Grundwahrheit) oder **ℹ mit SymPy-Fakten gestützt**
+  (bei nicht eindeutig prüfbaren Ergebnissen wie Ableitungen).
+- Der Modus schließt den Tutor-Modus aus (nur einer von beiden gleichzeitig).
+
 ### Schnell-Prompts
 
 Vier vordefinierte Einsteig-Aufgaben in der Toolbar:
@@ -673,17 +702,26 @@ indem du je Parameter eine Ausprägung wählst.
 1. **Aufgabenstellung** eingeben (z. B. „Konzept für ein modulares Lastenfahrrad")
    und **🤖 Parameter generieren** — die KI füllt das Raster mit Parametern und
    Ausprägungen.
-2. **Ausprägungen wählen:** Chip anklicken = für die Lösung auswählen (erneut klicken
-   = abwählen). **Doppelklick** = Text bearbeiten. Die aktuelle Lösung wird oben
-   angezeigt.
+2. **Ausprägungen wählen:** Chip **einfach anklicken** = für die Lösung auswählen (erneut
+   klicken = abwählen). **Doppelklick** = Text bearbeiten (Enter = übernehmen, Esc =
+   abbrechen). Die aktuelle Lösung wird oben angezeigt.
 3. **Verfeinern:** pro Chip **✨** (ausformulieren) oder **💬** (Kritik & Alternativen).
    Eigene Parameter/Ausprägungen über **＋ Parameter** bzw. **＋** in der Zeile.
 4. **📊 KI: Kombination bewerten** — bewertet die gewählte Lösung (Gesamt-/Machbarkeits-/
    Innovations-Score, Begründung, Risiken) und schlägt interessante Kombinationen vor,
    die du per **Übernehmen** ins Raster setzt.
-5. **Exportieren:** **DOCX**, **→ Doku** (in den Dokumentengenerator) oder
-   **Wissensdatenbank**, außerdem **CSV-Im-/Export**. Der Stand wird automatisch
-   im Browser gespeichert (übersteht einen Reload).
+5. **💾 Lösung + Bewertung merken** — legt die aktuelle Kombination (mit der zuletzt
+   erhaltenen Bewertung) in einer **Lösungsliste** ab. So sammelst du mehrere Varianten
+   mit ihren Scores zum Vergleich (laden/löschen je Eintrag).
+6. **Exportieren:** **DOCX**, **→ Doku** (in den Dokumentengenerator), **Wissensdatenbank**,
+   **CSV-Im-/Export**, sowie für die gemerkten Lösungen:
+   - **🧠 Trainingsfile (JSONL)** — je Lösung eine Zeile im Chat-Format (Frage = Aufgabe +
+     Parameterraum, Antwort = gewählte Kombination + Begründung), direkt zum **Finetunen
+     eines LLM** verwendbar.
+   - **📊 Auswertung (CSV)** — Tabelle Lösung × {Score, Machbarkeit, Innovation, gewählte
+     Ausprägungen} zur Weiterauswertung (z. B. in Excel).
+
+   Der Stand wird automatisch im Browser gespeichert (übersteht einen Reload).
 
 ---
 
@@ -964,6 +1002,17 @@ Bewertungs-Fenster (Jury wählen → ▶ Bewerten):
 
 > Tipp: Binde an die Jury-Mitglieder die einschlägigen Gesetz-Agenten (mit hinterlegtem
 > Normtext), dann werden konkrete Fundstellen (§/Artikel) in den Befunden genannt.
+
+**⚖️ Jury-Tab (Dokument-Werkbank):** Zusätzlich zum Bewertungs-Fenster gibt es einen
+eigenen Tab **⚖️ Jury** *(im Profil einblendbar → Abschnitt 18)*. Dort kannst du
+**Dokumente schreiben, einfügen, bearbeiten und speichern** und sie direkt von einer Jury
+prüfen lassen:
+- Links: Liste deiner Jurys und der **gespeicherten Dokumente**.
+- Rechts: Editor (mit **👁 Vorschau**), Jury-Auswahl, **⚖️ Mit Jury prüfen** (zeigt die
+  Voten direkt darunter), **💾 Speichern** sowie Export als **DOCX**, **→ Doku** oder in
+  eine **Wissensdatenbank**.
+- Gespeicherte Dokumente landen in der Datensicherung (Backup) und lassen sich später
+  wieder laden und weiterbearbeiten.
 
 ### Standard-Agenten
 

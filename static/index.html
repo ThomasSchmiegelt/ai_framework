@@ -24,7 +24,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260612" />
+  <link rel="stylesheet" href="/css/app.css?v=20260613" />
 </head>
 <body>
 
@@ -108,6 +108,7 @@
       <button class="tab-btn" data-tab="mathe">🔢 Mathe</button>
       <button class="tab-btn" data-tab="diranalyse">📁 Verzeichnis</button>
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
+      <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
     </div>
 
     <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
@@ -132,6 +133,9 @@
           </div>
         </div>
       </div>
+
+      <!-- Ziehbarer Trenner zwischen Nachrichten und Denkprozess-Panel -->
+      <div id="chat-splitter" class="pane-splitter" title="Ziehen zum Verschieben (Doppelklick = Standard)" style="display:none"></div>
 
       <!-- Denkprozess-Panel (rechts, umschaltbar) -->
       <aside id="thinking-panel" style="display:none">
@@ -374,6 +378,10 @@
           <p>Lege Wissensdatenbanken an und lade Dokumente hoch. Im Chat aktivierst du den
              📚-Umschalter und wählst eine Datenbank – passende Auszüge werden der Antwort
              als Kontext vorangestellt. Embeddings: <span id="rag-embed-model">…</span>.</p>
+          <div id="rag-help-box" style="margin-top:8px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px">
+            <span style="font-size:12.5px">🆘 <strong>Hilfe zum Tool</strong> als Wissensdatenbank + Hilfe-Agent (im Chat per <code>/Hilfe</code>).</span>
+            <button id="btn-rag-help-build" class="export-btn" style="margin-left:8px">Hilfe-Wissensdatenbank erstellen/aktualisieren</button>
+          </div>
         </div>
 
         <div class="research-field">
@@ -1205,6 +1213,7 @@ Beispiele:
             <input type="checkbox" id="mathe-opt-plot" checked /> 📈 Plot
           </label>
           <button id="btn-mathe-tutor" class="mathe-toolbar-btn" title="Tutor-Modus: führt dich Schritt für Schritt zur Lösung (werkzeuggeprüft), statt sie sofort zu verraten">🎓 Tutor</button>
+          <button id="btn-mathe-verify" class="mathe-toolbar-btn" title="Auto-Verifizieren: löst die Aufgabe und prüft das Ergebnis deterministisch mit SymPy – bei Abweichung korrigiert das Modell automatisch">🔁 Auto-Verifizieren</button>
           <button id="btn-mathe-solution" class="mathe-toolbar-btn" style="display:none" title="Vollständige Lösung anzeigen">💡 Lösung zeigen</button>
         </div>
         <div id="mathe-input-row">
@@ -1234,6 +1243,7 @@ Beispiele:
           <div id="dir-summary"></div>
           <div id="dir-tree-list"></div>
         </div>
+        <div id="dir-splitter" class="pane-splitter" title="Ziehen zum Verschieben (Doppelklick = Standard)"></div>
         <div id="dir-detail"></div>
       </div>
       <div id="dir-actions" style="display:none">
@@ -1248,9 +1258,12 @@ Beispiele:
         <h2 style="font-size:16px">🧩 Morphologischer Kasten</h2>
         <button id="btn-morph-add-param" class="export-btn" style="font-size:12px">＋ Parameter</button>
         <button id="btn-morph-eval" class="export-btn">📊 KI: Kombination bewerten</button>
+        <button id="btn-morph-save-solution" class="export-btn">💾 Lösung + Bewertung merken</button>
         <button id="btn-morph-export-docx" class="export-btn">📋 DOCX</button>
         <button id="btn-morph-export-doku" class="export-btn">📄 → Doku</button>
         <button id="btn-morph-export-rag" class="export-btn">📚 Wissensdatenbank</button>
+        <button id="btn-morph-export-jsonl" class="export-btn">🧠 Trainingsfile (JSONL)</button>
+        <button id="btn-morph-export-eval-csv" class="export-btn">📊 Auswertung (CSV)</button>
         <button id="btn-morph-export-csv" class="export-btn">⬇ CSV</button>
         <button id="btn-morph-import-csv" class="export-btn">⬆ CSV Import</button>
         <input type="file" id="morph-csv-input" accept=".csv" style="display:none" />
@@ -1265,7 +1278,38 @@ Beispiele:
       <div id="morph-solution"></div>
       <div id="morph-grid"></div>
       <div id="morph-eval" style="display:none"></div>
+      <div id="morph-solutions" style="display:none"></div>
     </div><!-- /morph-panel -->
+
+    <!-- ── Jury-Panel (Dokumente sehen, bearbeiten, von Jury prüfen, speichern) ── -->
+    <div id="jury-panel" class="panel">
+      <div id="jury-tab-body">
+        <div id="jury-tab-left">
+          <div class="jury-tab-sec-head">⚖️ Jurys</div>
+          <div id="jury-tab-jurylist"></div>
+          <button id="btn-jury-tab-manage" class="export-btn" style="margin-top:6px">⚙ Jurys verwalten</button>
+          <div class="jury-tab-sec-head" style="margin-top:16px">📄 Gespeicherte Dokumente</div>
+          <div id="jury-tab-doclist"></div>
+          <button id="btn-jury-tab-newdoc" class="export-btn" style="margin-top:6px">＋ Neues Dokument</button>
+        </div>
+        <div id="jury-tab-splitter" class="pane-splitter" title="Ziehen zum Verschieben (Doppelklick = Standard)"></div>
+        <div id="jury-tab-right">
+          <div id="jury-tab-toolbar">
+            <input id="jury-doc-name" type="text" placeholder="Titel des Dokuments" />
+            <select id="jury-doc-jury" title="Jury für die Prüfung"></select>
+            <button id="btn-jury-doc-check" class="export-btn">⚖️ Mit Jury prüfen</button>
+            <button id="btn-jury-doc-save" class="export-btn">💾 Speichern</button>
+            <button id="btn-jury-doc-docx" class="export-btn">📋 DOCX</button>
+            <button id="btn-jury-doc-doku" class="export-btn">📄 → Doku</button>
+            <button id="btn-jury-doc-rag" class="export-btn">📚 Wissensdatenbank</button>
+            <label class="mathe-inline-opt" title="Vorschau statt Editor"><input type="checkbox" id="jury-doc-preview-toggle" /> 👁 Vorschau</label>
+          </div>
+          <textarea id="jury-doc-text" placeholder="Dokument hier schreiben oder einfügen – per „⚖️ Mit Jury prüfen" bewerten lassen, dann speichern."></textarea>
+          <div id="jury-doc-preview" style="display:none"></div>
+          <div id="jury-tab-eval"></div>
+        </div>
+      </div>
+    </div><!-- /jury-panel -->
 
   </main>
 </div>
@@ -1494,6 +1538,7 @@ Beispiele:
       </div>
     </div>
 
+    <div id="provider-section">
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
     <h4 style="margin-bottom:6px">☁ KI-Anbieter (externe API)</h4>
     <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
@@ -1519,6 +1564,7 @@ Beispiele:
       <button id="btn-provider-add" class="export-btn" style="height:38px">＋ Hinzufügen</button>
     </div>
     <div id="provider-msg" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
+    </div><!-- /provider-section -->
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
     <h4 style="margin-bottom:10px">🗜 Automatische Komprimierung</h4>
@@ -1596,6 +1642,9 @@ Beispiele:
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="morph" /> 🧩 Morph-Kasten
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="jury" /> ⚖️ Jury
       </label>
     </div>
 
@@ -1854,14 +1903,14 @@ Beispiele:
 <script src="/js/canvas.js?v=20260603"></script>
 <script src="/js/canvas_editor.js?v=20260603"></script>
 <script src="/js/agents.js?v=20260606j"></script>
-<script src="/js/jury.js?v=20260606"></script>
-<script src="/js/chat.js?v=20260604"></script>
+<script src="/js/jury.js?v=20260613"></script>
+<script src="/js/chat.js?v=20260613"></script>
 <script src="/js/research.js?v=20260603"></script>
-<script src="/js/rag.js?v=20260603"></script>
+<script src="/js/rag.js?v=20260613"></script>
 <script src="/js/doc_generator.js?v=20260606j"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260606p1"></script>
+<script src="/js/profile.js?v=20260613"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260606j"></script>
 <script src="/js/matrix_research.js?v=20260603"></script>
@@ -1872,9 +1921,9 @@ Beispiele:
 <script src="/js/ide.js?v=20260603"></script>
 <script src="/js/onboarding.js?v=20260612"></script>
 <script src="/js/medizin.js?v=20260612"></script>
-<script src="/js/mathe.js?v=20260612"></script>
-<script src="/js/dir_analysis.js?v=20260606b"></script>
-<script src="/js/morph_box.js?v=20260606"></script>
+<script src="/js/mathe.js?v=20260613"></script>
+<script src="/js/dir_analysis.js?v=20260613"></script>
+<script src="/js/morph_box.js?v=20260613"></script>
 <script src="/js/app.js?v=20260606j"></script>
 
 </body>

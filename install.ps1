@@ -186,6 +186,41 @@ if (-not (Test-Path $CONFIG_FILE)) {
     Write-OK "config.json bereits vorhanden"
 }
 
+# ── 6b. Funktionsauswahl (optionale Tabs) + lokal/API ──────────────────────────
+
+Write-Step "Funktionsauswahl (optionale Tabs)..."
+Write-Host "  Jeweils [J/N]. Diese Tabs sind beim Erststart sonst ausgeblendet." -ForegroundColor DarkGray
+$optTabs = [ordered]@{
+    rag='Wissensdatenbanken (RAG)'; ide='Code-IDE'; mathe='Mathe'; medizin='Medizin';
+    mail='Mail'; logs='Logs'; diranalyse='Verzeichnis-Analyse';
+    morph='Morphologischer Kasten'; jury='Jury'
+}
+$hidden = @()
+foreach ($t in $optTabs.Keys) {
+    $a = Read-Host ("  {0} aktivieren? [J/N]" -f $optTabs[$t])
+    if ($a -notmatch '^[JjYy]') { $hidden += $t }
+}
+$apiAns = Read-Host "Externe KI-Anbieter (API, z. B. OpenRouter) zusaetzlich zu lokal nutzen? [J/N]"
+$enableApi = if ($apiAns -match '^[JjYy]') { "true" } else { "false" }
+
+# Robust per venv-Python in config.json schreiben (vermeidet PS-JSON-Eigenheiten)
+$env:HIDDEN_JSON = '[' + (($hidden | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']'
+$env:ENABLE_API  = $enableApi
+$pyMerge = @"
+import json, os, pathlib
+p = pathlib.Path('config.json')
+cfg = {}
+if p.exists():
+    try: cfg = json.loads(p.read_text(encoding='utf-8'))
+    except Exception: cfg = {}
+cfg['hidden_tabs_default'] = json.loads(os.environ['HIDDEN_JSON'])
+cfg['enable_api'] = os.environ['ENABLE_API'] == 'true'
+p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+print('  ok: hidden_tabs_default=%s enable_api=%s' % (cfg['hidden_tabs_default'], cfg['enable_api']))
+"@
+if (Test-Path $pyVenv) { $pyMerge | & $pyVenv - } else { $pyMerge | & $pythonCmd - }
+Write-OK "Funktionsauswahl gespeichert"
+
 # ── 7. Desktop-Verknüpfung ────────────────────────────────────────────────────
 
 Write-Step "Desktop-Verknüpfung erstellen..."

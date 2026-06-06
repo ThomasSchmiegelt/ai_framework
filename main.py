@@ -64,6 +64,7 @@ PLANS_DIR = DATA_DIR / "plans"
 DOSSIERS_DIR = DATA_DIR / "dossiers"   # automatisch exportierte Planer-Recherche-Dossiers (.md)
 CODE_DIR = DATA_DIR / "code"
 JURIES_DIR = DATA_DIR / "juries"   # gespeicherte Bewertungs-Jurys (Gruppen von Agenten)
+JURY_DOCS_DIR = DATA_DIR / "jury_docs"   # im Jury-Tab erstellte/geprüfte Dokumente
 BILDER_DIR = Path(__file__).parent / "bilder"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
 PROFILE_ASSETS_DIR = DATA_DIR / "profile_assets"
@@ -72,8 +73,39 @@ PROJECTS_FILE = DATA_DIR / "projects.json"
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, PROFILE_ASSETS_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, PROFILE_ASSETS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
+
+# Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
+# auch bei einem eigenen Datenpfad verfügbar sind).
+DEFAULTS_DIR = Path(__file__).parent / "defaults"
+
+
+def _seed_defaults() -> None:
+    """Beim ersten Start einen leeren Agenten-Ordner mit den mitgelieferten
+    Standard-Agenten (``defaults/agents/``) befüllen. Wichtig, wenn ein eigener
+    Datenpfad (``config.json`` ``data_dir``) gewählt wurde – dort wird ``agents/``
+    sonst leer angelegt und es erscheinen keine Agenten. Einmalig per Marker, damit
+    bewusst gelöschte Agenten nicht beim nächsten Start wiederkehren."""
+    marker = AGENTS_DIR / ".seeded"
+    if marker.exists():
+        return
+    src_dir = DEFAULTS_DIR / "agents"
+    has_agents = any(AGENTS_DIR.glob("*.json"))
+    if src_dir.is_dir() and not has_agents:
+        for src in src_dir.glob("*.json"):
+            try:
+                (AGENTS_DIR / src.name).write_text(
+                    src.read_text(encoding="utf-8"), encoding="utf-8")
+            except Exception:
+                pass
+    try:
+        marker.write_text("seeded", encoding="utf-8")
+    except Exception:
+        pass
+
+
+_seed_defaults()
 
 # LLM-Abstraktion konfigurieren (lokal Ollama + ggf. externe API-Anbieter)
 _llm.set_config(OLLAMA_BASE, API_PROVIDERS_FILE)
@@ -283,8 +315,15 @@ _MODEL_ROLES = {
 # Optionale Tabs, die im Profil ein-/ausgeblendet werden können. Beim ERSTAUFRUF
 # (noch kein user_profile.json) sind sie alle ausgeblendet – der Nutzer schaltet
 # Gewünschtes im Profil frei.
-_OPTIONAL_TABS = {"rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph"}
-_DEFAULT_HIDDEN_TABS = ["rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph"]
+_OPTIONAL_TABS = {"rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph", "jury"}
+# Auf erstem Start verborgene optionale Tabs. Der Installer kann die Vorbelegung über
+# config.json ("hidden_tabs_default") setzen (P8); ungültige/unbekannte Tabs werden
+# herausgefiltert, Fallback ist „alle optionalen Tabs verbergen".
+_cfg_hidden = _CONFIG.get("hidden_tabs_default")
+if isinstance(_cfg_hidden, list):
+    _DEFAULT_HIDDEN_TABS = [t for t in _cfg_hidden if t in _OPTIONAL_TABS]
+else:
+    _DEFAULT_HIDDEN_TABS = ["rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph", "jury"]
 
 
 def _model_for(role: str) -> str:
@@ -4166,6 +4205,9 @@ async def get_profile():
     # Erstaufruf (noch kein Profil gespeichert): optionale Tabs standardmäßig aus.
     if not PROFILE_FILE.exists():
         p.setdefault("hidden_tabs", list(_DEFAULT_HIDDEN_TABS))
+    # Installer-Flag: ob externe KI-Anbieter (API) angeboten werden (read-only,
+    # aus config.json). Steuert nur die Sichtbarkeit des Anbieter-Abschnitts.
+    p["enable_api"] = bool(_CONFIG.get("enable_api", True))
     return p
 
 
@@ -5440,6 +5482,10 @@ async def create_backup():
         for fp in sorted(CODE_DIR.glob("*.json")):
             zf.write(fp, f"code/{fp.name}")
 
+        # Jury-Dokumente (Werkbank im Jury-Tab)
+        for fp in sorted(JURY_DOCS_DIR.glob("*.json")):
+            zf.write(fp, f"jury_docs/{fp.name}")
+
         # Branding-Assets (Logo, Vorlagen-Deckblatt, Vorlagen-Kopfzeile)
         for fp in sorted(PROFILE_ASSETS_DIR.glob("*")):
             if fp.is_file():
@@ -5604,6 +5650,25 @@ async def restore_backup(file: UploadFile = File(...)):
                     fp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                     stats.setdefault("code", 0)
                     stats["code"] += 1
+                except Exception as e:
+                    stats["errors"].append(f"{name}: {e}")
+
+            # Jury-Dokumente (überspringt bereits vorhandene per id)
+            for name in names:
+                if not name.startswith("jury_docs/") or not name.endswith(".json"):
+                    continue
+                try:
+                    data = json.loads(zf.read(name).decode("utf-8"))
+                    doc_id = data.get("id", "")
+                    if doc_id and _jury_doc_path_by_id(doc_id):
+                        continue
+                    if not doc_id:
+                        doc_id = _to_slug(data.get("name", "doc")) + "_" + uuid.uuid4().hex[:6]
+                        data["id"] = doc_id
+                    fp = JURY_DOCS_DIR / f"{_to_slug(data.get('name','doc'))}_{doc_id[-6:]}.json"
+                    fp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    stats.setdefault("jury_docs", 0)
+                    stats["jury_docs"] += 1
                 except Exception as e:
                     stats["errors"].append(f"{name}: {e}")
 
@@ -5806,6 +5871,181 @@ async def delete_code_program(prog_id: str):
         raise HTTPException(404, "Programm nicht gefunden")
     fp.unlink()
     return {"ok": True}
+
+
+# ── Jury-Dokumente (Werkbank im Jury-Tab: anzeigen, bearbeiten, speichern) ──────
+
+def _jury_doc_path_by_id(doc_id: str) -> Optional[Path]:
+    for f in JURY_DOCS_DIR.glob("*.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            if d.get("id") == doc_id:
+                return f
+        except Exception:
+            pass
+    return None
+
+
+@app.get("/api/jury-docs")
+async def list_jury_docs():
+    docs = []
+    for f in JURY_DOCS_DIR.glob("*.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            docs.append({"id": d["id"], "name": d.get("name", ""), "updated_at": d.get("updated_at", 0)})
+        except Exception:
+            pass
+    return sorted(docs, key=lambda x: x.get("updated_at", 0), reverse=True)
+
+
+@app.get("/api/jury-docs/{doc_id}")
+async def get_jury_doc(doc_id: str):
+    fp = _jury_doc_path_by_id(doc_id)
+    if not fp:
+        raise HTTPException(404, "Dokument nicht gefunden")
+    return json.loads(fp.read_text(encoding="utf-8"))
+
+
+@app.post("/api/jury-docs")
+async def save_jury_doc(req: Request):
+    body = await req.json()
+    name = str(body.get("name") or "Unbenannt").strip()
+    text = str(body.get("text") or "")
+    evaluation = body.get("evaluation")  # optional: zuletzt gespeicherte Bewertung
+    doc_id = str(body.get("id") or "").strip()
+    if not doc_id:
+        doc_id = (_to_slug(name) or "doc") + "_" + uuid.uuid4().hex[:6]
+    fp = _jury_doc_path_by_id(doc_id)
+    if not fp:
+        fp = JURY_DOCS_DIR / f"{_to_slug(name)}_{doc_id[-6:]}.json"
+    data = {"id": doc_id, "name": name, "text": text, "evaluation": evaluation,
+            "updated_at": time.time()}
+    fp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return data
+
+
+@app.delete("/api/jury-docs/{doc_id}")
+async def delete_jury_doc(doc_id: str):
+    fp = _jury_doc_path_by_id(doc_id)
+    if not fp:
+        raise HTTPException(404, "Dokument nicht gefunden")
+    fp.unlink()
+    return {"ok": True}
+
+
+# ── Hilfe-Wissensdatenbank + Hilfe-Agent (aus der mitgelieferten Doku) ──────────
+
+_HELP_DOC_FILES = [
+    "README.md", "BEDIENUNGSANLEITUNG.md",
+    "docs/ENTWICKLUNG.md", "docs/SERVER.md", "docs/PERSISTENZ.md",
+    "docs/TECHNISCHE_BESCHREIBUNG.md", "docs/PORTABLE.md",
+    "docs/INSTALL.md", "docs/GITHUB.md", "docs/LIZENZEN.md",
+]
+_HELP_COLLECTION_NAME = "Hilfe: LOCAL AI"
+_HELP_AGENT_ID = "hilfe_agent"
+
+
+def _help_agent_path() -> Optional[Path]:
+    for f in AGENTS_DIR.glob("*.json"):
+        try:
+            if json.loads(f.read_text(encoding="utf-8")).get("id") == _HELP_AGENT_ID:
+                return f
+        except Exception:
+            pass
+    return None
+
+
+@app.post("/api/help/build")
+async def help_build(req: Request):
+    """Liest die mitgelieferte Tool-Doku in eine RAG-Wissensdatenbank ein und legt
+    (oder aktualisiert) einen Hilfe-Agenten an, der ausschließlich daraus antwortet.
+    Idempotent: eine vorhandene Hilfe-Sammlung wird ersetzt (frische Doku)."""
+    from tools.rag import ingest_file
+    root = Path(__file__).parent
+
+    # vorhandene Hilfe-Sammlung(en) entfernen → frisch aufbauen
+    try:
+        for c in await _db.rag_list_collections():
+            if c.get("name") == _HELP_COLLECTION_NAME:
+                await _db.rag_delete_collection(c["id"])
+    except Exception:
+        pass
+
+    coll = {
+        "id": f"rag_{uuid.uuid4().hex[:12]}",
+        "name": _HELP_COLLECTION_NAME,
+        "embed_model": EMBED_MODEL,
+        "tier": "ausgewogen",
+        "chunk_size": 1000, "chunk_overlap": 150, "top_k": 6,
+        "embed_gpu": False, "clean": True, "char_limit": 6000,
+        "strictness": "korrekt", "created_at": time.time(),
+    }
+    await _db.rag_create_collection(coll)
+
+    ingested = 0
+    try:
+        for rel in _HELP_DOC_FILES:
+            fp = root / rel
+            if not fp.is_file():
+                continue
+            try:
+                text = fp.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            if not text.strip():
+                continue
+            await ingest_file(coll, text, rel, f"doc_{uuid.uuid4().hex[:12]}")
+            ingested += 1
+    except Exception as e:
+        await _db.rag_delete_collection(coll["id"])
+        raise HTTPException(
+            status_code=500,
+            detail=f"Einbetten fehlgeschlagen — ist das Embedding-Modell '{EMBED_MODEL}' gepullt? ({e})")
+
+    if not ingested:
+        await _db.rag_delete_collection(coll["id"])
+        raise HTTPException(status_code=404, detail="Keine Doku-Dateien gefunden.")
+
+    system_prompt = (
+        "Du bist der Hilfe-Assistent für die Anwendung „LOCAL AI“. Dir ist die komplette "
+        "Bedienungs- und Entwicklerdokumentation als Wissensdatenbank hinterlegt. Beantworte "
+        "Fragen zur Bedienung, zu Tabs/Funktionen und zur Einrichtung AUSSCHLIESSLICH anhand "
+        "der eingeblendeten Doku-Auszüge und nenne den jeweiligen Abschnitt/die Datei. Steht "
+        "etwas nicht in der Doku, sage das klar und rate nicht. Antworte präzise auf Deutsch."
+    )
+    existing = _help_agent_path()
+    if existing:
+        try:
+            data = json.loads(existing.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        data.update({
+            "id": _HELP_AGENT_ID, "name": data.get("name") or "Hilfe-Assistent",
+            "description": "Beantwortet Fragen zur Bedienung des Tools aus der mitgelieferten Doku.",
+            "system_prompt": system_prompt, "icon": "🆘", "category": "Hilfe",
+            "favorite": True, "rag_collections": [coll["id"]],
+        })
+        data.setdefault("tools", [])
+        existing.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        agent_id = _HELP_AGENT_ID
+    else:
+        agent = AgentDef(
+            id=_HELP_AGENT_ID,
+            name="Hilfe-Assistent",
+            description="Beantwortet Fragen zur Bedienung des Tools aus der mitgelieferten Doku.",
+            system_prompt=system_prompt,
+            tools=[],
+            icon="🆘",
+            category="Hilfe",
+            favorite=True,
+            rag_collections=[coll["id"]],
+        )
+        fp = _unique_agent_path(agent.name, exclude_id=agent.id)
+        fp.write_text(json.dumps(agent.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+        agent_id = agent.id
+
+    return {"ok": True, "rag_collection_id": coll["id"], "agent_id": agent_id,
+            "docs": ingested, "agent_name": "Hilfe-Assistent"}
 
 
 # ── Diagnose-Logging ──────────────────────────────────────────────────────────
@@ -6474,6 +6714,73 @@ def _mathe_sympy_facts(kind: str, sympy_str: str, goal: str) -> str:
         return ""
 
 
+async def _mathe_ground_facts(client, model, messages) -> str:
+    """Extrahiert die zentrale Aufgabe aus dem Gespräch und liefert die
+    SymPy-verifizierte Grundwahrheit als Fakten-String (oder "" wenn nichts
+    deterministisch prüfbar ist). Erwartet einen offenen httpx-Client, dessen
+    Modell bereits unter ``_model_session`` geladen wurde."""
+    transcript = _med_transcript(messages)  # gleiche Formatierung wie Medizin
+    if not transcript:
+        return ""
+    try:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "stream": False,
+            "messages": [
+                {"role": "system", "content": (
+                    "Extrahiere die zentrale mathematische Aufgabe aus dem Gespräch. "
+                    "Antworte NUR mit JSON in genau diesem Format, ohne weiteren Text: "
+                    '{"kind":"equation|expression|none","sympy":"<SymPy-auswertbarer Ausdruck, '
+                    'Gleichungen mit = , Potenz mit ** , keine Worte>","goal":"solve|factor|diff|'
+                    'integrate|simplify|none"}. Bei reinen Theorie-/Wortaufgaben ohne klaren '
+                    'Ausdruck: kind=none.')},
+                {"role": "user", "content": f"Gespräch:\n{transcript[:2000]}"},
+            ],
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "") or ""
+    except Exception:
+        return ""
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return ""
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return ""
+
+    kind = str(data.get("kind", "none")).strip().lower()
+    sympy_str = str(data.get("sympy", "")).strip()
+    goal = str(data.get("goal", "none")).strip().lower()
+    if not sympy_str or sympy_str.lower() in ("none", "null"):
+        return ""
+    return _mathe_sympy_facts(kind, sympy_str, goal)
+
+
+def _mathe_check_tokens(facts: str) -> list[str]:
+    """Zieht aus den SymPy-Fakten die numerischen Ergebnis-Tokens, gegen die eine
+    Modell-Lösung strikt geprüft werden kann (z. B. Gleichungslösungen)."""
+    toks: list[str] = []
+    for line in facts.splitlines():
+        if "[SymPy]" not in line or ":" not in line:
+            continue
+        val = line.split(":", 1)[1]
+        for piece in re.split(r"[\[\]\{\}(),=\s]+", val):
+            piece = piece.strip()
+            if re.fullmatch(r"-?\d+(?:\.\d+)?", piece):
+                toks.append(piece)
+    return list(dict.fromkeys(toks))
+
+
+def _mathe_solution_ok(text: str, tokens: list[str]) -> bool:
+    """True, wenn alle erwarteten Ergebnis-Tokens in der Modell-Lösung vorkommen."""
+    if not tokens:
+        return False
+    norm = re.sub(r"\s+", "", text or "")
+    return all(t in norm for t in tokens)
+
+
 @app.post("/api/mathe/ground")
 async def mathe_ground(req: Request):
     """Extrahiert die zentrale Aufgabe aus dem Tutor-Gespräch und liefert die
@@ -6482,50 +6789,84 @@ async def mathe_ground(req: Request):
     body = await req.json()
     messages = body.get("messages") or []
     model = _pick_model(body.get("model"), _model_for("general"))
-
-    transcript = _med_transcript(messages)  # gleiche Formatierung wie Medizin
-    if not transcript:
-        return {"facts": ""}
-
-    # Schritt 1: Aufgabe als SymPy-Ausdruck extrahieren (robustes JSON-Parsing)
-    try:
-        async with _model_session(model), httpx.AsyncClient(timeout=90) as client:
-            resp = await _llm.chat(client,{
-                "model": model, "think": False, "stream": False,
-                "messages": [
-                    {"role": "system", "content": (
-                        "Extrahiere die zentrale mathematische Aufgabe aus dem Gespräch. "
-                        "Antworte NUR mit JSON in genau diesem Format, ohne weiteren Text: "
-                        '{"kind":"equation|expression|none","sympy":"<SymPy-auswertbarer Ausdruck, '
-                        'Gleichungen mit = , Potenz mit ** , keine Worte>","goal":"solve|factor|diff|'
-                        'integrate|simplify|none"}. Bei reinen Theorie-/Wortaufgaben ohne klaren '
-                        'Ausdruck: kind=none.')},
-                    {"role": "user", "content": f"Gespräch:\n{transcript[:2000]}"},
-                ],
-            })
-            resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "") or ""
-    except Exception:
-        return {"facts": ""}
-
-    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-    m = re.search(r"\{[\s\S]*\}", raw)
-    if not m:
-        return {"facts": ""}
-    try:
-        data = json.loads(m.group(0))
-    except Exception:
-        return {"facts": ""}
-
-    kind = str(data.get("kind", "none")).strip().lower()
-    sympy_str = str(data.get("sympy", "")).strip()
-    goal = str(data.get("goal", "none")).strip().lower()
-    # kind wird vom Modell oft mit goal verwechselt → nicht hart darauf sperren.
-    # Es genügt ein auswertbarer Ausdruck; ohne solchen (Theorie/Wort) bleibt es leer.
-    if not sympy_str or sympy_str.lower() in ("none", "null"):
-        return {"facts": ""}
-    facts = _mathe_sympy_facts(kind, sympy_str, goal)
+    async with _model_session(model), httpx.AsyncClient(timeout=90) as client:
+        facts = await _mathe_ground_facts(client, model, messages)
     return {"facts": facts}
+
+
+_MATHE_VERIFY_ROUNDS = 2  # zusätzliche Korrekturrunden nach dem ersten Lösungsversuch
+
+
+@app.post("/api/mathe/solve-verified")
+async def mathe_solve_verified(req: Request):
+    """Agentischer Verifikationsloop (freie Adaption des „Agentic-AI + Simulink"-
+    Konzepts): das Modell löst die Aufgabe, die Lösung wird deterministisch mit
+    SymPy geprüft; weicht sie ab, fließt die SymPy-Wahrheit als Korrektur zurück
+    und das Modell rechnet erneut (max. _MATHE_VERIFY_ROUNDS Korrekturrunden).
+    Streamt SSE-Frames: stage (solve|verify|fix), text (Endlösung), done, error."""
+    body = await req.json()
+    messages = body.get("messages") or []
+    model = _pick_model(body.get("model"), _model_for("coding"))
+
+    async def gen():
+        try:
+            async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+                # 1) Deterministische Grundwahrheit
+                yield _sse({"type": "stage", "stage": "verify", "status": "start",
+                            "label": "SymPy-Grundwahrheit"})
+                facts = await _mathe_ground_facts(client, model, messages)
+                tokens = _mathe_check_tokens(facts) if facts else []
+                yield _sse({"type": "stage", "stage": "verify", "status": "done",
+                            "label": "SymPy-Grundwahrheit",
+                            "content": facts or "Keine deterministisch prüfbaren Fakten – nur Plausibilität."})
+
+                task = _med_transcript(messages)
+                solution = ""
+                verified = False
+                rounds = 0
+                for rnd in range(_MATHE_VERIFY_ROUNDS + 1):
+                    rounds = rnd + 1
+                    is_fix = rnd > 0
+                    label = "Korrektur" if is_fix else "Lösung"
+                    stage = "fix" if is_fix else "solve"
+                    yield _sse({"type": "stage", "stage": stage, "status": "start", "label": label})
+
+                    sys = ("Du bist ein sorgfältiger Mathe-Experte. Löse die Aufgabe Schritt für "
+                           "Schritt und gib am Ende das Endergebnis klar an. Formeln in LaTeX ($…$).")
+                    user = f"Aufgabe:\n{task}"
+                    if is_fix and facts:
+                        user += (f"\n\nDeine bisherige Lösung stimmt NICHT mit der deterministischen "
+                                 f"SymPy-Berechnung überein.\nSymPy-Fakten:\n{facts}\n\nBisherige Lösung:\n"
+                                 f"{solution}\n\nKorrigiere und gib die vollständige, korrekte Lösung mit "
+                                 f"dem richtigen Endergebnis an.")
+                    try:
+                        resp = await _llm.chat(client, {
+                            "model": model, "think": False, "stream": False,
+                            "messages": [{"role": "system", "content": sys},
+                                         {"role": "user", "content": user}],
+                        })
+                        resp.raise_for_status()
+                        solution = resp.json().get("message", {}).get("content", "") or ""
+                        solution = re.sub(r"<think>.*?</think>", "", solution, flags=re.DOTALL).strip()
+                    except Exception as e:
+                        yield _sse({"type": "error", "content": f"Modellfehler: {e}"})
+                        return
+                    yield _sse({"type": "stage", "stage": stage, "status": "done",
+                                "label": label, "content": solution})
+
+                    if not tokens:
+                        break  # nicht strikt prüfbar → erste Lösung steht
+                    if _mathe_solution_ok(solution, tokens):
+                        verified = True
+                        break
+
+                yield _sse({"type": "text", "content": solution})
+                yield _sse({"type": "done", "verified": verified, "checkable": bool(tokens),
+                            "rounds": rounds, "facts": facts})
+        except Exception as e:
+            yield _sse({"type": "error", "content": str(e)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────

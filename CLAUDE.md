@@ -39,7 +39,7 @@ Ollama must be running separately on `http://localhost:11434` with at least one 
 ## Architecture
 
 ```
-Frontend (Vanilla JS, 15 tabs) static/js/app.js, chat.js, canvas.js, ide.js, planner.js, medizin.js, mathe.js, dir_analysis.js, morph_box.js, jury.js, …
+Frontend (Vanilla JS, 16 tabs) static/js/app.js, chat.js, canvas.js, ide.js, planner.js, medizin.js, mathe.js, dir_analysis.js, morph_box.js, jury.js, …
        ↓ SSE streaming
 Backend (FastAPI)              main.py  (~5800 lines)
        ↓ tools/llm.py (unified)
@@ -96,6 +96,17 @@ SymPy expression (one LLM call), computes the **ground truth deterministically w
 via `parse_expr` transformations, and direct calls like `diff(...)`), and returns verified
 facts that `mathe.js` injects into the chat request so the tutor judges against truth instead
 of guessing. No grounding for pure theory/word problems → graceful fallback to plain Socratic.
+**Auto-Verifizieren (agentic SymPy loop):** a **`🔁 Auto-Verifizieren`** toggle (mutually
+exclusive with Tutor) routes to `POST /api/mathe/solve-verified` (SSE) instead of `/api/chat`.
+It runs a free adaptation of the „Agentic-AI + Simulink" idea entirely on MIT tooling: (1) the
+model solves the task, (2) the answer is checked deterministically against the SymPy ground
+truth (reuses `_mathe_ground_facts` → `_mathe_sympy_facts`; `_mathe_check_tokens` extracts the
+numeric solution tokens, `_mathe_solution_ok` checks containment), (3) on mismatch the SymPy
+facts flow back as a correction prompt and the model re-solves (max `_MATHE_VERIFY_ROUNDS`).
+SSE frames: `stage` (`{stage:solve|verify|fix, status, content}` → collapsible blocks in
+`mathe.js`), `text` (final answer), `done` (`{verified, checkable, rounds, facts}` → green
+„✓ verifiziert" / yellow / info badge). Non-numeric results (diff/integrate) aren't strictly
+checkable → first solution stands, facts shown as guidance.
 **Function plotting is deterministic, not model-driven:** `plot_function` is **not** offered
 to the model (small models emit invalid LaTeX escapes `\(…\)` in tool args → Ollama HTTP 500;
 filtered out of `active_tools` in `_chat_generator`). Instead `_chat_generator` detects a plot
@@ -224,6 +235,14 @@ and **💻 Programmieren** — that set the agent selector to `presenter` / `cod
 (toggling off → „Kein Agent"); they add the option on the fly if the agent isn't a
 favorite. `coder` and `presenter` ship as favorites by default.
 
+**Slash-Agent (one-shot override):** typing a leading `/<name>` in the chat input runs
+**only that message** through the matching agent without changing the selector. `chat.js`
+`_resolveSlashAgent` matches the token against agent `id`/`name` (exact, then prefix, then
+de-slugged name; e.g. `/mathe` → `mathe_experte`, `/Hilfe` → `hilfe_agent`), strips the
+`/<name>` prefix from the sent+displayed text, sets `agent_id` for that request only, and
+shows a „➜ Agent: … (nur diese Frage)" note above the answer (`insertAgentNote`). No match →
+toast warning, message sent normally.
+
 ### Tools (`tools/` package)
 
 | Module | Responsibilities |
@@ -250,9 +269,9 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 - `messages_fts` FTS5 virtual table for full-text search with auto-maintenance triggers
 - On startup, legacy JSON files in `data/conversations/` are migrated into SQLite automatically
 
-### Frontend Modules (15 tabs: Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail [🚧 in development], Planer, Matrix, Code, Verzeichnis-Analyse, Morph-Kasten, Logs)
+### Frontend Modules (16 tabs: Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail [🚧 in development], Planer, Matrix, Code, Verzeichnis-Analyse, Morph-Kasten, Jury, Logs)
 
-**Optional tabs / first-run defaults:** RAG, Code (`ide`), Mathe, Medizin, Mail, Logs, **Verzeichnis-Analyse (`diranalyse`)** and **Morphologischer Kasten (`morph`)** are *optional* and toggled in the profile (`#profile-tab-vis`, applied by `Profile.applyTabVisibility` → hides the `.tab-btn`; `switchTab` also guards). **On first run (no `user_profile.json`) all eight are hidden** — `GET /api/profile` and the `PUT` handler default `hidden_tabs` to `_DEFAULT_HIDDEN_TABS` when the field is absent (onboarding doesn't send it); the profile modal always sends an explicit `hidden_tabs`. In the profile each optional tab is its own checkbox (Code and Mathe are **separate**, `data-tabs="ide"` / `data-tabs="mathe"`); `profile.js` expands `data-tabs` (comma-split, deduped — a single box may still carry several tabs) on save and checks a box only if all its tabs are visible.
+**Optional tabs / first-run defaults:** RAG, Code (`ide`), Mathe, Medizin, Mail, Logs, **Verzeichnis-Analyse (`diranalyse`)**, **Morphologischer Kasten (`morph`)** and **Jury (`jury`)** are *optional* and toggled in the profile (`#profile-tab-vis`, applied by `Profile.applyTabVisibility` → hides the `.tab-btn`; `switchTab` also guards). **On first run (no `user_profile.json`) all nine are hidden** — `GET /api/profile` and the `PUT` handler default `hidden_tabs` to `_DEFAULT_HIDDEN_TABS` when the field is absent (onboarding doesn't send it); the profile modal always sends an explicit `hidden_tabs`. The installer can pre-seed `_DEFAULT_HIDDEN_TABS` via `config.json` `hidden_tabs_default` (see Deployment Variants). In the profile each optional tab is its own checkbox (Code and Mathe are **separate**, `data-tabs="ide"` / `data-tabs="mathe"`); `profile.js` expands `data-tabs` (comma-split, deduped — a single box may still carry several tabs) on save and checks a box only if all its tabs are visible.
 
 - `app.js` — Global state, model loading, tab switching, backup/restore, module init
 - `chat.js` — SSE streaming consumer, message rendering, file uploads, conversation rename/import. Renders `rag`/`adaptive` SSE frames as info bars above the answer; markdown links get `target="_blank"`. **Math:** `renderMarkdown` registers a KaTeX **marked extension** (`_ensureMathExtension`, lazy once `katex` is loaded; also on `window._ensureKatexMarked` for other modules) so formulas (`$…$`/`$$…$$`/`\(…\)`/`\[…\]`) are rendered *during* markdown parsing — marked never sees/mangles the LaTeX. (The earlier post-parse auto-render approach broke on `_`/`\`.) **Citation linkifier:** `linkifyCitations` walks text nodes (skipping `a`/`code`/`pre`) and turns recognized norms (DIN/EN/ISO/IEC/VDI/VDE/ASTM) and German law refs (`§/Art. … <ABK>`) into links — laws → deterministic `gesetze-im-internet.de/<abk>/__<n>.html`, norms → DIN-Media search. **Auto-compression:** when enabled in the profile (`auto_compress`, `compress_overflow_chars`, `compress_idle_min`), it calls the existing `/api/conversations/{id}/compress` on overflow (after a response) or on idle-timer, on the currently open conversation, with a notification toast
@@ -262,7 +281,7 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 - `research.js` — Aspect-based search with sources + DOCX export with header image
 - `doc_generator.js` — Dokumentengenerator tab (`docgen`): generate documents (e.g. a funding application) with a **document agent** (any agent; those with category `Dokumentation` are listed first) optionally grounded in one or more RAG bases. Posts to `/api/chat` (`agent_id` + `rag_collections` + optional `science`), renders the streamed Markdown (with KaTeX/links), and exports via `/api/export/docx` or back into a RAG base (`RAG.ingestText`). Document agents are created in the normal 🤖 Agenten tab — no separate agent store. **Quellmaterial (source material):** the task can be grounded on (a) **uploaded external documents** (`/api/upload` → attached as `files[]` on the chat message, server extracts the text), (b) a **dossier** picked from the Planer-Recherche dossiers (`GET /api/dossiers` list + `GET /api/dossiers/load?id=` content, path-traversal-guarded), and (c) **pasted text** — all appended as „Quellmaterial" context to the brief. „Text übernehmen" (`_usePasted`) instead loads pasted text *directly* as the finished document. The chat toolbar's **→ Doku** button (`chatToDocGen` in `app.js`) hands the current conversation as compressed source material to `DocGen.loadFromChat()` and switches to this tab (e.g. to plan a meeting from a chat). `DocGen.showResult(text)` renders an externally produced document into the output pane and reveals the export buttons (used by the refine loop below).
 - `refine.js` — **Verfeinerungsschleife** (multi-agent), visually integrated at the bottom of the Dokumente tab (`#refine-section`, CSS-classed to match the generator, no white textarea). Its input is a **source toggle** (no own text field): „Erzeugtes Dokument" (`DocGen.getText()`) or „Bestehender Text" (`#docgen-paste`). The agent dropdowns list **favorites only** (like the document-agent selector). Iterates a document through the selected agents via `POST /api/refine-document` until the change rate falls below the threshold; the result is pushed back into the generated-document pane via `DocGen.showResult()` (export handled there). Model = `Profile.modelFor('general')`.
-- `rag.js` — RAG tab ("Wissensdatenbanken"): create/delete knowledge bases via two **sliders** — "schnell ↔ gründlich" (maps to chunk size/overlap/top-k/char_limit presets in `rag.js`) and "kreativ ↔ korrekt" (`strictness`) — plus a cleanup toggle and a prominent "📚 Wissensdatenbank anlegen" button. Upload documents and move/copy a conversation into a base (`/api/rag/collections/{id}/from-conversation`). In chat, the `📚 RAG` toggle + multi-select inject retrieved passages; the RAG system instruction wording follows the strictest selected base's `strictness`; a `rag` SSE frame shows the used sources (rendered by `chat.js`). Each base's document list is **collapsible** (native `<details>`, open by default when ≤4 docs)
+- `rag.js` — RAG tab ("Wissensdatenbanken"): create/delete knowledge bases via two **sliders** — "schnell ↔ gründlich" (maps to chunk size/overlap/top-k/char_limit presets in `rag.js`) and "kreativ ↔ korrekt" (`strictness`) — plus a cleanup toggle and a prominent "📚 Wissensdatenbank anlegen" button. Upload documents and move/copy a conversation into a base (`/api/rag/collections/{id}/from-conversation`). In chat, the `📚 RAG` toggle + multi-select inject retrieved passages; the RAG system instruction wording follows the strictest selected base's `strictness`; a `rag` SSE frame shows the used sources (rendered by `chat.js`). Each base's document list is **collapsible** (native `<details>`, open by default when ≤4 docs). **Hilfe-Wissensdatenbank:** a `🆘 Hilfe-Wissensdatenbank erstellen/aktualisieren` button (`_buildHelp` → `POST /api/help/build`) ingests the shipped tool documentation (`README.md`, `BEDIENUNGSANLEITUNG.md`, `docs/*.md`) into a `Hilfe: LOCAL AI` collection and creates/refreshes a favourite **`hilfe_agent`** (🆘, bound to that base) — idempotent (old collection replaced, single agent), then reachable in chat via `/Hilfe …`.
 - `planner.js` — Network diagram / CPM, zoom/pan, CSV im/export; AI (derive project agent, generate full plan, suggest predecessors/successors, detail a task, **insert task between two** via `/api/plans/insert-between`); structured resources with cost/rollup + lead time, resource catalog (import/export, free/extend/strict). Structure tools: stable task IDs with cascade-rename + separate computed **execution-order column (#)**, link-consistency normalizer (symmetric, dedup), delete-with-rebridge, **🔁 replace** task (by existing → inherits links, or new), **✨ Mach schön** (normalize + sort by order + redraw), **📅 Bestellplan** (resource schedule: needed-on = task ES, order-by = ES − lead, against project start date, optional **workdays** mode skipping weekends). Warnings line (`#planner-warn`) flags **cycles** (Kahn-unreached tasks) and **resource conflicts** (same human/hardware in overlapping ES…EF windows; also shown in the Bestellplan modal). The task table ↔ network-diagram split is a **draggable splitter** (`#planner-splitter`, `_initSplitter`; width persisted in `localStorage`, double-click resets) — the existing `ResizeObserver` on the canvas redraws automatically.
 - `matrix_research.js` — Research matrix with live `localStorage` save + CSV im/export
 - `presentation_assistant.js` — Table-based presentation builder (slide-by-slide generation)
@@ -270,9 +289,9 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 - `json_editor.js` — JSON-Editor: open file, live validation (line/column), format, download (for repairing broken JSON files). **Now a sub-view** of the merged **💻 Code** tab (no standalone tab); the IDE-panel has a sub-tab bar (`#code-subtabs`, switched in `app.js`) toggling `#code-view-ide` ↔ `#code-view-json`. IDs unchanged, so `JsonEditor.init()` still binds normally.
 - `ide.js` — Code-IDE: editor + sandboxed-iframe Canvas preview, AI assistant (uses the profile **Programmieren / Mathe** model via `Profile.modelFor('coding')` — shared with the Mathe tab, fallback `ministral-3:3b`), auto-repair. Provides the `ai_framework_thomas_input()` / `ai_framework_thomas_run()` iframe framework so generated programs get interactive input fields and a responsive canvas. The editor ↔ preview columns have a **draggable splitter** (`#ide-splitter`, `_initSplitter`; left width via the `--ide-left-w` CSS var on `#ide-body`, persisted in `localStorage`, double-click resets).
 - `medizin.js` — 🩺 Medizin tab: 2-model consultation **pipeline** (`_sendPipeline` → `/api/medizin/consult`) with collapsible stage blocks (`refine/analyze/formulate/final`), follow-up `question` handling (`_round`, max 2), `🗣 In einfaches Deutsch übersetzen` (`/api/medizin/translate`), plus a plain single-model fallback (`_sendSimple`) toggled by `🔬 Experten-Pipeline`. Patient files = RAG collections named `Patient:…` (create/upload inline in the topbar).
-- `mathe.js` — 🔢 Mathe tab: solver via the `mathe_experte` agent, or `🎓 Tutor-Modus` via the `mathe_tutor` agent with **deterministic SymPy grounding** (`/api/mathe/ground` facts injected into the chat request) + `💡 Lösung zeigen`. Model = `Profile.modelFor('coding')` (shared with Code, no own selector); LaTeX always on; the Plot toggle + Tutor/Lösung buttons sit in a toolbar at the chat input row. Renders `image` plot frames inline (full `data:` URI as-is), offers LaTeX/PDF export when the answer contains `$`.
+- `mathe.js` — 🔢 Mathe tab: solver via the `mathe_experte` agent, `🎓 Tutor-Modus` via the `mathe_tutor` agent with **deterministic SymPy grounding** (`/api/mathe/ground` facts injected) + `💡 Lösung zeigen`, or `🔁 Auto-Verifizieren` (mutually exclusive with Tutor) via `/api/mathe/solve-verified` (`_sendVerified` renders `stage` blocks + a verified/warn badge; see the Mathe tab backend section). Model = `Profile.modelFor('coding')` (shared with Code, no own selector); LaTeX always on; Plot/Tutor/Auto-Verifizieren/Lösung buttons sit in a toolbar at the chat input row. Renders `image` plot frames inline (full `data:` URI as-is), offers LaTeX/PDF export when the answer contains `$`.
 - `dir_analysis.js` — 📁 Verzeichnis-Analyse tab: enter a **server-side folder path** → `POST /api/dir/scan` (structure tree + KI overview + flagged „interesting" files), click a file → `POST /api/dir/analyze-file` (deep Markdown analysis), then „📥 Index speichern" / „📚 In Wissensdatenbank" → `POST /api/dir/finalize` (writes `_KI_INDEX.md` back into the folder, optionally a `Verzeichnis: <name>` RAG base). **Personal data in file contents is ALWAYS anonymized — mandatory, not switchable** (the backend forces `anonymize=True` and ignores any client flag); an optional `+ KI-Namenssuche` checkbox adds a slower LLM-NER pass that only finds *additional* names. **File analyses run through a client-side serial queue** (`_queue`/`_processQueue`, one at a time) — the VRAM lock serializes them server-side anyway, and firing them in parallel made idle connections abort as „Failed to fetch". Failed analyses show a `↻ Erneut` retry button. Model = `Profile.modelFor('general')`; last path in `localStorage`. Optional tab, hidden by default — do not enable in multi-user/server mode (arbitrary paths are read/written).
-- `morph_box.js` — 🧩 Morphologischer Kasten (Zwicky box) tab: ideation grid of parameters (rows) × values (chips). KI: `🤖 Parameter generieren` (`/api/morph/generate`), `📊 Kombination bewerten` (`/api/morph/evaluate` → score/Machbarkeit/Innovation bars + suggested combinations to apply), per-chip `✨ ausformulieren` / `💬 Alternativen` (`/api/morph/refine-cell`). A selection = one chip per parameter (click to (de)select, double-click to edit). State (`_problem`/`_params`/`_selection`) persists in `localStorage`; CSV im/export; export the chosen solution via DOCX (`/api/export/docx`), → Doku (`DocGen.showResult`) or Wissensdatenbank (`RAG.ingestText`). Model = `Profile.modelFor('general')`.
+- `morph_box.js` — 🧩 Morphologischer Kasten (Zwicky box) tab: ideation grid of parameters (rows) × values (chips). KI: `🤖 Parameter generieren` (`/api/morph/generate`), `📊 Kombination bewerten` (`/api/morph/evaluate` → score/Machbarkeit/Innovation bars + suggested combinations to apply), per-chip `✨ ausformulieren` / `💬 Alternativen` (`/api/morph/refine-cell`). A selection = one chip per parameter — single-click (de)selects (debounced 180 ms so a **double-click edits in place** instead; `_editChip` commits once via a guard, Escape cancels, no select-conflict). **`💾 Lösung + Bewertung merken`** stores the current combo + last evaluation in a `_solutions` store (`localStorage`), shown as a list with score bars (load/delete). Export: **`🧠 Trainingsfile (JSONL)`** (one chat-format line per saved solution for LLM-finetuning) and **`📊 Auswertung (CSV)`** (solution × scores × chosen values), plus the chosen solution via DOCX (`/api/export/docx`), → Doku (`DocGen.showResult`) or Wissensdatenbank (`RAG.ingestText`). All export is client-side. Model = `Profile.modelFor('general')`.
 - `onboarding.js` — First-run wizard: shown when `user_profile.json` is absent (or profile flag set). Slide 1 is an interactive form (name, custom mode definition); slides 2–14 are info screens with screenshots (incl. Medizin and Mathe). On finish, saves the profile and launches in custom mode.
 - `logger.js` — Diagnostic logger UI (toggle, filter, download)
 - `profile.js` / `projects.js` — User profile (incl. the four model roles `Profile.modelFor`, and tab visibility via `data-tabs` checkboxes) and project management
@@ -281,11 +300,11 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 
 `GET /api/backup` builds a ZIP of **all** user data: `profile.json`, `projects.json`,
 conversations (from SQLite), `plans/`, `agents/` (incl. `favorite`), `juries/`, `code/`,
-**`profile_assets/`** (logo/cover/header), and **`rag/collections.json`** — a full
+`jury_docs/`, **`profile_assets/`** (logo/cover/header), and **`rag/collections.json`** — a full
 dump of the RAG knowledge bases incl. documents, chunks and float32 embeddings
 (base64-encoded). **`api_providers.json` is deliberately excluded** (contains API keys).
 `POST /api/restore` re-imports everything: profile/assets overwrite;
-projects merge; plans skip by name; agents/juries/code skip by existing id; **RAG collections
+projects merge; plans skip by name; agents/juries/code/jury_docs skip by existing id; **RAG collections
 skip by existing id**; conversations are always added as new (re-restoring duplicates
 them). DB helpers `rag_export()` / `rag_collection_exists()` / `rag_import_collection()`
 live in `db.py`. `app.js` shows per-category counts in the restore toast and reloads
@@ -327,13 +346,24 @@ risiken[], empfehlung}`. After all members a **synthesis** call (general model) 
 `summary` frame `{gesamturteil, score, konsens, hauptkritik[], empfehlungen[]}` (fallback
 score = mean of member scores), then `done`. Reuses `_parse_llm_json` + `_sse`.
 
-**Frontend (`jury.js`, no new tab):** management modal opened from the 🤖 Agenten tab
+**Frontend (`jury.js`):** management modal opened from the 🤖 Agenten tab
 (`#btn-juries`) to create/edit juries (member checkboxes, legal/favourite agents first);
 a reusable overlay **`Jury.evaluate(text, {title, context})`** streams the verdicts/summary
-as cards. Wired into workflows via buttons: **Dokumente** (`#btn-docgen-jury` → checks the
-generated document), the **agent edit modal** (`#btn-agent-prompt-jury` → checks the
-system-prompt field), and the **Planer** (`#btn-planner-agent-jury` → checks the derived
-project-agent prompt with the project description as context).
+as cards (shared streamer `_streamEval`). Wired into workflows via buttons: **Dokumente**
+(`#btn-docgen-jury` → checks the generated document), the **agent edit modal**
+(`#btn-agent-prompt-jury` → checks the system-prompt field), and the **Planer**
+(`#btn-planner-agent-jury` → checks the derived project-agent prompt with the project
+description as context).
+
+**Dedicated ⚖️ Jury tab (document workbench):** the optional `jury` tab (`#jury-panel`,
+in `_OPTIONAL_TABS`) is a document workbench: left = jury list + saved-document list;
+right = an editable document (textarea + 👁 markdown preview) with „⚖️ Mit Jury prüfen"
+(runs `_streamEval` inline into `#jury-tab-eval`), „💾 Speichern", and export to DOCX /
+→ Doku (`DocGen.showResult`) / → Wissensdatenbank (`RAG.ingestText`). Documents persist
+in **`data/jury_docs/`** (`{id, name, text, evaluation?, updated_at}`) via CRUD
+`GET/POST/PUT/DELETE /api/jury-docs` (file-based like `data/code/`), in backup/restore
+(skip-by-id), gitignored. `Jury.loadDocument(name, text)` hands an external text into the
+tab. Draggable splitter `#jury-tab-splitter` (Planer pattern).
 
 ### Data File Formats (`data/`)
 
@@ -344,6 +374,8 @@ project-agent prompt with the project description as context).
 | `data/plans/<slug>_<id8>.json` | `{id, name, description, system_prompt, resource_mode, resource_catalog[], start_date, workdays, tasks[{id, name, duration, predecessors[], successors[], resource_list[], is_start, is_end, notes}]}` |
 | `data/code/<slug>_<id6>.json` | `{id, name, code, updated_at}` |
 | `data/juries/<slug>_<id6>.json` | `{id, name, description, member_agent_ids[], created_at}` — in backup, gitignored |
+| `data/jury_docs/<slug>_<id6>.json` | `{id, name, text, evaluation?, updated_at}` — Jury-Tab-Dokumente; in backup (skip-by-id), gitignored |
+| `defaults/agents/<slug>.json` | shipped default agents (read-only seed source for `_seed_defaults`); committed |
 | `data/user_profile.json` | user name/company/position + mode, lang, tone, **model roles** (`model_general/coding/science/medical`), **`hidden_tabs`** (optional tabs hidden; defaults to all eight on first run), etc. |
 | `data/api_providers.json` | `[{id, name, base_url, api_key, models[]}]` external OpenAI-compatible providers — **contains API keys → not in backup/git/bundles** |
 | `data/mail.json` | `{protocol, host, port, user, ssl, password}` — **not** in backup/git |
@@ -368,6 +400,21 @@ Python: FastAPI, Uvicorn, httpx, ddgs, pypdf, python-docx, openpyxl, python-pptx
 No frontend build step — plain HTML/CSS/JS served directly by FastAPI's `StaticFiles`.
 
 ## Deployment Variants
+
+**Installer feature selection (`install.sh` / `install.bat` → `install.ps1`):** the
+installers interactively ask which optional tabs to enable and whether to allow external
+**API** providers (local-only vs. local+API), then write the choices into `config.json`:
+`hidden_tabs_default` (the NOT-enabled optional tabs; consumed by `_DEFAULT_HIDDEN_TABS`
+on first run) and `enable_api` (a read-only flag returned by `GET /api/profile`;
+`profile.js` hides `#provider-section` when false — default `true`). The JSON merge is done
+by Python in both scripts (avoids PowerShell's single-element-array quirk). Non-interactive
+runs (no TTY) leave the defaults unchanged.
+
+**Default-agent seeding (`_seed_defaults()` in `main.py`):** the shipped default agents live
+in **`defaults/agents/`** (separate from `DATA_DIR`). On startup, if `AGENTS_DIR` is empty and
+has no `.seeded` marker, they are copied in — this fixes „agents vanish when a custom
+`data_dir` is chosen" (the new dir was created empty and never populated) and also seeds fresh
+installs. The marker prevents deliberately deleted agents from reappearing.
 
 Three installation variants exist (each has a `.bat` and `.ps1` script pair):
 - `install` — Standard: Python 3.12 via winget + Ollama + venv

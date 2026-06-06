@@ -211,6 +211,44 @@ const DirAnalysis = (() => {
     }
   }
 
+  // Ziehbarer Trenner zwischen Liste und Detailbereich (Planer-Muster)
+  const LS_SPLIT = 'dir_left_w';
+  function _initSplitter() {
+    const splitter = _el('dir-splitter');
+    const left     = _el('dir-left');
+    const body     = _el('dir-body');
+    if (!splitter || !left || !body) return;
+    const saved = parseInt(localStorage.getItem(LS_SPLIT) || '', 10);
+    if (saved > 0) left.style.width = saved + 'px';
+
+    const _apply = (clientX) => {
+      const rect = body.getBoundingClientRect();
+      let w = clientX - rect.left;
+      const max = rect.width - 260;            // Detailbereich mind. ~260px
+      w = Math.max(280, Math.min(w, max));     // Liste mind. 280px
+      left.style.width = w + 'px';
+    };
+    const _onMove = (e) => _apply(e.clientX);
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      localStorage.setItem(LS_SPLIT, String(parseInt(left.style.width, 10) || 0));
+    };
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+    splitter.addEventListener('dblclick', () => {
+      left.style.width = '';
+      localStorage.removeItem(LS_SPLIT);
+    });
+  }
+
   function init() {
     const last = localStorage.getItem(LS_PATH);
     if (last && _el('dir-path')) _el('dir-path').value = last;
@@ -218,6 +256,7 @@ const DirAnalysis = (() => {
     _el('dir-path')?.addEventListener('keydown', e => { if (e.key === 'Enter') _scanDir(); });
     _el('btn-dir-save')?.addEventListener('click', () => _finalize(false));
     _el('btn-dir-save-rag')?.addEventListener('click', () => _finalize(true));
+    _initSplitter();
   }
 
   return { init };

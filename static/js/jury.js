@@ -153,57 +153,292 @@ const Jury = (() => {
   }
   function _closeEval() { if (!_running) _el('jury-eval-overlay').classList.remove('active'); }
 
+  // Gemeinsamer Streamer: bewertet `text` mit Jury `jid` und rendert die Karten in
+  // `bodyEl`. Liefert {members:[], summary} zurück (für „Bewertung mitspeichern").
+  async function _streamEval(jid, text, context, bodyEl) {
+    bodyEl.innerHTML = '';
+    const out = { members: [], summary: null };
+    const card = (html) => { const d = document.createElement('div'); d.className = 'jury-card'; d.innerHTML = html; bodyEl.appendChild(d); return d; };
+    const resp = await fetch('/api/jury/evaluate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jury_id: jid, text, context: context || '' }),
+    });
+    if (!resp.ok || !resp.body) throw new Error('Bewertung fehlgeschlagen');
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const pending = {};   // agent → card element (start → done)
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        if (!line.startsWith('data:')) continue;
+        let f; try { f = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
+        if (f.type === 'member' && f.status === 'start') {
+          pending[f.agent] = card(`<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong> <span class="planner-muted">bewertet…</span></div>`);
+        } else if (f.type === 'member' && f.status === 'done') {
+          (pending[f.agent] || card('')).innerHTML = _memberHtml(f);
+          out.members.push(f);
+        } else if (f.type === 'member' && f.status === 'error') {
+          const el = pending[f.agent] || card('');
+          el.innerHTML = `<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong></div><div style="color:var(--danger,#e66);font-size:12.5px">Fehler: ${_esc(f.message)}</div>`;
+        } else if (f.type === 'summary') {
+          card(_summaryHtml(f)).classList.add('jury-summary');
+          out.summary = f;
+        } else if (f.type === 'error') {
+          card(`<div style="color:var(--danger,#e66)">${_esc(f.message)}</div>`);
+        }
+      }
+    }
+    return out;
+  }
+
   async function _runEval() {
     if (_running || !_evalCtx) return;
     const jid = _el('jury-eval-select').value;
     if (!jid) { if (typeof showToast === 'function') showToast('Keine Jury gewählt'); return; }
-    const body = _el('jury-eval-body');
-    body.innerHTML = '';
     _running = true;
     _el('btn-jury-eval-run').disabled = true;
-
-    const card = (html) => { const d = document.createElement('div'); d.className = 'jury-card'; d.innerHTML = html; body.appendChild(d); return d; };
     try {
-      const resp = await fetch('/api/jury/evaluate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jury_id: jid, text: _evalCtx.text, context: _evalCtx.context }),
-      });
-      if (!resp.ok || !resp.body) throw new Error('Bewertung fehlgeschlagen');
-      const reader = resp.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      const pending = {};   // agent → card element (start → done)
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf('\n\n')) >= 0) {
-          const line = buf.slice(0, idx); buf = buf.slice(idx + 2);
-          if (!line.startsWith('data:')) continue;
-          let f; try { f = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
-          if (f.type === 'member' && f.status === 'start') {
-            pending[f.agent] = card(`<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong> <span class="planner-muted">bewertet…</span></div>`);
-          } else if (f.type === 'member' && f.status === 'done') {
-            const el = pending[f.agent] || card('');
-            el.innerHTML = _memberHtml(f);
-          } else if (f.type === 'member' && f.status === 'error') {
-            const el = pending[f.agent] || card('');
-            el.innerHTML = `<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong></div><div style="color:var(--danger,#e66);font-size:12.5px">Fehler: ${_esc(f.message)}</div>`;
-          } else if (f.type === 'summary') {
-            const s = card(_summaryHtml(f));
-            s.classList.add('jury-summary');
-          } else if (f.type === 'error') {
-            card(`<div style="color:var(--danger,#e66)">${_esc(f.message)}</div>`);
-          }
-        }
-      }
+      await _streamEval(jid, _evalCtx.text, _evalCtx.context, _el('jury-eval-body'));
     } catch (e) {
-      body.innerHTML += `<div style="color:var(--danger,#e66)">Fehler: ${_esc(e.message)}</div>`;
+      _el('jury-eval-body').innerHTML += `<div style="color:var(--danger,#e66)">Fehler: ${_esc(e.message)}</div>`;
     } finally {
       _running = false;
       _el('btn-jury-eval-run').disabled = false;
     }
+  }
+
+  // ── Jury-Tab: Dokument-Werkbank (sehen, bearbeiten, prüfen, speichern) ──────
+  let _docs = [];
+  let _curDocId = null;
+  let _lastTabEval = null;
+
+  async function openTab() {
+    await _fetchAll();
+    _renderTabJuryList();
+    _fillDocJurySelect();
+    await _loadDocs();
+  }
+
+  function _renderTabJuryList() {
+    const box = _el('jury-tab-jurylist');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!_juries.length) {
+      box.innerHTML = '<span class="planner-muted" style="font-size:12px">Noch keine Jury – „Jurys verwalten".</span>';
+      return;
+    }
+    for (const j of _juries) {
+      const row = document.createElement('div');
+      row.className = 'jury-tab-listitem';
+      row.innerHTML = `<span>⚖️ ${_esc(j.name)} <span class="planner-muted">(${(j.member_agent_ids || []).length})</span></span>`;
+      row.addEventListener('click', () => { const s = _el('jury-doc-jury'); if (s) s.value = j.id; });
+      box.appendChild(row);
+    }
+  }
+
+  function _fillDocJurySelect() {
+    const sel = _el('jury-doc-jury');
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '';
+    if (!_juries.length) {
+      sel.innerHTML = '<option value="">— keine Jury —</option>';
+      return;
+    }
+    for (const j of _juries) {
+      const opt = document.createElement('option');
+      opt.value = j.id; opt.textContent = `${j.name} (${(j.member_agent_ids || []).length})`;
+      sel.appendChild(opt);
+    }
+    if (prev) sel.value = prev;
+  }
+
+  async function _loadDocs() {
+    try { _docs = await (await fetch('/api/jury-docs')).json(); } catch (_) { _docs = []; }
+    _renderDocList();
+  }
+
+  function _renderDocList() {
+    const box = _el('jury-tab-doclist');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!_docs.length) {
+      box.innerHTML = '<span class="planner-muted" style="font-size:12px">Noch keine Dokumente.</span>';
+      return;
+    }
+    for (const d of _docs) {
+      const row = document.createElement('div');
+      row.className = 'jury-tab-listitem' + (d.id === _curDocId ? ' active' : '');
+      row.innerHTML = `<span>📄 ${_esc(d.name || 'Unbenannt')}</span>`;
+      const del = document.createElement('button');
+      del.className = 'export-btn'; del.textContent = '✕'; del.style.marginLeft = 'auto';
+      del.addEventListener('click', (e) => { e.stopPropagation(); _deleteDoc(d.id); });
+      row.addEventListener('click', () => _loadDoc(d.id));
+      row.appendChild(del);
+      box.appendChild(row);
+    }
+  }
+
+  async function _loadDoc(id) {
+    try {
+      const d = await (await fetch('/api/jury-docs/' + encodeURIComponent(id))).json();
+      _curDocId = d.id;
+      _lastTabEval = d.evaluation || null;
+      if (_el('jury-doc-name')) _el('jury-doc-name').value = d.name || '';
+      if (_el('jury-doc-text')) _el('jury-doc-text').value = d.text || '';
+      _el('jury-tab-eval').innerHTML = '';
+      _refreshPreview();
+      _renderDocList();
+    } catch (e) { if (typeof showToast === 'function') showToast('Laden fehlgeschlagen: ' + e.message); }
+  }
+
+  function _newDoc() {
+    _curDocId = null; _lastTabEval = null;
+    if (_el('jury-doc-name')) _el('jury-doc-name').value = '';
+    if (_el('jury-doc-text')) _el('jury-doc-text').value = '';
+    _el('jury-tab-eval').innerHTML = '';
+    _refreshPreview();
+    _renderDocList();
+    _el('jury-doc-text')?.focus();
+  }
+
+  async function _saveDoc() {
+    const name = (_el('jury-doc-name')?.value || '').trim() || 'Unbenannt';
+    const text = _el('jury-doc-text')?.value || '';
+    try {
+      const d = await (await fetch('/api/jury-docs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: _curDocId, name, text, evaluation: _lastTabEval }),
+      })).json();
+      _curDocId = d.id;
+      await _loadDocs();
+      if (typeof showToast === 'function') showToast('✓ Dokument gespeichert');
+    } catch (e) { if (typeof showToast === 'function') showToast('Speichern fehlgeschlagen: ' + e.message); }
+  }
+
+  async function _deleteDoc(id) {
+    if (!confirm('Dokument löschen?')) return;
+    try {
+      await fetch('/api/jury-docs/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (id === _curDocId) _newDoc();
+      await _loadDocs();
+    } catch (_) {}
+  }
+
+  async function _checkDoc() {
+    if (_running) return;
+    const text = (_el('jury-doc-text')?.value || '').trim();
+    if (!text) { if (typeof showToast === 'function') showToast('Kein Text zum Bewerten'); return; }
+    const jid = _el('jury-doc-jury')?.value;
+    if (!jid) { if (typeof showToast === 'function') showToast('Keine Jury gewählt'); return; }
+    _running = true;
+    _el('btn-jury-doc-check').disabled = true;
+    try {
+      const res = await _streamEval(jid, text, '', _el('jury-tab-eval'));
+      _lastTabEval = res.summary || null;
+    } catch (e) {
+      _el('jury-tab-eval').innerHTML += `<div style="color:var(--danger,#e66)">Fehler: ${_esc(e.message)}</div>`;
+    } finally {
+      _running = false;
+      _el('btn-jury-doc-check').disabled = false;
+    }
+  }
+
+  function _refreshPreview() {
+    const on = _el('jury-doc-preview-toggle')?.checked;
+    const ta = _el('jury-doc-text');
+    const pv = _el('jury-doc-preview');
+    if (!ta || !pv) return;
+    if (on) {
+      ta.style.display = 'none';
+      pv.style.display = 'block';
+      if (typeof marked !== 'undefined') {
+        if (window._ensureKatexMarked) window._ensureKatexMarked();
+        pv.innerHTML = marked.parse(ta.value || '', { gfm: true, breaks: true });
+        pv.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      } else { pv.textContent = ta.value || ''; }
+    } else {
+      ta.style.display = 'block';
+      pv.style.display = 'none';
+    }
+  }
+
+  function _docDocx() {
+    const name = (_el('jury-doc-name')?.value || 'Dokument').trim();
+    const text = _el('jury-doc-text')?.value || '';
+    fetch('/api/export/docx', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'document', title: name, content: text }),
+    }).then(r => r.blob()).then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = (name || 'dokument') + '.docx';
+      a.click(); URL.revokeObjectURL(a.href);
+    }).catch(e => { if (typeof showToast === 'function') showToast('Export fehlgeschlagen: ' + e.message); });
+  }
+
+  function _docToDoku() {
+    const text = _el('jury-doc-text')?.value || '';
+    if (typeof DocGen === 'undefined') { if (typeof showToast === 'function') showToast('Dokumente-Tab nicht verfügbar'); return; }
+    DocGen.showResult(text);
+    if (typeof switchTab === 'function') switchTab('docgen');
+  }
+
+  function _docToRag() {
+    const name = (_el('jury-doc-name')?.value || 'Dokument').trim();
+    const text = _el('jury-doc-text')?.value || '';
+    if (typeof RAG === 'undefined' || !RAG.ingestText) { if (typeof showToast === 'function') showToast('RAG nicht verfügbar'); return; }
+    RAG.ingestText(name, text);
+  }
+
+  // Lädt einen extern erzeugten Text (z. B. aus DocGen) in den Jury-Tab.
+  function loadDocument(name, text) {
+    if (typeof switchTab === 'function') switchTab('jury');
+    _newDoc();
+    if (_el('jury-doc-name')) _el('jury-doc-name').value = name || 'Dokument';
+    if (_el('jury-doc-text')) _el('jury-doc-text').value = text || '';
+    _refreshPreview();
+  }
+
+  // Ziehbarer Trenner im Jury-Tab (Planer-Muster)
+  const _JT_SPLIT_KEY = 'jury_tab_left_w';
+  function _initTabSplitter() {
+    const splitter = _el('jury-tab-splitter');
+    const left = _el('jury-tab-left');
+    const body = _el('jury-tab-body');
+    if (!splitter || !left || !body) return;
+    const saved = parseInt(localStorage.getItem(_JT_SPLIT_KEY) || '', 10);
+    if (saved > 0) left.style.width = saved + 'px';
+    const _apply = (clientX) => {
+      const rect = body.getBoundingClientRect();
+      let w = clientX - rect.left;
+      const max = rect.width - 320;
+      w = Math.max(200, Math.min(w, max));
+      left.style.width = w + 'px';
+    };
+    const _onMove = (e) => _apply(e.clientX);
+    const _onUp = () => {
+      splitter.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', _onMove);
+      document.removeEventListener('mouseup', _onUp);
+      localStorage.setItem(_JT_SPLIT_KEY, String(parseInt(left.style.width, 10) || 0));
+    };
+    splitter.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      splitter.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', _onMove);
+      document.addEventListener('mouseup', _onUp);
+    });
+    splitter.addEventListener('dblclick', () => {
+      left.style.width = '';
+      localStorage.removeItem(_JT_SPLIT_KEY);
+    });
   }
 
   function _scoreColor(s) {
@@ -243,7 +478,20 @@ const Jury = (() => {
     _el('btn-jury-eval-close')?.addEventListener('click', _closeEval);
     _el('btn-jury-eval-run')?.addEventListener('click', _runEval);
     _el('jury-eval-overlay')?.addEventListener('click', e => { if (e.target === _el('jury-eval-overlay')) _closeEval(); });
+
+    // Jury-Tab (Dokument-Werkbank)
+    _el('btn-jury-tab-manage')?.addEventListener('click', openManager);
+    _el('btn-jury-tab-newdoc')?.addEventListener('click', _newDoc);
+    _el('btn-jury-doc-check')?.addEventListener('click', _checkDoc);
+    _el('btn-jury-doc-save')?.addEventListener('click', _saveDoc);
+    _el('btn-jury-doc-docx')?.addEventListener('click', _docDocx);
+    _el('btn-jury-doc-doku')?.addEventListener('click', _docToDoku);
+    _el('btn-jury-doc-rag')?.addEventListener('click', _docToRag);
+    _el('jury-doc-preview-toggle')?.addEventListener('change', _refreshPreview);
+    // Tab-Button öffnet die Werkbank (zusätzlich zum generischen switchTab)
+    document.querySelector('.tab-btn[data-tab="jury"]')?.addEventListener('click', openTab);
+    _initTabSplitter();
   }
 
-  return { init, evaluate, openManager };
+  return { init, evaluate, openManager, openTab, loadDocument };
 })();

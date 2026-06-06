@@ -27,6 +27,7 @@ data/mail.json
 data/mail_rules.json
 data/api_providers.json
 data/juries/*
+data/jury_docs/*
 
 # Verzeichnisstruktur erhalten (Inhalt ignoriert)
 !data/uploads/.gitkeep
@@ -35,9 +36,11 @@ data/juries/*
 !data/plans/.gitkeep
 !data/dossiers/.gitkeep
 !data/profile_assets/.gitkeep
+!data/jury_docs/.gitkeep
 
 # Agenten (Standard-Vorlagen) werden versioniert -> NICHT ignorieren
-# data/agents/  bleibt eingecheckt
+# data/agents/  bleibt eingecheckt; nur der Seeding-Marker ist Laufzeit-State:
+data/agents/.seeded
 
 # Laufzeit-/Dev-Artefakte
 /server.log
