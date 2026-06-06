@@ -8,6 +8,7 @@ const CodeIDE = (() => {
   let _dirty       = false;
   let _generating  = false;
   let _lastErrors  = [];   // letzte Konsolen-Fehler für Auto-Reparatur
+  let _cm          = null; // CodeMirror-Instanz (null = Textarea-Fallback)
 
   /* ── KI-Prompts ──────────────────────────────────────────────── */
   const SYSTEM_PROMPT =
@@ -49,8 +50,12 @@ const CodeIDE = (() => {
   const _console = () => document.getElementById('ide-console');
   const _nameEl  = () => document.getElementById('ide-name');
 
-  function _getCode() { return _editor()?.value || ''; }
-  function _setCode(c) { const e = _editor(); if (e) e.value = c; }
+  function _getCode() { return _cm ? _cm.getValue() : (_editor()?.value || ''); }
+  function _setCode(c) {
+    if (_cm) { _cm.setValue(c || ''); }
+    else { const e = _editor(); if (e) e.value = c || ''; }
+  }
+  function refresh() { if (_cm) _cm.refresh(); }
 
   function _setDirty() {
     _dirty = true;
@@ -514,7 +519,23 @@ if (!_drawFn) { _resize(); }
     });
 
     const ed = _editor();
-    if (ed) {
+    if (ed && window.CodeMirror) {
+      // Echter Code-Editor (CodeMirror 5) über die vorhandene Textarea
+      _cm = CodeMirror.fromTextArea(ed, {
+        mode: 'javascript',
+        lineNumbers: true,
+        indentUnit: 2, tabSize: 2, indentWithTabs: false,
+        autoCloseBrackets: true, matchBrackets: true, styleActiveLine: true,
+        extraKeys: {
+          'Ctrl-Enter': _run, 'Cmd-Enter': _run,
+          'Ctrl-S': () => _save(), 'Cmd-S': () => _save(),
+          'Ctrl-Space': 'autocomplete',
+          Tab: cm => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection('  '),
+        },
+      });
+      _cm.on('change', _setDirty);
+    } else if (ed) {
+      // Fallback: nackte Textarea (z. B. wenn CodeMirror-CDN nicht erreichbar)
       ed.addEventListener('keydown', e => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); _run(); return; }
         if ((e.ctrlKey || e.metaKey) && e.key === 's')     { e.preventDefault(); _save(); return; }
@@ -530,7 +551,7 @@ if (!_drawFn) { _resize(); }
       ed.addEventListener('input', _setDirty);
     }
 
-    document.querySelector('[data-tab="ide"]')?.addEventListener('click', _loadList);
+    document.querySelector('[data-tab="ide"]')?.addEventListener('click', () => { _loadList(); setTimeout(refresh, 0); });
     _initSplitter();
     _loadList();
   }
@@ -550,6 +571,7 @@ if (!_drawFn) { _resize(); }
       let w = clientX - rect.left;
       w = Math.max(240, Math.min(w, rect.width - 220));  // Editor ≥240, Vorschau ≥220
       body.style.setProperty('--ide-left-w', w + 'px');
+      if (_cm) _cm.refresh();
     };
     const _onMove = (e) => _apply(e.clientX);
     const _onUp = () => {
@@ -559,6 +581,7 @@ if (!_drawFn) { _resize(); }
       document.removeEventListener('mouseup', _onUp);
       const cur = body.style.getPropertyValue('--ide-left-w');
       if (cur) localStorage.setItem(KEY, String(parseInt(cur, 10) || 0));
+      if (_cm) _cm.refresh();
     };
     splitter.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -573,7 +596,7 @@ if (!_drawFn) { _resize(); }
     });
   }
 
-  return { init, loadFromChat };
+  return { init, loadFromChat, refresh };
 
 })();
 

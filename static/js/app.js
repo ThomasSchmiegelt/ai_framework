@@ -37,6 +37,10 @@ function switchTab(tabId) {
     if (typeof CanvasRenderer !== 'undefined' && CanvasRenderer.rerender) CanvasRenderer.rerender();
     if (typeof CanvasEditor !== 'undefined') CanvasEditor.refresh();
   }
+  if (tabId === 'ide') {
+    // Code-Editor (CodeMirror) neu vermessen, da das Panel vorher display:none war
+    if (typeof CodeIDE !== 'undefined' && CodeIDE.refresh) setTimeout(CodeIDE.refresh, 0);
+  }
 }
 
 // ── Modelle laden ──────────────────────────────────────────────────────────
@@ -485,6 +489,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         b.classList.toggle('active', b.dataset.subtab === target));
       document.querySelectorAll('.code-view').forEach(v =>
         v.classList.toggle('active', v.id === `code-view-${target}`));
+      // CodeMirror muss neu vermessen, wenn der IDE-Unterview wieder sichtbar wird
+      if (target === 'ide' && typeof CodeIDE !== 'undefined' && CodeIDE.refresh) CodeIDE.refresh();
     });
   });
 

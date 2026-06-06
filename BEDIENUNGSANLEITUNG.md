@@ -895,6 +895,12 @@ leer = `ministral-3:3b`).
 > *„Zeige ein Balkendiagramm der Zugfestigkeit für Stahl, Alu und Titan"*
 > *„Erstelle eine Toleranzanalyse für drei Bauteile"*
 
+### Komfort-Editor
+
+Der Code-Editor bietet **Syntax-Highlighting, Zeilennummern, automatische Klammern,
+Klammern-Hervorhebung und Autovervollständigung** (mit **Strg+Leertaste**). Tastenkürzel:
+**Strg+Enter** = ausführen, **Strg+S** = speichern, **Tab** = 2 Leerzeichen einrücken.
+
 ### Interaktive Eingabefelder
 
 Die generierten Programme zeigen unter dem Canvas **Eingabefelder**. Werte ändern

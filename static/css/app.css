@@ -2923,6 +2923,42 @@ html, body {
   tab-size: 2; min-height: 0;
 }
 
+/* ── CodeMirror-Editor (Code-Tab) — Größe + Theme über App-Variablen ──────────── */
+#ide-editor-panel .CodeMirror {
+  flex: 1; height: auto; min-height: 0;
+  background: var(--bg-sidebar); color: var(--text);
+  font-family: 'Consolas', 'Fira Code', 'Courier New', monospace;
+  font-size: 12.5px; line-height: 1.55;
+}
+#ide-editor-panel .CodeMirror-gutters {
+  background: var(--bg-sidebar); border: none; border-right: 1px solid var(--border);
+}
+#ide-editor-panel .CodeMirror-linenumber { color: var(--text-muted); }
+#ide-editor-panel .CodeMirror-cursor { border-left: 1.5px solid var(--accent); }
+#ide-editor-panel .CodeMirror-selected { background: var(--accent-dim); }
+#ide-editor-panel .CodeMirror-activeline-background { background: rgba(255,255,255,.04); }
+#ide-editor-panel .CodeMirror-matchingbracket { color: var(--accent); font-weight: 700; }
+/* Syntax-Token-Farben, lesbar auf dunklem Sidebar-Hintergrund */
+#ide-editor-panel .cm-comment  { color: #7c8a99; font-style: italic; }
+#ide-editor-panel .cm-keyword  { color: #5aa9e6; }
+#ide-editor-panel .cm-atom,
+#ide-editor-panel .cm-number   { color: #e6a55a; }
+#ide-editor-panel .cm-string,
+#ide-editor-panel .cm-string-2 { color: #8bd17c; }
+#ide-editor-panel .cm-def      { color: #d3e8ff; }
+#ide-editor-panel .cm-variable { color: var(--text); }
+#ide-editor-panel .cm-variable-2 { color: #b6d6f5; }
+#ide-editor-panel .cm-property { color: #c3a6e6; }
+#ide-editor-panel .cm-operator { color: var(--text-dim); }
+/* Autocomplete-Popup an das App-Theme angleichen */
+.CodeMirror-hints {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px; font-family: 'Consolas','Fira Code','Courier New',monospace; font-size: 12.5px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35); z-index: 9999;
+}
+.CodeMirror-hint { color: var(--text); }
+li.CodeMirror-hint-active { background: var(--accent); color: #fff; }
+
 /* ── Rechte Spalte ────────────────────────────────────────────── */
 #ide-right { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
