@@ -140,8 +140,9 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Angaben und stellt **Rückfragen**, gibt dann eine Einschätzung; auf Wunsch in einfaches
   Deutsch übersetzt. Mit **Patienten-Akten** (eigene RAG je Patient) und Datei-Upload.
   *Kein Ersatz für ärztliche Beratung.*
-- 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail und Logs lassen sich im Profil
-  ein-/ausblenden; beim **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
+- 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail, Logs, Verzeichnis-Analyse,
+  Morphologischer Kasten und Jury lassen sich im Profil ein-/ausblenden; beim
+  **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
 - 📋 **Diagnose-Logger** — zuschaltbares Protokoll zur Fehlersuche
 - 👤 **Nutzerprofil & Projekte** — Modell-Rollen, Dokument-Footer, Projektzuordnung
 - 💾 **Backup/Restore** — **alle** Nutzerdaten als ZIP: Profil, Projekte, Gespräche,
@@ -239,11 +240,28 @@ Bedienung für Anwender: **[BEDIENUNGSANLEITUNG.md](BEDIENUNGSANLEITUNG.md)**
 
 ---
 
-## Linux (Entwicklung)
+## Schnellstart (Linux)
+
+Das Projekt läuft plattformneutral auch unter Linux. Voraussetzung: `python3`,
+`python3-venv` und ein laufendes Ollama (`ollama serve`).
+
+```bash
+./install.sh             # venv + Pakete, optionale Tab-/API-Auswahl
+./start.sh               # Start auf http://127.0.0.1:8780
+```
+
+Über Umgebungsvariablen steuerbar (siehe `start.sh`):
+
+```bash
+AI_HOST=0.0.0.0 AI_PORT=8780 ./start.sh        # im Netzwerk erreichbar
+AI_SSL_CERT=certs/cert.pem AI_SSL_KEY=certs/key.pem ./start.sh   # HTTPS (PWA am Handy)
+```
+
+Oder direkt im Entwicklungsmodus mit Auto-Reload:
 
 ```bash
 source venv/bin/activate
-uvicorn main:app --host 0.0.0.0 --port 8780 --reload
+uvicorn main:app --host 127.0.0.1 --port 8780 --reload
 ```
 
 ---
