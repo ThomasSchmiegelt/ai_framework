@@ -122,8 +122,34 @@ const Onboarding = (() => {
            + 'Versand bleibt <strong>immer manuell</strong>. <em>(🚧 in Entwicklung)</em>',
     },
     {
+      image: 'verzeichnisanalyse.png',
+      title: '14 · Verzeichnis-Analyse',
+      text: 'Lass die KI einen <strong>Ordner auf dem Rechner</strong> durchsehen: Sie erstellt einen '
+           + 'Strukturüberblick, hebt <strong>interessante Dateien</strong> hervor und analysiert sie auf '
+           + 'Wunsch im Detail. <strong>Personenbezogene Daten werden dabei automatisch anonymisiert.</strong> '
+           + 'Das Ergebnis kommt als <strong>_KI_INDEX.md</strong> in den Ordner zurück oder in eine '
+           + 'Wissensdatenbank. <em>(Optionaler Tab – im Profil einblenden.)</em>',
+    },
+    {
+      image: 'morphologischer_kasten.png',
+      title: '15 · Morphologischer Kasten',
+      text: 'Systematische Ideenfindung (Zwicky-Box): Die KI füllt ein Raster aus <strong>Parametern</strong> '
+           + 'und <strong>Ausprägungen</strong>, bewertet Kombinationen und schlägt Alternativen vor. Mit '
+           + '<strong>🃏 Ideen wischen</strong> wischst du KI-Konzepte durch (links = gut, rechts = schlecht) '
+           + '– ideal am Handy. Gute und schlechte Ideen sammelt ein <strong>Trainingsfile</strong> '
+           + 'automatisch. <em>(Optionaler Tab.)</em>',
+    },
+    {
+      image: 'jury.png',
+      title: '16 · Jury',
+      text: 'Stelle ein <strong>Gremium aus Agenten</strong> zusammen (z. B. ⚖️ Gesetzes-Agenten), das einen '
+           + 'beliebigen Text bewertet: Jedes Mitglied gibt Score, Befund, Risiken und Empfehlung ab, danach '
+           + 'folgt ein <strong>Gesamturteil</strong>. So prüfst du erzeugte Dokumente, System-Prompts oder '
+           + 'Projektpläne. <em>(Optionaler Tab.)</em>',
+    },
+    {
       image: 'log_file.png',
-      title: '14 · Log-Datei',
+      title: '17 · Log-Datei',
       text: 'Im <strong>Log-Tab</strong> siehst du bei Bedarf, was im Hintergrund passiert: '
            + 'Modell-Antworten, Tool-Aufrufe und Diagnosen. Praktisch zur Fehlersuche – '
            + 'ein- und ausschaltbar und als Datei exportierbar.',
