@@ -205,6 +205,15 @@ function renderSearchResults(results) {
 
 // ── Initialisierung ────────────────────────────────────────────────────────
 
+// PWA: Service Worker registrieren (nur in Secure Contexts: HTTPS oder localhost;
+// über http://<lan-ip> registriert der Browser keinen SW → App läuft trotzdem im
+// Browser, ist dann aber nicht „installierbar"). Siehe BEDIENUNGSANLEITUNG (HTTPS).
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   // Profil zuerst laden, damit das Allgemein-Modell als Standard greift
   let _profile = {};
@@ -506,6 +515,34 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Jury (Bewertungs-Gremien)
   if (typeof Jury !== 'undefined') Jury.init();
+
+  // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)
+  (function wireGuide() {
+    const overlay = document.getElementById('guide-modal-overlay');
+    const content = document.getElementById('guide-content');
+    const btnOpen = document.getElementById('btn-open-guide');
+    const btnClose = document.getElementById('btn-guide-close');
+    if (!overlay || !btnOpen) return;
+    let loaded = false;
+    const open = async () => {
+      overlay.classList.add('active');
+      if (loaded) return;
+      try {
+        const resp = await fetch('/api/help/guide');
+        const data = await resp.json();
+        const md = data.markdown || '';
+        content.innerHTML = (window.marked && marked.parse) ? marked.parse(md) : md.replace(/\n/g, '<br>');
+        content.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+        loaded = true;
+      } catch (_) {
+        content.innerHTML = '<p>Anleitung konnte nicht geladen werden.</p>';
+      }
+    };
+    const close = () => overlay.classList.remove('active');
+    btnOpen.addEventListener('click', open);
+    btnClose.addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  })();
 
   // Diagnose-Logger (als letztes, damit alle anderen Module bereits verdrahtet sind)
   await Logger.init();

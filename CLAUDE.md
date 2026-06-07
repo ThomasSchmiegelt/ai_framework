@@ -141,13 +141,22 @@ standard `<think>`-strip + regex-extract + fallback. **Server-mode caveat:** arb
 read AND written — keep this tab hidden in multi-user/server deployments (it is optional + hidden
 by default).
 
-**Morphologischer Kasten** (`/api/morph/generate`, `/api/morph/evaluate`, `/api/morph/refine-cell`):
-all use the shared `_morph_llm(model, system, user)` helper (`format:"json"`, `_parse_llm_json`
+**Morphologischer Kasten** (`/api/morph/{generate,evaluate,refine-cell,ideas}` + `/api/morph/training…`):
+all generation uses the shared `_morph_llm(model, system, user)` helper (`format:"json"`, `_parse_llm_json`
 strips `<think>`/fences + extracts the first JSON object). `generate` returns parameters with short
 string values — `_morph_value_str` flattens the nested objects small models sometimes emit into a
 readable string. `evaluate` scores a chosen combination (score/Machbarkeit/Innovation 0–100 +
 Begründung/Risiken) and proposes alternative combinations. `refine-cell` expands or critiques a
-single value. Export is frontend-only (DOCX/DocGen/RAG) — no dedicated endpoint.
+single value. **`ideas`** generates N creative whole-concept ideas (one value per parameter + a short
+concept text) for the **swipe deck** (Tinder-style). **Source grounding:** `generate`/`refine-cell`/`ideas`
+accept `web:bool` + `rag_collections:[]`; `_morph_sources_context()` prepends DuckDuckGo
+(`search_with_sources`) and/or RAG passages (`query_collections`, CPU-embed, no own `_model_session`)
+as inspiration. **Auto-training file (backend):** `POST /api/morph/training/add` appends good/bad
+examples to `data/morph_training/<slug>.jsonl` (`_to_slug(problem)`; gitignored) — sources: swipe
+decisions, **deleted elaborated chips** (= „bad"), saved solutions (= „good"). Each line is structured
+**and** chat-format (`messages`) for finetuning. `GET …/training?problem=&format=jsonl|md` returns the
+accumulated file (md = readable good/bad lists, ingested into a RAG base via the frontend
+`RAG.ingestText`); `DELETE` clears it. Solution/CSV export stays frontend-only.
 
 ### LLM abstraction & external API providers (`tools/llm.py`)
 
@@ -291,7 +300,7 @@ Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sa
 - `medizin.js` — 🩺 Medizin tab: 2-model consultation **pipeline** (`_sendPipeline` → `/api/medizin/consult`) with collapsible stage blocks (`refine/analyze/formulate/final`), follow-up `question` handling (`_round`, max 2), `🗣 In einfaches Deutsch übersetzen` (`/api/medizin/translate`), plus a plain single-model fallback (`_sendSimple`) toggled by `🔬 Experten-Pipeline`. Patient files = RAG collections named `Patient:…` (create/upload inline in the topbar).
 - `mathe.js` — 🔢 Mathe tab: solver via the `mathe_experte` agent, `🎓 Tutor-Modus` via the `mathe_tutor` agent with **deterministic SymPy grounding** (`/api/mathe/ground` facts injected) + `💡 Lösung zeigen`, or `🔁 Auto-Verifizieren` (mutually exclusive with Tutor) via `/api/mathe/solve-verified` (`_sendVerified` renders `stage` blocks + a verified/warn badge; see the Mathe tab backend section). Model = `Profile.modelFor('coding')` (shared with Code, no own selector); LaTeX always on; Plot/Tutor/Auto-Verifizieren/Lösung buttons sit in a toolbar at the chat input row. Renders `image` plot frames inline (full `data:` URI as-is), offers LaTeX/PDF export when the answer contains `$`.
 - `dir_analysis.js` — 📁 Verzeichnis-Analyse tab: enter a **server-side folder path** → `POST /api/dir/scan` (structure tree + KI overview + flagged „interesting" files), click a file → `POST /api/dir/analyze-file` (deep Markdown analysis), then „📥 Index speichern" / „📚 In Wissensdatenbank" → `POST /api/dir/finalize` (writes `_KI_INDEX.md` back into the folder, optionally a `Verzeichnis: <name>` RAG base). **Personal data in file contents is ALWAYS anonymized — mandatory, not switchable** (the backend forces `anonymize=True` and ignores any client flag); an optional `+ KI-Namenssuche` checkbox adds a slower LLM-NER pass that only finds *additional* names. **File analyses run through a client-side serial queue** (`_queue`/`_processQueue`, one at a time) — the VRAM lock serializes them server-side anyway, and firing them in parallel made idle connections abort as „Failed to fetch". Failed analyses show a `↻ Erneut` retry button. Model = `Profile.modelFor('general')`; last path in `localStorage`. Optional tab, hidden by default — do not enable in multi-user/server mode (arbitrary paths are read/written).
-- `morph_box.js` — 🧩 Morphologischer Kasten (Zwicky box) tab: ideation grid of parameters (rows) × values (chips). KI: `🤖 Parameter generieren` (`/api/morph/generate`), `📊 Kombination bewerten` (`/api/morph/evaluate` → score/Machbarkeit/Innovation bars + suggested combinations to apply), per-chip `✨ ausformulieren` / `💬 Alternativen` (`/api/morph/refine-cell`). A selection = one chip per parameter — single-click (de)selects (debounced 180 ms so a **double-click edits in place** instead; `_editChip` commits once via a guard, Escape cancels, no select-conflict). **`💾 Lösung + Bewertung merken`** stores the current combo + last evaluation in a `_solutions` store (`localStorage`), shown as a list with score bars (load/delete). Export: **`🧠 Trainingsfile (JSONL)`** (one chat-format line per saved solution for LLM-finetuning) and **`📊 Auswertung (CSV)`** (solution × scores × chosen values), plus the chosen solution via DOCX (`/api/export/docx`), → Doku (`DocGen.showResult`) or Wissensdatenbank (`RAG.ingestText`). All export is client-side. Model = `Profile.modelFor('general')`.
+- `morph_box.js` — 🧩 Morphologischer Kasten (Zwicky box) tab: ideation grid of parameters (rows) × values (chips). KI: `🤖 Parameter generieren` (`/api/morph/generate`), `📊 Kombination bewerten` (`/api/morph/evaluate` → score/Machbarkeit/Innovation bars + suggested combinations to apply), per-chip `✨ ausformulieren` / `💬 Alternativen` (`/api/morph/refine-cell`). A selection = one chip per parameter — single-click (de)selects (debounced 180 ms so a **double-click edits in place** instead; `_editChip` commits once via a guard, Escape cancels, no select-conflict). **Dismissible alternatives:** `💬` no longer auto-pushes + toasts; it renders a persistent `#morph-altpanel` (`_showAltPanel`) where each alternative has „＋ übernehmen" and the panel a „✕ schließen". **Source grounding:** a `#morph-sources` bar (🌐 Web toggle + 📚 RAG multiselect, `_currentSources()`) is sent with generate/refine-cell/ideas. **Wischtechnik (`🃏 Ideen wischen`):** an overlay swipe deck (`#morph-swipe-overlay`) over `/api/morph/ideas`; **left = good, right = bad** (pointer/touch drag in `_bindSwipeDrag`, desktop 👍/👎 buttons), each swipe prompts a short reason and writes a training example. **Auto-training file (backend):** `_trainAdd()` → `/api/morph/training/add` from swipes, **deleted elaborated chips** (tracked in `_elaborated`, counted „bad"), and saved solutions („good"); `⬇ Auto-Trainingsfile` downloads it, `📚 Training → Wissensdatenbank` ingests the md form via `RAG.ingestText`. **`💾 Lösung + Bewertung merken`** still stores combos in `_solutions` (`localStorage`). Legacy client exports (`🧠 Trainingsfile (JSONL)` from solutions, `📊 Auswertung (CSV)`, DOCX/→Doku/RAG) remain. Model = `Profile.modelFor('general')`.
 - `onboarding.js` — First-run wizard: shown when `user_profile.json` is absent (or profile flag set). Slide 1 is an interactive form (name, custom mode definition); slides 2–14 are info screens with screenshots (incl. Medizin and Mathe). On finish, saves the profile and launches in custom mode.
 - `logger.js` — Diagnostic logger UI (toggle, filter, download)
 - `profile.js` / `projects.js` — User profile (incl. the four model roles `Profile.modelFor`, and tab visibility via `data-tabs` checkboxes) and project management
@@ -323,7 +332,7 @@ Endpoints: `POST/GET/DELETE /api/profile/asset/{kind}` (kind ∈ logo|cover|head
 
 ### Agent System
 
-Agents are JSON files in `data/agents/` with fields: `id`, `name`, `description`, `system_prompt`, `tools` (array), `model` (optional override), `icon` (emoji), `category`, `favorite`, **`rag_collections`** (optional list of knowledge-base ids bound to the agent — auto-activated in `_chat_generator` and merged into the request's RAG selection). The system prompt is prepended to the user message at request time. Domain agents shipped include `latex_experte`, `mathe_experte`, `mathe_tutor` (tutor mode), `medizin_assistent`, alongside the engineering/research/presentation defaults.
+Agents are JSON files in `data/agents/` with fields: `id`, `name`, `description`, `system_prompt`, `tools` (array), `model` (optional override), `icon` (emoji), `category`, `favorite`, **`rag_collections`** (optional list of knowledge-base ids bound to the agent — auto-activated in `_chat_generator` and merged into the request's RAG selection). **The agent editor modal exposes this** via a knowledge-base multiselect (`#field-agent-rag`, populated from `/api/rag/collections`; `agents.js` `_fillRagSelect` + `_currentFieldData.rag_collections`) — so **any** agent can be bound to one or more RAG bases, not just the legal/help agents. The system prompt is prepended to the user message at request time. Domain agents shipped include `latex_experte`, `mathe_experte`, `mathe_tutor` (tutor mode), `medizin_assistent`, alongside the engineering/research/presentation defaults.
 
 **Gesetz-/Regel-Agent aus Datei:** the 🤖 Agenten tab has a **⚖️ Gesetz-/Regel-Agent** button (`agents.js` `createLegalAgent` → `POST /api/agents/from-legal`, multipart `file`+`title`). The backend extracts the text (`_extract_text`), converts it to Markdown **deterministically** (`_legal_to_md` — regex turns `§ …`/`Art. …` line-starts into `###` headings, no LLM), then **decides by length** (`_LEGAL_PROMPT_LIMIT`, 8000 chars): short → the Markdown goes straight into the agent's `system_prompt`; long → it is embedded into a dedicated RAG base named `Gesetz: <title>` (`strictness:"korrekt"`) and bound via the agent's `rag_collections`. The agent is created with `icon:"⚖️"`, `category:"Recht"`, `favorite:true`. Returns `{agent_id, name, mode:"prompt"|"rag", chars, rag_collection_id}`.
 
@@ -398,6 +407,24 @@ These rules prevent the most common backend mistakes:
 Python: FastAPI, Uvicorn, httpx, ddgs, pypdf, python-docx, openpyxl, python-pptx, Pillow, python-multipart, aiofiles, aiosqlite, SymPy, NumPy, SciPy, Pint, matplotlib (see `requirements.txt` for pinned versions). Completeness verified by importing every dependency + project module and `pip check`.
 
 No frontend build step — plain HTML/CSS/JS served directly by FastAPI's `StaticFiles`.
+
+### PWA / phone-as-frontend
+
+The app is an installable **PWA**: `static/manifest.json` (icons from `/api/assets/icon.png`) and
+`static/sw.js` (app-shell cache; `/api/*` always network, never cached) are served at root by the
+static mount; `index.html` links the manifest + theme/apple metas; `app.js` registers the SW **only in
+a secure context** (`window.isSecureContext`). Phone uses the frontend, the desktop keeps the backend:
+bind `0.0.0.0` (`start_server.*`, or `config.json` `host`/`AI_HOST`) — CORS is already open. **Caveat:**
+service workers / „install" require **HTTPS or localhost**; over plain `http://<lan-ip>:8780` Android
+won't register the SW (the UI still works in the mobile browser, just not installable). For real install,
+run uvicorn with a self-signed cert (`--ssl-keyfile/--ssl-certfile`) and open `https://<lan-ip>:8780`.
+Mobile CSS lives in `app.css` `@media (max-width:600px)`; the swipe deck is touch-first.
+**Helper scripts (Linux, `scripts/`):** `gen_cert.sh`/`.ps1` generate a self-signed cert (SANs:
+localhost, LAN IPs, `<host>.fritz.box`) into `certs/` (gitignored); `start.sh` reads optional
+`AI_SSL_CERT`/`AI_SSL_KEY`; `install_service.sh`/`uninstall_service.sh` create a systemd unit
+(`ai-framework.service`, `User=<you>`, `After=ollama.service`, HTTPS if a cert exists, autostart +
+`Restart=on-failure`). End-user walkthrough: `docs/HANDY_ZUGRIFF.md` (in `_HELP_DOC_FILES` → ingested
+into the Hilfe RAG, so the `hilfe_agent` answers phone/HTTPS/autostart questions).
 
 ## Deployment Variants
 

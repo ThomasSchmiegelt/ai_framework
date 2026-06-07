@@ -12,10 +12,34 @@ const MorphBox = (() => {
   let _solutions = [];       // gemerkte Lösungen: [{label, picks:[{parameter,value}], evaluation}]
   let _lastEval = null;      // zuletzt erhaltene Bewertung (für „merken")
   let _editing = false;      // gerade wird ein Chip bearbeitet (blockiert Auswahl)
+  const _elaborated = new Set();  // Werttexte, die per ✨ ausformuliert wurden → Löschen = „schlecht" fürs Training
+  let _swipeQueue = [];      // noch zu wischende KI-Konzept-Ideen
+  let _swipeBusy = false;    // verhindert Doppel-Entscheidungen während der Animation
 
   function _el(id) { return document.getElementById(id); }
   function _model() {
     return (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+  }
+
+  // Gewählte Informationsquellen (Web / Wissensdatenbanken) für die KI-Generierung
+  function _currentSources() {
+    const web = !!_el('morph-src-web')?.checked;
+    const rag = Array.from(_el('morph-src-rag')?.selectedOptions || [])
+      .map(o => o.value).filter(Boolean);
+    return { web, rag_collections: rag };
+  }
+
+  // Hängt ein gut/schlecht-Beispiel an das automatische Backend-Trainingsfile an
+  async function _trainAdd(label, source, idea, reason, evaluation) {
+    try {
+      await fetch('/api/morph/training/add', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          problem: _problem, label, source, idea: idea || {},
+          reason: reason || '', evaluation: evaluation || null,
+        }),
+      });
+    } catch (_) { /* Training ist best-effort, blockiert die UI nie */ }
   }
 
   function _save() {
@@ -52,7 +76,7 @@ const MorphBox = (() => {
     try {
       const resp = await fetch('/api/morph/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem: _problem, model: _model() }),
+        body: JSON.stringify({ problem: _problem, model: _model(), ..._currentSources() }),
       });
       if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
       const data = await resp.json();
@@ -146,6 +170,7 @@ const MorphBox = (() => {
       begruendung: _lastEval.begruendung, risiken: _lastEval.risiken || [],
     } : null;
     _solutions.push({ label, picks, evaluation: ev });
+    _trainAdd('good', 'solution', { concept: label, picks }, '', ev);
     _renderSolutions(); _save();
     showToast('✓ Lösung gemerkt' + (ev ? ' (mit Bewertung)' : ' – Tipp: erst „bewerten" für Scores'));
   }
@@ -191,20 +216,51 @@ const MorphBox = (() => {
     try {
       const resp = await fetch('/api/morph/refine-cell', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem: _problem, parameter: p.name, value, action, model: _model() }),
+        body: JSON.stringify({ problem: _problem, parameter: p.name, value, action, model: _model(), ..._currentSources() }),
       });
       if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
       const d = await resp.json();
       if (action === 'expand' && d.text) {
         p.values[vi] = d.text;
+        _elaborated.add(d.text);     // ausformuliert → späteres Löschen zählt als „schlecht"
+        _render(); _save();
       } else if (action === 'critique') {
-        (d.alternativen || []).forEach(a => { if (a && !p.values.includes(a)) p.values.push(a); });
-        if (d.text) showToast('💬 ' + d.text);
+        _showAltPanel(pi, vi, d);    // Alternativen bleiben sichtbar, bis aktiv geschlossen/übernommen
+      } else {
+        _render(); _save();
       }
-      _render(); _save();
     } catch (e) {
       showToast('Fehler: ' + e.message);
     }
+  }
+
+  // Dismissibles Alternativen-Panel (ersetzt den flüchtigen Toast)
+  function _showAltPanel(pi, vi, d) {
+    const box = _el('morph-altpanel');
+    if (!box) return;
+    const p = _params[pi];
+    const alts = (d.alternativen || []).filter(Boolean);
+    let html = `<div class="morph-alt-head">💬 Alternativen zu „${_esc(p?.name)}: ${_esc(p?.values?.[vi])}"`
+      + `<button class="morph-alt-close" title="Schließen">✕</button></div>`;
+    if (d.text) html += `<p class="morph-alt-crit">${_esc(d.text)}</p>`;
+    if (alts.length) {
+      html += '<div class="morph-alt-list">' + alts.map((a, i) =>
+        `<div class="morph-alt-item"><button class="morph-alt-add" data-i="${i}">＋ übernehmen</button>`
+        + `<span>${_esc(a)}</span></div>`).join('') + '</div>';
+    } else {
+      html += '<p class="morph-alt-crit"><em>Keine konkreten Alternativen vorgeschlagen.</em></p>';
+    }
+    box.innerHTML = html;
+    box.style.display = 'block';
+    box.querySelector('.morph-alt-close').addEventListener('click', _closeAltPanel);
+    box.querySelectorAll('.morph-alt-add').forEach(b => b.addEventListener('click', () => {
+      const a = alts[+b.dataset.i];
+      if (a && !p.values.includes(a)) { p.values.push(a); _render(); _save(); showToast('✓ übernommen'); }
+    }));
+  }
+  function _closeAltPanel() {
+    const box = _el('morph-altpanel');
+    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
   }
 
   // ── Rendering ──────────────────────────────────────────────────────────────
@@ -291,6 +347,11 @@ const MorphBox = (() => {
     x.textContent = '✕'; x.title = 'Ausprägung löschen';
     x.addEventListener('click', e => {
       e.stopPropagation();
+      const delVal = _params[pi].values[vi];
+      if (_elaborated.has(delVal)) {   // ausformulierte Karte gelöscht → negatives Trainingsbeispiel
+        _trainAdd('bad', 'deleted_cell', { picks: [{ parameter: _params[pi].name, value: delVal }] }, '');
+        _elaborated.delete(delVal);
+      }
       _params[pi].values.splice(vi, 1);
       if (_selection[pi] === vi) delete _selection[pi];
       else if (_selection[pi] > vi) _selection[pi]--;
@@ -480,9 +541,157 @@ const MorphBox = (() => {
     reader.readAsText(file);
   }
 
+  // ── Wischtechnik (KI-Konzept-Ideen, Tinder-Stil) ───────────────────────────
+  // Links wischen = gut, rechts = schlecht — beides mit kurzer Begründung ins
+  // automatische Trainingsfile (Backend).
+  async function _openSwipe() {
+    _problem = (_el('morph-problem')?.value || '').trim();
+    if (!_problem) { showToast('Bitte zuerst eine Aufgabenstellung eingeben'); return; }
+    _el('morph-swipe-overlay').style.display = 'flex';
+    if (!_swipeQueue.length) await _loadIdeas();
+    _renderSwipeCard();
+  }
+  function _closeSwipe() {
+    const ov = _el('morph-swipe-overlay');
+    if (ov) ov.style.display = 'none';
+  }
+  async function _loadIdeas() {
+    const stat = _el('morph-swipe-status');
+    if (stat) stat.textContent = '💭 KI denkt sich Ideen aus …';
+    try {
+      const resp = await fetch('/api/morph/ideas', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ problem: _problem, parameters: _params, model: _model(), n: 6, ..._currentSources() }),
+      });
+      if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
+      const data = await resp.json();
+      _swipeQueue.push(...(data.ideen || []));
+    } catch (e) {
+      showToast('Fehler: ' + e.message);
+    } finally {
+      if (stat) stat.textContent = '';
+    }
+  }
+  function _renderSwipeCard() {
+    const stack = _el('morph-swipe-stack');
+    if (!stack) return;
+    const idea = _swipeQueue[0];
+    if (!idea) {
+      stack.innerHTML = '<div class="morph-swipe-empty">Keine Ideen mehr.<br><button id="morph-swipe-more" class="export-btn">🔄 Mehr Ideen</button></div>';
+      stack.querySelector('#morph-swipe-more')?.addEventListener('click', async () => { await _loadIdeas(); _renderSwipeCard(); });
+      return;
+    }
+    const picks = (idea.picks || []).map(p =>
+      `<div class="morph-swipe-pick"><b>${_esc(p.parameter)}:</b> ${_esc(p.value)}</div>`).join('');
+    stack.innerHTML =
+      `<div class="morph-swipe-card" id="morph-swipe-card">
+         <div class="morph-swipe-badge badge-good">👍 GUT</div>
+         <div class="morph-swipe-badge badge-bad">👎 SCHLECHT</div>
+         <div class="morph-swipe-concept">${_esc(idea.concept || '(ohne Titel)')}</div>
+         <div class="morph-swipe-picks">${picks}</div>
+         <div class="morph-swipe-hint">← wischen = gut · schlecht = wischen →</div>
+       </div>`;
+    _bindSwipeDrag(_el('morph-swipe-card'));
+  }
+  function _bindSwipeDrag(card) {
+    if (!card) return;
+    let sx = 0, dx = 0, dragging = false;
+    const down = (x) => { dragging = true; sx = x; dx = 0; card.style.transition = 'none'; };
+    const move = (x) => {
+      if (!dragging) return;
+      dx = x - sx;
+      card.style.transform = `translateX(${dx}px) rotate(${dx / 22}deg)`;
+      card.classList.toggle('swipe-good', dx < -40);
+      card.classList.toggle('swipe-bad', dx > 40);
+    };
+    const up = () => {
+      if (!dragging) return;
+      dragging = false;
+      card.style.transition = 'transform .25s ease';
+      if (dx < -90) _decideSwipe('good', card);
+      else if (dx > 90) _decideSwipe('bad', card);
+      else { card.style.transform = ''; card.classList.remove('swipe-good', 'swipe-bad'); }
+    };
+    if (window.PointerEvent) {
+      card.addEventListener('pointerdown', e => { card.setPointerCapture?.(e.pointerId); down(e.clientX); });
+      card.addEventListener('pointermove', e => move(e.clientX));
+      card.addEventListener('pointerup', up);
+      card.addEventListener('pointercancel', up);
+    } else {
+      card.addEventListener('touchstart', e => down(e.touches[0].clientX), { passive: true });
+      card.addEventListener('touchmove', e => move(e.touches[0].clientX), { passive: true });
+      card.addEventListener('touchend', up);
+    }
+  }
+  function _decideSwipe(label, card) {
+    if (_swipeBusy) return;
+    const idea = _swipeQueue[0];
+    if (!idea) return;
+    _swipeBusy = true;
+    if (card) {
+      card.style.transition = 'transform .25s ease, opacity .25s ease';
+      card.style.transform = `translateX(${label === 'good' ? -600 : 600}px) rotate(${label === 'good' ? -25 : 25}deg)`;
+      card.style.opacity = '0';
+    }
+    setTimeout(() => {
+      const q = label === 'good'
+        ? 'Warum ist diese Idee GUT? (optional – leer lassen + OK zum Überspringen)'
+        : 'Warum ist diese Idee SCHLECHT? (optional – leer lassen + OK zum Überspringen)';
+      const reason = (window.prompt(q, '') || '').trim();
+      _trainAdd(label, 'swipe', { concept: idea.concept, picks: idea.picks }, reason);
+      if (label === 'good' && idea.picks && idea.picks.length) _applySuggestion({ picks: idea.picks });
+      _swipeQueue.shift();
+      _swipeBusy = false;
+      _renderSwipeCard();
+      if (_swipeQueue.length <= 1) {               // Nachschub im Hintergrund
+        const wasEmpty = _swipeQueue.length === 0;
+        _loadIdeas().then(() => { if (wasEmpty) _renderSwipeCard(); });
+      }
+    }, 220);
+  }
+
+  // ── Auto-Trainingsfile (Backend) ───────────────────────────────────────────
+  async function _downloadTraining() {
+    try {
+      const resp = await fetch('/api/morph/training?problem=' + encodeURIComponent(_problem) + '&format=jsonl');
+      const txt = await resp.text();
+      if (!txt.trim()) { showToast('Noch keine Trainingsdaten gesammelt'); return; }
+      _download('morph_training.jsonl', txt, 'application/jsonl');
+      showToast('✓ Auto-Trainingsfile heruntergeladen');
+    } catch (e) { showToast('Fehler: ' + e.message); }
+  }
+  async function _trainingToRag() {
+    if (typeof RAG === 'undefined' || !RAG.ingestText) { showToast('RAG nicht verfügbar'); return; }
+    try {
+      const resp = await fetch('/api/morph/training?problem=' + encodeURIComponent(_problem) + '&format=md');
+      const md = await resp.text();
+      if (!/- \*\*/.test(md)) { showToast('Noch keine Trainingsdaten gesammelt'); return; }
+      RAG.ingestText('Trainingsdaten: ' + (_problem || 'Morph').slice(0, 40), md);
+    } catch (e) { showToast('Fehler: ' + e.message); }
+  }
+
+  // RAG-Wissensdatenbanken in den Quellen-Selektor laden
+  async function _loadRagOptions() {
+    const sel = _el('morph-src-rag');
+    if (!sel) return;
+    const prev = Array.from(sel.selectedOptions || []).map(o => o.value);
+    try {
+      const resp = await fetch('/api/rag/collections');
+      const cols = await resp.json();
+      sel.innerHTML = '';
+      (cols || []).forEach(c => {
+        const o = document.createElement('option');
+        o.value = c.id; o.textContent = c.name;
+        if (prev.includes(c.id)) o.selected = true;
+        sel.appendChild(o);
+      });
+    } catch (_) {}
+  }
+
   function _clear() {
     if (!confirm('Morphologischen Kasten leeren? (Auch gemerkte Lösungen werden entfernt)')) return;
     _problem = ''; _params = []; _solutions = []; _lastEval = null;
+    _elaborated.clear(); _closeAltPanel();
     Object.keys(_selection).forEach(k => delete _selection[k]);
     if (_el('morph-problem')) _el('morph-problem').value = '';
     if (_el('morph-eval')) _el('morph-eval').style.display = 'none';
@@ -509,6 +718,17 @@ const MorphBox = (() => {
     _el('btn-morph-import-csv')?.addEventListener('click', () => _el('morph-csv-input')?.click());
     _el('morph-csv-input')?.addEventListener('change', e => { if (e.target.files[0]) _importCsv(e.target.files[0]); e.target.value = ''; });
     _el('btn-morph-clear')?.addEventListener('click', _clear);
+    // Wischtechnik
+    _el('btn-morph-swipe')?.addEventListener('click', _openSwipe);
+    _el('morph-swipe-close')?.addEventListener('click', _closeSwipe);
+    _el('morph-swipe-good')?.addEventListener('click', () => _decideSwipe('good', _el('morph-swipe-card')));
+    _el('morph-swipe-bad')?.addEventListener('click', () => _decideSwipe('bad', _el('morph-swipe-card')));
+    // Auto-Trainingsfile
+    _el('btn-morph-train-dl')?.addEventListener('click', _downloadTraining);
+    _el('btn-morph-train-rag')?.addEventListener('click', _trainingToRag);
+    // Quellen
+    _el('btn-morph-src-refresh')?.addEventListener('click', _loadRagOptions);
+    _loadRagOptions();
     _render();
   }
 

@@ -1,0 +1,17 @@
+{
+  "name": "LOCAL AI — KI-Framework",
+  "short_name": "LOCAL AI",
+  "description": "Lokales KI-Framework: Chat, Morphologischer Kasten mit Wischtechnik, Recherche u. v. m.",
+  "lang": "de",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1117",
+  "theme_color": "#1f6feb",
+  "icons": [
+    { "src": "/api/assets/icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/api/assets/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/api/assets/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

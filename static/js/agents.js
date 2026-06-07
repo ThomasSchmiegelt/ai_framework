@@ -292,12 +292,34 @@ const AgentManager = (() => {
       toolsContainer.appendChild(item);
     }
 
+    // Wissensdatenbanken (RAG) befüllen + Bindung des Agenten vorauswählen
+    _fillRagSelect(agent?.rag_collections || []);
+
     // Löschen-Button
     const btnDelete = document.getElementById('btn-delete-agent');
     btnDelete.style.display = (agent && agent.id) ? 'block' : 'none';
     btnDelete.dataset.id = agent?.id ?? '';
 
     document.getElementById('modal-overlay').classList.add('open');
+  }
+
+  // Wissensdatenbank-Mehrfachauswahl im Agenten-Modal füllen
+  async function _fillRagSelect(selected) {
+    const sel = document.getElementById('field-agent-rag');
+    if (!sel) return;
+    const chosen = new Set(selected || []);
+    sel.innerHTML = '';
+    try {
+      const resp = await fetch('/api/rag/collections');
+      const cols = await resp.json();
+      (cols || []).forEach(c => {
+        const o = document.createElement('option');
+        o.value = c.id;
+        o.textContent = c.name;
+        if (chosen.has(c.id)) o.selected = true;
+        sel.appendChild(o);
+      });
+    } catch (_) { /* ohne RAG-Liste bleibt die Auswahl leer */ }
   }
 
   function closeModal() {
@@ -372,6 +394,10 @@ const AgentManager = (() => {
     ).map(el => el.dataset.value);
     // Favorit-Status des bearbeiteten Agenten erhalten (wird nicht im Formular editiert)
     const existing = editingId ? agents.find(a => a.id === editingId) : null;
+    const ragSel = document.getElementById('field-agent-rag');
+    const rag_collections = ragSel
+      ? Array.from(ragSel.selectedOptions).map(o => o.value)
+      : (existing?.rag_collections || []);
     return {
       id: editingId || '(neu)',
       name: document.getElementById('field-agent-name').value.trim(),
@@ -381,6 +407,7 @@ const AgentManager = (() => {
       system_prompt: document.getElementById('field-agent-prompt').value.trim(),
       model: document.getElementById('field-agent-model').value.trim() || null,
       tools,
+      rag_collections,
       favorite: existing ? !!existing.favorite : false,
     };
   }

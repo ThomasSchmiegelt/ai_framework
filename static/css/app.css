@@ -3819,6 +3819,60 @@ select.ob-input option {
 .dir-retry { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; margin-left: 4px; }
 .dir-retry:hover { border-color: var(--accent); }
 
+/* ── Morph: Quellen-Leiste (Web / Wissensdatenbanken) ─────────────────────── */
+#morph-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 4px 14px 8px; font-size: 12.5px; color: var(--text-dim); }
+#morph-sources label { display: inline-flex; align-items: center; gap: 5px; }
+#morph-src-rag { min-width: 160px; max-width: 280px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 4px 6px; font-size: 12px; }
+#btn-morph-src-refresh { padding: 2px 8px; }
+
+/* ── Morph: dismissibles Alternativen-Panel ───────────────────────────────── */
+#morph-altpanel { margin: 0 14px 14px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-dim); font-size: 13px; }
+.morph-alt-head { display: flex; align-items: center; font-weight: 600; gap: 8px; margin-bottom: 6px; }
+.morph-alt-close { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.morph-alt-close:hover { color: var(--danger, #e66); background: rgba(var(--accent-rgb), .2); }
+.morph-alt-crit { margin: 4px 0 8px; color: var(--text-dim); }
+.morph-alt-list { display: flex; flex-direction: column; gap: 5px; }
+.morph-alt-item { display: flex; align-items: center; gap: 8px; background: var(--bg-main); border-radius: 8px; padding: 5px 8px; }
+.morph-alt-add { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; flex-shrink: 0; }
+.morph-alt-add:hover { filter: brightness(1.1); }
+
+/* ── Morph: Wischtechnik (Tinder-Stil) ────────────────────────────────────── */
+#morph-swipe-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.62); display: flex; align-items: center; justify-content: center; padding: 16px; }
+#morph-swipe-box { width: min(440px, 96vw); max-height: 92vh; display: flex; flex-direction: column; gap: 12px; background: var(--bg-main); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+#morph-swipe-top { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+#morph-swipe-top button { margin-left: auto; }
+#morph-swipe-status { min-height: 16px; font-size: 12.5px; color: var(--text-dim); text-align: center; }
+#morph-swipe-stack { position: relative; min-height: 280px; display: flex; align-items: center; justify-content: center; }
+.morph-swipe-card { position: relative; width: 100%; min-height: 260px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 22px 20px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 8px 28px rgba(0,0,0,.35); cursor: grab; touch-action: pan-y; user-select: none; }
+.morph-swipe-card:active { cursor: grabbing; }
+.morph-swipe-card.swipe-good { border-color: #2fa36b; box-shadow: 0 8px 28px rgba(47,163,107,.4); }
+.morph-swipe-card.swipe-bad { border-color: #e0564f; box-shadow: 0 8px 28px rgba(224,86,79,.4); }
+.morph-swipe-badge { position: absolute; top: 14px; font-weight: 800; font-size: 15px; padding: 3px 10px; border-radius: 8px; opacity: 0; transition: opacity .1s; }
+.badge-good { left: 14px; color: #2fa36b; border: 2px solid #2fa36b; transform: rotate(-12deg); }
+.badge-bad { right: 14px; color: #e0564f; border: 2px solid #e0564f; transform: rotate(12deg); }
+.morph-swipe-card.swipe-good .badge-good { opacity: 1; }
+.morph-swipe-card.swipe-bad .badge-bad { opacity: 1; }
+.morph-swipe-concept { font-size: 16px; font-weight: 700; line-height: 1.35; }
+.morph-swipe-picks { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.morph-swipe-pick { color: var(--text-dim); }
+.morph-swipe-pick b { color: var(--text); }
+.morph-swipe-hint { margin-top: auto; font-size: 11.5px; color: var(--text-muted); text-align: center; }
+.morph-swipe-empty { text-align: center; color: var(--text-dim); font-size: 13px; }
+#morph-swipe-actions { display: flex; gap: 12px; }
+#morph-swipe-actions button { flex: 1; font-size: 14px; padding: 10px; }
+#morph-swipe-good { background: rgba(47,163,107,.22); border-color: #2fa36b; }
+#morph-swipe-bad { background: rgba(224,86,79,.22); border-color: #e0564f; }
+
+/* ── Mobil (Handy/PWA): Morph-Tab kompakter, größere Tap-Ziele ────────────── */
+@media (max-width: 600px) {
+  .morph-row { flex-direction: column; gap: 4px; }
+  .morph-param { width: 100%; }
+  .morph-chip-tools button { font-size: 15px; padding: 4px 7px; }
+  .morph-chip-add { padding: 7px 14px; }
+  #morph-toolbar { gap: 4px; }
+  #morph-eval, #morph-solutions, #morph-altpanel { margin-left: 8px; margin-right: 8px; }
+}
+
 /* ── Jury (Bewertungs-Gremien) ─────────────────────────────────────────────── */
 #btn-juries { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
 #btn-juries:hover { background: var(--bg-hover, var(--accent-dim)); border-color: var(--accent); }

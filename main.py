@@ -4022,6 +4022,36 @@ async def _morph_llm(model: str, system: str, user: str) -> Optional[dict]:
         return None
 
 
+async def _morph_sources_context(problem: str, web: bool, rag_collections: list) -> str:
+    """Optionaler Inspirationskontext aus Websuche und/oder Wissensdatenbanken für
+    die Morph-Generierung. Gibt einen an den User-Prompt anzuhängenden Block zurück
+    (oder "" wenn nichts gewählt/gefunden). Die Embeddings der RAG-Suche laufen auf
+    CPU (siehe rag.py), daher kein eigenes _model_session nötig — wie im Chat-RAG."""
+    parts = []
+    problem = (problem or "").strip()
+    if web and problem:
+        try:
+            from tools.search import search_with_sources
+            _, txt = await search_with_sources(problem, 5)
+            if txt:
+                parts.append("Recherche-Ergebnisse (Web):\n" + txt[:2500])
+        except Exception:
+            pass
+    if rag_collections and problem:
+        try:
+            from tools.rag import query_collections
+            hits = await query_collections(rag_collections, problem, top_k_cap=8)
+            if hits:
+                ctx = "\n\n".join(f"[{h['filename']}]\n{h['text']}" for h in hits)
+                parts.append("Auszüge aus den Wissensdatenbanken:\n" + ctx)
+        except Exception:
+            pass
+    if not parts:
+        return ""
+    return ("\n\nNutze die folgenden Quellen als Inspiration und fachliche Grundlage; "
+            "erfinde nichts dazu, was ihnen klar widerspricht:\n\n" + "\n\n".join(parts))
+
+
 @app.post("/api/morph/generate")
 async def morph_generate(req: Request):
     """Erzeugt Parameter (Zeilen) und je Parameter mehrere Ausprägungen (Werte)
@@ -4031,6 +4061,8 @@ async def morph_generate(req: Request):
     if not problem:
         raise HTTPException(status_code=400, detail="Problem fehlt")
     model = _pick_model(body.get("model"), _model_for("general"))
+    _ctx = await _morph_sources_context(
+        problem, bool(body.get("web")), body.get("rag_collections") or [])
     data = await _morph_llm(
         model,
         ("Du erstellst einen morphologischen Kasten (Zwicky-Box) für eine "
@@ -4040,7 +4072,7 @@ async def morph_generate(req: Request):
          "keine verschachtelten Felder. Antworte NUR mit JSON: "
          "{\"parameters\":[{\"name\":\"Parameter\",\"values\":"
          "[\"Ausprägung 1\",\"Ausprägung 2\"]}]}"),
-        f"Aufgabenstellung:\n{problem}")
+        f"Aufgabenstellung:\n{problem}{_ctx}")
     params = []
     if data:
         for p in (data.get("parameters") or []):
@@ -4105,6 +4137,8 @@ async def morph_refine_cell(req: Request):
     if not value:
         raise HTTPException(status_code=400, detail="Ausprägung fehlt")
     model = _pick_model(body.get("model"), _model_for("general"))
+    _ctx = await _morph_sources_context(
+        problem, bool(body.get("web")), body.get("rag_collections") or [])
     if action == "critique":
         system = ("Du kritisierst eine Ausprägung in einem morphologischen Kasten und "
                   "schlägst bessere/zusätzliche Alternativen vor. Antworte NUR mit JSON: "
@@ -4115,11 +4149,156 @@ async def morph_refine_cell(req: Request):
                   "{\"text\":\"…\",\"alternativen\":[]}")
     data = await _morph_llm(
         model, system,
-        f"Aufgabenstellung:\n{problem}\n\nParameter: {parameter}\nAusprägung: {value}")
+        f"Aufgabenstellung:\n{problem}\n\nParameter: {parameter}\nAusprägung: {value}{_ctx}")
     if not data:
         raise HTTPException(status_code=502, detail="KI-Verfeinerung fehlgeschlagen")
     return {"text": (data.get("text") or "").strip(),
             "alternativen": [str(a) for a in (data.get("alternativen") or [])]}
+
+
+@app.post("/api/morph/ideas")
+async def morph_ideas(req: Request):
+    """Erzeugt mehrere KREATIVE Konzept-Ideen (je eine Ausprägung pro Parameter)
+    zum Durchwischen. Optional über Web/Wissensdatenbanken inspiriert."""
+    body = await req.json()
+    problem = (body.get("problem") or "").strip()
+    if not problem:
+        raise HTTPException(status_code=400, detail="Problem fehlt")
+    model = _pick_model(body.get("model"), _model_for("general"))
+    n = max(1, min(8, int(body.get("n") or 5)))
+    params = body.get("parameters") or []
+    params_txt = ""
+    if params:
+        params_txt = "\n\nParameter und mögliche Ausprägungen:\n" + "\n".join(
+            f"- {p.get('name','?')}: {', '.join(_morph_value_str(v) for v in (p.get('values') or []))}"
+            for p in params if isinstance(p, dict))
+    _ctx = await _morph_sources_context(
+        problem, bool(body.get("web")), body.get("rag_collections") or [])
+    data = await _morph_llm(
+        model,
+        (f"Du erzeugst {n} KREATIVE, deutlich unterschiedliche Lösungsideen für eine "
+         "Aufgabenstellung auf Basis eines morphologischen Kastens. Jede Idee wählt je "
+         "Parameter genau EINE Ausprägung (nutze die vorgegebenen, wenn vorhanden, sonst "
+         "passende eigene) und bekommt einen kurzen, prägnanten Konzepttitel/-satz. Wage "
+         "auch ungewöhnliche, originelle Kombinationen. Antworte NUR mit JSON: "
+         "{\"ideen\":[{\"concept\":\"kurzer Konzepttext\",\"picks\":"
+         "[{\"parameter\":\"…\",\"value\":\"…\"}]}]}"),
+        f"Aufgabenstellung:\n{problem}{params_txt}{_ctx}")
+    ideen = []
+    if data:
+        for it in (data.get("ideen") or []):
+            if not isinstance(it, dict):
+                continue
+            picks = []
+            for pk in (it.get("picks") or []):
+                if isinstance(pk, dict) and pk.get("parameter"):
+                    picks.append({"parameter": str(pk["parameter"]).strip(),
+                                  "value": _morph_value_str(pk.get("value"))})
+            concept = _morph_value_str(it.get("concept"))
+            if picks or concept:
+                ideen.append({"concept": concept, "picks": picks})
+    if not ideen:
+        raise HTTPException(status_code=502, detail="KI lieferte keine Ideen")
+    return {"ideen": ideen}
+
+
+# ── Morph-Trainingsfile (Backend, automatisch generiert) ──────────────────────
+# Gute/schlechte Ideen sammeln sich fortlaufend je Thema unter
+# data/morph_training/<slug>.jsonl. Quellen: Wischtechnik, gelöschte ausformulierte
+# Karten (= „schlecht"), gemerkte Lösungen (= „gut"). Pro Zeile sowohl strukturiert
+# als auch im Chat-Format (messages) zum Finetunen.
+MORPH_TRAIN_DIR = DATA_DIR / "morph_training"
+
+
+def _morph_train_path(problem: str) -> Path:
+    slug = _to_slug((problem or "").strip()) or "allgemein"
+    return MORPH_TRAIN_DIR / f"{slug}.jsonl"
+
+
+@app.post("/api/morph/training/add")
+async def morph_training_add(req: Request):
+    body = await req.json()
+    problem = (body.get("problem") or "").strip()
+    label = (body.get("label") or "").strip().lower()
+    if label not in ("good", "bad"):
+        raise HTTPException(status_code=400, detail="label muss 'good' oder 'bad' sein")
+    idea = body.get("idea") or {}
+    picks = [p for p in (idea.get("picks") or []) if isinstance(p, dict)]
+    concept = str(idea.get("concept") or "").strip()
+    reason = str(body.get("reason") or "").strip()
+    source = str(body.get("source") or "swipe").strip()
+    evaluation = body.get("evaluation") or None
+    combo = "\n".join(f"- {p.get('parameter','?')}: {p.get('value','?')}" for p in picks)
+    user_txt = f"Aufgabe: {problem or '—'}"
+    if concept:
+        user_txt += f"\nIdee: {concept}"
+    if combo:
+        user_txt += f"\nKombination:\n{combo}"
+    urteil = "GUT — geeignete Idee." if label == "good" else "SCHLECHT — ungeeignete Idee."
+    assistant_txt = urteil + (f"\nBegründung: {reason}" if reason else "")
+    rec = {
+        "problem": problem, "label": label, "reason": reason, "source": source,
+        "idea": {"concept": concept, "picks": picks}, "evaluation": evaluation,
+        "ts": time.time(),
+        "messages": [
+            {"role": "user", "content": user_txt},
+            {"role": "assistant", "content": assistant_txt},
+        ],
+    }
+    MORPH_TRAIN_DIR.mkdir(parents=True, exist_ok=True)
+    path = _morph_train_path(problem)
+    async with aiofiles.open(path, "a", encoding="utf-8") as f:
+        await f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    n = 0
+    async with aiofiles.open(path, "r", encoding="utf-8") as f:
+        async for _line in f:
+            if _line.strip():
+                n += 1
+    return {"ok": True, "count": n, "file": path.name}
+
+
+@app.get("/api/morph/training")
+async def morph_training_get(problem: str = "", format: str = "jsonl"):
+    path = _morph_train_path(problem)
+    recs = []
+    if path.exists():
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            async for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    recs.append(json.loads(line))
+                except Exception:
+                    pass
+    if format == "md":
+        def _fmt(r):
+            idea = r.get("idea") or {}
+            picks = [p for p in (idea.get("picks") or []) if isinstance(p, dict)]
+            combo = ", ".join(f"{p.get('parameter','?')}: {p.get('value','?')}" for p in picks)
+            head = (idea.get("concept") or combo or "—").strip()
+            line = f"- **{head}**"
+            if combo and idea.get("concept"):
+                line += f" ({combo})"
+            if r.get("reason"):
+                line += f" — {r['reason']}"
+            return line
+        good = [r for r in recs if r.get("label") == "good"]
+        bad = [r for r in recs if r.get("label") == "bad"]
+        md = f"# Trainingsdaten Morphologischer Kasten\n\n**Aufgabe:** {problem or '—'}\n\n"
+        md += f"## Gute Ideen ({len(good)})\n\n" + ("\n".join(_fmt(r) for r in good) or "_keine_") + "\n\n"
+        md += f"## Schlechte Ideen ({len(bad)})\n\n" + ("\n".join(_fmt(r) for r in bad) or "_keine_") + "\n"
+        return Response(md, media_type="text/markdown; charset=utf-8")
+    raw = ("\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n") if recs else ""
+    return Response(raw, media_type="application/jsonl; charset=utf-8")
+
+
+@app.delete("/api/morph/training")
+async def morph_training_delete(problem: str = ""):
+    path = _morph_train_path(problem)
+    if path.exists():
+        path.unlink()
+    return {"ok": True}
 
 
 # ── Export-API ────────────────────────────────────────────────────────────────
@@ -5940,6 +6119,7 @@ _HELP_DOC_FILES = [
     "docs/ENTWICKLUNG.md", "docs/SERVER.md", "docs/PERSISTENZ.md",
     "docs/TECHNISCHE_BESCHREIBUNG.md", "docs/PORTABLE.md",
     "docs/INSTALL.md", "docs/GITHUB.md", "docs/LIZENZEN.md",
+    "docs/HANDY_ZUGRIFF.md",
 ]
 _HELP_COLLECTION_NAME = "Hilfe: LOCAL AI"
 _HELP_AGENT_ID = "hilfe_agent"
@@ -6046,6 +6226,16 @@ async def help_build(req: Request):
 
     return {"ok": True, "rag_collection_id": coll["id"], "agent_id": agent_id,
             "docs": ingested, "agent_name": "Hilfe-Assistent"}
+
+
+@app.get("/api/help/guide")
+async def help_guide():
+    """Liefert die Handy-/FritzBox-Anleitung (docs/HANDY_ZUGRIFF.md) als Markdown
+    für das Anleitungs-Fenster im Nutzerprofil."""
+    fp = Path(__file__).parent / "docs" / "HANDY_ZUGRIFF.md"
+    if not fp.is_file():
+        raise HTTPException(status_code=404, detail="Anleitung nicht gefunden")
+    return {"markdown": fp.read_text(encoding="utf-8", errors="ignore")}
 
 
 # ── Diagnose-Logging ──────────────────────────────────────────────────────────

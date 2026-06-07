@@ -706,6 +706,8 @@ indem du je Parameter eine Ausprägung wählst.
    klicken = abwählen). **Doppelklick** = Text bearbeiten (Enter = übernehmen, Esc =
    abbrechen). Die aktuelle Lösung wird oben angezeigt.
 3. **Verfeinern:** pro Chip **✨** (ausformulieren) oder **💬** (Kritik & Alternativen).
+   Die **Alternativen erscheinen jetzt in einem Feld, das offen bleibt**, bis du eine per
+   **＋ übernehmen** ins Raster holst oder es mit **✕** schließt (kein flüchtiger Hinweis mehr).
    Eigene Parameter/Ausprägungen über **＋ Parameter** bzw. **＋** in der Zeile.
 4. **📊 KI: Kombination bewerten** — bewertet die gewählte Lösung (Gesamt-/Machbarkeits-/
    Innovations-Score, Begründung, Risiken) und schlägt interessante Kombinationen vor,
@@ -722,6 +724,44 @@ indem du je Parameter eine Ausprägung wählst.
      Ausprägungen} zur Weiterauswertung (z. B. in Excel).
 
    Der Stand wird automatisch im Browser gespeichert (übersteht einen Reload).
+
+### 🃏 Ideen wischen (kreative Ideenfindung)
+
+Mit **🃏 Ideen wischen** denkt sich die KI laufend **ganze Konzept-Ideen** aus (je eine
+Ausprägung pro Parameter + ein kurzer Konzepttitel) und legt sie als Kartenstapel vor:
+
+- **Nach links wischen = gut**, **nach rechts wischen = schlecht** (am PC: Karte mit der
+  Maus ziehen oder die Knöpfe **👍 Gut** / **👎 Schlecht**).
+- Nach jedem Wisch kannst du **kurz begründen**, *warum* die Idee gut bzw. schlecht ist
+  (überspringbar – einfach leer lassen + OK).
+- Gute Ideen werden gleich **in den Kasten übernommen**. Geht der Stapel zur Neige, lädt die
+  KI im Hintergrund nach (oder **🔄 Mehr Ideen**).
+
+### 🧠 Automatisches Trainingsfile
+
+Während du arbeitest, sammelt die App **gute und schlechte Beispiele automatisch** in einer
+Datei auf dem Rechner (`data/morph_training/<thema>.jsonl`):
+
+- **Wischen** (gut/schlecht + deine Begründung),
+- eine **ausformulierte Karte gelöscht** → wird als **„schlecht"** vermerkt,
+- eine **Lösung gemerkt** → wird als **„gut"** vermerkt.
+
+Über **⬇ Auto-Trainingsfile** lädst du diese Sammlung herunter (zum Finetunen eines LLM),
+über **📚 Training → Wissensdatenbank** schiebst du sie als lesbare Gut/Schlecht-Liste in eine
+**Wissensdatenbank**.
+
+### 🌐 Web / 📚 Wissensdatenbank als Quelle
+
+Über der Tabelle wählst du **Informationsquellen** für die KI: **🌐 Web** (DuckDuckGo) und/oder
+eine oder mehrere **📚 Wissensdatenbank(en)**. Sie fließen als Inspiration in **Parameter
+generieren**, **Ideen wischen** und **💬 Alternativen** ein (**↻** aktualisiert die Liste).
+
+> **Am Handy nutzen (PWA):** Die Oberfläche lässt sich aufs Handy „installieren" (Frontend am
+> Handy, Backend bleibt am Rechner). Dafür den Server im **Servermodus** (`0.0.0.0`) starten und
+> am Handy die Adresse `http(s)://<Rechner-IP>:8780` öffnen → Browser-Menü **„Zum Startbildschirm
+> hinzufügen"**. Die **Wischen**-Ansicht ist auf Touch ausgelegt. Hinweis: Die echte Installation
+> verlangt **HTTPS** (oder `localhost`); über einfaches `http://…` läuft alles im Handy-Browser,
+> ist aber nicht installierbar (Details siehe Entwickler-Doku, Stichwort selbstsigniertes Zertifikat).
 
 ---
 

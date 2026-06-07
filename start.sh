@@ -17,5 +17,14 @@ export PYTHONUTF8=1
 HOST="${AI_HOST:-127.0.0.1}"
 PORT="${AI_PORT:-8780}"
 
-echo "AI Framework Thomas startet auf http://${HOST}:${PORT}"
-exec uvicorn main:app --host "$HOST" --port "$PORT"
+# Optionales HTTPS (für die PWA-Installation am Handy): beide Variablen setzen.
+# Zertifikat z. B. mit ./scripts/gen_cert.sh erzeugen.
+SSL_ARGS=()
+SCHEME="http"
+if [ -n "${AI_SSL_CERT:-}" ] && [ -n "${AI_SSL_KEY:-}" ]; then
+  SSL_ARGS=(--ssl-certfile "$AI_SSL_CERT" --ssl-keyfile "$AI_SSL_KEY")
+  SCHEME="https"
+fi
+
+echo "AI Framework Thomas startet auf ${SCHEME}://${HOST}:${PORT}"
+exec uvicorn main:app --host "$HOST" --port "$PORT" "${SSL_ARGS[@]}"

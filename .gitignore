@@ -28,6 +28,10 @@ data/mail_rules.json
 data/api_providers.json
 data/juries/*
 data/jury_docs/*
+data/morph_training/*
+
+# Selbstsignierte TLS-Zertifikate (privater Schlüssel!) — siehe scripts/gen_cert.*
+certs/
 
 # Verzeichnisstruktur erhalten (Inhalt ignoriert)
 !data/uploads/.gitkeep
