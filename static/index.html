@@ -1276,6 +1276,7 @@ Beispiele:
       <div id="morph-toolbar">
         <h2 style="font-size:16px">🧩 Morphologischer Kasten</h2>
         <button id="btn-morph-add-param" class="export-btn" style="font-size:12px">＋ Parameter</button>
+        <button id="btn-morph-grade-best" class="export-btn" title="Wählt je Zeile das Kärtchen mit der besten Note (1)">🎯 Beste Noten wählen</button>
         <button id="btn-morph-eval" class="export-btn">📊 KI: Kombination bewerten</button>
         <button id="btn-morph-save-solution" class="export-btn">💾 Lösung + Bewertung merken</button>
         <button id="btn-morph-export-docx" class="export-btn">📋 DOCX</button>
@@ -1303,7 +1304,7 @@ Beispiele:
         <button id="btn-morph-src-refresh" class="export-btn" style="font-size:11px" title="Liste aktualisieren">↻</button>
         <span class="dir-hint" style="margin:0">Quellen für „Parameter generieren", „Ideen wischen" &amp; 💬 Alternativen</span>
       </div>
-      <div class="dir-hint">Zeile = Parameter, Chips = Ausprägungen. Klick auf einen Chip = für die Lösung wählen · Doppelklick = bearbeiten · ✨ ausformulieren · 💬 Alternativen.</div>
+      <div class="dir-hint">Zeile = Parameter, Chips = Ausprägungen. Klick auf einen Chip = für die Lösung wählen · Doppelklick = bearbeiten · ✨ ausformulieren · 💬 Alternativen. Links die kleine <strong>Note</strong> anklicken = Schulnote 1–6 vergeben (1 = beste); „🎯 Beste Noten wählen" übernimmt je Zeile die beste.</div>
       <div id="morph-solution"></div>
       <div id="morph-grid"></div>
       <div id="morph-altpanel" style="display:none"></div>
@@ -1999,7 +2000,7 @@ Beispiele:
 <script src="/js/medizin.js?v=20260612"></script>
 <script src="/js/mathe.js?v=20260613"></script>
 <script src="/js/dir_analysis.js?v=20260613"></script>
-<script src="/js/morph_box.js?v=20260607swipe"></script>
+<script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/app.js?v=20260607guide"></script>
 
 </body>

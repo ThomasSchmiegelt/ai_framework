@@ -301,15 +301,79 @@ const MorphBox = (() => {
     });
 
     const sol = _selectionList();
-    _el('morph-solution').textContent = sol.length
-      ? '✓ Lösung: ' + sol.map(s => s.value).join(' · ') : '';
+    let gsum = 0, gn = 0;
+    _params.forEach((p, pi) => {
+      if (_selection[pi] != null) { const g = _grade(pi, _selection[pi]); if (g != null) { gsum += g; gn++; } }
+    });
+    let _line = sol.length ? '✓ Lösung: ' + sol.map(s => s.value).join(' · ') : '';
+    if (gn) _line += `  ·  Ø Note ${(gsum / gn).toFixed(1)}`;
+    _el('morph-solution').textContent = _line;
     _renderSolutions();
+  }
+
+  // ── Schulnoten 1–6 pro Kärtchen (kleine Nutzwertanalyse) ────────────────────
+  // 1 = beste, 6 = schlechteste. Hilft zu entscheiden, welche Ausprägung je Zeile
+  // gewählt wird. Gespeichert als p.grades[] parallel zu p.values[].
+  function _grade(pi, vi) {
+    const p = _params[pi];
+    const g = (p && Array.isArray(p.grades)) ? p.grades[vi] : null;
+    return (g >= 1 && g <= 6) ? g : null;
+  }
+  function _setGrade(pi, vi, g) {
+    const p = _params[pi]; if (!p) return;
+    if (!Array.isArray(p.grades)) p.grades = [];
+    p.grades[vi] = (g >= 1 && g <= 6) ? g : null;
+    _render(); _save();
+  }
+  function _cycleGrade(pi, vi, dir) {
+    const cur = _grade(pi, vi);
+    let next;
+    if (cur == null) next = dir > 0 ? 1 : 6;
+    else { next = cur + dir; if (next < 1 || next > 6) next = null; }
+    _setGrade(pi, vi, next);
+  }
+  function _bestGrade(pi) {
+    const p = _params[pi]; if (!p) return null;
+    let best = null;
+    p.values.forEach((_, vi) => { const g = _grade(pi, vi); if (g != null && (best == null || g < best)) best = g; });
+    return best;
+  }
+  // Note einer Ausprägung über Parametername + Wert (für Exporte gemerkter Lösungen)
+  function _pickGrade(parameter, value) {
+    const pi = _params.findIndex(p => p.name === parameter);
+    if (pi < 0) return null;
+    const vi = _params[pi].values.indexOf(value);
+    return vi < 0 ? null : _grade(pi, vi);
+  }
+  // Beste Note je Zeile als Auswahl übernehmen
+  function _gradeBest() {
+    let n = 0;
+    _params.forEach((p, pi) => {
+      const best = _bestGrade(pi);
+      if (best == null) return;
+      const vi = p.values.findIndex((_, i) => _grade(pi, i) === best);
+      if (vi >= 0) { _selection[pi] = vi; n++; }
+    });
+    if (!n) { showToast('Noch keine Noten vergeben – Kärtchen über die kleine Note (1–6) benoten'); return; }
+    _lastEval = null;
+    _render(); _save();
+    showToast(`✓ Beste Note je Zeile gewählt (${n} Zeilen)`);
   }
 
   function _chip(pi, vi) {
     const chip = document.createElement('div');
     const selected = _selection[pi] === vi;
-    chip.className = 'morph-chip' + (selected ? ' morph-chip--sel' : '');
+    const g = _grade(pi, vi);
+    const isBest = g != null && g === _bestGrade(pi);
+    chip.className = 'morph-chip' + (selected ? ' morph-chip--sel' : '') + (isBest ? ' morph-chip--best' : '');
+
+    const grade = document.createElement('button');
+    grade.className = 'morph-chip-grade ' + (g ? 'g' + g : 'g-none');
+    grade.textContent = g ? g : '–';
+    grade.title = 'Schulnote 1–6 (1 = beste) · Klick = weiter, Rechtsklick = zurück';
+    grade.addEventListener('click', e => { e.stopPropagation(); _cycleGrade(pi, vi, +1); });
+    grade.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); _cycleGrade(pi, vi, -1); });
+    chip.appendChild(grade);
 
     const txt = document.createElement('span');
     txt.className = 'morph-chip-txt';
@@ -353,6 +417,7 @@ const MorphBox = (() => {
         _elaborated.delete(delVal);
       }
       _params[pi].values.splice(vi, 1);
+      if (Array.isArray(_params[pi].grades)) _params[pi].grades.splice(vi, 1);
       if (_selection[pi] === vi) delete _selection[pi];
       else if (_selection[pi] > vi) _selection[pi]--;
       _render(); _save();
@@ -451,12 +516,15 @@ const MorphBox = (() => {
     if (!sols.length) { showToast('Keine Lösung zur Auswertung'); return; }
     const paramNames = _params.map(p => p.name);
     const q = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-    let csv = ['Lösung', 'Score', 'Machbarkeit', 'Innovation', ...paramNames].map(q).join(',') + '\n';
+    let csv = ['Lösung', 'Score', 'Machbarkeit', 'Innovation', 'Ø Note', ...paramNames].map(q).join(',') + '\n';
     sols.forEach(s => {
       const ev = s.evaluation || {};
       const byParam = {};
       (s.picks || []).forEach(p => { byParam[p.parameter] = p.value; });
-      const row = [s.label, ev.score ?? '', ev.machbarkeit ?? '', ev.innovation ?? '',
+      let gsum = 0, gn = 0;
+      (s.picks || []).forEach(p => { const g = _pickGrade(p.parameter, p.value); if (g != null) { gsum += g; gn++; } });
+      const avg = gn ? (gsum / gn).toFixed(1) : '';
+      const row = [s.label, ev.score ?? '', ev.machbarkeit ?? '', ev.innovation ?? '', avg,
         ...paramNames.map(n => byParam[n] || '')];
       csv += row.map(q).join(',') + '\n';
     });
@@ -466,15 +534,25 @@ const MorphBox = (() => {
 
   function _toMarkdown() {
     let md = `# Morphologischer Kasten\n\n**Aufgabe:** ${_problem || '—'}\n\n`;
-    md += '| Parameter | Ausprägungen |\n|---|---|\n';
+    md += '| Parameter | Ausprägungen (Note 1–6, 1 = beste) |\n|---|---|\n';
     _params.forEach((p, pi) => {
-      const vals = p.values.map((v, vi) => _selection[pi] === vi ? `**${v}**` : v).join(' · ');
+      const vals = p.values.map((v, vi) => {
+        const g = _grade(pi, vi);
+        const cell = g != null ? `${v} (Note ${g})` : v;
+        return _selection[pi] === vi ? `**${cell}**` : cell;
+      }).join(' · ');
       md += `| ${p.name} | ${vals} |\n`;
     });
     const sol = _selectionList();
     if (sol.length) {
       md += '\n## Gewählte Lösung\n\n';
-      sol.forEach(s => { md += `- **${s.parameter}:** ${s.value}\n`; });
+      let gsum = 0, gn = 0;
+      sol.forEach(s => {
+        const g = _pickGrade(s.parameter, s.value);
+        if (g != null) { gsum += g; gn++; }
+        md += `- **${s.parameter}:** ${s.value}${g != null ? ` — Note ${g}` : ''}\n`;
+      });
+      if (gn) md += `\n**Ø Note:** ${(gsum / gn).toFixed(1)}\n`;
     }
     return md;
   }
@@ -509,9 +587,10 @@ const MorphBox = (() => {
   }
 
   function _exportCsv() {
-    let csv = 'Parameter,Ausprägungen\n';
-    _params.forEach(p => {
-      csv += `"${(p.name || '').replace(/"/g, '""')}","${p.values.join(' | ').replace(/"/g, '""')}"\n`;
+    let csv = 'Parameter,Ausprägungen,Noten\n';
+    _params.forEach((p, pi) => {
+      const noten = p.values.map((_, vi) => { const g = _grade(pi, vi); return g != null ? g : '–'; }).join(' | ');
+      csv += `"${(p.name || '').replace(/"/g, '""')}","${p.values.join(' | ').replace(/"/g, '""')}","${noten}"\n`;
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -708,6 +787,7 @@ const MorphBox = (() => {
     _el('btn-morph-generate')?.addEventListener('click', _generate);
     _el('btn-morph-add-param')?.addEventListener('click', _addParam);
     _el('btn-morph-eval')?.addEventListener('click', _evaluate);
+    _el('btn-morph-grade-best')?.addEventListener('click', _gradeBest);
     _el('btn-morph-save-solution')?.addEventListener('click', _saveSolution);
     _el('btn-morph-export-docx')?.addEventListener('click', _exportDocx);
     _el('btn-morph-export-doku')?.addEventListener('click', _exportDoku);

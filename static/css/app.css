@@ -3791,6 +3791,24 @@ select.ob-input option {
   cursor: pointer; font-size: 13px; padding: 4px 12px;
 }
 .morph-chip-add:hover { border-color: var(--accent); color: var(--accent); }
+/* Schulnoten 1–6 pro Kärtchen (1 = beste, grün → rot) */
+.morph-chip { padding-left: 5px; }
+.morph-chip-grade {
+  flex-shrink: 0; min-width: 19px; height: 19px; padding: 0 3px;
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  font-size: 11px; font-weight: 700; line-height: 17px; text-align: center;
+  background: var(--bg-main); color: var(--text-muted);
+}
+.morph-chip-grade:hover { border-color: var(--accent); }
+.morph-chip-grade.g-none { font-weight: 400; opacity: .65; }
+.morph-chip-grade.g1 { background: #2fa36b; color: #fff;     border-color: #2fa36b; }
+.morph-chip-grade.g2 { background: #6bbf59; color: #07210f; border-color: #6bbf59; }
+.morph-chip-grade.g3 { background: #e0c64f; color: #2a2200; border-color: #e0c64f; }
+.morph-chip-grade.g4 { background: #e0964f; color: #2a1600; border-color: #e0964f; }
+.morph-chip-grade.g5 { background: #e0704f; color: #fff;     border-color: #e0704f; }
+.morph-chip-grade.g6 { background: #e0564f; color: #fff;     border-color: #e0564f; }
+.morph-chip--best { box-shadow: 0 0 0 2px rgba(47,163,107,.55); }
+.morph-chip--sel.morph-chip--best { box-shadow: 0 0 0 2px rgba(47,163,107,.9); }
 .morph-chip-edit { background: var(--bg-main); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 7px; font-size: 12.5px; min-width: 120px; }
 .morph-chip-edit:focus { outline: none; }
 #morph-eval { margin: 0 14px 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); font-size: 13px; }
