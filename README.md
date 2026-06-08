@@ -200,6 +200,15 @@ Ein Eindruck der wichtigsten Tabs (Screenshots aus der Anwendung):
 ![Mathe](static/onboarding/mathe.png)
 *🔢 Mathe — Workspace mit Plots, SymPy und Tutor-Modus (werkzeuggeprüft).*
 
+![Verzeichnis-Analyse](static/onboarding/verzeichnisanalyse.png)
+*📁 Verzeichnis-Analyse — Ordner serverseitig scannen, Dateien KI-analysieren (personenbezogene Daten werden anonymisiert), Index & Wissensdatenbank erzeugen.*
+
+![Morphologischer Kasten](static/onboarding/morphologischer_kasten.png)
+*🧩 Morphologischer Kasten — Ideenfindung über Parameter × Ausprägungen mit Bewertung, Schulnoten und Wischtechnik.*
+
+![Jury](static/onboarding/jury.png)
+*⚖️ Jury — Mehr-Agenten-Bewertung eines Textes (z. B. Recht) mit Einzelurteilen und Gesamt-Synthese.*
+
 ![Diagnose-Logger](static/onboarding/log_file.png)
 *📋 Diagnose-Logger — zuschaltbares Protokoll zur Fehlersuche.*
 
