@@ -202,10 +202,15 @@ foreach ($t in $optTabs.Keys) {
 }
 $apiAns = Read-Host "Externe KI-Anbieter (API, z. B. OpenRouter) zusaetzlich zu lokal nutzen? [J/N]"
 $enableApi = if ($apiAns -match '^[JjYy]') { "true" } else { "false" }
+# Python-Ausfuehrung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-
+# Server eher abschalten. Leere Eingabe = Ja (Standard).
+$pyAns = Read-Host "Python-Code im Code-Tab serverseitig ausfuehren? (lokal empfohlen) [J/N]"
+$allowPy = if ($pyAns -match '^[Nn]') { "false" } else { "true" }
 
 # Robust per venv-Python in config.json schreiben (vermeidet PS-JSON-Eigenheiten)
 $env:HIDDEN_JSON = '[' + (($hidden | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']'
 $env:ENABLE_API  = $enableApi
+$env:ALLOW_PY    = $allowPy
 $pyMerge = @"
 import json, os, pathlib
 p = pathlib.Path('config.json')
@@ -215,8 +220,9 @@ if p.exists():
     except Exception: cfg = {}
 cfg['hidden_tabs_default'] = json.loads(os.environ['HIDDEN_JSON'])
 cfg['enable_api'] = os.environ['ENABLE_API'] == 'true'
+cfg['allow_python_exec'] = os.environ['ALLOW_PY'] == 'true'
 p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
-print('  ok: hidden_tabs_default=%s enable_api=%s' % (cfg['hidden_tabs_default'], cfg['enable_api']))
+print('  ok: hidden_tabs_default=%s enable_api=%s allow_python_exec=%s' % (cfg['hidden_tabs_default'], cfg['enable_api'], cfg['allow_python_exec']))
 "@
 if (Test-Path $pyVenv) { $pyMerge | & $pyVenv - } else { $pyMerge | & $pythonCmd - }
 Write-OK "Funktionsauswahl gespeichert"

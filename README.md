@@ -240,12 +240,21 @@ Bedienung für Anwender: **[BEDIENUNGSANLEITUNG.md](BEDIENUNGSANLEITUNG.md)**
   "embed_model":    "nomic-embed-text",
   "ollama_base":    "http://localhost:11434",
   "port":           8780,
-  "host":           "127.0.0.1"
+  "host":           "127.0.0.1",
+  "enable_api":         true,
+  "allow_python_exec":  true
 }
 ```
 
 > `allowed_models` ist nur noch eine **Sortier-Reihenfolge**, kein Filter: in den
 > Modell-Auswahllisten (Profil) erscheinen **alle** in Ollama installierten Modelle.
+
+**Optionale Installer-Schalter** (werden vom Installer gesetzt, lassen sich aber von Hand ändern):
+- `enable_api` — externe OpenAI-kompatible KI-Anbieter (API) im Profil anbieten (Default `true`).
+- `allow_python_exec` — **Python im 💻 Code-Tab serverseitig ausführen** (Default `true`).
+  Lokal sinnvoll; im Mehrbenutzer-/Servermodus auf `false` setzen, da beliebiger
+  Python-Code auf dem Server läuft. Bei `false` liefert der Endpunkt 403 und die
+  Python-Option im Code-Tab wird ausgeblendet (`make_server` setzt den Wert auf `false`).
 
 ---
 

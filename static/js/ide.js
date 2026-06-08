@@ -9,6 +9,7 @@ const CodeIDE = (() => {
   let _generating  = false;
   let _lastErrors  = [];   // letzte Konsolen-Fehler für Auto-Reparatur
   let _cm          = null; // CodeMirror-Instanz (null = Textarea-Fallback)
+  let _lang        = 'js'; // 'js' = Canvas-Vorschau (Browser), 'py' = Python (Server)
 
   /* ── KI-Prompts ──────────────────────────────────────────────── */
   const SYSTEM_PROMPT =
@@ -43,6 +44,25 @@ const CodeIDE = (() => {
     'Das Programm MUSS mit ai_framework_thomas_run(draw) enden. ai_framework_thomas_input() für Eingabefelder.\n' +
     'Antworte IMMER mit dem vollständigen korrigierten Code in einem ```javascript Block.\n' +
     'Danach 1 Satz: was war der Fehler und wie wurde er behoben.';
+
+  const PY_SYSTEM_PROMPT =
+    'Du bist ein Python-Code-Assistent für AI_Framework_Thomas. Der Code wird serverseitig ausgeführt.\n' +
+    '\n' +
+    'GRUNDREGELN:\n' +
+    '- Schreibe eigenständigen Python-Code; gib Ergebnisse mit print(...) aus.\n' +
+    '- Verfügbar: math, statistics, random, datetime, json, re, itertools, functools, collections,\n' +
+    '  numpy (np), scipy, sympy (sp), pandas (pd) und matplotlib.pyplot (plt).\n' +
+    '- Für Diagramme matplotlib nutzen: plt.plot(...) usw. KEIN plt.show() nötig — erzeugte Figuren\n' +
+    '  werden automatisch angezeigt.\n' +
+    '- KEIN Datei-/Netzwerkzugriff, kein os/sys/subprocess, keine Endlosschleifen (Zeitlimit 15 s).\n' +
+    '\n' +
+    'Antworte IMMER mit vollständigem Code in einem ```python Block, dann 1–2 Sätze Erklärung. Deutsch.';
+
+  const PY_REPAIR_PROMPT =
+    'Du bist ein Python-Code-Reparatur-Assistent für AI_Framework_Thomas. Der Code wird serverseitig ausgeführt.\n' +
+    'Regeln: eigenständiges Python, Ausgaben mit print(...); Diagramme via matplotlib.pyplot (plt), kein plt.show();\n' +
+    'verfügbar sind numpy/scipy/sympy/pandas; kein Datei-/Netzwerkzugriff.\n' +
+    'Antworte IMMER mit dem vollständigen korrigierten Code in einem ```python Block, danach 1 Satz Erklärung.';
 
   /* ── Hilfsfunktionen ─────────────────────────────────────────── */
   const _editor  = () => document.getElementById('ide-editor');
@@ -195,6 +215,7 @@ if (!_drawFn) { _resize(); }
 </html>`;
 
   function _run() {
+    if (_lang === 'py') return _runPython();
     const code  = _getCode().trim();
     const frame = _preview();
     const cons  = _console();
@@ -217,6 +238,91 @@ if (!_drawFn) { _resize(); }
     for (const [k, val] of Object.entries(tokens)) fw = fw.split(k).join(val);
     frame.srcdoc = fw + code + _IFRAME_CLOSE;
     if (typeof Logger !== 'undefined') Logger.log('ide_run', { name: _currentName, code_len: code.length });
+  }
+
+  /* ── Python serverseitig ausführen ───────────────────────────── */
+  const _esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+  async function _runPython() {
+    const code = _getCode().trim();
+    const out  = document.getElementById('ide-py-output');
+    const cons = _console();
+    if (cons) cons.innerHTML = '';
+    _lastErrors = [];
+    const repairBtn = document.getElementById('btn-ide-repair');
+    if (repairBtn) repairBtn.style.display = 'none';
+    _showPyOutput(true);
+    if (!out) return;
+    if (!code) { out.innerHTML = ''; return; }
+    out.innerHTML = '<div class="ide-py-run"><span class="spinner"></span> Python läuft…</div>';
+    try {
+      const resp = await fetch('/api/code/run-python', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      let data;
+      try { data = await resp.json(); } catch { data = {}; }
+      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      _renderPyResult(data);
+    } catch (e) {
+      out.innerHTML = `<pre class="ide-py-err">Fehler: ${_esc(e.message)}</pre>`;
+    }
+    if (typeof Logger !== 'undefined') Logger.log('ide_run_py', { name: _currentName, code_len: code.length });
+  }
+
+  function _renderPyResult(data) {
+    const out = document.getElementById('ide-py-output');
+    if (!out) return;
+    out.innerHTML = '';
+    for (const src of (data.images || [])) {
+      const img = document.createElement('img');
+      img.className = 'ide-py-img'; img.src = src;
+      out.appendChild(img);
+    }
+    const txt = (data.output || '').replace(/\s+$/, '');
+    if (txt) {
+      const pre = document.createElement('pre');
+      pre.className = 'ide-py-out'; pre.textContent = txt;
+      out.appendChild(pre);
+    }
+    if (data.error) {
+      const pre = document.createElement('pre');
+      pre.className = 'ide-py-err'; pre.textContent = data.error;
+      out.appendChild(pre);
+      _lastErrors = [data.error];
+      const repairBtn = document.getElementById('btn-ide-repair');
+      if (repairBtn) repairBtn.style.display = '';   // Auto-Reparatur auch für Python
+    }
+    if (!txt && !data.error && !(data.images || []).length) {
+      out.innerHTML = '<div class="ide-py-run">✓ Ausgeführt (keine Ausgabe)</div>';
+    }
+  }
+
+  /* Vorschau (JS-Canvas) vs. Python-Ausgabe umschalten */
+  function _showPyOutput(showPy) {
+    const frame = _preview();
+    const out   = document.getElementById('ide-py-output');
+    if (frame) frame.style.display = showPy ? 'none' : '';
+    if (out)   out.style.display   = showPy ? '' : 'none';
+  }
+
+  /* Sprache umschalten (JS ⇄ Python): Editor-Modus, Vorschau, gespeicherte Wahl */
+  function _setLang(lang, opts) {
+    // Python serverseitig deaktiviert (Installer/Server) → immer JS
+    if (lang === 'py' && window.AllowPythonExec === false) lang = 'js';
+    _lang = (lang === 'py') ? 'py' : 'js';
+    try { localStorage.setItem('ide_lang', _lang); } catch (_) {}
+    const sel = document.getElementById('ide-lang');
+    if (sel) sel.value = _lang;
+    if (_cm) _cm.setOption('mode', _lang === 'py' ? 'python' : 'javascript');
+    _showPyOutput(_lang === 'py');
+    // Beim manuellen Umschalten alte Ausgaben leeren (nicht beim Initialisieren)
+    if (!opts || !opts.silent) {
+      const out = document.getElementById('ide-py-output'); if (out) out.innerHTML = '';
+      const f = _preview(); if (f && _lang === 'js') f.srcdoc = '';
+      const c = _console(); if (c) c.innerHTML = '';
+      const rb = document.getElementById('btn-ide-repair'); if (rb) rb.style.display = 'none';
+    }
   }
 
   /* ── Speichern ───────────────────────────────────────────────── */
@@ -311,9 +417,11 @@ if (!_drawFn) { _resize(); }
     const tbl = {
       toleranz: ['Toleranzanalyse', EXAMPLE_TOLERANZ],
       kurve:    ['Federkennlinie',   EXAMPLE_FEDERKURVE],
+      python:   ['Python-Beispiel',  EXAMPLE_PYTHON],
       leer:     ['Neues Programm',   EXAMPLE_LEER],
     };
     const [name, code] = tbl[key] || tbl.leer;
+    _setLang(key === 'python' ? 'py' : 'js', { silent: true });
     _currentId = null; _currentName = name;
     if (_nameEl()) _nameEl().value = name;
     _setCode(code); _clearDirty();
@@ -339,8 +447,8 @@ if (!_drawFn) { _resize(); }
   function _extractCodeBlock(text) {
     // Versucht alle gängigen Code-Block-Formate zu erkennen
     const patterns = [
-      /```(?:javascript|js|html|HTML|JS|JavaScript)\s*\n([\s\S]*?)\n?```/i,
-      /```(?:javascript|js|html)\s*([\s\S]*?)```/i,
+      /```(?:javascript|js|html|HTML|JS|JavaScript|python|py|Python)\s*\n([\s\S]*?)\n?```/i,
+      /```(?:javascript|js|html|python|py)\s*([\s\S]*?)```/i,
       /```\s*\n([\s\S]*?)\n?```/,
       /```([\s\S]*?)```/,
     ];
@@ -379,7 +487,7 @@ if (!_drawFn) { _resize(); }
     if (!msg) { inputEl?.focus(); return; }
     inputEl.value = '';
 
-    await _runAI(SYSTEM_PROMPT, msg, _getCode());
+    await _runAI(_lang === 'py' ? PY_SYSTEM_PROMPT : SYSTEM_PROMPT, msg, _getCode());
   }
 
   /* ── Auto-Reparatur ──────────────────────────────────────────── */
@@ -393,7 +501,7 @@ if (!_drawFn) { _resize(); }
     document.getElementById('btn-ide-repair').style.display = 'none';
 
     const userMsg = `Dieser Code hat einen Fehler:\n\`\`\`\n${code}\n\`\`\`\n\nFehler:\n${errText}`;
-    await _runAI(REPAIR_PROMPT, userMsg, null, '🔧 Repariere Code…');
+    await _runAI(_lang === 'py' ? PY_REPAIR_PROMPT : REPAIR_PROMPT, userMsg, null, '🔧 Repariere Code…');
   }
 
   /* ── Gemeinsamer KI-Stream ───────────────────────────────────── */
@@ -509,7 +617,9 @@ if (!_drawFn) { _resize(); }
     document.getElementById('btn-ide-new')?.addEventListener('click', _new);
     document.getElementById('btn-ide-example-toleranz')?.addEventListener('click', () => _loadExample('toleranz'));
     document.getElementById('btn-ide-example-kurve')?.addEventListener('click',    () => _loadExample('kurve'));
+    document.getElementById('btn-ide-example-py')?.addEventListener('click',       () => _loadExample('python'));
     document.getElementById('btn-ide-example-leer')?.addEventListener('click',     () => _loadExample('leer'));
+    document.getElementById('ide-lang')?.addEventListener('change', e => _setLang(e.target.value));
     document.getElementById('btn-ide-chat-send')?.addEventListener('click', _sendChat);
     document.getElementById('btn-ide-repair')?.addEventListener('click', _autoRepair);
 
@@ -550,6 +660,12 @@ if (!_drawFn) { _resize(); }
       });
       ed.addEventListener('input', _setDirty);
     }
+
+    // Gespeicherte Sprache (JS/Python) wiederherstellen – nach CodeMirror-Init,
+    // damit der Editor-Modus korrekt gesetzt wird.
+    let savedLang = 'js';
+    try { savedLang = localStorage.getItem('ide_lang') || 'js'; } catch (_) {}
+    _setLang(savedLang, { silent: true });
 
     document.querySelector('[data-tab="ide"]')?.addEventListener('click', () => { _loadList(); setTimeout(refresh, 0); });
     _initSplitter();
@@ -596,7 +712,14 @@ if (!_drawFn) { _resize(); }
     });
   }
 
-  return { init, loadFromChat, refresh };
+  /* Python-Option abschalten (vom Profil aufgerufen, wenn allow_python_exec=false) */
+  function disablePython() {
+    const pyOpt = document.querySelector('#ide-lang option[value="py"]');
+    if (pyOpt) pyOpt.style.display = 'none';
+    if (_lang === 'py') _setLang('js', { silent: true });
+  }
+
+  return { init, loadFromChat, refresh, disablePython };
 
 })();
 
@@ -767,4 +890,31 @@ function draw() {
 }
 
 ai_framework_thomas_run(draw);
+`;
+
+const EXAMPLE_PYTHON = `# Python-Beispiel — wird serverseitig ausgeführt
+# Verfügbar u.a.: numpy (np), sympy (sp), pandas (pd), matplotlib.pyplot (plt)
+# Ausgaben mit print(...); Diagramme einfach mit plt erzeugen (kein plt.show() nötig).
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1) Rechnen & ausgeben
+werte = np.array([1, 2, 3, 4, 5, 6])
+print("Summe:", werte.sum(), "| Mittelwert:", werte.mean(), "| Std:", round(float(werte.std()), 3))
+
+# 2) Symbolisch (SymPy)
+import sympy as sp
+x = sp.symbols('x')
+f = x**2 * sp.sin(x)
+print("Ableitung von x^2*sin(x):", sp.diff(f, x))
+
+# 3) Diagramm (matplotlib) — erscheint automatisch in der Vorschau
+t = np.linspace(0, 2 * np.pi, 400)
+plt.figure(figsize=(6, 3.2))
+plt.plot(t, np.sin(t), label='sin')
+plt.plot(t, np.cos(t), label='cos')
+plt.title('Sinus & Kosinus')
+plt.xlabel('t'); plt.ylabel('f(t)')
+plt.legend(); plt.grid(True, alpha=0.3)
 `;

@@ -2204,15 +2204,30 @@ html, body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
+/* Einklappbarer Projekt-Setup-Block (spart vertikalen Platz) */
+#planner-setup { border-bottom: 1px solid var(--border); }
+#planner-setup > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 14px; font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+}
+#planner-setup > summary::-webkit-details-marker { display: none; }
+#planner-setup > summary::before {
+  content: "▸"; display: inline-block; transition: transform .15s; color: var(--text-dim); font-weight: 400;
+}
+#planner-setup[open] > summary::before { transform: rotate(90deg); }
+#planner-setup > summary:hover { color: var(--accent); }
+.planner-setup-title { white-space: nowrap; }
+
 /* Projektkontext + Agent-Zeile */
 #planner-project-row {
   display: flex; gap: 10px; align-items: flex-start;
-  padding: 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  padding: 2px 14px 8px; flex-wrap: wrap;
 }
 #planner-desc {
   flex: 1; min-width: 260px; background: var(--bg-input); border: 1px solid var(--border);
@@ -2222,6 +2237,7 @@ html, body {
 #planner-desc:focus { border-color: var(--accent); }
 #planner-project-actions { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
 .planner-action-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.planner-sep { width: 1px; align-self: stretch; min-height: 18px; background: var(--border); margin: 0 3px; }
 .planner-muted { font-size: 11px; color: var(--text-dim); }
 .planner-rollup { font-size: 12px; color: var(--accent); font-weight: 600; white-space: nowrap; }
 
@@ -2969,6 +2985,28 @@ li.CodeMirror-hint-active { background: var(--accent); color: #fff; }
 /* Leere Vorschau folgt dem dunklen Theme; ein laufendes Programm bringt seinen
    eigenen (weißen) <body>-Hintergrund mit und überdeckt dies. */
 #ide-preview { flex: 1; border: none; border-bottom: 1px solid var(--border); background: var(--bg-main); }
+
+/* Python-Ausgabe (serverseitig) — Alternative zur Canvas-Vorschau */
+#ide-py-output {
+  flex: 1; overflow: auto; border-bottom: 1px solid var(--border);
+  background: var(--bg-main); padding: 10px 12px; min-height: 0;
+}
+#ide-py-output .ide-py-out {
+  margin: 0 0 8px; white-space: pre-wrap; word-break: break-word;
+  font-family: monospace; font-size: 12.5px; color: var(--text); line-height: 1.5;
+}
+#ide-py-output .ide-py-err {
+  margin: 0 0 8px; white-space: pre-wrap; word-break: break-word;
+  font-family: monospace; font-size: 12.5px; color: #ef4444; line-height: 1.5;
+}
+#ide-py-output .ide-py-img {
+  display: block; max-width: 100%; height: auto; margin: 0 auto 10px;
+  background: #fff; border: 1px solid var(--border); border-radius: 6px;
+}
+#ide-py-output .ide-py-run {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text-dim); font-size: 13px; padding: 4px 0;
+}
 
 #ide-console-bar {
   display: flex; align-items: center; justify-content: space-between;

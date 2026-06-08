@@ -278,6 +278,8 @@ const Chat = (() => {
     if (!a) return { notFound: true, token, rest };
     return { agent: a, rest };
   }
+  // Auch für andere Tabs nutzbar machen (Medizin, Mathe, Dokumente): /Agent in jeder Chatzeile
+  window.resolveSlashAgent = _resolveSlashAgent;
 
   function insertAgentNote(container, beforeEl, agent) {
     if (!agent) return;

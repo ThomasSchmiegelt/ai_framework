@@ -243,8 +243,19 @@ const MedizinChat = (() => {
   async function _sendSimple() {
     if (_streaming) return;
     const input = document.getElementById('medizin-input');
-    const text  = (input?.value || '').trim();
+    let text  = (input?.value || '').trim();
     if (!text && !_attachedFiles.length) return;
+
+    // Slash-Agent: führendes „/Name" wählt nur für diese Nachricht einen Agenten
+    let slashAgentId = null;
+    const _slash = (typeof window.resolveSlashAgent === 'function') ? window.resolveSlashAgent(text) : null;
+    if (_slash && _slash.agent) {
+      slashAgentId = _slash.agent.id; text = (_slash.rest || '').trim();
+      showToast('➜ Agent: ' + (_slash.agent.name || _slash.agent.id) + ' (nur diese Frage)');
+      if (!text && !_attachedFiles.length) { showToast('Bitte nach /' + (_slash.agent.name || '') + ' noch eine Frage eingeben'); return; }
+    } else if (_slash && _slash.notFound) {
+      showToast('Kein Agent für „/' + _slash.token + '" gefunden – Nachricht wird normal gesendet');
+    }
 
     const model   = (typeof Profile !== 'undefined' ? Profile.modelFor('medical') : '') || 'ministral-3:3b';
     const ragSel  = document.getElementById('medizin-rag-select')?.value || '';
@@ -268,7 +279,7 @@ const MedizinChat = (() => {
     const body = {
       messages:        _history.map(m => ({ role: m.role, content: m.content, files: m.files || [] })),
       model:           model,
-      agent_id:        'medizin_assistent',
+      agent_id:        slashAgentId || 'medizin_assistent',
       rag_collections: ragSel ? [ragSel] : [],
       science:         false,
     };

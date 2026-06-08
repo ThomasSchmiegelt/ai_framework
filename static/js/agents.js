@@ -15,7 +15,7 @@ const AgentManager = (() => {
 
   const CATEGORIES = [
     'Fertigung', 'Qualität', 'Dokumentation', 'Kommunikation',
-    'Analyse', 'Recherche', 'Technik', 'Sonstige',
+    'Analyse', 'Recherche', 'Technik', 'Planer', 'Sonstige',
   ];
 
   const TEMPLATES = [
