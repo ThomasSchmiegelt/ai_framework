@@ -121,6 +121,8 @@ const Profile = (() => {
     document.getElementById('profile-auto-compress').checked = !!_data.auto_compress;
     document.getElementById('profile-compress-overflow').value = _data.compress_overflow_chars || 12000;
     document.getElementById('profile-compress-idle').value = _data.compress_idle_min || 10;
+    const ctxEl = document.getElementById('profile-num-ctx');
+    if (ctxEl) ctxEl.value = String(_data.chat_num_ctx || 8192);
     const replayEl = document.getElementById('profile-replay-intro');
     if (replayEl) replayEl.checked = !!_data.replay_intro;
     _fillModelSelects();
@@ -201,6 +203,7 @@ const Profile = (() => {
       auto_compress:           document.getElementById('profile-auto-compress').checked,
       compress_overflow_chars: parseInt(document.getElementById('profile-compress-overflow').value, 10) || 12000,
       compress_idle_min:       parseInt(document.getElementById('profile-compress-idle').value, 10) || 10,
+      chat_num_ctx:            parseInt(document.getElementById('profile-num-ctx')?.value, 10) || 8192,
       model_general:  document.getElementById('profile-model-general')?.value || '',
       model_coding:   document.getElementById('profile-model-coding')?.value || '',
       model_science:  document.getElementById('profile-model-science')?.value || '',

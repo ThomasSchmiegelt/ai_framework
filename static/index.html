@@ -1674,6 +1674,20 @@ Beispiele:
       automatisch zusammengefasst (mit Hinweis). Komprimiert wird das gerade geöffnete Gespräch.
     </p>
 
+    <div class="form-group" style="margin-top:14px">
+      <label>Kontextfenster <span class="planner-muted" style="font-size:11px">Tokens · Chat &amp; Dokumentengenerator</span></label>
+      <select id="profile-num-ctx" class="sidebar-select">
+        <option value="4096">4k (4096) — sparsam</option>
+        <option value="8192">8k (8192) — Standard</option>
+        <option value="16384">16k (16384) — lange Berichte</option>
+        <option value="32768">32k (32768) — sehr lang, viel VRAM</option>
+      </select>
+      <p class="planner-muted" style="font-size:11.5px;margin:4px 0 0">
+        Größeres Fenster verhindert abgeschnittene Antworten, kostet aber mehr GPU-Speicher
+        (KV-Cache). Bei wenig VRAM kleiner wählen. Wirkt sofort beim nächsten Senden.
+      </p>
+    </div>
+
     <p class="planner-muted" style="font-size:12px;margin:14px 0 4px">
       Logo &amp; Vorlagenbilder (werden in Oberfläche, Folien und Dokumenten verwendet):
     </p>

@@ -36,6 +36,12 @@ if _CONFIG_FILE.exists():
 OLLAMA_BASE: str = _CONFIG.get("ollama_base", "http://localhost:11434")
 ALLOWED_MODELS: list[str] = _CONFIG.get("allowed_models", [])
 DEFAULT_MODEL: str = _CONFIG.get("default_model", "ministral-3:3b")
+# Kontextfenster (Tokens) für den Haupt-Chat/Dokumentengenerator. Ollama-Default ist
+# nur 4096 – das reicht bei Recherche-/RAG-Berichten nicht, sodass Antworten mitten im
+# Satz abbrechen. Höher kostet KV-Cache-VRAM (config.json: "chat_num_ctx").
+CHAT_NUM_CTX: int = int(_CONFIG.get("chat_num_ctx", 8192))
+# Im Profil wählbare Kontextfenster-Stufen (Tokens). Mehr = mehr KV-Cache-VRAM.
+_ALLOWED_NUM_CTX: tuple[int, ...] = (4096, 8192, 16384, 32768)
 # Python-Ausführung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-/
 # Servermodus ggf. abschalten (config.json: "allow_python_exec": false).
 ALLOW_PYTHON_EXEC: bool = bool(_CONFIG.get("allow_python_exec", True))
@@ -1710,6 +1716,13 @@ async def _chat_generator(request: ChatRequest):
     # Niedrige Temperatur reduziert Halluzinationen kleiner Modelle deutlich und
     # macht das Tool-Calling zuverlässiger. Für Wissenschaft/Recherche noch strenger.
     _temp = 0.1 if request.science else 0.3
+    # Kontextfenster: im Profil wählbar (4k/8k/16k/32k), sonst config-Default.
+    try:
+        _num_ctx = int(_load_profile().get("chat_num_ctx", CHAT_NUM_CTX))
+    except (TypeError, ValueError):
+        _num_ctx = CHAT_NUM_CTX
+    if _num_ctx not in _ALLOWED_NUM_CTX:
+        _num_ctx = CHAT_NUM_CTX
     # Denkprozess anfordern? Wird abgeschaltet, falls das Modell 'think' nicht unterstützt.
     _think_on = bool(request.show_thinking)
     # Agentic Loop
@@ -1718,7 +1731,7 @@ async def _chat_generator(request: ChatRequest):
             "model": model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": _temp},
+            "options": {"temperature": _temp, "num_ctx": _num_ctx},
             "tools": active_tools if request.use_tools else [],
         }
         if _think_on:
@@ -4467,6 +4480,8 @@ async def get_profile():
     # Installer-Flag: ob Python im Code-Tab serverseitig ausgeführt werden darf
     # (read-only, aus config.json). Steuert die Sichtbarkeit der Python-Option.
     p["allow_python_exec"] = ALLOW_PYTHON_EXEC
+    # Kontextfenster-Default ans Frontend spiegeln, falls noch nichts gewählt wurde.
+    p.setdefault("chat_num_ctx", CHAT_NUM_CTX)
     return p
 
 
@@ -4508,6 +4523,13 @@ async def save_profile(req: Request):
         profile["compress_idle_min"] = max(1, int(body.get("compress_idle_min", 10)))
     except (TypeError, ValueError):
         profile["compress_idle_min"] = 10
+    # Kontextfenster (Tokens) für Chat/Dokumentengenerator. Nur erlaubte Stufen
+    # zulassen, damit ein Tippfehler nicht den VRAM sprengt. Leer/ungültig → Default.
+    try:
+        _nctx = int(body.get("chat_num_ctx", CHAT_NUM_CTX))
+    except (TypeError, ValueError):
+        _nctx = CHAT_NUM_CTX
+    profile["chat_num_ctx"] = _nctx if _nctx in _ALLOWED_NUM_CTX else CHAT_NUM_CTX
     # Erst-Start-Einleitung: einmal absolviert? + beim nächsten Start erneut zeigen?
     profile["onboarding_done"] = bool(body.get("onboarding_done", False))
     profile["replay_intro"] = bool(body.get("replay_intro", False))

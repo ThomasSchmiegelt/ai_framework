@@ -2,6 +2,7 @@
   "_comment": "Modell-Tags bitte auf https://ollama.com/library verifizieren",
   "allowed_models": [],
   "default_model": "ministral-3:3b",
+  "chat_num_ctx": 8192,
   "embed_model": "nomic-embed-text",
   "ollama_base": "http://localhost:11434",
   "port": 8780,
