@@ -42,6 +42,10 @@ DEFAULT_MODEL: str = _CONFIG.get("default_model", "ministral-3:3b")
 CHAT_NUM_CTX: int = int(_CONFIG.get("chat_num_ctx", 8192))
 # Im Profil wählbare Kontextfenster-Stufen (Tokens). Mehr = mehr KV-Cache-VRAM.
 _ALLOWED_NUM_CTX: tuple[int, ...] = (4096, 8192, 16384, 32768)
+# Wie lange ein geladenes Modell ohne neue Anfrage im VRAM bleibt (Ollama keep_alive).
+# Lang genug, damit es zwischen Schritten nicht ständig neu lädt; endlich, damit der
+# VRAM im Leerlauf wieder frei wird. Bei Modellwechsel entlädt _model_session sofort.
+KEEP_ALIVE: str = str(_CONFIG.get("model_keep_alive", "30m"))
 # Python-Ausführung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-/
 # Servermodus ggf. abschalten (config.json: "allow_python_exec": false).
 ALLOW_PYTHON_EXEC: bool = bool(_CONFIG.get("allow_python_exec", True))
@@ -340,6 +344,18 @@ def _model_for(role: str) -> str:
     key = _MODEL_ROLES.get(role)
     val = str(_load_profile().get(key, "") or "").strip() if key else ""
     return val or DEFAULT_MODEL
+
+
+def _profile_num_ctx() -> int:
+    """Im Profil gewähltes Kontextfenster (Tokens), validiert gegen die erlaubten
+    Stufen. Wird auf ALLE lokalen Modellaufrufe eines Ablaufs angewandt, damit das
+    gewählte Fenster wirklich greift und das Modell nicht zwischen Schritten mit
+    unterschiedlichem num_ctx neu geladen wird."""
+    try:
+        n = int(_load_profile().get("chat_num_ctx", CHAT_NUM_CTX))
+    except (TypeError, ValueError):
+        n = CHAT_NUM_CTX
+    return n if n in _ALLOWED_NUM_CTX else CHAT_NUM_CTX
 
 
 # Immer aktive Grundregel gegen Halluzinationen (unabhängig vom Modus)
@@ -1009,6 +1025,35 @@ async def get_models():
     return result
 
 
+@app.post("/api/model/activate")
+async def activate_model(req: Request):
+    """Lädt proaktiv das Modell einer Funktion/Rolle in den VRAM (Vorwärmen beim
+    Funktionswechsel). Bei Modellwechsel entlädt _model_session das vorherige Modell
+    automatisch – so ist beim ersten Senden im neuen Tab schon das richtige LLM
+    geladen. Für Remote-Modelle ein No-op. Idempotent: bereits geladenes Modell wird
+    nicht erneut geladen."""
+    body = await req.json()
+    role = str(body.get("role", "") or "").strip().lower()
+    if role in _MODEL_ROLES:
+        model = _model_for(role)
+    else:
+        model = _pick_model(body.get("model"), DEFAULT_MODEL)
+    if _llm.is_remote(model):
+        return {"model": model, "remote": True, "switched": False}
+    if _loaded_model == model:
+        return {"model": model, "remote": False, "switched": False}
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            # Leerer Prompt an /api/generate lädt das Modell, ohne zu generieren.
+            await client.post(f"{OLLAMA_BASE}/api/generate", json={
+                "model": model, "prompt": "", "stream": False,
+                "keep_alive": KEEP_ALIVE, "options": {"num_ctx": _profile_num_ctx()},
+            })
+    except Exception:
+        pass
+    return {"model": model, "remote": False, "switched": True}
+
+
 # ── Externe KI-Anbieter (OpenAI-kompatibel) ─────────────────────────────────────
 # Konfiguration in data/api_providers.json (enthält API-Keys → gitignored, NICHT im
 # Backup). Modelle dieser Anbieter erscheinen präfigiert in /api/models und damit in
@@ -1180,6 +1225,8 @@ async def _research_generator(request: ResearchRequest):
                 "think": False,
                 "messages": _r_msgs,
                 "stream": False,
+                "options": {"num_ctx": _profile_num_ctx()},
+                "keep_alive": KEEP_ALIVE,
             })
             resp.raise_for_status()
             llm_result = resp.json()
@@ -1476,9 +1523,12 @@ async def rag_from_text(cid: str, req: Request):
     return {"ok": True, "n_chunks": n}
 
 
-async def _derive_adaptive_prompt(user_text: str, model: str):
+async def _derive_adaptive_prompt(user_text: str, model: str, num_ctx: int = CHAT_NUM_CTX):
     """Leitet aus der Nutzerfrage einen fragespezifischen Experten-System-Prompt ab.
-    Rückgabe: (rolle, system_prompt) – bei Fehler ("", "")."""
+    Rückgabe: (rolle, system_prompt) – bei Fehler ("", "").
+
+    Nutzt dasselbe num_ctx wie die anschließende Antwort, damit Ollama das Modell
+    nicht erst mit kleinem Fenster lädt und danach für die Antwort neu laden muss."""
     if not (user_text or "").strip():
         return "", ""
     try:
@@ -1487,6 +1537,8 @@ async def _derive_adaptive_prompt(user_text: str, model: str):
                 "model": model,
                 "think": False,
                 "stream": False,
+                "options": {"num_ctx": num_ctx},
+                "keep_alive": KEEP_ALIVE,
                 "messages": [
                     {"role": "system", "content": (
                         "Bestimme den am besten geeigneten Fach-Experten, um die Frage des Nutzers "
@@ -1575,11 +1627,14 @@ async def _chat_generator(request: ChatRequest):
     _log_t0 = time.time()
     _tools_called: list = []
     _last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+    # Kontextfenster früh bestimmen, damit ALLE Aufrufe dieses Ablaufs (inkl. der
+    # adaptiven Prompt-Ableitung) dasselbe num_ctx nutzen → kein Neuladen des Modells.
+    _num_ctx = _profile_num_ctx()
 
     # Adaptiver Agent: erst die Frage analysieren, dann einen fragespezifischen
     # Experten-System-Prompt ableiten, der anschließend die Antwort erzeugt.
     if request.agent_id == "__adaptive__":
-        role, derived = await _derive_adaptive_prompt(_last_user, model)
+        role, derived = await _derive_adaptive_prompt(_last_user, model, _num_ctx)
         if derived:
             system_prompt = derived
             yield _sse({"type": "adaptive", "role": role})
@@ -1716,13 +1771,7 @@ async def _chat_generator(request: ChatRequest):
     # Niedrige Temperatur reduziert Halluzinationen kleiner Modelle deutlich und
     # macht das Tool-Calling zuverlässiger. Für Wissenschaft/Recherche noch strenger.
     _temp = 0.1 if request.science else 0.3
-    # Kontextfenster: im Profil wählbar (4k/8k/16k/32k), sonst config-Default.
-    try:
-        _num_ctx = int(_load_profile().get("chat_num_ctx", CHAT_NUM_CTX))
-    except (TypeError, ValueError):
-        _num_ctx = CHAT_NUM_CTX
-    if _num_ctx not in _ALLOWED_NUM_CTX:
-        _num_ctx = CHAT_NUM_CTX
+    # _num_ctx wurde bereits oben (vor der adaptiven Ableitung) bestimmt.
     # Denkprozess anfordern? Wird abgeschaltet, falls das Modell 'think' nicht unterstützt.
     _think_on = bool(request.show_thinking)
     # Agentic Loop
@@ -1732,6 +1781,7 @@ async def _chat_generator(request: ChatRequest):
             "messages": messages,
             "stream": False,
             "options": {"temperature": _temp, "num_ctx": _num_ctx},
+            "keep_alive": KEEP_ALIVE,
             "tools": active_tools if request.use_tools else [],
         }
         if _think_on:

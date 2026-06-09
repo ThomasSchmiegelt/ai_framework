@@ -20,11 +20,36 @@ function showToast(msg, duration = 2500) {
   setTimeout(() => toast.classList.remove('show'), duration);
 }
 
+// Welche Funktion/Tab nutzt welche Modell-Rolle (Profil). Tabs ohne Eintrag
+// nutzen die Allgemein-Rolle. Steuert das proaktive Vorwärmen beim Funktionswechsel.
+const TAB_MODEL_ROLE = {
+  chat: 'general', agents: 'general', recherche: 'science', rag: 'general',
+  docgen: 'general', medizin: 'medical', mathe: 'science', ide: 'coding',
+  planner: 'general', matrix: 'general', diranalyse: 'general',
+  morph: 'general', jury: 'general',
+};
+let _activeModelName = '';
+
+// Beim Funktionswechsel das passende LLM vorab laden (Backend entlädt das alte).
+// Fire-and-forget: blockiert die UI nicht; nur wenn sich das Modell wirklich ändert.
+function _activateModelForTab(tabId) {
+  if (typeof Profile === 'undefined' || !Profile.modelFor) return;
+  const role = TAB_MODEL_ROLE[tabId] || 'general';
+  const model = Profile.modelFor(role);
+  if (!model || model === _activeModelName) return;
+  _activeModelName = model;
+  fetch('/api/model/activate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  }).catch(() => {});
+}
+
 function switchTab(tabId) {
   // Don't switch to a hidden tab
   const hidden = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get().hidden_tabs || []) : [];
   if (hidden.includes(tabId)) return;
   AppState.currentTab = tabId;
+  _activateModelForTab(tabId);
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tabId);
   });

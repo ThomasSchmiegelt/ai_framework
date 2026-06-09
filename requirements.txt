@@ -20,6 +20,12 @@ sympy>=1.12
 Pint>=0.23
 matplotlib>=3.8.0
 
+# PDF-Export von Dokumenten: ReportLab (BSD, MIT-kompatibel) für echten Fließsatz
+# mit Auto-Spaltenbreite/Umbruch/Seitenumbruch. Formeln werden via matplotlib-mathtext
+# als PNG eingebettet, Mermaid-Diagramme als PNG aus dem Browser. Präsentations-PDFs
+# laufen weiterhin über matplotlib.
+reportlab>=4.1.0
+
 # Mail (IMAP/POP3, tools/mail.py) nutzt ausschließlich die Python-Standardbibliothek
 # (imaplib, poplib, email) — daher kein zusätzliches Paket nötig.
 

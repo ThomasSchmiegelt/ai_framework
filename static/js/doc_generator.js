@@ -297,15 +297,70 @@ const DocGen = (() => {
     showToast('✓ Text übernommen — exportierbar / als Präsentation / in Wissensdatenbank');
   }
 
+  // Mermaid-Codeblöcke (```mermaid …```) im Browser zu PNG rendern und als
+  // Markdown-Bild (data-URL) einsetzen, damit DOCX/PDF das Diagramm einbetten.
+  function _svgDims(svg) {
+    let w = 0, h = 0;
+    const vb = svg.match(/viewBox="[\d.+-]+ [\d.+-]+ ([\d.]+) ([\d.]+)"/);
+    if (vb) { w = parseFloat(vb[1]); h = parseFloat(vb[2]); }
+    const wm = svg.match(/\bwidth="([\d.]+)"/), hm = svg.match(/\bheight="([\d.]+)"/);
+    if (wm) w = parseFloat(wm[1]) || w;
+    if (hm) h = parseFloat(hm[1]) || h;
+    return { w: w || 800, h: h || 600 };
+  }
+
+  function _svgToPng(svg) {
+    return new Promise((resolve, reject) => {
+      try {
+        const { w, h } = _svgDims(svg);
+        const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          const scale = 2;  // schärfer für Druck
+          const canvas = document.createElement('canvas');
+          canvas.width = w * scale; canvas.height = h * scale;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.scale(scale, scale);
+          ctx.drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+        img.src = url;
+      } catch (e) { reject(e); }
+    });
+  }
+
+  async function _mermaidToImages(md) {
+    if (typeof mermaid === 'undefined' || !/```mermaid/.test(md)) return md;
+    try { mermaid.initialize({ startOnLoad: false, theme: 'default' }); } catch (_) {}
+    const re = /```mermaid\s*([\s\S]*?)```/g;
+    const blocks = [];
+    let m;
+    while ((m = re.exec(md)) !== null) blocks.push({ full: m[0], def: m[1].trim() });
+    let out = md, idx = 0;
+    for (const b of blocks) {
+      try {
+        const { svg } = await mermaid.render('mmx-' + Date.now() + '-' + (idx++), b.def);
+        const png = await _svgToPng(svg);
+        out = out.replace(b.full, '\n\n![Diagramm](' + png + ')\n\n');
+      } catch (_) { /* nicht renderbar → Codeblock bleibt stehen */ }
+    }
+    return out;
+  }
+
   async function _exportDocx() {
     if (!_docText) return;
     showToast('Erstelle Dokument…');
     try {
       const profile = await (await fetch('/api/profile')).json();
+      const content = await _mermaidToImages(_docText);
       const resp = await fetch('/api/export/docx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: _docTitle, content: _docText, _include_header_image: true, _profile: profile }),
+        body: JSON.stringify({ title: _docTitle, content, _include_header_image: true, _profile: profile }),
       });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const blob = await resp.blob();
@@ -323,10 +378,11 @@ const DocGen = (() => {
     showToast('Erstelle PDF…');
     try {
       const profile = await (await fetch('/api/profile')).json();
+      const content = await _mermaidToImages(_docText);
       const resp = await fetch('/api/export/pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: _docTitle, content: _docText, _profile: profile }),
+        body: JSON.stringify({ title: _docTitle, content, _profile: profile }),
       });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || ('HTTP ' + resp.status));
       const blob = await resp.blob();

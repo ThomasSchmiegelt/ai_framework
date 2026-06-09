@@ -146,6 +146,40 @@ def _footer_text(data: dict) -> str:
 
 # ── DOCX ─────────────────────────────────────────────────────────────────────
 
+# Markdown-Bild ``![alt](src)`` – src darf data-URL (z. B. Mermaid-PNG aus dem
+# Browser) oder lokaler Pfad sein. Wird hier von DOCX und (weiter unten) PDF genutzt.
+_IMG_RE = re.compile(r'^!\[[^\]]*\]\((.+?)\)\s*$')
+
+
+def _docx_add_image(doc, src: str) -> None:
+    """Bettet ein ``![](src)``-Bild ins DOCX ein (data-URL oder lokaler Pfad).
+    Remote-URLs werden aus Offline-Gründen übersprungen."""
+    from docx.shared import Inches
+    src = (src or "").strip()
+    path = None
+    if src.startswith("data:"):
+        try:
+            import base64
+            head, b64 = src.split(",", 1)
+            ext = ".jpg" if ("jpeg" in head or "jpg" in head) else ".png"
+            path = tempfile.mktemp(suffix=ext)
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(b64))
+        except Exception:
+            return
+    elif src.startswith(("http://", "https://")):
+        return
+    else:
+        if Path(src).exists():
+            path = src
+    if not path:
+        return
+    try:
+        doc.add_picture(path, width=Inches(6.0))
+    except Exception:
+        pass
+
+
 def to_docx(data: dict) -> Path:
     from docx import Document
     from docx.shared import Pt, RGBColor
@@ -172,7 +206,10 @@ def to_docx(data: dict) -> Path:
     content = data.get("content", "")
     if content:
         for para in content.split("\n"):
-            if para.startswith("#### "):
+            m_img = _IMG_RE.match(para.strip())
+            if m_img:
+                _docx_add_image(doc, m_img.group(1))
+            elif para.startswith("#### "):
                 doc.add_heading(_strip_md(para[5:]), 4)
             elif para.startswith("### "):
                 doc.add_heading(_strip_md(para[4:]), 3)
@@ -524,12 +561,17 @@ _PDF_WHITE  = (1, 1, 1)
 
 def to_pdf(data: dict) -> Path:
     """Erzeugt ein PDF aus einem Dokument ({title, content}) ODER einer
-    Präsentation ({type:"presentation", slides:[…]}). Reines matplotlib —
-    keine TeX-/LaTeX-Installation nötig."""
-    import matplotlib
-    matplotlib.use("Agg")
+    Präsentation ({type:"presentation", slides:[…]}).
+
+    Dokumente werden über **ReportLab** gesetzt (echter Fließsatz mit
+    Auto-Spaltenbreite/Umbruch/Seitenumbruch); Formeln werden via matplotlib-mathtext
+    als PNG eingebettet, eingebettete Bilder (z. B. Mermaid-Diagramme als
+    ``![](data:image/png;base64,…)``) ebenfalls. Präsentationen laufen weiter über
+    matplotlib. Keine TeX-/LaTeX-Installation nötig."""
     fp = Path(tempfile.mktemp(suffix=".pdf"))
     if data.get("type") == "presentation":
+        import matplotlib
+        matplotlib.use("Agg")
         _pdf_presentation(data, fp)
     else:
         _pdf_document(data, fp)
@@ -613,104 +655,294 @@ def _pdf_blocks_from_markdown(content: str) -> list[dict]:
     return blocks
 
 
-def _pdf_document(data: dict, fp: Path) -> None:
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
+# ── ReportLab-Dokument (echter Fließsatz, Formel-/Bild-Einbettung) ───────────
+# (_IMG_RE ist oben bei DOCX definiert und wird hier mitbenutzt.)
 
-    PW, PH = 8.27, 11.69          # A4 hochkant (Zoll)
-    L, R, TOP, BOT = 0.10, 0.92, 0.93, 0.07
-    usable_pt = (R - L) * PW * 72
+
+def _math_inner(seg: str) -> str:
+    """Innentext eines Formel-Segments ohne die Trenner ($$..$$, $..$, \\[..\\], \\(..\\))."""
+    seg = seg.strip()
+    for a, b in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)")):
+        if seg.startswith(a) and seg.endswith(b) and len(seg) > len(a) + len(b):
+            return seg[len(a):-len(b)].strip()
+    if seg.startswith("$") and seg.endswith("$") and len(seg) > 2:
+        return seg[1:-1].strip()
+    return seg
+
+
+def _formula_png(expr: str, fontsize: float = 11.0, color: str = "#11314F",
+                 dpi: int = 220):
+    """Rendert eine Formel (Innentext ohne ``$``) via matplotlib-mathtext als
+    transparentes PNG. Rückgabe (pfad, breite_pt, höhe_pt) – oder None, wenn die
+    Formel nicht renderbar ist (Aufrufer fällt dann auf reinen Text zurück)."""
+    expr = (expr or "").strip()
+    if not expr:
+        return None
+    global _MATHTEXT_PARSER
+    try:
+        if _MATHTEXT_PARSER is None:
+            from matplotlib import mathtext
+            _MATHTEXT_PARSER = mathtext.MathTextParser("agg")
+        _MATHTEXT_PARSER.parse("$" + expr + "$")
+    except Exception:
+        return None
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig = None
+    try:
+        fig = plt.figure(figsize=(0.1, 0.1), dpi=dpi)
+        fig.text(0.0, 0.0, "$" + expr + "$", fontsize=fontsize, color=color)
+        path = tempfile.mktemp(suffix=".png")
+        fig.savefig(path, transparent=True, bbox_inches="tight", pad_inches=0.01, dpi=dpi)
+        plt.close(fig)
+    except Exception:
+        if fig is not None:
+            try: plt.close(fig)
+            except Exception: pass
+        return None
+    try:
+        from PIL import Image as _PIL
+        with _PIL.open(path) as im:
+            wpx, hpx = im.size
+    except Exception:
+        return None
+    return path, wpx * 72.0 / dpi, hpx * 72.0 / dpi
+
+
+def _rl_escape(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _rl_inline(text: str, fontsize: float, color: str) -> str:
+    """Wandelt Inline-Markdown (**fett**, *kursiv*, `code`) in ReportLab-Markup und
+    bettet ``$..$``-Formeln als Inline-Bilder ein. XML-sicher escaped."""
+    saved: list[str] = []
+
+    def _keep(m):
+        saved.append(m.group(0))
+        return "\x01%d\x02" % (len(saved) - 1)
+
+    t = _MATH_RE.sub(_keep, text or "")
+    t = _rl_escape(t)
+
+    def _md(m):
+        bi, b, i, code = m.groups()
+        if bi is not None:   return "<b><i>%s</i></b>" % bi
+        if b is not None:    return "<b>%s</b>" % b
+        if i is not None:    return "<i>%s</i>" % i
+        if code is not None: return '<font face="Courier">%s</font>' % code
+        return m.group(0)
+
+    t = _MD_INLINE.sub(_md, t)
+    for idx, seg in enumerate(saved):
+        inner = _math_inner(seg)
+        png = _formula_png(inner, fontsize=fontsize, color=color)
+        if png:
+            p, w, h = png
+            rep = '<img src="%s" width="%.1f" height="%.1f" valign="%.1f"/>' % (
+                p.replace("\\", "/"), w, h, -(h * 0.22))
+        else:
+            rep = _rl_escape(inner)
+        t = t.replace("\x01%d\x02" % idx, rep)
+    return t
+
+
+def _rl_styles():
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib import colors
+    dark = colors.HexColor("#" + _CORP_DARK)
+    body_clr = colors.HexColor("#1A1A1A")
+    base = ParagraphStyle("Body", fontName="Helvetica", fontSize=10.5, leading=14.5,
+                          textColor=body_clr, spaceAfter=4)
+    def _h(name, size, lead, sb, sa):
+        return ParagraphStyle(name, parent=base, fontName="Helvetica-Bold",
+                              fontSize=size, leading=lead, textColor=dark,
+                              spaceBefore=sb, spaceAfter=sa)
+    return {
+        "Body": base,
+        "Title": ParagraphStyle("Title", parent=base, fontName="Helvetica-Bold",
+                                fontSize=20, leading=24, textColor=dark, spaceAfter=2),
+        "H1": _h("H1", 15, 19, 10, 4), "H2": _h("H2", 13, 17, 8, 3),
+        "H3": _h("H3", 11.5, 15, 6, 2), "H4": _h("H4", 10.5, 14, 4, 2),
+        "Bullet": ParagraphStyle("Bullet", parent=base, leftIndent=14, bulletIndent=2, spaceAfter=2),
+        "Code": ParagraphStyle("Code", fontName="Courier", fontSize=8.5, leading=11,
+                               textColor=body_clr, backColor=colors.HexColor("#F2F4F7"),
+                               borderPadding=4, spaceAfter=4),
+        "Cell": ParagraphStyle("Cell", fontName="Helvetica", fontSize=8.5, leading=11, textColor=body_clr),
+        "CellHead": ParagraphStyle("CellHead", fontName="Helvetica-Bold", fontSize=8.5,
+                                   leading=11, textColor=colors.white),
+    }
+
+
+def _rl_image(src: str, avail: float):
+    """``![](src)`` → ReportLab-Image. src darf data-URL (z. B. Mermaid-PNG) oder
+    lokaler Pfad sein; Remote-URLs werden aus Offline-Gründen übersprungen."""
+    from reportlab.platypus import Image
+    src = (src or "").strip()
+    path = None
+    if src.startswith("data:"):
+        try:
+            import base64
+            head, b64 = src.split(",", 1)
+            ext = ".jpg" if ("jpeg" in head or "jpg" in head) else ".png"
+            path = tempfile.mktemp(suffix=ext)
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(b64))
+        except Exception:
+            return None
+    elif src.startswith(("http://", "https://")):
+        return None
+    else:
+        p = Path(src)
+        if p.exists():
+            path = str(p)
+    if not path:
+        return None
+    try:
+        from PIL import Image as _PIL
+        with _PIL.open(path) as im:
+            wpx, hpx = im.size
+        w_pt, h_pt = wpx * 72.0 / 96.0, hpx * 72.0 / 96.0
+        if w_pt > avail:
+            sc = avail / w_pt; w_pt *= sc; h_pt *= sc
+        img = Image(path, width=w_pt, height=h_pt)
+        img.hAlign = "CENTER"
+        return img
+    except Exception:
+        return None
+
+
+def _rl_table(rows: list, avail: float, styles: dict):
+    from reportlab.platypus import Table, TableStyle, Paragraph
+    from reportlab.lib import colors
+    ncols = max(len(r) for r in rows)
+    norm = [[(r[c] if c < len(r) else "") for c in range(ncols)] for r in rows]
+    # Spaltenbreite nach längstem Zellinhalt (Untergrenze 3 Zeichen), auf die
+    # verfügbare Breite normiert → kein Überlauf, Inhalt wird umbrochen.
+    floors = [max(3, max(len(str(norm[r][c])) for r in range(len(norm)))) for c in range(ncols)]
+    total = sum(floors) or 1
+    col_w = [avail * f / total for f in floors]
+    cell, head = styles["Cell"], styles["CellHead"]
+    data = []
+    for ri, row in enumerate(norm):
+        st = head if ri == 0 else cell
+        clr = "#FFFFFF" if ri == 0 else "#1A1A1A"
+        data.append([Paragraph(_rl_inline(str(c), st.fontSize, clr), st) for c in row])
+    t = Table(data, colWidths=col_w, repeatRows=1)
+    ts = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#" + _CORP_DARK)),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#BFC4CC")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    for ri in range(1, len(norm)):
+        if ri % 2 == 1:
+            ts.append(("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#EEF2F9")))
+    t.setStyle(TableStyle(ts))
+    return t
+
+
+def _rl_block_formula(seg: str, avail: float):
+    from reportlab.platypus import Image
+    png = _formula_png(_math_inner(seg), fontsize=13, color="#" + _CORP_DARK, dpi=220)
+    if not png:
+        return None
+    p, w, h = png
+    if w > avail:
+        sc = avail / w; w *= sc; h *= sc
+    img = Image(p, width=w, height=h)
+    img.hAlign = "CENTER"
+    return img
+
+
+def _rl_flowables(content: str, styles: dict, avail: float) -> list:
+    from reportlab.platypus import Spacer, Paragraph, Preformatted
+    out: list = []
+    lines = (content or "").split("\n")
+    i, n = 0, len((content or "").split("\n"))
+    while i < n:
+        line = lines[i].rstrip()
+        s = line.strip()
+        if not s:
+            out.append(Spacer(1, 5)); i += 1; continue
+        # Code-Block ```…```
+        if s.startswith("```"):
+            i += 1; buf = []
+            while i < n and not lines[i].strip().startswith("```"):
+                buf.append(lines[i]); i += 1
+            i += 1
+            out.append(Preformatted("\n".join(buf), styles["Code"]))
+            out.append(Spacer(1, 4)); continue
+        # Bild (Mermaid-PNG / data-URL / Pfad)
+        mimg = _IMG_RE.match(s)
+        if mimg:
+            fl = _rl_image(mimg.group(1), avail)
+            if fl is not None:
+                out.append(fl); out.append(Spacer(1, 6))
+            i += 1; continue
+        # Markdown-Tabelle
+        if s.startswith("|"):
+            tbl = []
+            while i < n and lines[i].strip().startswith("|"):
+                tbl.append(lines[i]); i += 1
+            rows = _parse_md_table(tbl)
+            if rows:
+                out.append(_rl_table(rows, avail, styles)); out.append(Spacer(1, 6))
+            continue
+        # Block-Formel (ganze Zeile ist genau eine Formel)
+        if _MATH_RE.fullmatch(s):
+            fl = _rl_block_formula(s, avail)
+            if fl is not None:
+                out.append(fl); out.append(Spacer(1, 6)); i += 1; continue
+        # Überschrift
+        mh = re.match(r"^(#{1,6})\s*(.*)", line)
+        if mh:
+            st = styles.get("H%d" % min(len(mh.group(1)), 4), styles["H4"])
+            out.append(Paragraph(_rl_inline(mh.group(2), st.fontSize, "#" + _CORP_DARK), st))
+            i += 1; continue
+        # Aufzählung
+        if s.startswith("- ") or s.startswith("* "):
+            st = styles["Bullet"]
+            out.append(Paragraph(_rl_inline(s[2:], st.fontSize, "#1A1A1A"), st, bulletText="•"))
+            i += 1; continue
+        # Absatz (inkl. nummerierter Listen)
+        st = styles["Body"]
+        out.append(Paragraph(_rl_inline(s, st.fontSize, "#1A1A1A"), st))
+        i += 1
+    return out
+
+
+def _pdf_document(data: dict, fp: Path) -> None:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, HRFlowable
+
     footer_text = _footer_text(data)
     title = data.get("title", "Dokument")
+    doc = SimpleDocTemplate(
+        str(fp), pagesize=A4,
+        leftMargin=2 * cm, rightMargin=2 * cm, topMargin=2 * cm, bottomMargin=2 * cm,
+        title=title,
+    )
+    styles = _rl_styles()
+    story = [
+        Paragraph(_rl_inline(title, 20, "#" + _CORP_DARK), styles["Title"]),
+        HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#" + _CORP_PRIMARY),
+                   spaceBefore=2, spaceAfter=8),
+    ]
+    story += _rl_flowables(data.get("content", ""), styles, doc.width)
 
-    blocks = _pdf_blocks_from_markdown(data.get("content", ""))
+    def _on_page(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#" + _CORP_GRAY))
+        canvas.drawCentredString(A4[0] / 2, 1.0 * cm, footer_text)
+        canvas.restoreState()
 
-    pages: list = []
-    fig = ax = None
-    y = 0.0
-
-    def _new_page():
-        nonlocal fig, ax, y
-        fig = plt.figure(figsize=(PW, PH))
-        ax = fig.add_axes([0, 0, 1, 1]); ax.axis("off")
-        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_autoscale_on(False)
-        ax.text(0.5, BOT - 0.025, footer_text, ha="center", va="center",
-                fontsize=8, color=_PDF_GRAY, parse_math=False)
-        pages.append(fig)
-        y = TOP
-
-    def _advance(size, factor=1.55):
-        nonlocal y
-        y -= (size * factor) / (PH * 72)
-
-    _new_page()
-    # Titel
-    _pdf_text(ax, L, y, _strip_md_keep_math(_math_to_mpl(title)), ha="left", va="top",
-              fontsize=20, fontweight="bold", color=_PDF_DARK)
-    _advance(20, 2.2)
-    ax.plot([L, R], [y, y], color=_PDF_ACCENT, lw=1.2)
-    _advance(10)
-
-    for blk in blocks:
-        if blk.get("gap"):
-            _advance(6)
-            continue
-
-        # ── Tabelle ──────────────────────────────────────────────────────────
-        if blk.get("type") == "table":
-            from matplotlib.patches import Rectangle as _Rect
-            rows = blk["rows"]
-            if not rows:
-                continue
-            ncols   = max(len(r) for r in rows)
-            col_w   = (R - L) / ncols
-            row_h   = 0.021   # figure-Koordinaten, ≈18 pt bei A4
-            if y - row_h * len(rows) < BOT + 0.04:
-                _new_page()
-            for ri, row in enumerate(rows):
-                if y - row_h < BOT + 0.01:
-                    _new_page()
-                is_hdr = ri == 0
-                bg = _PDF_DARK if is_hdr else ((0.94, 0.94, 0.97) if ri % 2 == 0 else _PDF_WHITE)
-                fg = _PDF_WHITE if is_hdr else (0.1, 0.1, 0.1)
-                for ci in range(ncols):
-                    cx = L + ci * col_w
-                    ax.add_patch(_Rect(
-                        (cx, y - row_h), col_w, row_h,
-                        facecolor=bg, edgecolor=(0.75, 0.75, 0.80),
-                        linewidth=0.4, zorder=1,
-                    ))
-                    cell = _strip_md_keep_math(row[ci]) if ci < len(row) else ""
-                    ax.text(cx + 0.007, y - row_h / 2, cell,
-                            ha="left", va="center", fontsize=8.5, zorder=2,
-                            fontweight="bold" if is_hdr else "normal",
-                            color=fg, clip_on=True)
-                y -= row_h
-            _advance(6)   # Abstand nach der Tabelle
-            continue
-
-        # ── Textblock ────────────────────────────────────────────────────────
-        size = blk["size"]
-        chars = max(20, int(usable_pt / (0.50 * size)))
-        prefix = "•  " if blk["bullet"] else ""
-        indent = 0.022 if blk["bullet"] else 0.0
-        wrapped = _wrap_keep_math(blk["text"], chars)
-        for i, ln in enumerate(wrapped):
-            if y < BOT + 0.02:
-                _new_page()
-            x = L + (indent if (blk["bullet"] and i > 0) else 0)
-            _pdf_text(ax, x, y, (prefix + ln) if (blk["bullet"] and i == 0) else ln,
-                      ha="left", va="top", fontsize=size,
-                      fontweight="bold" if blk["bold"] else "normal",
-                      color=_PDF_DARK if blk["bold"] else (0.1, 0.1, 0.1))
-            _advance(size)
-        if blk["bold"]:
-            _advance(4)
-
-    with PdfPages(str(fp)) as pdf:
-        for f in pages:
-            pdf.savefig(f)
-            plt.close(f)
+    doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
 
 
 def _slide_bullets(sd: dict) -> list:
