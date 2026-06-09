@@ -157,6 +157,7 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `POST /api/medizin/translate` | Medizinische Einschätzung in Laiendeutsch übersetzen (SSE, Allgemein-Modell) |
 | `POST /api/mathe/ground` | 🎓 Tutor: Aufgabe extrahieren + SymPy-Grundwahrheit berechnen → `{facts}` (leer bei Theorie) |
 | `GET/POST/DELETE /api/code[/{id}]` | IDE-Programme-CRUD |
+| `POST /api/code/run-python` | Python aus dem Code-Tab serverseitig ausführen (stdout/stderr, matplotlib-PNG, Zeitlimit); 403 wenn `allow_python_exec:false` |
 | `GET/DELETE /api/logs` · `PUT /api/logs/config` · `GET /api/logs/active` · `POST /api/logs/entry` · `GET /api/logs/download` | Diagnose-Logger |
 | `GET /api/backup` · `POST /api/restore` | Komplett-Backup/-Restore (ZIP) |
 | `GET /api/assets/{name}` | Corporate-Bilder aus `bilder/` |
@@ -323,4 +324,364 @@ Zusatzordner:
 Installationsvarianten: `install` (Standard, Python+Ollama+venv),
 `make_portable` (Embedded-Python-Bundle), `make_server` (Mehrbenutzer/NSSM-Dienst).
 Die `make_*`-Skripte schließen `venv`, `__pycache__`, `.git`, `.claude` und
-`server.log` beim Kopieren aus.
+`server.log` beim Kopieren aus. Vollständige Deployment-Details: siehe §20.
+
+---
+
+## 11. Modi & System-Prompt-Vorspann (`_augment_prefix`)
+
+Es gibt **sieben Modi** (`maschinenbau`, `ki`, `soziales`, `marketing`, `finanz` (grau),
+`geschaeftsfuehrung` (gelb) + einen nutzerdefinierten `custom` in Violett), gewählt im
+Profil. Sie steuern (a) das UI-/Folien-Farbschema über CSS-Variablen (`html[data-mode=…]`
+in `app.css`) und (b) — wenn `mode_prompt` an ist — eine **Domänen-Rahmung**, die den
+System-Prompts vorangestellt wird (`_mode_prefix()`, keyword-gesteuert pro Frage über
+`_MODE_KEYWORDS`).
+
+Der **`custom`**-Modus ist voll nutzerdefiniert: Name, Domänen-Rahmung und (optionale)
+Keywords kommen aus den Profilfeldern `custom_mode_name` / `custom_mode_prompt` /
+`custom_mode_keywords` (gelesen von `_mode_prompt_text()` / `_mode_keywords()`; ohne
+Keywords gilt die Rahmung für jede Frage).
+
+Der automatische System-Prompt-Vorspann wird von **`_augment_prefix()`** in `main.py`
+zusammengesetzt: Anti-Halluzinations-Guard + Modus-Rahmung + Persona/Profil (`tone`) +
+LaTeX-Formelregel + Zitierregel (Normen/Gesetze sollen benannt werden, damit das Frontend
+linkifizieren kann).
+
+- **`pure_llm`** (Profil-Flag „keine Modi / LLM pur"): `_augment_prefix()` lässt
+  Guard/Modus/Persona/Formel/Zitat weg — nur die Sprachregel bleibt. Ein explizit
+  gewählter Agent und aktive RAG-Basen gelten weiterhin.
+- **`lang`** (`de`/`en`, Default `de`): steuert UI-Sprache (Frontend `static/js/i18n.js` —
+  DE→EN-Wörterbuch, übersetzt die statische HTML-Hülle on the fly; tief JS-generierte
+  Strings bleiben deutsch) **und** Antwortsprache: bei `lang=en` hängt `_lang_rule()`
+  `_LANG_RULE_EN` an (auch unter `pure_llm`). Toggle: `#profile-lang` → `I18n.setLang`.
+
+**Branding** (Logo, Deckblatt, Kopfzeile) lädt der Nutzer im Profil hoch
+(`POST/GET/DELETE /api/profile/asset/{logo|cover|header}`, Ablage `data/profile_assets/`,
+Pillow-resize: Logo 512 PNG, cover/header 1920 JPG). `bilder/` enthält Repo-Fallbacks
+(`default_logo.png`, `default_cover.jpg`, `default_header.jpg`, `icon.png`/`icon.ico`),
+ausgeliefert über `GET /api/assets/{name}`. `canvas.js` lädt sie über
+`/api/profile/asset/...`, `export.py` aus `data/profile_assets/`. Folien lesen die aktive
+Modus-Palette über `_pal()`. Exporte kennzeichnen KI-Text mit „▶ Von KI generiert".
+
+**Präsentations-Canvas-Fallback:** kleine Modelle rufen das `create_presentation`-Tool
+oft nicht auf, sondern schreiben Prosa. Ist der aktive Agent präsentationsfähig
+(`create_presentation` in seinen Tools → `presentation_capable`) und es kam kein
+`canvas`-Frame, aber die Antwort sieht nach Präsentation aus, ruft `_chat_generator`
+`_text_to_presentation(text, model)` (zweiter `format:"json"`-Aufruf) und emittiert
+trotzdem einen `canvas`-Frame.
+
+**Weitere Nicht-Streaming-KI-Endpunkte** (immer mit `<think>`-/Codezaun-Strip +
+Regex-Extraktion + Fallback): `/api/derive-persona`, `/api/analyze-image` (Vision),
+Planer `/api/plans/{derive-agent,suggest-tasks,generate}`. **Science-Modus:**
+`/api/research` und Matrix-Recherche (postet an `/api/chat` mit `science:true`) stellen
+immer `_SCIENCE_PROMPT` voran — unabhängig von `pure_llm`. Temperatur im Chat-Payload
+niedrig (`0.3`, bei `science` `0.1`). Bei leerem Content ohne Tool-Calls emittiert
+`_chat_generator` einen klaren `error`-Frame statt einer leeren Antwort.
+
+**Per-Task-Planrecherche:** `POST /api/plans/{pid}/research-task` durchläuft
+analyze → adaptive Persona (`_derive_adaptive_prompt`) → Websuche (`tools.search`) →
+wissenschaftliches Markdown-Dossier → einbetten in eine auto-erzeugte plan-spezifische
+RAG (`_ensure_plan_rag`, Name `Plan: <name>`, gespeichert als `plan["rag_collection_id"]`)
+→ Dossier an die Aufgabe anhängen. `planner.js` treibt es pro Task (🔬) und als
+abbrechbaren/fortsetzbaren Batch (überspringt bereits `researched`); 📄 öffnet das Dossier.
+
+---
+
+## 12. LLM-Abstraktion & externe API-Anbieter (`tools/llm.py`)
+
+Alle LLM-Aufrufe laufen über **`tools/llm.py`** (in `main.py` als `_llm` importiert), damit
+die App **lokales Ollama ODER einen externen OpenAI-kompatiblen Anbieter** (OpenRouter,
+OpenAI, Groq, Together …) nutzen kann. **Die Rückgabe ist immer Ollama-förmig**
+(`{"message": {"content", "tool_calls", "thinking"}}` / Stream-Chunks
+`{"message": {"content"}, "done"}`), sodass die ~30 Aufrufstellen fast unverändert bleiben:
+`client.post(.../api/chat, json=PAYLOAD)` → `await _llm.chat(client, PAYLOAD)`,
+`client.stream(...)` → `async for chunk in _llm.stream(client, PAYLOAD)`. `_llm.chat`
+liefert ein `LLMResponse(dict)`, das zusätzlich `.json()` / `.raise_for_status()` /
+`.status_code` bietet (auch der `think`-400-Retry der Agentic-Loop funktioniert unverändert).
+
+- **Routing:** ein Modellname mit Präfix `"<provider_id>::<model>"` (lokale Ollama-Namen
+  enthalten nie `::`) ist remote; `_llm.resolve()` schlägt den Anbieter in
+  `data/api_providers.json` nach. Remote-Requests übersetzen Ollama→OpenAI:
+  `options.temperature`→`temperature`, `format:"json"`→`response_format:{type:"json_object"}`,
+  `think` verworfen, Bilder→`image_url`-Content-Parts; Response/Stream werden zurück in die
+  Ollama-Form übersetzt (Tool-Call-`arguments` JSON-String → dict).
+- **Anbieter:** in `data/api_providers.json` (**enthält API-Keys → gitignored, aus
+  `/api/backup` und den `make_*`-Bundles ausgeschlossen**; analog `data/mail.json`). CRUD:
+  `GET/POST/DELETE /api/providers` + `POST /api/providers/test` (holt `{base}/models`).
+  `_provider_public()` entfernt den Key fürs Frontend. `/api/models` merged lokale
+  Ollama-Tags mit Anbieter-Modellen (präfixiert, `remote:true`); die Profil-Rollen-Selects
+  listen beide (`profile.js` `_fillModelSelects`, Label `☁ model (Provider)`).
+- **Config:** `_llm.set_config(OLLAMA_BASE, API_PROVIDERS_FILE)` einmal beim Start. Verwaltung
+  im **Profil-Modal** („☁ KI-Anbieter (API)"). Für remote ist `_model_session` ein No-op.
+
+---
+
+## 13. RAG-Engine (`tools/rag.py`, `rag.js`)
+
+Dokument-Cleanup (`clean_text`), zeichenbasiertes überlappendes `chunk_text`,
+Ollama-Embeddings (`embed`, auf kleinen VRAM-Tiers via `num_gpu=0` auf CPU gezwungen, damit
+sie das Chat-Modell nicht verdrängen) und NumPy-Brute-Force-Kosinus-Suche
+(`query_collections`). **VRAM-Tiers** (`none`/`4gb`/`6gb`/`12gb`) presetten Chunk-Größe,
+Overlap, top-k, Embed-Device **und `char_limit`** (max. injizierte Kontextzeichen — pro
+Query erzwungen, größtes Limit der gewählten Sammlungen). Per-Basis **`strictness`**
+(`kreativ`/`ausgewogen`/`korrekt`) wählt die RAG-Injektions-Formulierung (strengste der
+gewählten Basen gewinnt). Embeddings als float32-BLOBs in SQLite
+(`rag_collections`/`rag_documents`/`rag_chunks` in `db.py`; `char_limit`/`strictness` via
+Migration). Embed-Modell aus `config.json` `embed_model` (Default `nomic-embed-text`, **muss
+in Ollama gepullt sein**).
+
+**Ingest-Quellen:** Dokument-Upload, ein Gespräch
+(`POST /api/rag/collections/{id}/from-conversation`, optional `delete_after` = verschieben)
+oder beliebiger Text (`POST /api/rag/collections/{id}/from-text` — von den „📚 In
+Wissensdatenbank"-Buttons in Recherche/Matrix). `rag.js` bietet wiederverwendbares
+`pickCollection()`/`ingestText()` (Picker-Modal).
+
+**RAG-Tab** („Wissensdatenbanken"): zwei Slider — „schnell ↔ gründlich" (Chunk-Presets) und
+„kreativ ↔ korrekt" (`strictness`) — plus Cleanup-Toggle. Im Chat injiziert `📚 RAG`-Toggle +
+Multiselect Passagen; ein `rag`-SSE-Frame zeigt die genutzten Quellen. Dokumentlisten sind
+einklappbar (`<details>`). **Hilfe-Wissensdatenbank:** `🆘 …erstellen/aktualisieren`
+(`_buildHelp` → `POST /api/help/build`) bettet die mitgelieferte Tool-Doku (`README.md`,
+`BEDIENUNGSANLEITUNG.md`, `docs/*.md`, Liste in `_HELP_DOC_FILES`) in eine
+`Hilfe: LOCAL AI`-Sammlung ein und legt/erneuert einen Favoriten-Agenten **`hilfe_agent`**
+(🆘, an die Basis gebunden) an — idempotent, erreichbar via `/Hilfe …`.
+
+---
+
+## 14. Agenten — Favoriten, Slash, Adaptiv, Gesetz-Agent
+
+Agenten sind JSON-Dateien in `data/agents/` mit Feldern: `id`, `name`, `description`,
+`system_prompt`, `tools[]`, `model?` (Override), `icon`, `category`, `favorite`,
+**`rag_collections[]`** (an den Agenten gebundene Wissensbasen — in `_chat_generator`
+auto-aktiviert und in die RAG-Auswahl gemerged). Der Agent-Editor exponiert das über einen
+Wissensbasis-Multiselect (`#field-agent-rag`, befüllt aus `/api/rag/collections`). Der
+System-Prompt wird zur Laufzeit der Nutzernachricht vorangestellt. Standard-Agenten u. a.
+`latex_experte`, `mathe_experte`, `mathe_tutor`, `medizin_assistent`, `coder`, `presenter`.
+
+- **Sidebar = Favoriten:** der Sidebar-Agentenselektor listet **nur `favorite:true`**
+  (+ „Kein Agent" + adaptiv). Jede Agentenkarte hat einen ⭐-Toggle
+  (`AgentManager.toggleFavorite`). Die Chat-Toolbar hat zwei Schnellwähler — **📊
+  Präsentation** und **💻 Programmieren** — die den Selektor auf `presenter`/`coder` setzen
+  (fügen die Option bei Bedarf on the fly hinzu). `coder`/`presenter` sind Default-Favoriten.
+- **Slash-Agent (One-Shot):** ein führendes `/<name>` in der Chateingabe lässt **nur diese
+  Nachricht** durch den passenden Agenten laufen, ohne den Selektor zu ändern. `chat.js`
+  `_resolveSlashAgent` matcht gegen `id`/`name` (exakt → Präfix → ent-slugifizierter Name;
+  z. B. `/mathe` → `mathe_experte`, `/Hilfe` → `hilfe_agent`), strippt das Präfix, setzt
+  `agent_id` nur für diesen Request und zeigt eine „➜ Agent: … (nur diese Frage)"-Notiz
+  (`insertAgentNote`). Kein Match → Toast + normaler Versand.
+- **Adaptiver Agent:** `agent_id == "__adaptive__"` triggert `_derive_adaptive_prompt()` —
+  ein vorgelagerter Nicht-Streaming-Aufruf, der die letzte Nachricht analysiert und einen
+  fragenspezifischen `system_prompt` (`{rolle, system_prompt}`) liefert; emittiert einen
+  `adaptive`-Frame mit der Rolle.
+- **Gesetz-/Regel-Agent aus Datei:** Button **⚖️ Gesetz-/Regel-Agent**
+  (`agents.js` `createLegalAgent` → `POST /api/agents/from-legal`, multipart `file`+`title`).
+  Backend extrahiert Text (`_extract_text`), wandelt **deterministisch** in Markdown
+  (`_legal_to_md` — Regex macht `§ …`/`Art. …`-Zeilenanfänge zu `###`, kein LLM), entscheidet
+  **nach Länge** (`_LEGAL_PROMPT_LIMIT`, 8000 Zeichen): kurz → Markdown direkt in
+  `system_prompt`; lang → in eine dedizierte RAG `Gesetz: <title>` (`strictness:"korrekt"`)
+  eingebettet und über `rag_collections` gebunden. Agent mit `icon:"⚖️"`, `category:"Recht"`,
+  `favorite:true`. Rückgabe `{agent_id, name, mode:"prompt"|"rag", chars, rag_collection_id}`.
+
+**Standard-Agent-Seeding (`_seed_defaults()`):** die mitgelieferten Agenten liegen in
+**`defaults/agents/`** (getrennt von `DATA_DIR`). Beim Start, wenn `AGENTS_DIR` leer ist und
+keinen `.seeded`-Marker hat, werden sie hineinkopiert — behebt „Agenten verschwinden bei
+eigenem `data_dir`" und seedet Frischinstallationen. Der Marker verhindert, dass bewusst
+gelöschte Agenten wiederkommen.
+
+---
+
+## 15. Jury — Mehr-Agenten-Bewertung eines Textes
+
+Eine **Jury** bündelt mehrere Agenten (typisch ⚖️ Gesetz-Agenten) zu einem
+wiederverwendbaren Gremium, das beliebigen Text bewertet (auch KI-erzeugten: ein Dokument,
+ein System-Prompt, einen Planer-Projektagenten). Speicherung als JSON in `data/juries/`
+(`{id, name, description, member_agent_ids[], created_at}` — im Backup, restore nach id,
+gitignored). CRUD: `GET/POST/PUT/DELETE /api/juries`.
+
+**Bewertungs-Engine** `POST /api/jury/evaluate` (SSE), Body `{jury_id | member_agent_ids[],
+text, context?, criteria?}`: pro Mitglied lädt sie `system_prompt` + gebundene
+`rag_collections` (Passagen via `query_collections`), führt einen Verdict-Aufruf
+(`format:"json"`, Modell = `agent.model` oder `_model_for("science")`) **sequenziell unter
+`_model_session`** aus und streamt einen `member`-Frame `{agent, icon, score, befund,
+risiken[], empfehlung}`. Danach eine **Synthese** (Allgemein-Modell) → `summary`-Frame
+`{gesamturteil, score, konsens, hauptkritik[], empfehlungen[]}` (Fallback-Score = Mittel der
+Mitglieder), dann `done`. Nutzt `_parse_llm_json` + `_sse`.
+
+**Frontend (`jury.js`):** Verwaltungs-Modal aus dem 🤖 Agenten-Tab (`#btn-juries`);
+wiederverwendbares Overlay **`Jury.evaluate(text, {title, context})`** (Streamer
+`_streamEval`). Eingebunden in Dokumente (`#btn-docgen-jury`) und Agent-Edit-Modal
+(`#btn-agent-prompt-jury`). Der Planer prüft Projekt-Agenten **nicht mehr selbst**
+(früher `#btn-planner-agent-jury`); stattdessen wird der abgeleitete Agent über
+„💾 Als Agent speichern" (`_saveAsAgent` → `AgentManager.openModal`) in den Agenten-Tab
+übernommen und dort über `#btn-agent-prompt-jury` geprüft/bearbeitet (siehe §14).
+
+**Dedizierter ⚖️ Jury-Tab (Dokument-Werkbank):** optionaler `jury`-Tab (`#jury-panel`):
+links Jury-Liste + gespeicherte Dokumente; rechts ein editierbares Dokument (Textarea + 👁
+Markdown-Vorschau) mit „⚖️ Mit Jury prüfen", „💾 Speichern", Export DOCX / → Doku
+(`DocGen.showResult`) / → Wissensdatenbank (`RAG.ingestText`). Persistenz in
+**`data/jury_docs/`** (`{id, name, text, evaluation?, updated_at}`) via
+`GET/POST/PUT/DELETE /api/jury-docs` (dateibasiert wie `data/code/`), im Backup
+(skip-by-id), gitignored. `Jury.loadDocument(name, text)` reicht externen Text hinein.
+Splitter `#jury-tab-splitter`.
+
+---
+
+## 16. Verzeichnis-Analyse & Morphologischer Kasten (Backend)
+
+Zwei **optionale** Tabs (Frontend `dir_analysis.js` / `morph_box.js`). Alle Endpunkte vor
+dem Static-Mount registriert, Modellnamen über
+`_pick_model(body.get("model"), _model_for("general"))`, jeder Ollama-Aufruf in
+`async with _model_session(model), httpx…`.
+
+**Verzeichnis-Analyse** (`/api/dir/scan`, `/api/dir/analyze-file`, `/api/dir/finalize`):
+liest einen **serverseitigen Pfad** (`_dir_resolve_base` prüft `is_dir`). `_dir_walk` ist
+ein bounded rekursiver Walk (`_DIR_MAX_FILES`/`_DIR_MAX_DEPTH`, überspringt versteckte +
+`_DIR_SKIP_DIRS` wie `.git`/`node_modules`/`venv`, fängt `PermissionError`).
+Snippets/Volltext aus `_extract_text`. **PII wird anonymisiert, bevor irgendetwas das LLM
+oder den Client erreicht** — `tools/anonymize.py` (`_anonymize()` umhüllt `redact_pii` + eine
+optionale LLM-NER `_llm_ner_names`); ein per-Request-`mapping` hält Platzhalter konsistent.
+Anonymisierung ist **verpflichtend, nicht abschaltbar** (Backend erzwingt `anonymize=True`,
+ignoriert Client-Flags); ein optionales `+ KI-Namenssuche`-Häkchen ergänzt nur *zusätzliche*
+Namen. `analyze-file` schützt Traversal mit
+`(base / file_rel).resolve().relative_to(base)`. `finalize` schreibt `_KI_INDEX.md`
+(UTF-8, „▶ Von KI generiert") zurück in den Ordner und legt optional eine
+`Verzeichnis: <name>`-RAG an. **Server-Modus-Vorbehalt:** beliebige Pfade werden gelesen UND
+geschrieben — diesen Tab in Mehrbenutzer-/Server-Deployments versteckt lassen (optional,
+Default versteckt).
+
+`tools/anonymize.py` (nur stdlib-Regex): `redact_pii(text, mapping)` ersetzt E-Mails,
+Telefonnummern, IBAN, URLs und — heuristisch (Anrede/Titel + Namens-Tokens) — Personennamen
+durch stabile Platzhalter (`[EMAIL_1]`, `[TEL_1]`, `[PERSON_1]`…). `redact_names(text,
+found_names, mapping)` wendet eine konkrete Namensliste an. Redigiert **Inhalte**, nicht
+Datei-/Ordnernamen; das Mapping bleibt lokal, kommt **nicht** in die Indexdatei.
+
+**Morphologischer Kasten** (`/api/morph/{generate,evaluate,refine-cell,ideas}` +
+`/api/morph/training…`): alle Generierung über `_morph_llm(model, system, user)`
+(`format:"json"`, `_parse_llm_json`). `generate` liefert Parameter mit kurzen String-Werten
+(`_morph_value_str` flacht verschachtelte Objekte ab). `evaluate` bewertet eine Kombination
+(score/Machbarkeit/Innovation 0–100 + Begründung/Risiken) und schlägt Alternativen vor.
+`refine-cell` weitet einen Einzelwert aus oder kritisiert ihn. **`ideas`** generiert N
+kreative Gesamtkonzepte (ein Wert pro Parameter + Konzepttext) fürs **Swipe-Deck**.
+**Source-Grounding:** `generate`/`refine-cell`/`ideas` akzeptieren `web:bool` +
+`rag_collections:[]`; `_morph_sources_context()` stellt DuckDuckGo (`search_with_sources`)
+und/oder RAG-Passagen (`query_collections`, CPU-Embed) als Inspiration voran.
+**Auto-Trainingsfile:** `POST /api/morph/training/add` hängt Gut/Schlecht-Beispiele an
+`data/morph_training/<slug>.jsonl` (`_to_slug(problem)`; gitignored) — Quellen:
+Swipe-Entscheidungen, **gelöschte ausformulierte Chips** (= „schlecht"), gespeicherte
+Lösungen (= „gut"). Jede Zeile ist strukturiert **und** Chat-Format (`messages`) fürs
+Finetuning. `GET …/training?problem=&format=jsonl|md` liefert die Datei (md =
+lesbare Listen, ingestbar via `RAG.ingestText`); `DELETE` leert sie.
+
+---
+
+## 17. Mathe-Tab — Tutor, Auto-Verifizieren, Plotting
+
+(Modell-Rollen & deterministisches Plotting bereits in §2.3.)
+
+Der 🔢 Mathe-Tab (`mathe.js`) routet den normalen Löser zum `mathe_experte`-Agenten. Der
+**`🎓 Tutor-Modus`** routet stattdessen zum `mathe_tutor` (adaptiv-sokratisch; `💡 Lösung
+zeigen` ist der Notausgang). Weil kleine Modelle Verifikations-Tools im Dialog nicht
+zuverlässig selbst aufrufen, ruft der Tutor zuerst `POST /api/mathe/ground`: das Backend
+extrahiert die Aufgabe als SymPy-Ausdruck (ein LLM-Aufruf), berechnet die **Grundwahrheit
+deterministisch** (`_mathe_sympy_facts` — behandelt `^`→`**`, `==`→`=`, `f(x)=`-Vorsatz,
+implizite Multiplikation via `parse_expr`-Transformationen, direkte Aufrufe wie `diff(...)`)
+und gibt verifizierte Fakten zurück, die `mathe.js` in den Chat-Request injiziert.
+
+**Auto-Verifizieren (agentic SymPy-Loop):** ein **`🔁 Auto-Verifizieren`**-Toggle
+(exklusiv zum Tutor) routet zu `POST /api/mathe/solve-verified` (SSE) statt `/api/chat`:
+(1) das Modell löst, (2) die Antwort wird deterministisch gegen die SymPy-Grundwahrheit
+geprüft (`_mathe_ground_facts` → `_mathe_sympy_facts`; `_mathe_check_tokens` extrahiert
+numerische Lösungs-Tokens, `_mathe_solution_ok` prüft Containment), (3) bei Abweichung
+fließen die SymPy-Fakten als Korrektur-Prompt zurück und das Modell löst neu (max
+`_MATHE_VERIFY_ROUNDS`). Frames: `stage` (`{stage:solve|verify|fix, status, content}` →
+einklappbar), `text` (finale Antwort), `done` (`{verified, checkable, rounds, facts}` →
+grünes „✓ verifiziert" / gelb / Info-Badge). Nicht-numerische Ergebnisse (diff/integrate)
+sind nicht strikt prüfbar → erste Lösung gilt, Fakten als Leitplanke.
+
+Der Mathe-Tab teilt die `model_coding`-Rolle mit Code (kein eigenes Auswahlfeld), LaTeX
+immer an, rendert `image`-Plot-Frames inline (volle `data:`-URI as-is) und bietet
+LaTeX/PDF-Export, wenn die Antwort `$` enthält.
+
+---
+
+## 18. Backup & Restore
+
+`GET /api/backup` baut ein ZIP **aller** Nutzerdaten: `profile.json`, `projects.json`,
+Gespräche (aus SQLite), `plans/`, `agents/` (inkl. `favorite`), `juries/`, `code/`,
+`jury_docs/`, **`profile_assets/`** (Logo/Cover/Header) und **`rag/collections.json`** — ein
+voller Dump der RAG-Basen inkl. Dokumenten, Chunks und float32-Embeddings (base64).
+**`api_providers.json` ist bewusst ausgeschlossen** (API-Keys), ebenso `mail.json`.
+
+`POST /api/restore` re-importiert alles: Profil/Assets überschreiben; Projekte mergen; Pläne
+skip nach Name; Agenten/Juries/Code/Jury-Docs skip nach existierender id; **RAG-Sammlungen
+skip nach existierender id**; Gespräche werden immer neu angelegt (Re-Restore dupliziert
+sie). DB-Helfer `rag_export()` / `rag_collection_exists()` / `rag_import_collection()` in
+`db.py`. `app.js` zeigt Kategorie-Zähler im Restore-Toast und lädt danach
+Profil/Branding, Agenten und RAG neu.
+
+---
+
+## 19. PWA / Handy-als-Frontend
+
+Die App ist eine installierbare **PWA**: `static/manifest.json` (Icons aus
+`/api/assets/icon.png`) und `static/sw.js` (App-Shell-Cache; `/api/*` immer Netzwerk, nie
+gecacht) werden vom Static-Mount am Root ausgeliefert; `index.html` linkt Manifest +
+theme/apple-Metas; `app.js` registriert den SW **nur im Secure Context**
+(`window.isSecureContext`). Handy nutzt das Frontend, der Desktop behält das Backend:
+`0.0.0.0` binden (`start_server.*`, oder `config.json` `host`/`AI_HOST`) — CORS ist offen.
+
+**Vorbehalt:** Service Worker / „Installieren" brauchen **HTTPS oder localhost**; über
+`http://<lan-ip>:8780` registriert Android den SW nicht (UI funktioniert, nur nicht
+installierbar). Für echte Installation uvicorn mit selbstsigniertem Cert
+(`--ssl-keyfile/--ssl-certfile`) und `https://<lan-ip>:8780` öffnen. Mobile-CSS in `app.css`
+`@media (max-width:600px)`; das Swipe-Deck ist touch-first.
+
+**Helfer (Linux, `scripts/`):** `gen_cert.sh`/`.ps1` erzeugen ein selbstsigniertes Cert
+(SANs: localhost, LAN-IPs, `<host>.fritz.box`) nach `certs/` (gitignored); `start.sh` liest
+optional `AI_SSL_CERT`/`AI_SSL_KEY`; `install_service.sh`/`uninstall_service.sh` legen eine
+systemd-Unit an (`ai-framework.service`, `User=<you>`, `After=ollama.service`, HTTPS falls
+Cert vorhanden, Autostart + `Restart=on-failure`). Endnutzer-Walkthrough:
+`docs/HANDY_ZUGRIFF.md` (in `_HELP_DOC_FILES` → in die Hilfe-RAG ingestet).
+
+---
+
+## 20. Deployment-Varianten & Installer
+
+**Installer-Feature-Auswahl (`install.sh` / `install.bat` → `install.ps1`):** die Installer
+fragen interaktiv, welche optionalen Tabs aktiviert werden, ob externe **API**-Anbieter
+erlaubt sind (local-only vs. local+API) und ob **Python im Code-Tab serverseitig ausgeführt**
+werden darf, und schreiben die Wahl in `config.json`: `hidden_tabs_default` (die NICHT
+aktivierten optionalen Tabs; von `_DEFAULT_HIDDEN_TABS` beim Erstaufruf konsumiert),
+`enable_api` (read-only Flag aus `GET /api/profile`; `profile.js` versteckt
+`#provider-section` wenn false — Default `true`) und `allow_python_exec` (Default `true`;
+ebenfalls über `GET /api/profile` gespiegelt — `profile.js` blendet die Python-Option im
+Code-Tab aus und `CodeIDE.disablePython()` schaltet zurück auf JS, wenn false). Der
+JSON-Merge erfolgt in beiden Skripten per Python (vermeidet PowerShells
+Einzelelement-Array-Eigenart). Nicht-interaktive Läufe (kein TTY) lassen die Defaults
+unverändert. **`make_server`** setzt `allow_python_exec = false` (Mehrbenutzer: kein
+beliebiger Code auf dem Server).
+
+**Optionale Tabs / Erstaufruf:** RAG, Code (`ide`), Mathe, Medizin, Mail, Logs,
+Verzeichnis-Analyse (`diranalyse`), Morph-Kasten (`morph`) und Jury (`jury`) sind optional,
+im Profil umschaltbar (`#profile-tab-vis` → `Profile.applyTabVisibility`; `switchTab`
+guardet zusätzlich). **Beim Erstaufruf (kein `user_profile.json`) sind alle neun versteckt**
+— `GET /api/profile` und der `PUT`-Handler defaulten `hidden_tabs` auf
+`_DEFAULT_HIDDEN_TABS`, wenn das Feld fehlt (Onboarding sendet es nicht); das Profil-Modal
+sendet immer ein explizites `hidden_tabs`. Im Profil hat jeder optionale Tab ein eigenes
+Häkchen (Code und Mathe getrennt, `data-tabs="ide"` / `data-tabs="mathe"`); `profile.js`
+expandiert `data-tabs` (Komma-gesplittet, dedupliziert) beim Speichern.
+
+Drei Installationsvarianten (je `.bat`+`.ps1`-Paar):
+- `install` — Standard: Python 3.12 via winget + Ollama + venv.
+- `make_portable` — selbstständiges Bundle ohne Systemabhängigkeiten. Nutzt **eigenen
+  Ollama-Port `11500`** (schreibt `config.json` `ollama_base` um), bundelt nur die
+  Whitelist-Modelle. Modell-Blobs aus **`$env:OLLAMA_MODELS` falls gesetzt** (z. B.
+  `D:\OLLAMA_MODELS`), sonst `%USERPROFILE%\.ollama\models`.
+- `make_server` — Mehrbenutzer-Servermodus mit `0.0.0.0`-Binding.
+
+Die `make_*`-Skripte schließen `venv`, `__pycache__`, `.git`, `.claude`, `server.log` beim
+Kopieren aus. **Troubleshooting-Helfer** (Repo-Root): `diagnose.bat` schreibt
+OS/Python/Packages/Ports/Ollama-Status nach `diagnose_report.txt`; `test_chat.bat` +
+`test_chat.py` treffen `/api/chat` direkt. Beide erkennen Bundle- vs. Dev-Layout.
+**VRAM-Guard-Vorbehalt:** in `make_server` mit `workers > 1` koordiniert der
+Einzel-Modell-Guard nicht über Worker-Prozesse — auf ~6 GB VRAM `workers = 1`
+(dokumentiert in `docs/SERVER.md`).

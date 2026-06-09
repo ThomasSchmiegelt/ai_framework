@@ -59,10 +59,14 @@ if [ -t 0 ]; then
   echo ""
   read -r -p "Externe KI-Anbieter (API, z. B. OpenRouter) zusätzlich zu lokal nutzen? [j/N] " api_ans || api_ans=""
   case "$api_ans" in [jJyY]*) ENABLE_API=true ;; *) ENABLE_API=false ;; esac
+  # Python-Ausführung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-
+  # Server eher abschalten. Leere Eingabe = Ja (Standard).
+  read -r -p "Python-Code im Code-Tab serverseitig ausführen? (lokal empfohlen) [J/n] " py_ans || py_ans=""
+  case "$py_ans" in [nN]*) ALLOW_PY=false ;; *) ALLOW_PY=true ;; esac
 
   HIDDEN_JSON="[$HIDDEN]"
   echo "Schreibe Auswahl nach config.json …"
-  HIDDEN_JSON="$HIDDEN_JSON" ENABLE_API="$ENABLE_API" "$PYTHON" - <<'PYEOF'
+  HIDDEN_JSON="$HIDDEN_JSON" ENABLE_API="$ENABLE_API" ALLOW_PY="$ALLOW_PY" "$PYTHON" - <<'PYEOF'
 import json, os, pathlib
 p = pathlib.Path("config.json")
 cfg = {}
@@ -71,8 +75,9 @@ if p.exists():
     except Exception: cfg = {}
 cfg["hidden_tabs_default"] = json.loads(os.environ["HIDDEN_JSON"])
 cfg["enable_api"] = os.environ["ENABLE_API"] == "true"
+cfg["allow_python_exec"] = os.environ["ALLOW_PY"] == "true"
 p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-print("  ok: hidden_tabs_default=%s enable_api=%s" % (cfg["hidden_tabs_default"], cfg["enable_api"]))
+print("  ok: hidden_tabs_default=%s enable_api=%s allow_python_exec=%s" % (cfg["hidden_tabs_default"], cfg["enable_api"], cfg["allow_python_exec"]))
 PYEOF
 fi
 

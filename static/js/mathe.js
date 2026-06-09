@@ -121,8 +121,20 @@ const MatheChat = (() => {
   async function _sendMessage() {
     if (_streaming) return;
     const input = document.getElementById('mathe-input');
-    const text  = (input?.value || '').trim();
+    let text  = (input?.value || '').trim();
     if (!text && !_attachedFiles.length) return;
+
+    // Slash-Agent: führendes „/Name" überschreibt nur für diese Nachricht den Agenten
+    // (umgeht dann Tutor-Grounding und Auto-Verifizieren – der gewählte Agent steuert).
+    let slashAgentId = null;
+    const _slash = (typeof window.resolveSlashAgent === 'function') ? window.resolveSlashAgent(text) : null;
+    if (_slash && _slash.agent) {
+      slashAgentId = _slash.agent.id; text = (_slash.rest || '').trim();
+      showToast('➜ Agent: ' + (_slash.agent.name || _slash.agent.id) + ' (nur diese Frage)');
+      if (!text && !_attachedFiles.length) { showToast('Bitte nach /' + (_slash.agent.name || '') + ' noch eine Frage eingeben'); return; }
+    } else if (_slash && _slash.notFound) {
+      showToast('Kein Agent für „/' + _slash.token + '" gefunden – Nachricht wird normal gesendet');
+    }
 
     const model   = _model();
     const wantPlot  = document.getElementById('mathe-opt-plot')?.checked !== false;
@@ -142,7 +154,7 @@ const MatheChat = (() => {
     _streaming = true; _setBtnState(true);
 
     // 🔁 Auto-Verifizieren: eigener Pfad (lösen → SymPy-prüfen → korrigieren)
-    if (_verifyMode) { await _sendVerified(text, assistantEl, model); return; }
+    if (_verifyMode && !slashAgentId) { await _sendVerified(text, assistantEl, model); return; }
 
     // Ausgehende Nachrichten aus dem sauberen Verlauf bauen; den Ausgabe-Hinweis
     // NUR an die letzte (aktuelle) Nachricht hängen und WEICH formulieren, damit
@@ -150,7 +162,7 @@ const MatheChat = (() => {
     // erzwungenen, sinnlosen Plot-Aufruf führen. Im Tutor-Modus KEIN Hinweis –
     // der Tutor-Agent steuert sein Verhalten vollständig über seinen Prompt.
     const outMessages = _history.map(m => ({ role: m.role, content: m.content, files: m.files || [] }));
-    if (!_tutorMode) {
+    if (!_tutorMode && !slashAgentId) {
       const hints = [];
       if (wantPlot)  hints.push('Falls die Frage eine konkrete Funktion oder Wertereihe enthält, visualisiere sie mit plot_function bzw. plot_chart (sonst nicht).');
       if (wantLatex) hints.push('Formatiere mathematische Formeln in LaTeX ($…$ inline, $$…$$ als Block).');
@@ -158,7 +170,7 @@ const MatheChat = (() => {
         const last = outMessages[outMessages.length - 1];
         last.content = `${last.content}\n\n[Formatierungshinweis: ${hints.join(' ')}]`;
       }
-    } else {
+    } else if (_tutorMode && !slashAgentId) {
       // Werkzeuggeprüft: SymPy-Grundwahrheit serverseitig holen und dem Tutor als
       // verifizierte Fakten mitgeben (kleine Modelle rufen Tools selbst nicht zuverlässig auf).
       try {
@@ -179,7 +191,7 @@ const MatheChat = (() => {
     const body = {
       messages:        outMessages,
       model:           model,
-      agent_id:        _tutorMode ? 'mathe_tutor' : 'mathe_experte',
+      agent_id:        slashAgentId || (_tutorMode ? 'mathe_tutor' : 'mathe_experte'),
       rag_collections: [],
       science:         false,
     };

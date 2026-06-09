@@ -910,6 +910,7 @@ const Planner = (() => {
 
     _appendAIMsg('user', msg); // Anzeige ohne Kontext-Prefix
     const assistantDiv = _appendAIMsg('assistant', '');
+    assistantDiv.innerHTML = '<span class="spinner"></span> <span class="planner-muted">denkt…</span>';
     _aiStreaming = true;
     // Alte Action-Buttons entfernen
     document.querySelectorAll('.planner-ai-action').forEach(el => el.remove());
@@ -923,7 +924,7 @@ const Planner = (() => {
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: contextMsg, model, tasks: _tasks, use_web: useWeb, use_rag: useRag }),
+        body: JSON.stringify({ message: contextMsg, model, tasks: _tasks, use_web: useWeb, use_rag: useRag, rag_collections: _currentRag() }),
       });
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -951,6 +952,8 @@ const Planner = (() => {
         if (window._ensureKatexMarked) window._ensureKatexMarked();
         assistantDiv.innerHTML = marked.parse(text, { gfm: true, breaks: true });
         assistantDiv.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      } else if (!text) {
+        assistantDiv.textContent = '(keine Antwort – evtl. Modellwechsel, bitte erneut versuchen)';
       }
       // Nach dem Streaming: Aufgaben-JSON in der Antwort suchen
       _aiParsedTasks = _parseTasksFromText(text);
@@ -983,6 +986,189 @@ const Planner = (() => {
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
     return div;
+  }
+
+  /* ── Wissensdatenbanken (Informationsbeschaffung) ────────────────── */
+  function _currentRag() {
+    const sel = document.getElementById('planner-rag-select');
+    if (!sel) return [];
+    return Array.from(sel.selectedOptions).map(o => o.value).filter(Boolean);
+  }
+
+  async function _fillRagSelect() {
+    const sel = document.getElementById('planner-rag-select');
+    if (!sel) return;
+    const cur = new Set(Array.from(sel.selectedOptions).map(o => o.value));
+    try {
+      const r = await fetch('/api/rag/collections');
+      const cols = await r.json();
+      sel.innerHTML = '';
+      for (const c of (cols || [])) {
+        const o = document.createElement('option');
+        o.value = c.id; o.textContent = c.name;
+        if (cur.has(c.id)) o.selected = true;
+        sel.appendChild(o);
+      }
+    } catch (_) { /* keine RAG-Liste verfügbar */ }
+  }
+
+  /* ── Projekt-Agent: bestehenden wählen / als Agent speichern ──────── */
+  function _fillAgentPicker() {
+    const sel = document.getElementById('btn-plan-pick-agent');
+    if (!sel || typeof AgentManager === 'undefined') return;
+    const keep = sel.value;
+    const agents = AgentManager.getAgents() || [];
+    sel.innerHTML = '<option value="">📂 Agent wählen…</option>';
+    for (const a of agents) {
+      const o = document.createElement('option');
+      o.value = a.id;
+      o.textContent = (a.icon ? a.icon + ' ' : '') + (a.name || a.id);
+      sel.appendChild(o);
+    }
+    if (keep) sel.value = keep;
+  }
+
+  function _pickAgent(id) {
+    if (!id || typeof AgentManager === 'undefined') return;
+    const a = (AgentManager.getAgents() || []).find(x => x.id === id);
+    if (!a || !a.system_prompt) { showToast('Agent hat keinen System-Prompt'); return; }
+    _systemPrompt = a.system_prompt;
+    const status = document.getElementById('planner-agent-status');
+    if (status) { status.textContent = `✓ Agent: ${a.name || a.id}`; status.title = _systemPrompt; }
+    // Die an den Agenten gebundenen Wissensdatenbanken im Planer mitaktivieren
+    if (a.rag_collections && a.rag_collections.length) {
+      const sel = document.getElementById('planner-rag-select');
+      if (sel) Array.from(sel.options).forEach(o => { if (a.rag_collections.includes(o.value)) o.selected = true; });
+    }
+    showToast('Projekt-Agent gesetzt: ' + (a.name || a.id));
+  }
+
+  function _saveAsAgent() {
+    if (!_systemPrompt) { showToast('Erst „Projekt-Agent ableiten" oder einen Agenten wählen'); return; }
+    if (typeof AgentManager === 'undefined') { showToast('Agenten-Modul nicht verfügbar'); return; }
+    const base = (document.getElementById('planner-plan-name')?.value || _desc || 'Projekt').trim().slice(0, 30);
+    // Öffnet den Agenten-Editor vorausgefüllt – dort speichern & weiter bearbeiten.
+    AgentManager.openModal({
+      id: null,
+      name: `Planer: ${base}`,
+      description: 'Projekt-Agent aus dem Planer',
+      system_prompt: _systemPrompt,
+      icon: '🗂️',
+      category: 'Planer',
+      tools: ['web_search', 'calculate'],
+      rag_collections: _currentRag(),
+    });
+  }
+
+  /* ── Durchführbarkeit prüfen ─────────────────────────────────────── */
+  async function _checkFeasibility() {
+    if (!_tasks.length) { showToast('Kein Plan mit Aufgaben vorhanden'); return; }
+    _desc = (document.getElementById('planner-desc')?.value || '').trim();
+    const btn = document.getElementById('btn-plan-check');
+    if (btn) { btn.disabled = true; btn.textContent = '🔍 prüft…'; }
+    _appendAIMsg('user', '🔍 Durchführbarkeit prüfen');
+    const div = _appendAIMsg('assistant', '');
+    div.innerHTML = '<span class="spinner"></span> <span class="planner-muted">prüft den Plan…</span>';
+    document.querySelectorAll('.planner-ai-action').forEach(el => el.remove());
+    try {
+      const pid = _planId || 'unsaved';
+      const r = await fetch(`/api/plans/${pid}/check-feasibility`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks: _tasks, description: _desc, system_prompt: _systemPrompt,
+                               model: _model(), rag_collections: _currentRag() }),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { m = (await r.json()).detail || m; } catch (_) {} throw new Error(m); }
+      _renderFeasibility(div, await r.json());
+    } catch (e) {
+      div.textContent = 'Fehler: ' + e.message;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Durchführbarkeit prüfen'; }
+    }
+  }
+
+  function _renderFeasibility(div, d) {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const itemText = x => {
+      if (x == null) return '';
+      if (typeof x !== 'object') return String(x);
+      // Aufgabe (hat id/duration/predecessors) → „[id] name"
+      if (x.name && (x.id || x.duration != null || x.predecessors)) return `[${x.id || 'neu'}] ${x.name}`;
+      // generisches Objekt: Kopf + Detail aus den gängigen Feldnamen zusammenbauen
+      const head = x.name || x.bereich || x.titel || '';
+      const body = x.details || x.maßnahmen || x.massnahmen || x.beschreibung || '';
+      if (head || body) return head && body ? `${head}: ${body}` : (head || body);
+      return JSON.stringify(x);
+    };
+    const list = arr => (arr && arr.length)
+      ? '<ul style="margin:4px 0 8px 18px">' + arr.map(x => `<li>${esc(itemText(x))}</li>`).join('') + '</ul>' : '';
+    const ok = d.durchfuehrbar;
+    let html = `<div style="font-weight:600;margin-bottom:4px">${ok ? '✅' : '⚠️'} ${esc(d.bewertung || (ok ? 'Plan erscheint durchführbar' : 'Plan hat offene Punkte'))}</div>`;
+    if ((d.fehlende_aufgaben || []).length) html += `<div style="margin-top:6px">🧩 <strong>Fehlende Aufgaben</strong>${list(d.fehlende_aufgaben)}</div>`;
+    if ((d.luecken || []).length)          html += `<div>🔗 <strong>Lücken / lose Enden</strong>${list(d.luecken)}</div>`;
+    if ((d.struktur || []).length)         html += `<div>🧱 <strong>Struktur</strong>${list(d.struktur)}</div>`;
+    if ((d.risiken || []).length)          html += `<div>⚠ <strong>Risiken</strong>${list(d.risiken)}</div>`;
+    if ((d.empfehlungen || []).length)     html += `<div>💡 <strong>Empfehlungen</strong>${list(d.empfehlungen)}</div>`;
+    div.innerHTML = html;
+    // Fehlende Aufgaben übernehmbar machen (hinzufügen, nicht ersetzen)
+    if ((d.fehlende_aufgaben || []).length) {
+      _aiParsedTasks = d.fehlende_aufgaben;
+      const actionDiv = document.createElement('div');
+      actionDiv.className = 'planner-ai-action';
+      actionDiv.innerHTML = `<button class="export-btn btn-ai-apply-tasks" style="font-size:12px;background:var(--accent);color:#fff;margin:4px 0">✓ ${d.fehlende_aufgaben.length} fehlende Aufgabe(n) hinzufügen</button>`;
+      const container = document.getElementById('planner-ai-messages');
+      container?.appendChild(actionDiv);
+      actionDiv.querySelector('.btn-ai-apply-tasks')?.addEventListener('click', () => { _selectedTaskId = null; _applyAITasks(); });
+      container && (container.scrollTop = container.scrollHeight);
+    }
+  }
+
+  /* ── Fertigen Plan in eine Wissensdatenbank überführen ───────────── */
+  async function _planToRag() {
+    if (!_tasks.length) { showToast('Kein Plan mit Aufgaben'); return; }
+    if (typeof RAG === 'undefined') { showToast('RAG-Modul nicht verfügbar'); return; }
+    const name = (document.getElementById('planner-plan-name')?.value || 'Plan').trim();
+    _desc = (document.getElementById('planner-desc')?.value || '').trim();
+    const lines = [`# Projektplan: ${name}`, ''];
+    if (_desc) lines.push('## Projektbeschreibung & Ziel', _desc, '');
+    if (_systemPrompt) lines.push('## Projekt-Agent', _systemPrompt, '');
+    lines.push('## Aufgaben', '');
+    for (const t of _tasks) {
+      lines.push(`### [${t.id}] ${t.name || ''}`);
+      if (t.duration != null) lines.push(`- Dauer: ${t.duration} Tage`);
+      if ((t.predecessors || []).length) lines.push(`- Vorgänger: ${t.predecessors.join(', ')}`);
+      if ((t.successors || []).length)   lines.push(`- Nachfolger: ${t.successors.join(', ')}`);
+      if (t.area)  lines.push(`- Bereich: ${t.area}`);
+      if ((t.resource_list || []).length) lines.push(`- Ressourcen: ${t.resource_list.map(r => `${r.name || ''} (${r.kind || ''})`).join(', ')}`);
+      if (t.notes) lines.push(`- Notizen: ${t.notes}`);
+      if (t.doc)   lines.push('', '#### Recherche-Dossier', t.doc);
+      lines.push('');
+    }
+    const text = lines.join('\n');
+    const useNew = confirm('Plan in eine NEUE Wissensdatenbank überführen?\n\nOK = neue anlegen · Abbrechen = bestehende wählen');
+    if (useNew) {
+      const nm = (prompt('Name der neuen Wissensdatenbank:', `Plan: ${name}`) || '').trim();
+      if (!nm) return;
+      showToast('⏳ Wird angelegt & eingebettet…');
+      try {
+        const cr = await fetch('/api/rag/collections', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: nm, strictness: 'korrekt' }),
+        });
+        const coll = await cr.json();
+        if (!cr.ok) throw new Error(coll.detail || cr.status);
+        const ir = await fetch(`/api/rag/collections/${coll.id}/from-text`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: `Projektplan: ${name}`, text }),
+        });
+        const res = await ir.json();
+        if (!ir.ok) throw new Error(res.detail || ir.status);
+        showToast(`✓ „${nm}" angelegt: ${res.n_chunks} Chunks`);
+        _fillRagSelect();
+      } catch (e) { showToast('Fehler: ' + e.message); }
+    } else {
+      await RAG.ingestText(`Projektplan: ${name}`, text, `Plan „${name}" in Wissensdatenbank übernehmen`);
+      _fillRagSelect();
+    }
   }
 
   /* ── Selektions-Indikator ────────────────────────────────────────── */
@@ -1344,7 +1530,8 @@ const Planner = (() => {
       const r = await fetch('/api/plans/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: desc, system_prompt: _systemPrompt, model,
-                               resource_catalog: _catalog, resource_mode: _resMode, max_tasks: count }),
+                               resource_catalog: _catalog, resource_mode: _resMode, max_tasks: count,
+                               rag_collections: _currentRag() }),
       });
       if (!r.ok) {
         let msg = 'HTTP ' + r.status;
@@ -2265,13 +2452,28 @@ const Planner = (() => {
 
     // Projekt-Agent ableiten + Komplett-Generierung
     document.getElementById('btn-derive-agent')?.addEventListener('click', _deriveAgent);
-    document.getElementById('btn-planner-agent-jury')?.addEventListener('click', () => {
-      if (!_systemPrompt) { showToast('Erst „Projekt-Agent ableiten"'); return; }
-      if (typeof Jury !== 'undefined') {
-        Jury.evaluate(_systemPrompt, { title: 'Projekt-Agent prüfen', context: _desc });
-      }
-    });
+    document.getElementById('btn-plan-save-agent')?.addEventListener('click', _saveAsAgent);
+    const pickSel = document.getElementById('btn-plan-pick-agent');
+    pickSel?.addEventListener('mousedown', _fillAgentPicker);   // Liste vor dem Öffnen aktualisieren
+    pickSel?.addEventListener('change', e => _pickAgent(e.target.value));
     document.getElementById('btn-generate-plan')?.addEventListener('click', _generatePlan);
+    document.getElementById('btn-plan-check')?.addEventListener('click', _checkFeasibility);
+
+    // Wissensdatenbanken (Informationsbeschaffung) + Plan → RAG
+    _fillRagSelect();
+    _fillAgentPicker();
+    document.getElementById('planner-rag-select')?.addEventListener('mousedown', _fillRagSelect);
+    document.getElementById('btn-plan-to-rag')?.addEventListener('click', _planToRag);
+
+    // Einklappbarer Setup-Block: Zustand merken (spart Platz beim Arbeiten am Plan)
+    const setup = document.getElementById('planner-setup');
+    if (setup) {
+      // Standardmäßig eingeklappt; nur öffnen, wenn der Nutzer es zuletzt offen ließ.
+      try { if (localStorage.getItem('planner-setup-open') === '1') setup.open = true; } catch (_) {}
+      setup.addEventListener('toggle', () => {
+        try { localStorage.setItem('planner-setup-open', setup.open ? '1' : '0'); } catch (_) {}
+      });
+    }
 
     // Ressourcen-Katalog: Modus, Import, Export
     document.getElementById('planner-res-mode')?.addEventListener('change', e => { _resMode = e.target.value; });

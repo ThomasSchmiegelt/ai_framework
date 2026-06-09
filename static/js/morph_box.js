@@ -360,12 +360,30 @@ const MorphBox = (() => {
     showToast(`✓ Beste Note je Zeile gewählt (${n} Zeilen)`);
   }
 
+  // Auswahl umschalten (je Zeile genau ein Haken)
+  function _toggleSelect(pi, vi) {
+    if (_editing) return;
+    _selection[pi] = (_selection[pi] === vi) ? undefined : vi;
+    if (_selection[pi] === undefined) delete _selection[pi];
+    _lastEval = null;   // Auswahl geändert → alte Bewertung gilt nicht mehr
+    _render(); _save();
+  }
+
   function _chip(pi, vi) {
     const chip = document.createElement('div');
     const selected = _selection[pi] === vi;
     const g = _grade(pi, vi);
     const isBest = g != null && g === _bestGrade(pi);
     chip.className = 'morph-chip' + (selected ? ' morph-chip--sel' : '') + (isBest ? ' morph-chip--best' : '');
+
+    // Auswahl-Haken vorne — explizit ankreuzbar
+    const check = document.createElement('button');
+    check.className = 'morph-chip-check';
+    check.textContent = selected ? '✓' : '';
+    check.title = 'Für die Lösung wählen (Haken setzen)';
+    check.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    check.addEventListener('click', e => { e.stopPropagation(); _toggleSelect(pi, vi); });
+    chip.appendChild(check);
 
     const grade = document.createElement('button');
     grade.className = 'morph-chip-grade ' + (g ? 'g' + g : 'g-none');
@@ -378,29 +396,21 @@ const MorphBox = (() => {
     const txt = document.createElement('span');
     txt.className = 'morph-chip-txt';
     txt.textContent = _params[pi].values[vi];
-    txt.title = 'Klicken = für die Kombination wählen · Doppelklick = bearbeiten';
-    // Einfacher Klick = auswählen (verzögert, damit ein Doppelklick stattdessen
-    // editiert und nicht die Auswahl umschaltet). Während des Editierens: ignorieren.
-    txt.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (_editing) return;
-      clearTimeout(txt._clickT);
-      txt._clickT = setTimeout(() => {
-        _selection[pi] = (_selection[pi] === vi) ? undefined : vi;
-        if (_selection[pi] === undefined) delete _selection[pi];
-        _lastEval = null;   // Auswahl geändert → alte Bewertung gilt nicht mehr
-        _render(); _save();
-      }, 180);
-    });
+    txt.title = 'Klicken = Haken setzen/entfernen · Doppelklick oder ✏️ = bearbeiten';
+    // Einfacher Klick = auswählen (sofort — Bearbeiten läuft jetzt über ✏️/Doppelklick,
+    // daher keine Verzögerung mehr nötig). Während des Editierens: ignorieren.
+    txt.addEventListener('click', (e) => { e.stopPropagation(); _toggleSelect(pi, vi); });
     txt.addEventListener('dblclick', (e) => {
       e.preventDefault(); e.stopPropagation();
-      clearTimeout(txt._clickT);
       _editChip(pi, vi, txt);
     });
     chip.appendChild(txt);
 
     const tools = document.createElement('span');
     tools.className = 'morph-chip-tools';
+    const edit = document.createElement('button');
+    edit.textContent = '✏️'; edit.title = 'Bearbeiten';
+    edit.addEventListener('click', e => { e.stopPropagation(); _editChip(pi, vi, txt); });
     const star = document.createElement('button');
     star.textContent = '✨'; star.title = 'Ausformulieren (KI)';
     star.addEventListener('click', e => { e.stopPropagation(); _refineCell(pi, vi, 'expand'); });
@@ -422,7 +432,7 @@ const MorphBox = (() => {
       else if (_selection[pi] > vi) _selection[pi]--;
       _render(); _save();
     });
-    tools.appendChild(star); tools.appendChild(crit); tools.appendChild(x);
+    tools.appendChild(edit); tools.appendChild(star); tools.appendChild(crit); tools.appendChild(x);
     chip.appendChild(tools);
     return chip;
   }
@@ -430,9 +440,11 @@ const MorphBox = (() => {
   function _editChip(pi, vi, txtEl) {
     if (_editing) return;
     _editing = true;
-    const inp = document.createElement('input');
+    const inp = document.createElement('textarea');
     inp.className = 'morph-chip-edit';
     inp.value = _params[pi].values[vi];
+    inp.rows = Math.min(8, Math.max(1, Math.ceil((inp.value.length || 1) / 36)));
+    inp.title = 'Enter = übernehmen · Shift+Enter = Zeilenumbruch · Esc = abbrechen';
     txtEl.replaceWith(inp);
     inp.focus(); inp.select();
     let done = false;
@@ -448,7 +460,8 @@ const MorphBox = (() => {
     };
     inp.addEventListener('blur', () => finish(true));
     inp.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      // Enter = übernehmen, Shift+Enter = Zeilenumbruch (Mehrzeiler bearbeiten)
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
       else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
     });
     inp.addEventListener('click', e => e.stopPropagation());

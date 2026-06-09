@@ -2204,15 +2204,30 @@ html, body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
+/* Einklappbarer Projekt-Setup-Block (spart vertikalen Platz) */
+#planner-setup { border-bottom: 1px solid var(--border); }
+#planner-setup > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 14px; font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+}
+#planner-setup > summary::-webkit-details-marker { display: none; }
+#planner-setup > summary::before {
+  content: "▸"; display: inline-block; transition: transform .15s; color: var(--text-dim); font-weight: 400;
+}
+#planner-setup[open] > summary::before { transform: rotate(90deg); }
+#planner-setup > summary:hover { color: var(--accent); }
+.planner-setup-title { white-space: nowrap; }
+
 /* Projektkontext + Agent-Zeile */
 #planner-project-row {
   display: flex; gap: 10px; align-items: flex-start;
-  padding: 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  padding: 2px 14px 8px; flex-wrap: wrap;
 }
 #planner-desc {
   flex: 1; min-width: 260px; background: var(--bg-input); border: 1px solid var(--border);
@@ -2222,6 +2237,7 @@ html, body {
 #planner-desc:focus { border-color: var(--accent); }
 #planner-project-actions { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
 .planner-action-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.planner-sep { width: 1px; align-self: stretch; min-height: 18px; background: var(--border); margin: 0 3px; }
 .planner-muted { font-size: 11px; color: var(--text-dim); }
 .planner-rollup { font-size: 12px; color: var(--accent); font-weight: 600; white-space: nowrap; }
 
@@ -2969,6 +2985,28 @@ li.CodeMirror-hint-active { background: var(--accent); color: #fff; }
 /* Leere Vorschau folgt dem dunklen Theme; ein laufendes Programm bringt seinen
    eigenen (weißen) <body>-Hintergrund mit und überdeckt dies. */
 #ide-preview { flex: 1; border: none; border-bottom: 1px solid var(--border); background: var(--bg-main); }
+
+/* Python-Ausgabe (serverseitig) — Alternative zur Canvas-Vorschau */
+#ide-py-output {
+  flex: 1; overflow: auto; border-bottom: 1px solid var(--border);
+  background: var(--bg-main); padding: 10px 12px; min-height: 0;
+}
+#ide-py-output .ide-py-out {
+  margin: 0 0 8px; white-space: pre-wrap; word-break: break-word;
+  font-family: monospace; font-size: 12.5px; color: var(--text); line-height: 1.5;
+}
+#ide-py-output .ide-py-err {
+  margin: 0 0 8px; white-space: pre-wrap; word-break: break-word;
+  font-family: monospace; font-size: 12.5px; color: #ef4444; line-height: 1.5;
+}
+#ide-py-output .ide-py-img {
+  display: block; max-width: 100%; height: auto; margin: 0 auto 10px;
+  background: #fff; border: 1px solid var(--border); border-radius: 6px;
+}
+#ide-py-output .ide-py-run {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text-dim); font-size: 13px; padding: 4px 0;
+}
 
 #ide-console-bar {
   display: flex; align-items: center; justify-content: space-between;
@@ -3764,7 +3802,10 @@ select.ob-input option {
 #morph-problem:focus { outline: none; border-color: var(--accent); }
 #morph-solution { padding: 6px 14px; font-size: 13px; color: var(--accent); font-weight: 600; min-height: 0; }
 #morph-solution:empty { display: none; }
-#morph-grid { flex: 1; overflow-y: auto; padding: 8px 14px 16px; }
+/* Ein gemeinsamer Scroll-Bereich für Raster + Bewertung + Lösungen, damit das
+   Bewertungs-Ergebnis unter dem Raster mitgescrollt (und damit lesbar) ist. */
+#morph-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+#morph-grid { padding: 8px 14px 16px; }
 .morph-row { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .morph-param { width: 200px; flex-shrink: 0; display: flex; gap: 4px; align-items: center; padding-top: 4px; }
 .morph-param-name {
@@ -3782,6 +3823,14 @@ select.ob-input option {
 }
 .morph-chip--sel { background: var(--accent); border-color: var(--accent); color: #fff; }
 .morph-chip--sel .morph-chip-tools button { color: rgba(255,255,255,.85); }
+/* Auswahl-Haken: explizit ankreuzbar statt versteckter Klick-Logik */
+.morph-chip-check {
+  flex-shrink: 0; width: 19px; height: 19px; padding: 0; cursor: pointer;
+  border: 2px solid var(--border); border-radius: 5px; background: var(--bg-main);
+  color: #fff; font-size: 13px; font-weight: 700; line-height: 15px; text-align: center;
+}
+.morph-chip-check:hover { border-color: var(--accent); }
+.morph-chip--sel .morph-chip-check { background: #2fa36b; border-color: #2fa36b; }
 .morph-chip-txt { cursor: pointer; white-space: normal; }
 .morph-chip-tools { display: inline-flex; gap: 1px; }
 .morph-chip-tools button { background: none; border: none; cursor: pointer; font-size: 11px; padding: 1px 3px; color: var(--text-muted); border-radius: 4px; }
@@ -3809,7 +3858,7 @@ select.ob-input option {
 .morph-chip-grade.g6 { background: #e0564f; color: #fff;     border-color: #e0564f; }
 .morph-chip--best { box-shadow: 0 0 0 2px rgba(47,163,107,.55); }
 .morph-chip--sel.morph-chip--best { box-shadow: 0 0 0 2px rgba(47,163,107,.9); }
-.morph-chip-edit { background: var(--bg-main); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 7px; font-size: 12.5px; min-width: 120px; }
+.morph-chip-edit { background: var(--bg-main); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 4px 8px; font-size: 12.5px; min-width: 180px; width: 240px; max-width: 60vw; resize: vertical; font-family: inherit; line-height: 1.4; }
 .morph-chip-edit:focus { outline: none; }
 #morph-eval { margin: 0 14px 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); font-size: 13px; }
 .morph-eval-head { font-weight: 600; font-size: 14px; margin-bottom: 10px; }

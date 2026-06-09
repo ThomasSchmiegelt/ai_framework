@@ -140,8 +140,9 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Angaben und stellt **Rückfragen**, gibt dann eine Einschätzung; auf Wunsch in einfaches
   Deutsch übersetzt. Mit **Patienten-Akten** (eigene RAG je Patient) und Datei-Upload.
   *Kein Ersatz für ärztliche Beratung.*
-- 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail und Logs lassen sich im Profil
-  ein-/ausblenden; beim **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
+- 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail, Logs, Verzeichnis-Analyse,
+  Morphologischer Kasten und Jury lassen sich im Profil ein-/ausblenden; beim
+  **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
 - 📋 **Diagnose-Logger** — zuschaltbares Protokoll zur Fehlersuche
 - 👤 **Nutzerprofil & Projekte** — Modell-Rollen, Dokument-Footer, Projektzuordnung
 - 💾 **Backup/Restore** — **alle** Nutzerdaten als ZIP: Profil, Projekte, Gespräche,
@@ -199,6 +200,15 @@ Ein Eindruck der wichtigsten Tabs (Screenshots aus der Anwendung):
 ![Mathe](static/onboarding/mathe.png)
 *🔢 Mathe — Workspace mit Plots, SymPy und Tutor-Modus (werkzeuggeprüft).*
 
+![Verzeichnis-Analyse](static/onboarding/verzeichnisanalyse.png)
+*📁 Verzeichnis-Analyse — Ordner serverseitig scannen, Dateien KI-analysieren (personenbezogene Daten werden anonymisiert), Index & Wissensdatenbank erzeugen.*
+
+![Morphologischer Kasten](static/onboarding/morphologischer_kasten.png)
+*🧩 Morphologischer Kasten — Ideenfindung über Parameter × Ausprägungen mit Bewertung, Schulnoten und Wischtechnik.*
+
+![Jury](static/onboarding/jury.png)
+*⚖️ Jury — Mehr-Agenten-Bewertung eines Textes (z. B. Recht) mit Einzelurteilen und Gesamt-Synthese.*
+
 ![Diagnose-Logger](static/onboarding/log_file.png)
 *📋 Diagnose-Logger — zuschaltbares Protokoll zur Fehlersuche.*
 
@@ -230,20 +240,46 @@ Bedienung für Anwender: **[BEDIENUNGSANLEITUNG.md](BEDIENUNGSANLEITUNG.md)**
   "embed_model":    "nomic-embed-text",
   "ollama_base":    "http://localhost:11434",
   "port":           8780,
-  "host":           "127.0.0.1"
+  "host":           "127.0.0.1",
+  "enable_api":         true,
+  "allow_python_exec":  true
 }
 ```
 
 > `allowed_models` ist nur noch eine **Sortier-Reihenfolge**, kein Filter: in den
 > Modell-Auswahllisten (Profil) erscheinen **alle** in Ollama installierten Modelle.
 
+**Optionale Installer-Schalter** (werden vom Installer gesetzt, lassen sich aber von Hand ändern):
+- `enable_api` — externe OpenAI-kompatible KI-Anbieter (API) im Profil anbieten (Default `true`).
+- `allow_python_exec` — **Python im 💻 Code-Tab serverseitig ausführen** (Default `true`).
+  Lokal sinnvoll; im Mehrbenutzer-/Servermodus auf `false` setzen, da beliebiger
+  Python-Code auf dem Server läuft. Bei `false` liefert der Endpunkt 403 und die
+  Python-Option im Code-Tab wird ausgeblendet (`make_server` setzt den Wert auf `false`).
+
 ---
 
-## Linux (Entwicklung)
+## Schnellstart (Linux)
+
+Das Projekt läuft plattformneutral auch unter Linux. Voraussetzung: `python3`,
+`python3-venv` und ein laufendes Ollama (`ollama serve`).
+
+```bash
+./install.sh             # venv + Pakete, optionale Tab-/API-Auswahl
+./start.sh               # Start auf http://127.0.0.1:8780
+```
+
+Über Umgebungsvariablen steuerbar (siehe `start.sh`):
+
+```bash
+AI_HOST=0.0.0.0 AI_PORT=8780 ./start.sh        # im Netzwerk erreichbar
+AI_SSL_CERT=certs/cert.pem AI_SSL_KEY=certs/key.pem ./start.sh   # HTTPS (PWA am Handy)
+```
+
+Oder direkt im Entwicklungsmodus mit Auto-Reload:
 
 ```bash
 source venv/bin/activate
-uvicorn main:app --host 0.0.0.0 --port 8780 --reload
+uvicorn main:app --host 127.0.0.1 --port 8780 --reload
 ```
 
 ---

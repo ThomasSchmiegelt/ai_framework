@@ -111,6 +111,10 @@ $serverConfig = [ordered]@{
     port           = [int]$PORT
     host           = $HOST_IP
     workers        = [int]$WORKERS
+    # Server/Mehrbenutzer: Python-Ausfuehrung im Code-Tab standardmaessig AUS
+    # (fuehrt beliebigen Code auf dem Server aus). Bei Bedarf in config.json auf
+    # true setzen.
+    allow_python_exec = $false
 }
 if ($authUser) {
     $serverConfig["auth"] = @{ user = $authUser; pass = $authPass }

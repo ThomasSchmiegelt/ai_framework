@@ -190,9 +190,18 @@ const DocGen = (() => {
 
   async function _run(thenPresent = false) {
     if (_busy) return;
-    const brief = document.getElementById('docgen-brief').value.trim();
+    let brief = document.getElementById('docgen-brief').value.trim();
     if (!brief) { showToast('Bitte beschreibe das gewünschte Dokument'); return; }
-    const agentId = document.getElementById('docgen-agent').value || undefined;
+    let agentId = document.getElementById('docgen-agent').value || undefined;
+    // Slash-Agent: führendes „/Name" überschreibt den Dokument-Agenten für diesen Lauf
+    const _slash = (typeof window.resolveSlashAgent === 'function') ? window.resolveSlashAgent(brief) : null;
+    if (_slash && _slash.agent) {
+      agentId = _slash.agent.id; brief = (_slash.rest || '').trim();
+      showToast('➜ Agent: ' + (_slash.agent.name || _slash.agent.id));
+      if (!brief) { showToast('Bitte nach /' + (_slash.agent.name || '') + ' noch eine Beschreibung eingeben'); return; }
+    } else if (_slash && _slash.notFound) {
+      showToast('Kein Agent für „/' + _slash.token + '" gefunden');
+    }
     const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
     const ragSel = document.getElementById('docgen-rag');
     const rag = Array.from(ragSel.selectedOptions).map(o => o.value);

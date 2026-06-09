@@ -36,6 +36,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/show-hint.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/closebrackets.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/selection/active-line.min.js"></script>
@@ -43,7 +44,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260614" />
+  <link rel="stylesheet" href="/css/app.css?v=20260615py" />
 </head>
 <body>
 
@@ -772,45 +773,67 @@
         <input type="file" id="plan-csv-input" accept=".csv" style="display:none" />
       </div>
 
-      <!-- Projektkontext + abgeleiteter Agent -->
-      <div id="planner-project-row">
-        <textarea id="planner-desc" rows="2"
-          placeholder="Projektbeschreibung & Ziel … daraus wird ein Projekt-Agent abgeleitet, der die KI-Vorschläge steuert"></textarea>
-        <div id="planner-project-actions">
-          <div class="planner-action-line">
-            <button id="btn-derive-agent" class="export-btn" style="font-size:12px">🧠 Projekt-Agent ableiten</button>
-            <button id="btn-planner-agent-jury" class="export-btn" style="font-size:12px" title="Den abgeleiteten Projekt-Agenten-Prompt von einer Jury prüfen lassen">⚖️ Agent prüfen</button>
-            <button id="btn-generate-plan" class="export-btn" style="font-size:12px">🪄 KI-Projekt generieren</button>
-            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Gewünschte Aufgabenzahl. Große Pläne überfordern kleine lokale Modelle – dann ein größeres Modell verwenden.">
-              Aufgaben <input type="number" id="planner-task-count" min="5" max="200" value="12" class="sidebar-select" style="max-width:70px;font-size:12px" />
-            </label>
-          </div>
-          <div class="planner-action-line">
-            <select id="planner-res-mode" class="sidebar-select" style="max-width:170px;font-size:12px" title="Wie die KI mit dem Ressourcen-Katalog umgeht">
-              <option value="free">Ressourcen: frei</option>
-              <option value="extend">Katalog: erweitern (Zukauf)</option>
-              <option value="strict">Katalog: strikt</option>
-            </select>
-            <button id="btn-import-catalog" class="export-btn" style="font-size:12px" title="Ressourcen-Katalog (CSV: Typ;Name;Satz) importieren">📥 Katalog</button>
-            <input type="file" id="catalog-csv-input" accept=".csv" style="display:none" />
-            <button id="btn-export-resources" class="export-btn" style="font-size:12px" title="Verwendete Ressourcen als CSV exportieren">📤 Ressourcen</button>
-            <span id="planner-catalog-status" class="planner-muted"></span>
-            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Projektstart – legt fest, ab wann die Tage als Kalenderdaten gerechnet werden">
-              🗓 Start <input type="date" id="planner-start-date" class="sidebar-select" style="max-width:140px;font-size:12px" />
-            </label>
-            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Deadline – bei gesetztem Enddatum ohne Startdatum wird der Projektstart rückwärts errechnet">
-              🏁 Ende <input type="date" id="planner-end-date" class="sidebar-select" style="max-width:140px;font-size:12px" />
-            </label>
-            <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Tage als Arbeitstage rechnen (Wochenenden überspringen)">
-              <input type="checkbox" id="planner-workdays" /> Arbeitstage
-            </label>
-            <button id="btn-plan-evaluate" class="export-btn" style="font-size:12px" title="Bis zu 3 Pläne KI-gestützt vergleichen und zu einem verbesserten Plan zusammenführen">📊 Pläne vergleichen</button>
-          </div>
-          <span id="planner-warn" class="planner-warn"></span>
+      <!-- Projektkontext + KI-Aktionen (einklappbar, um Platz zu sparen) -->
+      <details id="planner-setup">
+        <summary id="planner-setup-summary">
+          <span class="planner-setup-title">🛠 Projekt-Setup &amp; KI-Aktionen</span>
           <span id="planner-agent-status" class="planner-muted"></span>
           <span id="planner-rollup" class="planner-rollup"></span>
+          <span id="planner-warn" class="planner-warn"></span>
+        </summary>
+        <div id="planner-project-row">
+          <textarea id="planner-desc" rows="2"
+            placeholder="Projektbeschreibung & Ziel … daraus wird ein Projekt-Agent abgeleitet, der die KI-Vorschläge steuert"></textarea>
+          <div id="planner-project-actions">
+            <!-- Gruppe: Projekt-Agent + Generierung -->
+            <div class="planner-action-line">
+              <button id="btn-derive-agent" class="export-btn" style="font-size:12px">🧠 Projekt-Agent ableiten</button>
+              <select id="btn-plan-pick-agent" class="sidebar-select" style="max-width:170px;font-size:12px" title="Bestehenden Agenten als Projekt-Agent verwenden">
+                <option value="">📂 Agent wählen…</option>
+              </select>
+              <button id="btn-plan-save-agent" class="export-btn" style="font-size:12px" title="Den abgeleiteten Projekt-Agenten als bearbeitbaren Agenten unter 🤖 Agenten speichern">💾 Als Agent speichern</button>
+              <span class="planner-sep"></span>
+              <button id="btn-generate-plan" class="export-btn" style="font-size:12px">🪄 KI-Projekt generieren</button>
+              <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Gewünschte Aufgabenzahl. Große Pläne überfordern kleine lokale Modelle – dann ein größeres Modell verwenden.">
+                Aufgaben <input type="number" id="planner-task-count" min="5" max="200" value="12" class="sidebar-select" style="max-width:64px;font-size:12px" />
+              </label>
+              <button id="btn-plan-check" class="export-btn" style="font-size:12px" title="Plan strukturiert auf Durchführbarkeit prüfen: fehlende Aufgaben, Lücken/lose Enden, Zyklen">🔍 Durchführbarkeit prüfen</button>
+            </div>
+            <!-- Gruppe: Ressourcen + Termine -->
+            <div class="planner-action-line">
+              <select id="planner-res-mode" class="sidebar-select" style="max-width:170px;font-size:12px" title="Wie die KI mit dem Ressourcen-Katalog umgeht">
+                <option value="free">Ressourcen: frei</option>
+                <option value="extend">Katalog: erweitern (Zukauf)</option>
+                <option value="strict">Katalog: strikt</option>
+              </select>
+              <button id="btn-import-catalog" class="export-btn" style="font-size:12px" title="Ressourcen-Katalog (CSV: Typ;Name;Satz) importieren">📥 Katalog</button>
+              <input type="file" id="catalog-csv-input" accept=".csv" style="display:none" />
+              <button id="btn-export-resources" class="export-btn" style="font-size:12px" title="Verwendete Ressourcen als CSV exportieren">📤 Ressourcen</button>
+              <span class="planner-sep"></span>
+              <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Projektstart – legt fest, ab wann die Tage als Kalenderdaten gerechnet werden">
+                🗓 Start <input type="date" id="planner-start-date" class="sidebar-select" style="max-width:140px;font-size:12px" />
+              </label>
+              <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Deadline – bei gesetztem Enddatum ohne Startdatum wird der Projektstart rückwärts errechnet">
+                🏁 Ende <input type="date" id="planner-end-date" class="sidebar-select" style="max-width:140px;font-size:12px" />
+              </label>
+              <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Tage als Arbeitstage rechnen (Wochenenden überspringen)">
+                <input type="checkbox" id="planner-workdays" /> Arbeitstage
+              </label>
+            </div>
+            <!-- Gruppe: Wissensdatenbanken + Vergleich -->
+            <div class="planner-action-line">
+              <label class="planner-muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Wissensdatenbank(en) zur Informationsbeschaffung – fließen in KI-Vorschläge, Generierung und Chat ein (mehrfach wählbar mit Strg/Cmd)">
+                📚 Wissen
+                <select id="planner-rag-select" multiple size="2" class="sidebar-select" style="max-width:240px;min-width:140px;font-size:12px"></select>
+              </label>
+              <button id="btn-plan-to-rag" class="export-btn" style="font-size:12px" title="Den fertigen, recherchierten Plan (Aufgaben + Notizen + Dossiers) in eine Wissensdatenbank überführen">📚 Plan → Wissensdatenbank</button>
+              <span class="planner-sep"></span>
+              <button id="btn-plan-evaluate" class="export-btn" style="font-size:12px" title="Bis zu 3 Pläne KI-gestützt vergleichen und zu einem verbesserten Plan zusammenführen">📊 Pläne vergleichen</button>
+              <span id="planner-catalog-status" class="planner-muted"></span>
+            </div>
+          </div>
         </div>
-      </div>
+      </details>
 
       <div id="planner-main">
         <!-- Linke Hälfte: Tabellen-Editor -->
@@ -975,6 +998,10 @@
       <div id="ide-toolbar">
         <button class="export-btn" id="btn-ide-new">＋ Neu</button>
         <input type="text" id="ide-name" placeholder="Programmname…" autocomplete="off" />
+        <select id="ide-lang" class="sidebar-select" style="max-width:190px;font-size:12px" title="Sprache: JavaScript läuft als Canvas-Vorschau, Python wird serverseitig ausgeführt">
+          <option value="js">🟨 JavaScript (Canvas)</option>
+          <option value="py">🐍 Python</option>
+        </select>
         <button class="export-btn" id="btn-ide-save">💾 Speichern</button>
         <button class="export-btn ide-run-btn" id="btn-ide-run">▶ Ausführen</button>
         <span class="ide-hint">Strg+Enter = Ausführen · Strg+S = Speichern</span>
@@ -982,6 +1009,7 @@
           <span class="ide-hint">Beispiele:</span>
           <button class="export-btn" id="btn-ide-example-toleranz">📐 Toleranzanalyse</button>
           <button class="export-btn" id="btn-ide-example-kurve">📈 Federkennlinie</button>
+          <button class="export-btn" id="btn-ide-example-py">🐍 Python-Plot</button>
           <button class="export-btn" id="btn-ide-example-leer">📄 Leere Vorlage</button>
         </div>
       </div>
@@ -1035,6 +1063,7 @@ Beispiele:
             <span style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Vorschau</span>
           </div>
           <iframe id="ide-preview" sandbox="allow-scripts" title="Vorschau"></iframe>
+          <div id="ide-py-output" style="display:none"></div>
           <div id="ide-console-bar">
             <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Meldungen</span>
             <div style="display:flex;gap:6px;align-items:center">
@@ -1304,12 +1333,14 @@ Beispiele:
         <button id="btn-morph-src-refresh" class="export-btn" style="font-size:11px" title="Liste aktualisieren">↻</button>
         <span class="dir-hint" style="margin:0">Quellen für „Parameter generieren", „Ideen wischen" &amp; 💬 Alternativen</span>
       </div>
-      <div class="dir-hint">Zeile = Parameter, Chips = Ausprägungen. Klick auf einen Chip = für die Lösung wählen · Doppelklick = bearbeiten · ✨ ausformulieren · 💬 Alternativen. Links die kleine <strong>Note</strong> anklicken = Schulnote 1–6 vergeben (1 = beste); „🎯 Beste Noten wählen" übernimmt je Zeile die beste.</div>
+      <div class="dir-hint">Zeile = Parameter, Chips = Ausprägungen. <strong>Haken setzen</strong> = Ausprägung für die Lösung wählen · ✏️ bearbeiten · ✨ ausformulieren · 💬 Alternativen. Links die kleine <strong>Note</strong> anklicken = Schulnote 1–6 vergeben (1 = beste); „🎯 Beste Noten wählen" übernimmt je Zeile die beste.</div>
       <div id="morph-solution"></div>
-      <div id="morph-grid"></div>
-      <div id="morph-altpanel" style="display:none"></div>
-      <div id="morph-eval" style="display:none"></div>
-      <div id="morph-solutions" style="display:none"></div>
+      <div id="morph-scroll">
+        <div id="morph-grid"></div>
+        <div id="morph-altpanel" style="display:none"></div>
+        <div id="morph-eval" style="display:none"></div>
+        <div id="morph-solutions" style="display:none"></div>
+      </div>
 
       <!-- Wischtechnik (KI-Konzept-Ideen, Tinder-Stil) -->
       <div id="morph-swipe-overlay" style="display:none">
@@ -1979,26 +2010,26 @@ Beispiele:
 <script src="/js/i18n.js?v=20260604"></script>
 <script src="/js/canvas.js?v=20260603"></script>
 <script src="/js/canvas_editor.js?v=20260603"></script>
-<script src="/js/agents.js?v=20260607rag"></script>
+<script src="/js/agents.js?v=20260615plan"></script>
 <script src="/js/jury.js?v=20260613"></script>
-<script src="/js/chat.js?v=20260613"></script>
+<script src="/js/chat.js?v=20260615plan"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260613"></script>
-<script src="/js/doc_generator.js?v=20260606j"></script>
+<script src="/js/doc_generator.js?v=20260615plan"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260613"></script>
+<script src="/js/profile.js?v=20260615pyexec"></script>
 <script src="/js/projects.js?v=20260603"></script>
-<script src="/js/planner.js?v=20260606j"></script>
+<script src="/js/planner.js?v=20260615plan2"></script>
 <script src="/js/matrix_research.js?v=20260603"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260603"></script>
 <script src="/js/json_editor.js?v=20260603"></script>
 <script src="/js/logger.js?v=20260603"></script>
-<script src="/js/ide.js?v=20260614"></script>
+<script src="/js/ide.js?v=20260615pyexec"></script>
 <script src="/js/onboarding.js?v=20260607tabs"></script>
-<script src="/js/medizin.js?v=20260612"></script>
-<script src="/js/mathe.js?v=20260613"></script>
+<script src="/js/medizin.js?v=20260615plan"></script>
+<script src="/js/mathe.js?v=20260615plan"></script>
 <script src="/js/dir_analysis.js?v=20260613"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/app.js?v=20260607guide"></script>

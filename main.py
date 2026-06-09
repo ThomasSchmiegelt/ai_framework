@@ -36,6 +36,9 @@ if _CONFIG_FILE.exists():
 OLLAMA_BASE: str = _CONFIG.get("ollama_base", "http://localhost:11434")
 ALLOWED_MODELS: list[str] = _CONFIG.get("allowed_models", [])
 DEFAULT_MODEL: str = _CONFIG.get("default_model", "ministral-3:3b")
+# Python-Ausführung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-/
+# Servermodus ggf. abschalten (config.json: "allow_python_exec": false).
+ALLOW_PYTHON_EXEC: bool = bool(_CONFIG.get("allow_python_exec", True))
 
 
 # Platzhalter-Werte aus den Frontend-Selektoren (kein echtes Modell)
@@ -2135,6 +2138,80 @@ def _safe_exec(code: str) -> str:
         return f"Fehler: {exc}"
     sys.stdout = old_stdout
     return buf.getvalue() or "OK (kein Output)"
+
+
+def _run_python_code(code: str, timeout: float = 15.0) -> dict:
+    """Führt Python-Code für den Code-Tab aus und liefert stdout/stderr, etwaige
+    matplotlib-Figuren (als PNG-Data-URIs) und Fehler strukturiert zurück.
+
+    Wie ``_safe_exec`` läuft der Code mit eingeschränkten, kuratierten Modulen
+    (kein Datei-/Netzwerkzugriff vorgesehen) und einem Zeitlimit. Die Ausführung
+    erfolgt in einem Worker-Thread, damit das Zeitlimit greift; bei Überschreitung
+    kehrt der Aufruf zurück (der Thread läuft im Hintergrund aus)."""
+    import contextlib
+    import traceback as _tb
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FTimeout
+
+    result = {"output": "", "error": "", "images": []}
+
+    def _work() -> tuple[str, list[str]]:
+        import math, statistics, random, datetime, json as _json, re as _re
+        import itertools, functools, collections
+        g: dict = {
+            "__name__": "__main__", "math": math, "statistics": statistics,
+            "random": random, "datetime": datetime, "json": _json, "re": _re,
+            "itertools": itertools, "functools": functools, "collections": collections,
+        }
+        # Wissenschafts-Stack optional vorladen (wie in _safe_exec)
+        for _mod, _alias in (("numpy", "np"), ("scipy", None), ("sympy", "sp"), ("pandas", "pd")):
+            try:
+                m = __import__(_mod)
+                g[_mod] = m
+                if _alias:
+                    g[_alias] = m
+            except Exception:
+                pass
+        plt = None
+        try:
+            import matplotlib
+            matplotlib.use("Agg")          # headless – keine GUI nötig
+            import matplotlib.pyplot as plt  # type: ignore
+            g["matplotlib"] = matplotlib
+            g["plt"] = plt
+        except Exception:
+            plt = None
+
+        out_buf = io.StringIO()
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(out_buf):
+            exec(code, g)  # noqa: S102
+
+        imgs: list[str] = []
+        if plt is not None:
+            try:
+                for num in plt.get_fignums():
+                    fig = plt.figure(num)
+                    b = io.BytesIO()
+                    fig.savefig(b, format="png", dpi=110, bbox_inches="tight")
+                    imgs.append("data:image/png;base64," + base64.b64encode(b.getvalue()).decode())
+                plt.close("all")
+            except Exception:
+                pass
+        return out_buf.getvalue(), imgs
+
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = ex.submit(_work)
+        out, imgs = fut.result(timeout=timeout)
+        result["output"] = out
+        result["images"] = imgs
+    except _FTimeout:
+        result["error"] = f"Zeitlimit ({int(timeout)} s) überschritten – Ausführung abgebrochen."
+    except Exception:
+        # Nutzer-Tracebacks ohne internen Rahmen zeigen
+        result["error"] = _tb.format_exc(limit=2)
+    finally:
+        ex.shutdown(wait=False)   # bei Timeout nicht auf den Thread warten
+    return result
 
 
 # ── Hilfsfunktionen ───────────────────────────────────────────────────────────
@@ -4387,6 +4464,9 @@ async def get_profile():
     # Installer-Flag: ob externe KI-Anbieter (API) angeboten werden (read-only,
     # aus config.json). Steuert nur die Sichtbarkeit des Anbieter-Abschnitts.
     p["enable_api"] = bool(_CONFIG.get("enable_api", True))
+    # Installer-Flag: ob Python im Code-Tab serverseitig ausgeführt werden darf
+    # (read-only, aus config.json). Steuert die Sichtbarkeit der Python-Option.
+    p["allow_python_exec"] = ALLOW_PYTHON_EXEC
     return p
 
 
@@ -4616,19 +4696,29 @@ async def plan_ai(pid: str, req: Request):
         except Exception:
             pass
 
-    if use_rag:
-        cid = plan.get("rag_collection_id")
-        if cid:
-            coll = await _db.rag_get_collection(cid)
-            if coll:
-                from tools.rag import query_collections
-                try:
-                    hits = await query_collections([coll], user_message)
-                    if hits:
-                        rag_text = "\n\n".join(h.get("text", "") for h in hits[:6])
-                        context_parts.append(f"Aus Plan-Wissensdatenbank:\n{rag_text[:3000]}")
-                except Exception:
-                    pass
+    # Wissensdatenbanken zur Informationsbeschaffung: die plan-eigene Basis
+    # (bei aktivem 📚-Schalter) UND optional im Planer ausgewählte Basen.
+    rag_ids = list(body.get("rag_collections") or [])
+    if use_rag and plan.get("rag_collection_id"):
+        rag_ids.append(plan["rag_collection_id"])
+    if rag_ids:
+        from tools.rag import query_collections
+        colls, seen = [], set()
+        for cid in rag_ids:
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            c = await _db.rag_get_collection(cid)
+            if c:
+                colls.append(c)
+        if colls:
+            try:
+                hits = await query_collections(colls, user_message)
+                if hits:
+                    rag_text = "\n\n".join(h.get("text", "") for h in hits[:6])
+                    context_parts.append(f"Aus Wissensdatenbank:\n{rag_text[:3000]}")
+            except Exception:
+                pass
 
     user_content = "\n\n".join(context_parts) + f"\n\nFrage: {user_message}"
     messages = [
@@ -4643,6 +4733,10 @@ async def plan_ai(pid: str, req: Request):
                 "think": False,
                 "messages": messages,
                 "stream": True,
+                # Großes Kontextfenster: der komplette Aufgaben-JSON-Block kann das
+                # Ollama-Default (2048) sprengen → sonst fällt die eigentliche Frage
+                # aus dem Kontext und das Modell antwortet mit Bruchstücken/Einwörtern.
+                "options": {"num_ctx": 8192, "temperature": 0.4},
             }):
                 try:
                     token = chunk.get("message", {}).get("content", "")
@@ -4654,6 +4748,108 @@ async def plan_ai(pid: str, req: Request):
                     pass
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/plans/{pid}/check-feasibility")
+async def plan_check_feasibility(pid: str, req: Request):
+    """Prüft den Plan strukturiert auf Durchführbarkeit: erkennt deterministisch
+    Zyklen, lose Enden und mehrfache Wurzeln und lässt das LLM fehlende Aufgaben,
+    Lücken, Risiken und Empfehlungen ergänzen. Liefert strukturiertes JSON."""
+    body = await req.json()
+    fp = PLANS_DIR / f"{pid}.json"
+    plan = json.loads(fp.read_text(encoding="utf-8")) if fp.exists() else {}
+    tasks = plan.get("tasks") or body.get("tasks", [])
+    if not tasks:
+        raise HTTPException(400, "Kein Plan mit Aufgaben vorhanden")
+    description = (body.get("description") or plan.get("description") or "").strip()
+    system_prompt = (body.get("system_prompt") or plan.get("system_prompt") or "").strip()
+    model = _pick_model(body.get("model"))
+
+    # ── Deterministische Strukturprüfung ──────────────────────────────────────
+    by_id = {str(t.get("id")): t for t in tasks if t.get("id")}
+    ids = list(by_id.keys())
+    idset = set(ids)
+    preds = {i: [p for p in (by_id[i].get("predecessors") or []) if p in idset] for i in ids}
+    has_succ = set()
+    for i in ids:
+        for p in preds[i]:
+            has_succ.add(p)
+    no_pred = [i for i in ids if not preds[i] and not by_id[i].get("is_start")]
+    no_succ = [i for i in ids if i not in has_succ and not by_id[i].get("is_end")]
+    # Zyklen via Kahn
+    indeg = {i: len(preds[i]) for i in ids}
+    succ = {i: [] for i in ids}
+    for i in ids:
+        for p in preds[i]:
+            succ[p].append(i)
+    queue = [i for i in ids if indeg[i] == 0]
+    seen_n = 0
+    while queue:
+        n = queue.pop()
+        seen_n += 1
+        for m in succ[n]:
+            indeg[m] -= 1
+            if indeg[m] == 0:
+                queue.append(m)
+    cycle = seen_n < len(ids)
+
+    struct_hints = []
+    if cycle:
+        struct_hints.append("Mindestens ein Zyklus in den Abhängigkeiten – CPM nicht berechenbar.")
+    if len(no_pred) > 1:
+        struct_hints.append(f"Mehrere Aufgaben ohne Vorgänger (mögliche fehlende Verknüpfung): {', '.join(no_pred[:8])}.")
+    if no_succ:
+        struct_hints.append(f"Lose Enden ohne Nachfolger: {', '.join(no_succ[:8])}.")
+
+    # ── LLM-Bewertung ─────────────────────────────────────────────────────────
+    tasks_summary = json.dumps(
+        [{"id": t.get("id"), "name": t.get("name"), "duration": t.get("duration"),
+          "predecessors": t.get("predecessors")} for t in tasks],
+        ensure_ascii=False)
+    sys = (system_prompt + "\n\n" if system_prompt else "") + (
+        "Du bist ein erfahrener Projektmanager und prüfst Projektpläne kritisch auf "
+        "Durchführbarkeit und Vollständigkeit. Antworte ausschließlich mit gültigem JSON."
+    )
+    user = (
+        (f"Projektbeschreibung & Ziel:\n{description}\n\n" if description else "") +
+        f"Aktuelle Aufgaben:\n{tasks_summary}\n\n" +
+        (("Automatisch erkannte Strukturprobleme:\n- " + "\n- ".join(struct_hints) + "\n\n") if struct_hints else "") +
+        "Prüfe den Plan auf Durchführbarkeit und welche Aufgaben FEHLEN. Antworte NUR mit JSON:\n"
+        '{"durchfuehrbar": true, "bewertung": "kurzes Gesamturteil", '
+        '"fehlende_aufgaben": [{"id":"N1","name":"…","duration":2,"predecessors":["T3"]}], '
+        '"luecken": ["…"], "risiken": ["…"], "empfehlungen": ["…"]}\n'
+        "fehlende_aufgaben: konkrete Vorschläge mit nicht kollidierender id, name, duration, predecessors "
+        "(verweise nur auf existierende oder neue ids)."
+    )
+
+    async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "format": "json",
+            "messages": [{"role": "system", "content": sys},
+                         {"role": "user", "content": user}],
+            "stream": False, "options": {"num_ctx": 8192},
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    data = _parse_llm_json(raw) or {}
+    if not isinstance(data, dict):
+        data = {}
+    # Kleine Modelle liefern oft Umlaut-Schlüssel statt der ASCII-Variante aus dem
+    # Schema-Beispiel → auf die erwarteten Keys normalisieren.
+    for k_uml, k_ascii in (("durchführbar", "durchfuehrbar"), ("lücken", "luecken")):
+        if k_uml in data and not data.get(k_ascii):
+            data[k_ascii] = data.pop(k_uml)
+    data.setdefault("durchfuehrbar", not cycle)
+    data.setdefault("luecken", [])
+    data.setdefault("fehlende_aufgaben", [])
+    # Deterministische Befunde ergänzen (verlässlich, unabhängig vom Modell)
+    if struct_hints:
+        data["struktur"] = struct_hints
+    data["cycle"] = cycle
+    data["no_predecessor"] = no_pred
+    data["loose_ends"] = no_succ
+    return data
 
 
 @app.post("/api/plans/evaluate")
@@ -5480,7 +5676,26 @@ async def generate_plan(req: Request):
     catalog = _normalize_catalog(body.get("resource_catalog"))
     res_mode = str(body.get("resource_mode", "free")).lower().strip()
 
+    # Optionale Wissensdatenbanken zur Informationsbeschaffung (Grounding)
+    rag_context = ""
+    rag_ids = list(body.get("rag_collections") or [])
+    if rag_ids:
+        from tools.rag import query_collections
+        colls = []
+        for cid in rag_ids:
+            c = await _db.rag_get_collection(cid) if cid else None
+            if c:
+                colls.append(c)
+        if colls:
+            try:
+                hits = await query_collections(colls, description)
+                if hits:
+                    rag_context = "\n\n".join(h.get("text", "") for h in hits[:8])[:4000]
+            except Exception:
+                rag_context = ""
+
     user = (
+        (f"Verfügbares Hintergrundwissen (als Grundlage nutzen, nicht erfinden):\n{rag_context}\n\n" if rag_context else "") +
         f"Projektbeschreibung und Ziel:\n{description}\n\n"
         f"Erstelle einen vollständigen Projektplan mit {max_tasks} Aufgaben in sinnvoller Reihenfolge. "
         "Vergib fortlaufende IDs T1, T2, …. Jede Aufgabe hat: id, name, duration (Tage), "
@@ -6050,6 +6265,26 @@ async def delete_code_program(prog_id: str):
         raise HTTPException(404, "Programm nicht gefunden")
     fp.unlink()
     return {"ok": True}
+
+
+@app.post("/api/code/run-python")
+async def run_python_code(req: Request):
+    """Führt Python-Code aus dem Code-Tab serverseitig aus (stdout/stderr,
+    matplotlib-Plots, Zeitlimit). Im Mehrbenutzer-/Servermodus über
+    config.json `allow_python_exec: false` abschaltbar."""
+    if not ALLOW_PYTHON_EXEC:
+        raise HTTPException(403, "Python-Ausführung ist in dieser Installation deaktiviert.")
+    body = await req.json()
+    code = str(body.get("code") or "")
+    if not code.strip():
+        return {"output": "", "error": "", "images": []}
+    try:
+        t = float(body.get("timeout") or 15.0)
+    except Exception:
+        t = 15.0
+    t = max(1.0, min(t, 60.0))
+    # Ausführung (blockierend mit Zeitlimit) im Threadpool, damit der Event-Loop frei bleibt
+    return await asyncio.to_thread(_run_python_code, code, t)
 
 
 # ── Jury-Dokumente (Werkbank im Jury-Tab: anzeigen, bearbeiten, speichern) ──────

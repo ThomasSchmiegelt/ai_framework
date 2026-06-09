@@ -76,6 +76,11 @@ const Profile = (() => {
     // Installer-Flag: API-Anbieter-Abschnitt nur zeigen, wenn aktiviert (Default: an)
     const provSec = document.getElementById('provider-section');
     if (provSec) provSec.style.display = (_data.enable_api === false) ? 'none' : '';
+    // Installer-Flag: Python-Ausführung im Code-Tab. Option ausblenden, wenn aus.
+    window.AllowPythonExec = (_data.allow_python_exec !== false);
+    const pyOpt = document.querySelector('#ide-lang option[value="py"]');
+    if (pyOpt) pyOpt.style.display = window.AllowPythonExec ? '' : 'none';
+    if (!window.AllowPythonExec && typeof CodeIDE !== 'undefined' && CodeIDE.disablePython) CodeIDE.disablePython();
     if (typeof I18n !== 'undefined' && _data.lang) I18n.setLang(_data.lang);
     return _data;
   }
