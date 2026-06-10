@@ -1,0 +1,11 @@
+Typ;Name;Satz;Land;Kapazität;Skills
+Mensch;Projektleiter (Geschäftsführung);95;DE;60;Projektsteuerung, Stakeholder, Budget, Raumfahrt
+Mensch;Systemingenieur (Onboard-Verarbeitung);105;DE;120;Onboard-Datenverarbeitung, Anforderungen, Schnittstellen
+Mensch;Embedded-Entwickler (Edge/Space);95;DE;200;C/C++, FPGA/SoC, strahlungstolerant, Echtzeit
+Mensch;KI- / ML-Ingenieur;100;PL;160;Modellkompression, Edge-Inferenz, Python, Deep Learning
+Mensch;Bildverarbeitungs-Ingenieur;95;PL;160;Wolkenerkennung, Segmentierung, Datenreduktion
+Mensch;Daten- / MLOps-Ingenieur;85;PL;140;Trainingsdaten, Pipelines, MLOps, Validierung
+Mensch;Qualitäts- / PA-Ingenieur (extern);110;DE;40;Product Assurance, ECSS, Verifikation
+Mensch;Test- / Verifikationsingenieur;85;DE;120;HIL-Test, Datensätze, On-Board-Validierung
+Software;KI-Inferenz-Stack (Open Source);0;-;0;TensorFlow Lite, ONNX, Edge, MIT/Apache
+Hardware;KI-Edge-Rechner (strahlungstolerant, Eval-Board);9000;DE;0;Edge-Inferenz, SoC, Eval, Labor

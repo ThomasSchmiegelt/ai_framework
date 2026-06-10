@@ -1,0 +1,23 @@
+Typ;Name;Satz;Land;Kapazität;Skills
+Mensch;Projektleiter / Missionsmanager;100;DE;120;Projektsteuerung, Reviews, Budget, ECSS
+Mensch;Systemingenieur / Raumfahrt-Architekt;115;DE;120;Systemarchitektur, Anforderungen, Budgets, Schnittstellen
+Mensch;Strukturkonstrukteur (CAD);90;DE;260;CAD, Primärstruktur, Mechanik, Toleranzen
+Mensch;Berechnungsingenieur FEM (Struktur/Vibration);95;DE;140;FEM, Modalanalyse, Vibration, Startlasten
+Mensch;Thermalingenieur;95;DE;120;Thermalbilanz, TVAC, MLI, Thermalanalyse
+Mensch;Elektronikentwickler (Power/PCDU);95;DE;200;PCDU, Leistungselektronik, Solar, Batterie, EMV
+Mensch;Avionik- / OBC-Ingenieur;100;DE;160;OBC, SpaceWire, CAN, Avionik-Architektur
+Mensch;AOCS- / ADCS-Ingenieur;105;DE;140;Lageregelung, Reaktionsräder, Sternsensor, Regelung
+Mensch;Antriebsingenieur (Propulsion);105;FR;90;Kaltgas, Triebwerk, Tank, Schubauslegung
+Mensch;Optik- / Nutzlast-Ingenieur;110;DE;120;Optik, Detektor, MTF, Multispektral
+Mensch;Flight-Software-Entwickler;100;PL;220;C/C++, Flugsoftware, FDIR, Echtzeit, cFS/FPrime
+Mensch;KI- / Bildverarbeitungs-Ingenieur;100;PL;160;Onboard-KI, Wolkenerkennung, Deep Learning, Python
+Mensch;RF- / Kommunikationsingenieur;100;DE;140;S-Band, X-Band, Link-Budget, Antennen
+Mensch;EEE- / Beschaffungsingenieur;85;DE;120;Space-grade EEE, Derating, Strahlung, Lieferkette
+Mensch;Test- / Qualifikationsingenieur;90;DE;160;Vibration, TVAC, EMV, Qualifikation, ECSS
+Mensch;Reinraum- / Integrationstechniker;75;DE;220;Integration, Montage, Verkabelung, Reinraum
+Mensch;Strahlungs- / Zuverlässigkeitsingenieur;105;DE;80;TID, SEE, Reliability, Strahlungstest
+Mensch;Bodenstations- / Betriebsingenieur;90;DE;140;Bodensegment, Mission Control, LEOP, Betrieb
+Mensch;Startkampagnen-Partner (extern);130;FR;40;Launch-Service, P-POD, Startfreigabe, Koordination
+Mensch;Frequenz- / Lizenzexperte (extern);120;DE;30;ITU, Funklizenz, Frequenzkoordination
+Hardware;Vibrations- & TVAC-Prüfstand (extern);60000;DE;0;Vibration, Thermal-Vakuum, Qualifikation
+Software;Flugsoftware-Framework (Open Source, cFS/FPrime);0;-;0;cFS, F Prime, Open Source, Apache-Lizenz

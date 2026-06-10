@@ -1,0 +1,27 @@
+﻿Typ;Name;Satz
+Mensch;Projektleiter;95
+Mensch;KI-Architekt;110
+Mensch;Data Engineer;85
+Mensch;ML Engineer;95
+Mensch;Data Scientist;100
+Mensch;DevOps Engineer;90
+Mensch;IT-Security-Experte;105
+Mensch;Datenschutzbeauftragter;100
+Mensch;Fachbereichsexperte;75
+Mensch;Change Manager;85
+Mensch;Trainer;70
+Mensch;Systemadministrator;75
+Mensch;Netzwerk-Ingenieur;85
+Mensch;Qualitätsmanager;80
+Mensch;Business Analyst;80
+Hardware;GPU-Server (2x H100);45000
+Hardware;KI-Workstation;6000
+Hardware;Netzwerk-Upgrade (10GbE);18000
+Hardware;Storage-Array (NAS);22000
+Hardware;Edge-KI-Gerät;3500
+Hardware;USV & Server-Rack;8000
+Software;Vektordatenbank (Lizenz);5000
+Software;MLOps-Plattform;12000
+Software;Monitoring-Suite;4000
+Software;Open-Source-LLM-Stack;0
+Software;Sicherheits-/DLP-Software;9000
