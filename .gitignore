@@ -50,6 +50,9 @@ certs/
 # data/agents/  bleibt eingecheckt; nur der Seeding-Marker ist Laufzeit-State:
 data/agents/.seeded
 
+# Beispieldateien: lokal behalten, aber nicht auf GitHub veroeffentlichen
+samples/
+
 # Laufzeit-/Dev-Artefakte
 /server.log
 /_test_*.py
