@@ -411,7 +411,13 @@ Förderprogramm**, einen Projektbericht oder ein Pflichtenheft) mit Hilfe eines
 4. **📄 Dokument erzeugen** — das Ergebnis erscheint **rechts** formatiert (inkl. Formeln
    via KaTeX/Links). Oder **🖥️ Präsentation erzeugen** — derselbe Inhalt landet als
    Präsentation im **Canvas** (Querformat).
-5. Export als **📝 DOCX**, **📑 PDF**, **𝐓 LaTeX** (reine `.tex`-Datei), als
+5. **✏️ Bearbeiten** — das erzeugte Dokument **direkt im Text** ändern (WYSIWYG): Klick auf
+   **✏️ Bearbeiten** macht die rechte Ansicht editierbar (farbiger Rahmen). Tippe Korrekturen
+   direkt hinein, dann **✓ Übernehmen** (oder **✕ Abbrechen**). Die Änderungen gelten für
+   **alle** weiteren Exporte (DOCX/PDF/LaTeX/RAG/Jury). *Hinweis:* Während der Bearbeitung
+   erscheinen **Mermaid-Diagramme als Quelltext** (damit sie erhalten bleiben) und werden
+   nach „Übernehmen" wieder als Diagramm gezeichnet; Formeln bleiben erhalten.
+6. Export als **📝 DOCX**, **📑 PDF**, **𝐓 LaTeX** (reine `.tex`-Datei), als
    **🖥️ Präsentation** (Canvas) oder zurück **📚 In Wissensdatenbank**.
 
 > **Layout:** Der Dokumenten-Tab ist zweispaltig — links die Steuerung, rechts das
@@ -489,6 +495,13 @@ antwortet auf Basis der aktuellen Auswertung.
 **📚 In RAG übernehmen:** Die fertige Auswertung als Dokument in eine **Wissensdatenbank**
 übernehmen (du wählst die Sammlung). So lässt sich später im Chat oder in weiteren Anfragen
 darauf zugreifen.
+
+> **Große Pakete & Kontextfenster:** Die Anfrage wird **paketweise** ausgewertet — die
+> Gesamtdatei muss also nie komplett ins Kontextfenster passen, egal wie viele Pakete sie
+> hat. Wie viel Text **eines einzelnen Pakets** (plus Kapazitätsliste) berücksichtigt wird,
+> richtet sich automatisch nach dem **Kontextfenster** (Profil): ein größeres Fenster lässt
+> längere Paketbeschreibungen ungekürzt zu. Hat ein **einzelnes** Paket mehr Text als das
+> Fenster fasst, wird es gekürzt — dann das Kontextfenster erhöhen.
 
 **👥 Kapazitätslisten (mehrere):** Rollen/Partner mit **Land**, **freier Kapazität (h)**,
 **Kostensatz** und **Skills**. Du kannst **mehrere benannte Listen** anlegen (Button
@@ -1176,6 +1189,19 @@ Bewertungs-Fenster (Jury wählen → ▶ Bewerten):
 
 > Tipp: Binde an die Jury-Mitglieder die einschlägigen Gesetz-Agenten (mit hinterlegtem
 > Normtext), dann werden konkrete Fundstellen (§/Artikel) in den Befunden genannt.
+
+**Große Dokumente (mehr als das Kontextfenster):** Wichtig sind **zwei** verschiedene Dinge:
+- **Die Fachgrundlage des Agenten** (z. B. ein Gesetzestext mit 100 000 Wörtern) gehört
+  **nicht** in jede Anfrage, sondern in eine **Wissensdatenbank**. Lege den Agenten als
+  **📚 Dokument-Experte** an (Agenten-Tab) — lange Texte landen automatisch in einer
+  RAG-Basis, fest an den Agenten gebunden. Die Jury zieht daraus pro Votum nur die
+  **relevanten Passagen**. So spielt die Textlänge keine Rolle.
+- **Das zu bewertende Dokument** kann beliebig groß sein: passt es nicht in einen Durchgang,
+  bewertet die Jury es **automatisch abschnittsweise** (Map-Reduce) und fasst die
+  Abschnitts-Befunde je Mitglied zu einem Gesamtvotum zusammen (Fortschritt „prüft Abschnitt
+  k/N…"). Die Abschnittsgröße richtet sich nach dem **Kontextfenster** (Profil) — ein
+  größeres Fenster = weniger Abschnitte und schnellere Läufe, aber mehr VRAM. Hinweis:
+  sehr lange Dokumente bedeuten **viele Modellaufrufe** (im Token-Zähler sichtbar).
 
 **⚖️ Jury-Tab (Dokument-Werkbank):** Zusätzlich zum Bewertungs-Fenster gibt es einen
 eigenen Tab **⚖️ Jury** *(im Profil einblendbar → Abschnitt 18)*. Dort kannst du

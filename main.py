@@ -3333,6 +3333,18 @@ def _llm_tok(j: dict) -> tuple:
     return int((j or {}).get("prompt_eval_count") or 0), int((j or {}).get("eval_count") or 0)
 
 
+def _rfq_task_max() -> int:
+    """Max. Zeichen je Arbeitspaket-Text — skaliert mit dem Kontextfenster (statt fest 4000).
+    So wird ein langes Paket nicht künstlich beschnitten, wenn das Fenster groß genug ist."""
+    return max(4000, int(_profile_num_ctx() * 3.5 * 0.4))
+
+
+def _rfq_cap_max() -> int:
+    """Max. Zeichen der Kapazitätsliste je Auswertung, damit eine sehr große (vereinigte)
+    Ressourcenliste nicht jeden einzelnen Aufruf dominiert/das Fenster sprengt."""
+    return max(2000, int(_profile_num_ctx() * 3.5 * 0.25))
+
+
 async def _rfq_eval_custom(client, model: str, task: str, columns: list):
     """Wertet je eigener Spalte EIN Arbeitspaket aus → ({key: {value, note}}, tok_in, tok_out).
     Pro Spalte ein LLM-Aufruf (Agent-Persona oder freier Prompt als Vorgabe)."""
@@ -3344,14 +3356,15 @@ async def _rfq_eval_custom(client, model: str, task: str, columns: list):
             continue
         instr = (col.get("prompt") or "").strip()
         persona = _rfq_agent_prompt(col.get("agent_id") or "")
+        _tmax = _rfq_task_max()
         if persona:
             sys = persona + '\n\nAntworte NUR mit JSON: {"value":"kurze Antwort","note":"1-Satz-Begründung"}.'
-            usr = (f"Arbeitspaket:\n{task[:3000]}"
+            usr = (f"Arbeitspaket:\n{task[:_tmax]}"
                    + (f"\n\nZusätzliche Vorgabe: {instr}" if instr else ""))
         else:
             sys = _RFQ_CUSTOM_SYSTEM
             usr = (f"Vorgabe/Frage für die Spalte „{col.get('name', '')}\":\n"
-                   f"{instr or col.get('name', '')}\n\nArbeitspaket:\n{task[:3000]}")
+                   f"{instr or col.get('name', '')}\n\nArbeitspaket:\n{task[:_tmax]}")
         try:
             async with _model_session(model):
                 resp = await _llm.chat(client, {
@@ -3396,10 +3409,10 @@ async def _rfq_eval_one(client, model: str, task: str, capacity_ctx: str,
             pass
     user = ""
     if capacity_ctx:
-        user += f"Kapazitätsliste (verfügbare Rollen/Partner):\n{capacity_ctx}\n\n"
+        user += f"Kapazitätsliste (verfügbare Rollen/Partner):\n{capacity_ctx[:_rfq_cap_max()]}\n\n"
     if grounding:
         user += "\n\n".join(grounding) + "\n\n"
-    user += f"Arbeitspaket:\n{task[:4000]}"
+    user += f"Arbeitspaket:\n{task[:_rfq_task_max()]}"
     # _model_session serialisiert lokale Generierungen (VRAM-Lock) und ist für
     # Remote-Modelle ein No-op → mehrere Remote-Aufrufe laufen echt parallel.
     async with _model_session(model):
@@ -3449,7 +3462,7 @@ async def rfq_ask(req: Request):
     question = str(body.get("question", "")).strip()
     if not question:
         raise HTTPException(status_code=400, detail="Keine Frage angegeben")
-    context = str(body.get("context", "")).strip()[:9000]
+    context = str(body.get("context", "")).strip()[:max(9000, int(_profile_num_ctx() * 3.5 * 0.6))]
     model = _pick_model(body.get("model"), _model_for("general"))
     sys = (
         "Du bist Angebots- und Vergabeassistent. Beantworte die Frage des Nutzers zur "
@@ -3641,7 +3654,7 @@ _RFQ_ESTIMATE_SYSTEM = (
 
 async def _rfq_estimate_one(client, model: str, task: str, role: str) -> dict:
     """Schätzt Aufwand (h) und Dauer (Tage) für ein Ticket. Fallback 8 h / 1 Tag."""
-    usr = f"Rolle: {role or 'unbestimmt'}\n\nArbeitspaket:\n{task[:3000]}"
+    usr = f"Rolle: {role or 'unbestimmt'}\n\nArbeitspaket:\n{task[:_rfq_task_max()]}"
     try:
         async with _model_session(model):
             resp = await _llm.chat(client, {
@@ -4645,6 +4658,40 @@ _JURY_SYNTH_SYSTEM = (
     '"empfehlungen":["…"]}'
 )
 
+# Map-Schritt fuer sehr lange Dokumente: pro Abschnitt eine kurze Vorab-Analyse.
+_JURY_CHUNK_SYSTEM = (
+    "Du erhältst EINEN Abschnitt eines längeren Dokuments. Notiere aus deiner "
+    "Fachperspektive die wichtigsten Befunde, Risiken/Verstöße (mit Fundstelle, falls "
+    "Fachgrundlagen eingeblendet sind) und auffälligen Punkte NUR für diesen Abschnitt. "
+    "Maximal 100 Wörter, Stichpunkte. Kein JSON, keine Gesamtwertung."
+)
+
+
+def _chunk_for_ctx(text: str, num_ctx: int, max_chunks: int = 40) -> list:
+    """Teilt Text in Abschnitte, die mit Prompt + Ausgabe ins Kontextfenster passen.
+    ~3,5 Zeichen/Token (DE), ~50 % des Fensters für den Textabschnitt. Begrenzt die
+    Abschnittszahl (notfalls größere Abschnitte), um die Kosten zu deckeln."""
+    per = max(4000, int(num_ctx * 3.5 * 0.5))
+    need = (len(text) + per - 1) // per
+    if need > max_chunks:
+        per = (len(text) + max_chunks - 1) // max_chunks
+    chunks, i, n = [], 0, len(text)
+    while i < n:
+        end = min(i + per, n)
+        if end < n:  # möglichst an Absatz-/Satzgrenze trennen
+            br = text.rfind("\n", i + per // 2, end)
+            if br <= i:
+                br = text.rfind(". ", i + per // 2, end)
+                if br > i:
+                    br += 1
+            if br > i:
+                end = br
+        seg = text[i:end].strip()
+        if seg:
+            chunks.append(seg)
+        i = end
+    return chunks
+
 
 @app.post("/api/jury/evaluate")
 async def jury_evaluate(req: Request):
@@ -4672,6 +4719,7 @@ async def jury_evaluate(req: Request):
 
     async def _stream():
         verdicts = []
+        tok_total = {"in": 0, "out": 0}
         for aid in member_ids:
             agent = _load_agent_dict(aid)
             if not agent:
@@ -4695,31 +4743,67 @@ async def jury_evaluate(req: Request):
                     rag_ctx = ""
 
             sys_prompt = (agent.get("system_prompt") or "").strip()
-            member_sys = sys_prompt + "\n\n" + _JURY_MEMBER_SYSTEM if sys_prompt else _JURY_MEMBER_SYSTEM
-            user_parts = []
+            member_sys = (sys_prompt + "\n\n" + _JURY_MEMBER_SYSTEM) if sys_prompt else _JURY_MEMBER_SYSTEM
+            base_parts = []
             if context:
-                user_parts.append(f"Kontext:\n{context}")
+                base_parts.append(f"Kontext:\n{context}")
             if criteria:
-                user_parts.append(f"Bewertungskriterien:\n{criteria}")
+                base_parts.append(f"Bewertungskriterien:\n{criteria}")
             if rag_ctx:
-                user_parts.append(f"Eingeblendete Fachgrundlagen:\n{rag_ctx[:6000]}")
-            user_parts.append(f"Zu bewertender Text:\n{text[:8000]}")
-            user_content = "\n\n".join(user_parts)
+                base_parts.append(f"Eingeblendete Fachgrundlagen:\n{rag_ctx[:6000]}")
 
             mdl = _pick_model(agent.get("model"), _model_for("science"))
+            num_ctx = _profile_num_ctx()
+            # Passt das Dokument in einen Direktdurchlauf? Sonst Map-Reduce über Abschnitte.
+            single_max = max(4000, int(num_ctx * 3.5 * 0.5))
+
+            async def _member_call(client, sysmsg, usermsg, as_json):
+                payload = {"model": mdl, "think": False, "stream": False,
+                           "messages": [{"role": "system", "content": sysmsg},
+                                        {"role": "user", "content": usermsg}],
+                           "options": {"num_ctx": num_ctx}, "keep_alive": KEEP_ALIVE}
+                if as_json:
+                    payload["format"] = "json"
+                resp = await _llm.chat(client, payload)
+                resp.raise_for_status()
+                j = resp.json()
+                ti, to = _llm_tok(j)
+                return j.get("message", {}).get("content", ""), ti, to
+
             data = None
+            notes = None   # Abschnitts-Befunde (nur im Map-Reduce-Pfad gesetzt)
             try:
-                async with _model_session(mdl), httpx.AsyncClient(timeout=180) as client:
-                    resp = await _llm.chat(client, {
-                        "model": mdl, "think": False, "stream": False,
-                        "format": "json",
-                        "messages": [
-                            {"role": "system", "content": member_sys},
-                            {"role": "user", "content": user_content},
-                        ],
-                    })
-                    resp.raise_for_status()
-                    data = _parse_llm_json(resp.json().get("message", {}).get("content", ""))
+                async with _model_session(mdl), httpx.AsyncClient(timeout=300) as client:
+                    if len(text) <= single_max:
+                        up = "\n\n".join(base_parts + [f"Zu bewertender Text:\n{text}"])
+                        content, ti, to = await _member_call(client, member_sys, up, True)
+                        tok_total["in"] += ti; tok_total["out"] += to
+                        data = _parse_llm_json(content)
+                    else:
+                        # Map: jeden Abschnitt vorab analysieren
+                        chunks = _chunk_for_ctx(text, num_ctx)
+                        chunk_sys = (sys_prompt + "\n\n" + _JURY_CHUNK_SYSTEM) if sys_prompt else _JURY_CHUNK_SYSTEM
+                        notes = []
+                        for ci, ch in enumerate(chunks):
+                            yield _sse({"type": "member", "status": "progress", "agent": aname,
+                                        "icon": aicon, "chunk": ci + 1, "chunks": len(chunks)})
+                            up = "\n\n".join(base_parts + [f"Dokument-Abschnitt {ci+1}/{len(chunks)}:\n{ch}"])
+                            try:
+                                content, ti, to = await _member_call(client, chunk_sys, up, False)
+                                tok_total["in"] += ti; tok_total["out"] += to
+                                if content.strip():
+                                    notes.append(f"[Abschnitt {ci+1}] {content.strip()}")
+                            except Exception:
+                                pass
+                        # Reduce: Gesamtvotum aus den Abschnitts-Befunden
+                        joined = "\n\n".join(notes)[:int(num_ctx * 3.0)]
+                        up = "\n\n".join(base_parts + [
+                            f"Das Dokument ist sehr lang und wurde abschnittsweise vorab-analysiert "
+                            f"({len(chunks)} Abschnitte). Abschnitts-Befunde:\n{joined}\n\n"
+                            "Erstelle daraus dein abschließendes Gesamtvotum zum gesamten Dokument."])
+                        content, ti, to = await _member_call(client, member_sys, up, True)
+                        tok_total["in"] += ti; tok_total["out"] += to
+                        data = _parse_llm_json(content)
             except Exception as e:
                 yield _sse({"type": "member", "status": "error", "agent": aname,
                             "icon": aicon, "message": str(e)})
@@ -4732,6 +4816,12 @@ async def jury_evaluate(req: Request):
                 "risiken": [str(r) for r in ((data or {}).get("risiken") or [])],
                 "empfehlung": ((data or {}).get("empfehlung") or "").strip(),
             }
+            # Fallback: lieferte die (Reduce-)Wertung kein verwertbares JSON, aber es gibt
+            # Abschnitts-Befunde, dann diese als Befund/Risiken zeigen (statt leerer Karte).
+            if not verdict["befund"] and not verdict["risiken"] and notes:
+                verdict["befund"] = ("Automatische Gesamtwertung war unsicher — "
+                                     "abschnittsweise Befunde des großen Dokuments:")
+                verdict["risiken"] = notes[:12]
             verdicts.append(verdict)
             yield _sse({"type": "member", "status": "done", **verdict})
 
@@ -4750,13 +4840,17 @@ async def jury_evaluate(req: Request):
             async with _model_session(gmodel), httpx.AsyncClient(timeout=180) as client:
                 resp = await _llm.chat(client, {
                     "model": gmodel, "think": False, "stream": False, "format": "json",
+                    "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
                     "messages": [
                         {"role": "system", "content": _JURY_SYNTH_SYSTEM},
                         {"role": "user", "content": f"Einzelvoten der Jury:\n\n{votes_txt}"},
                     ],
                 })
                 resp.raise_for_status()
-                synth = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+                _sj = resp.json()
+                _sti, _sto = _llm_tok(_sj)
+                tok_total["in"] += _sti; tok_total["out"] += _sto
+                synth = _parse_llm_json(_sj.get("message", {}).get("content", "")) or {}
         except Exception:
             synth = {}
         # Fallback-Gesamtscore: Mittelwert der Einzel-Scores
@@ -4768,7 +4862,7 @@ async def jury_evaluate(req: Request):
                     "konsens": (synth.get("konsens") or "").strip(),
                     "hauptkritik": [str(x) for x in (synth.get("hauptkritik") or [])],
                     "empfehlungen": [str(x) for x in (synth.get("empfehlungen") or [])]})
-        yield _sse({"type": "done"})
+        yield _sse({"type": "done", "tokens": tok_total})
 
     return StreamingResponse(_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

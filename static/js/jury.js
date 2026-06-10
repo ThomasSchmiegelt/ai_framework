@@ -179,9 +179,14 @@ const Jury = (() => {
         let f; try { f = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
         if (f.type === 'member' && f.status === 'start') {
           pending[f.agent] = card(`<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong> <span class="planner-muted">bewertet…</span></div>`);
+        } else if (f.type === 'member' && f.status === 'progress') {
+          const el = pending[f.agent];
+          if (el) el.innerHTML = `<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong> <span class="planner-muted">prüft Abschnitt ${f.chunk}/${f.chunks} (großes Dokument)…</span></div>`;
         } else if (f.type === 'member' && f.status === 'done') {
           (pending[f.agent] || card('')).innerHTML = _memberHtml(f);
           out.members.push(f);
+        } else if (f.type === 'done') {
+          if (f.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(f.tokens);
         } else if (f.type === 'member' && f.status === 'error') {
           const el = pending[f.agent] || card('');
           el.innerHTML = `<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong></div><div style="color:var(--danger,#e66);font-size:12.5px">Fehler: ${_esc(f.message)}</div>`;

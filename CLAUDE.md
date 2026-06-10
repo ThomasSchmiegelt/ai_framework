@@ -77,7 +77,7 @@ Each subsystem's deep documentation is in `docs/ENTWICKLUNG.md` (section numbers
 | LLM abstraction & API providers | `tools/llm.py`, profile modal | §12 |
 | RAG engine | `tools/rag.py`, `rag.js`, `db.py` | §13 |
 | Agents (favorites, slash, adaptive, legal) | `data/agents/`, `agents.js`, `main.py` | §14 |
-| Jury (multi-agent evaluation) | `data/juries/`, `jury.js` | §15 |
+| Jury (multi-agent evaluation) | `data/juries/`, `jury.js`, `/api/jury/evaluate`; große Dokumente per Map-Reduce (`_chunk_for_ctx`, `_JURY_CHUNK_SYSTEM`), alle Calls mit `num_ctx`, Tokens im `done`-Frame | §15 |
 | Anfrage-Auswertung (RFQ, XLS-Stapel) | `rfq.js`, `/api/rfq/*` (eval, to-plan, ask), eigene Bewertungsspalten (Agent/Prompt, `_sanitize_rfq_columns`), `tools/files.read_table` | — |
 | Mehrere Ressourcenlisten | `/api/capacity/lists*` + `/api/capacity/selection`, `data/capacity_lists.json` (Migration aus `capacity.json`); `_load_capacity()` = Vereinigung der aktiven Listen | — |
 | Token-Zähler | `static/js/tokens.js` (`TokenMeter`), Profil `price_per_1k_in/out`+`currency`; `tokens:{in,out}` aus Chat-`done`, RFQ-`done`, `/api/code/assist`, `/api/rfq/ask`; `_llm_tok()` + `tools/llm.py` usage-Mapping | — |

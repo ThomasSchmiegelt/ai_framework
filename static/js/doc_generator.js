@@ -118,10 +118,103 @@ const DocGen = (() => {
   // Aktionsknöpfe (DOCX / Präsentation / Wissensdatenbank) ein- bzw. ausblenden
   function _showActions(show) {
     const disp = show ? '' : 'none';
-    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-latex', 'btn-docgen-present', 'btn-docgen-rag', 'btn-docgen-jury'].forEach(id => {
+    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-latex', 'btn-docgen-present', 'btn-docgen-rag', 'btn-docgen-jury', 'btn-docgen-edit'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = disp;
     });
+  }
+
+  // ── WYSIWYG-Bearbeitung des erzeugten Dokuments ─────────────────────────────
+  let _editing = false;
+
+  // Editier-Rendering: wie die Vorschau, aber Mermaid bleibt als Codeblock (Quelltext
+  // bliebe sonst verloren) und Formeln werden per KaTeX gerendert (Quelltext steckt in
+  // der MathML-Annotation → beim Zurückwandeln rekonstruierbar).
+  function _renderEditable(el, text) {
+    if (typeof marked === 'undefined') { el.textContent = text; return; }
+    // Mathe-Extension registrieren: $…$/$$…$$ → KaTeX (mit TeX-Annotation, rekonstruierbar)
+    // und vor Markdown geschützt. Fehlt sie, bleibt die Formel als $…$-Text (rundet ebenso).
+    if (window._ensureKatexMarked) try { window._ensureKatexMarked(); } catch (_) {}
+    el.innerHTML = marked.parse(text, { gfm: true, breaks: true });
+    el.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+    // Mermaid bewusst NICHT zu SVG rendern → bleibt als Codeblock (Quelltext erhalten)
+    el.querySelectorAll('pre code').forEach(b => {
+      if (typeof hljs !== 'undefined' && !b.classList.contains('language-mermaid')) {
+        try { hljs.highlightElement(b); } catch (_) {}
+      }
+    });
+  }
+
+  // Gerendertes HTML → Markdown (Turndown + GFM-Tabellen + KaTeX-Rückgewinnung).
+  function _htmlToMarkdown(el) {
+    if (typeof TurndownService === 'undefined') {
+      // Fallback ohne Bibliothek: reiner Text (verlustbehaftet)
+      return (el.innerText || el.textContent || '').trim();
+    }
+    const td = new TurndownService({
+      headingStyle: 'atx', codeBlockStyle: 'fenced',
+      bulletListMarker: '-', emDelimiter: '*', hr: '---',
+    });
+    if (window.turndownPluginGfm && window.turndownPluginGfm.gfm) td.use(window.turndownPluginGfm.gfm);
+    // KaTeX-Formeln aus der TeX-Annotation zurückholen (inline $…$ / display $$…$$)
+    td.addRule('katex', {
+      filter: (node) => node.classList && node.classList.contains('katex'),
+      replacement: (content, node) => {
+        const tex = (node.querySelector('annotation[encoding="application/x-tex"]') || {}).textContent || '';
+        if (!tex) return content;
+        return node.closest('.katex-display') ? `\n\n$$${tex}$$\n\n` : `$${tex}$`;
+      },
+    });
+    // Kopier-Buttons (von der Vorschau) nicht mitnehmen
+    td.remove((node) => node.nodeName === 'BUTTON');
+    return td.turndown(el.innerHTML).replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  function _setEditUI(editing) {
+    _editing = editing;
+    const out = document.getElementById('docgen-output');
+    if (out) out.classList.toggle('docgen-editing', editing);
+    // Export-/Aktionsknöpfe während der Bearbeitung ausblenden, Save/Cancel zeigen
+    ['btn-docgen-export', 'btn-docgen-pdf', 'btn-docgen-latex', 'btn-docgen-present',
+     'btn-docgen-rag', 'btn-docgen-jury', 'btn-docgen-edit'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.display = editing ? 'none' : '';
+    });
+    ['btn-docgen-edit-save', 'btn-docgen-edit-cancel'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.display = editing ? '' : 'none';
+    });
+  }
+
+  function _startEdit() {
+    if (!_docText.trim()) { showToast('Kein Dokument zum Bearbeiten'); return; }
+    const out = document.getElementById('docgen-output');
+    if (!out) return;
+    _renderEditable(out, _docText);
+    out.contentEditable = 'true';
+    out.focus();
+    _setEditUI(true);
+    document.getElementById('docgen-status').textContent =
+      '✏️ Bearbeitung — Text direkt ändern, dann „✓ Übernehmen". (Mermaid-Diagramme erscheinen als Quelltext.)';
+  }
+
+  function _saveEdit() {
+    const out = document.getElementById('docgen-output');
+    if (!out) return;
+    _docText = _htmlToMarkdown(out);
+    out.contentEditable = 'false';
+    _setEditUI(false);
+    _renderDoc(out, _docText);   // sauber neu rendern (Mermaid wieder als Diagramm)
+    document.getElementById('docgen-status').textContent = '✓ Änderungen übernommen';
+    if (typeof TurndownService === 'undefined')
+      showToast('Hinweis: Markdown-Konverter nicht geladen — Formatierung evtl. vereinfacht');
+  }
+
+  function _cancelEdit() {
+    const out = document.getElementById('docgen-output');
+    if (!out) return;
+    out.contentEditable = 'false';
+    _setEditUI(false);
+    _renderDoc(out, _docText);   // Originaltext wiederherstellen
+    document.getElementById('docgen-status').textContent = '';
   }
 
   // Platzhalter im rechten Bereich aus-/einblenden
@@ -225,6 +318,7 @@ const DocGen = (() => {
     const out = document.getElementById('docgen-output');
     document.getElementById('btn-docgen-run').disabled = true;
     document.getElementById('btn-docgen-run-present').disabled = true;
+    if (_editing) { out.contentEditable = 'false'; _setEditUI(false); }  // ggf. laufende Bearbeitung beenden
     _showActions(false);
     _hidePlaceholder();
     status.textContent = thenPresent ? '⏳ Inhalt für die Präsentation wird erzeugt…' : '⏳ Dokument wird erzeugt…';
@@ -512,6 +606,9 @@ const DocGen = (() => {
     document.getElementById('btn-docgen-jury')?.addEventListener('click', () => {
       if (typeof Jury !== 'undefined') Jury.evaluate(_docText, { title: 'Dokumentenprüfung' });
     });
+    document.getElementById('btn-docgen-edit')?.addEventListener('click', _startEdit);
+    document.getElementById('btn-docgen-edit-save')?.addEventListener('click', _saveEdit);
+    document.getElementById('btn-docgen-edit-cancel')?.addEventListener('click', _cancelEdit);
     // Beim Öffnen des Tabs Agenten + Wissensdatenbanken auffrischen
     document.querySelector('.tab-btn[data-tab="docgen"]')?.addEventListener('click', refresh);
   }

@@ -15,6 +15,9 @@
 
   <!-- Marked.js für Markdown -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- HTML→Markdown (MIT) für die WYSIWYG-Bearbeitung im Dokumente-Tab -->
+  <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm/dist/turndown-plugin-gfm.min.js"></script>
   <!-- Highlight.js für Code -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/core.min.js"></script>
@@ -44,7 +47,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260610tokens" />
+  <link rel="stylesheet" href="/css/app.css?v=20260610edit" />
 </head>
 <body>
 
@@ -705,6 +708,9 @@
           <button id="btn-docgen-present" class="export-btn" style="display:none">🖥️ Als Präsentation</button>
           <button id="btn-docgen-rag" class="export-btn" style="display:none">📚 In Wissensdatenbank</button>
           <button id="btn-docgen-jury" class="export-btn" style="display:none" title="Das erzeugte Dokument von einer Jury bewerten lassen">⚖️ Von Jury prüfen</button>
+          <button id="btn-docgen-edit" class="export-btn" style="display:none" title="Das erzeugte Dokument direkt im Text bearbeiten (WYSIWYG)">✏️ Bearbeiten</button>
+          <button id="btn-docgen-edit-save" class="export-btn" style="display:none;background:#16a34a;color:#fff" title="Änderungen übernehmen">✓ Übernehmen</button>
+          <button id="btn-docgen-edit-cancel" class="export-btn" style="display:none" title="Bearbeitung verwerfen">✕ Abbrechen</button>
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px">
             <input type="checkbox" id="docgen-science" /> quellengebunden (wissenschaftlich)
           </label>
@@ -2280,11 +2286,11 @@ Beispiele:
 <script src="/js/canvas.js?v=20260603"></script>
 <script src="/js/canvas_editor.js?v=20260603"></script>
 <script src="/js/agents.js?v=20260610code"></script>
-<script src="/js/jury.js?v=20260613"></script>
+<script src="/js/jury.js?v=20260610mapreduce"></script>
 <script src="/js/chat.js?v=20260610tokens"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260613"></script>
-<script src="/js/doc_generator.js?v=20260615plan"></script>
+<script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
 <script src="/js/profile.js?v=20260610tokens"></script>
