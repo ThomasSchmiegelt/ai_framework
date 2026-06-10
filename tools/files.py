@@ -11,6 +11,83 @@ Parser und gibt den extrahierten Text zurück.
 from pathlib import Path
 
 
+def read_table(fp: Path, sheet=None, header_row: int = 0, max_rows=None) -> dict:
+    """Liest eine XLSX/CSV-Datei **strukturiert** ein (im Gegensatz zu :func:`_spreadsheet`,
+    das nur Fließtext für RAG liefert und bei 200 Zeilen kappt).
+
+    Rückgabe: ``{"sheets": [Blattnamen], "sheet": gewähltes Blatt, "headers": [Spalten],
+    "rows": [[Zelle, …], …]}``. ``header_row`` ist der 0-basierte Index der Kopfzeile;
+    alle Zeilen darüber werden übersprungen, die Kopfzeile selbst liefert die Spaltennamen.
+    ``max_rows`` begrenzt die zurückgegebenen Datenzeilen (None = unbegrenzt)."""
+    suffix = fp.suffix.lower()
+    if suffix == ".csv":
+        return _read_csv_table(fp, header_row, max_rows)
+    return _read_xlsx_table(fp, sheet, header_row, max_rows)
+
+
+def _cells_to_strs(values) -> list:
+    return [("" if v is None else str(v)).strip() for v in values]
+
+
+def _split_header_rows(all_rows: list, header_row: int, max_rows):
+    """Teilt rohe Zeilen in (headers, data_rows) anhand der Kopfzeile. Datenzeilen,
+    die komplett leer sind, werden verworfen; Zeilen werden auf die Header-Breite
+    aufgefüllt/gekürzt, damit das Raster rechteckig ist."""
+    if header_row < 0:
+        header_row = 0
+    if header_row >= len(all_rows):
+        return [], []
+    headers = _cells_to_strs(all_rows[header_row])
+    # Leere Endspalten der Kopfzeile abschneiden
+    while headers and headers[-1] == "":
+        headers.pop()
+    if not headers:
+        return [], []
+    width = len(headers)
+    data = []
+    for raw in all_rows[header_row + 1:]:
+        cells = _cells_to_strs(raw)
+        if not any(cells):
+            continue
+        cells = (cells + [""] * width)[:width]
+        data.append(cells)
+        if max_rows is not None and len(data) >= max_rows:
+            break
+    return headers, data
+
+
+def _read_xlsx_table(fp: Path, sheet, header_row: int, max_rows) -> dict:
+    try:
+        import openpyxl
+    except ImportError:
+        return {"sheets": [], "sheet": "", "headers": [], "rows": [], "error": "openpyxl nicht installiert"}
+    try:
+        wb = openpyxl.load_workbook(str(fp), read_only=True, data_only=True)
+    except Exception as e:
+        return {"sheets": [], "sheet": "", "headers": [], "rows": [], "error": f"Tabellen-Fehler: {e}"}
+    sheets = list(wb.sheetnames)
+    name = sheet if sheet in sheets else (sheets[0] if sheets else "")
+    if not name:
+        return {"sheets": sheets, "sheet": "", "headers": [], "rows": []}
+    ws = wb[name]
+    all_rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    headers, data = _split_header_rows(all_rows, header_row, max_rows)
+    return {"sheets": sheets, "sheet": name, "headers": headers, "rows": data}
+
+
+def _read_csv_table(fp: Path, header_row: int, max_rows) -> dict:
+    import csv, io
+    text = fp.read_text(errors="replace")
+    # Trennzeichen heuristisch erkennen (; oder , oder Tab)
+    sample = text[:4000]
+    delim = ";" if sample.count(";") >= sample.count(",") else ","
+    if sample.count("\t") > sample.count(delim):
+        delim = "\t"
+    all_rows = [row for row in csv.reader(io.StringIO(text), delimiter=delim)]
+    headers, data = _split_header_rows(all_rows, header_row, max_rows)
+    return {"sheets": ["CSV"], "sheet": "CSV", "headers": headers, "rows": data}
+
+
 def extract(fp: Path) -> str:
     suffix = fp.suffix.lower()
 

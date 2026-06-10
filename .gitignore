@@ -29,6 +29,9 @@ data/api_providers.json
 data/juries/*
 data/jury_docs/*
 data/morph_training/*
+data/rfq/*
+data/capacity.json
+data/capacity_lists.json
 
 # Selbstsignierte TLS-Zertifikate (privater Schlüssel!) — siehe scripts/gen_cert.*
 certs/
@@ -41,6 +44,7 @@ certs/
 !data/dossiers/.gitkeep
 !data/profile_assets/.gitkeep
 !data/jury_docs/.gitkeep
+!data/rfq/.gitkeep
 
 # Agenten (Standard-Vorlagen) werden versioniert -> NICHT ignorieren
 # data/agents/  bleibt eingecheckt; nur der Seeding-Marker ist Laufzeit-State:

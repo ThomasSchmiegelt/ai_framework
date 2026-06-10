@@ -44,7 +44,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260615py" />
+  <link rel="stylesheet" href="/css/app.css?v=20260610tokens" />
 </head>
 <body>
 
@@ -102,6 +102,12 @@
       </div>
       <input type="file" id="restore-input" accept=".zip" style="display:none" />
       <button id="btn-profile" class="btn-sidebar-action" style="width:100%">👤 Profil bearbeiten</button>
+      <div id="token-meter" title="Tokens dieser Sitzung (Klick zum Zurücksetzen). Preis je 1.000 Tokens im Profil hinterlegen."
+           style="display:none;margin-top:8px;font-size:11px;opacity:.8;cursor:pointer;line-height:1.5;
+                  border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--bg-input)">
+        <div style="display:flex;justify-content:space-between"><span>🔢 Tokens</span><span id="token-meter-total">0</span></div>
+        <div style="display:flex;justify-content:space-between;opacity:.7"><span id="token-meter-io">↓0 ↑0</span><span id="token-meter-cost"></span></div>
+      </div>
       <div id="sidebar-credit" style="margin-top:8px;text-align:center;font-size:11px;opacity:.55">
         Entwickelt von Thomas Schmiegelt
       </div>
@@ -118,6 +124,7 @@
       <button class="tab-btn" data-tab="docgen">📄 Dokumente</button>
       <button class="tab-btn" data-tab="research">🔬 Recherche</button>
       <button class="tab-btn" data-tab="matrix">📊 Matrix</button>
+      <button class="tab-btn" data-tab="rfq">📋 Anfrage</button>
       <button class="tab-btn" data-tab="planner">🗂️ Planer</button>
       <button class="tab-btn" data-tab="ide">💻 Code</button>
       <button class="tab-btn" data-tab="agents">🤖 Agenten</button>
@@ -315,7 +322,7 @@
       <div id="agents-header">
         <h2>🤖 Agenten</h2>
         <button id="btn-new-agent">＋ Neuer Agent</button>
-        <button id="btn-legal-agent" title="Aus einem Gesetzestext oder einer Norm (PDF/DOCX/TXT) automatisch einen spezialisierten Agenten erzeugen">⚖️ Gesetz-/Regel-Agent</button>
+        <button id="btn-legal-agent" title="Aus einem Fachdokument (Gesetz, Norm, Skript, Handbuch — PDF/DOCX/TXT) automatisch einen spezialisierten Experten erzeugen. Fachgebiet frei wählbar (Recht, Physik, Medizin …)">📚 Dokument-Experte</button>
         <input type="file" id="legal-agent-file" accept=".pdf,.docx,.txt,.md" style="display:none" />
         <button id="btn-juries" title="Bewertungs-Jurys verwalten: mehrere Agenten zu einem Gremium bündeln, das Texte bewertet">⚖️ Jurys</button>
       </div>
@@ -807,6 +814,7 @@
                 <option value="strict">Katalog: strikt</option>
               </select>
               <button id="btn-import-catalog" class="export-btn" style="font-size:12px" title="Ressourcen-Katalog (CSV: Typ;Name;Satz) importieren">📥 Katalog</button>
+              <button id="btn-catalog-from-global" class="export-btn" style="font-size:12px" title="Ressourcen aus der globalen Kapazitätsliste (Anfrage-Tab) übernehmen">👥 Globale Liste</button>
               <input type="file" id="catalog-csv-input" accept=".csv" style="display:none" />
               <button id="btn-export-resources" class="export-btn" style="font-size:12px" title="Verwendete Ressourcen als CSV exportieren">📤 Ressourcen</button>
               <span class="planner-sep"></span>
@@ -844,8 +852,9 @@
             <button id="btn-recalc-cpm" class="export-btn" style="font-size:12px">⚙️ CPM</button>
             <button id="btn-beautify" class="export-btn" style="font-size:12px" title="Verknüpfungen säubern, nach Ablaufreihenfolge sortieren und Netzplan neu zeichnen">✨ Mach schön</button>
             <button id="btn-insert-between" class="export-btn" style="font-size:12px" title="Neuen Vorgang zwischen zwei Aufgaben einfügen – KI schlägt passende Tätigkeiten vor">➕ Dazwischen</button>
-            <button id="btn-schedule" class="export-btn" style="font-size:12px" title="Ressourcen-/Bestellplan: wann wird welche Ressource gebraucht und bis wann bestellt">📅 Bestellplan</button>
+            <button id="btn-schedule" class="export-btn" style="font-size:12px" title="Kapazität & Zukauf: Auslastung je Rolle (Make-or-Buy), Partner/BCC und Bestellplan mit Lieferzeiten">📅 Kapazität &amp; Zukauf</button>
             <button id="btn-from-list" class="export-btn" style="font-size:12px" title="Aus einer einfachen Aufgabenliste (Anfrage/Ausschreibung) einen strukturierten Projektplan generieren">📋 Aus Liste</button>
+            <button id="btn-auto-structure" class="export-btn" style="font-size:12px" title="Bestehende Aufgaben automatisch strukturieren: Phasen, fachliche Abhängigkeiten und Ressourcen-Entzerrung (Vorschau vor dem Anwenden)">🔗 Auto-Strukturieren</button>
             <button id="btn-research-all" class="export-btn" style="font-size:12px" title="Alle noch nicht recherchierten Tätigkeiten wissenschaftlich recherchieren → Dossiers ins Plan-RAG">🔬 Alle recherchieren</button>
             <button id="btn-research-stop" class="export-btn" style="font-size:12px;display:none">⏹ Stop</button>
             <progress id="planner-research-bar" max="100" value="0" style="display:none;width:140px;height:10px;vertical-align:middle"></progress>
@@ -954,6 +963,43 @@
           </div>
         </div>
       </div>
+
+      <!-- Automatisch strukturieren (intelligentes Verknüpfen) -->
+      <div id="auto-structure-overlay" class="modal-overlay-base">
+        <div class="modal-base" style="width:min(680px,96vw);max-height:90vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <strong>🔗 Projekt automatisch strukturieren</strong>
+            <button id="btn-auto-structure-close" class="export-btn">✕ Schließen</button>
+          </div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+            Die KI versucht, die bestehenden Aufgaben automatisch zu strukturieren: sie ordnet
+            sie Phasen zu, leitet <strong>fachliche Abhängigkeiten</strong> ab und entzerrt
+            <strong>doppelt belegte Ressourcen</strong>. Du siehst zuerst eine Vorschau und
+            entscheidest dann, ob die bestehenden Verknüpfungen ersetzt werden.
+          </p>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+            <label style="font-size:13px;display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="auto-struct-deps" checked />
+              <span><strong>Fachliche Abhängigkeiten</strong> ableiten (was muss vor was fertig sein)</span>
+            </label>
+            <label style="font-size:13px;display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="auto-struct-phases" checked />
+              <span><strong>Phasen / Bereiche</strong> zuordnen (Konzept, Konstruktion, Test …)</span>
+            </label>
+            <label style="font-size:13px;display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="auto-struct-leveling" checked />
+              <span><strong>Ressourcen entzerren</strong> (gleiche Rolle nacheinander statt parallel)</span>
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+            <button id="btn-auto-struct-run" class="export-btn" style="background:var(--accent);color:#fff;font-weight:600">▶ Vorschau berechnen</button>
+            <button id="btn-auto-struct-apply" class="export-btn" style="display:none;background:#16a34a;color:#fff">✓ Anwenden (ersetzt Verknüpfungen)</button>
+            <button id="btn-auto-struct-undo" class="export-btn" style="display:none">↩ Rückgängig</button>
+            <span id="auto-struct-status" style="font-size:12px;color:var(--text-muted)"></span>
+          </div>
+          <div id="auto-struct-preview" style="font-size:13px;line-height:1.6"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ── Matrix-Recherche-Panel ────────────────────────────────────────── -->
@@ -979,6 +1025,173 @@
           <thead><tr id="matrix-header-row"></tr></thead>
           <tbody id="matrix-body"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- ── Anfrage-Auswertung (RFQ) ─────────────────────────────────────── -->
+    <div id="rfq-panel" class="panel" style="overflow:auto;padding:12px 14px">
+      <h2 style="font-size:16px;margin:0 0 4px">📋 Anfrage-Auswertung</h2>
+      <p class="planner-muted" style="font-size:12.5px;margin:0 0 12px">
+        Große XLS-/CSV-Anfrage hochladen, die Aufgaben-Spalte zuordnen und automatisch je
+        Paket auswerten: zuständige Fachrolle, interessant?, Partner nötig?, Best-Cost-Country.
+      </p>
+
+      <!-- Schritt 1: Upload + Mapping -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <input type="file" id="rfq-file" class="file-styled" accept=".xlsx,.xls,.csv" />
+        <button id="btn-rfq-preview" class="export-btn">⬆ Datei einlesen</button>
+        <span id="rfq-file-info" class="planner-muted" style="font-size:12px"></span>
+      </div>
+
+      <div id="rfq-mapping" style="display:none;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+        <label style="font-size:12px">Blatt<br><select id="rfq-sheet" class="sidebar-select" style="font-size:12px"></select></label>
+        <label style="font-size:12px">Kopfzeile (0-basiert)<br><input type="number" id="rfq-header-row" value="0" min="0" class="sidebar-select" style="width:90px;font-size:12px" /></label>
+        <label style="font-size:12px">Aufgaben-Spalte *<br><select id="rfq-task-col" class="sidebar-select" style="font-size:12px"></select></label>
+        <label style="font-size:12px">ID-Spalte<br><select id="rfq-id-col" class="sidebar-select" style="font-size:12px"></select></label>
+        <label style="font-size:12px">Titel-Spalte<br><select id="rfq-title-col" class="sidebar-select" style="font-size:12px"></select></label>
+        <button id="btn-rfq-reload" class="export-btn" style="font-size:12px" title="Vorschau mit gewähltem Blatt/Kopfzeile neu laden">↻ Vorschau</button>
+      </div>
+      <div id="rfq-sample-wrap" style="display:none;max-height:180px;overflow:auto;margin-bottom:10px;border:1px solid var(--border);border-radius:6px">
+        <table id="rfq-sample" style="width:100%;border-collapse:collapse;font-size:11.5px"></table>
+      </div>
+
+      <!-- Schritt 2: Lauf-Optionen -->
+      <div id="rfq-run-options" style="display:none;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+        <label style="font-size:12px">Modell<br><select id="rfq-model" class="sidebar-select" style="font-size:12px"></select></label>
+        <label style="font-size:12px"><input type="checkbox" id="rfq-web" /> Websuche je Paket</label>
+        <label style="font-size:12px">Wissensdatenbanken
+          <div id="rfq-rag" class="check-list" style="font-size:12px;min-width:180px;max-width:280px;max-height:96px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:4px 6px;background:var(--bg-input)">
+            <span class="planner-muted" style="font-size:11px">— keine vorhanden —</span>
+          </div></label>
+        <label style="font-size:12px">Ressourcenlisten <span class="planner-muted" style="font-size:10.5px">(aktiv)</span>
+          <div id="rfq-caplists" class="check-list" style="font-size:12px;min-width:160px;max-width:240px;max-height:96px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:4px 6px;background:var(--bg-input)">
+            <span class="planner-muted" style="font-size:11px">— keine vorhanden —</span>
+          </div></label>
+        <label style="font-size:12px">Umfang<br>
+          <select id="rfq-limit" class="sidebar-select" style="font-size:12px">
+            <option value="10">Testlauf: erste 10</option>
+            <option value="25" selected>Testlauf: erste 25</option>
+            <option value="100">erste 100</option>
+            <option value="0">alle</option>
+          </select></label>
+        <button id="btn-rfq-run" class="export-btn">▶ Auswerten starten</button>
+        <button id="btn-rfq-resume" class="export-btn" style="font-size:12px" title="Unterbrochenen Lauf fortsetzen">⏩ Fortsetzen</button>
+        <button id="btn-rfq-cancel" class="export-btn btn-danger-sm" style="display:none">✕ Abbrechen</button>
+        <button id="btn-rfq-export" class="export-btn" style="display:none">📋 XLSX exportieren</button>
+        <button id="btn-rfq-to-rag" class="export-btn" style="display:none" title="Die Auswertung als Dokument in eine Wissensdatenbank (RAG) übernehmen">📚 In RAG übernehmen</button>
+        <button id="btn-rfq-to-plan" class="export-btn" style="display:none" title="Ausgewählte Tickets als Plan in den Planer übernehmen (mit Aufwandsschätzung)">➜ In Planer übernehmen</button>
+        <label style="font-size:12px"><input type="checkbox" id="rfq-only-interesting" /> nur interessante</label>
+        <button id="btn-rfq-capacity" class="export-btn" style="font-size:12px" title="Ressourcen-/Kapazitätslisten verwalten">👥 Kapazitätslisten</button>
+        <button id="btn-rfq-columns" class="export-btn" style="font-size:12px" title="Eigene Bewertungsspalten (mit Agent oder freiem Prompt) definieren">🧩 Eigene Spalten</button>
+      </div>
+
+      <div id="rfq-status" class="planner-muted" style="font-size:12.5px;margin-bottom:6px"></div>
+      <div id="rfq-counters" style="display:none;gap:14px;font-size:12.5px;margin-bottom:8px">
+        <span>📦 <b id="rfq-c-total">0</b></span>
+        <span>✅ interessant: <b id="rfq-c-int">0</b></span>
+        <span>🤝 Partner: <b id="rfq-c-partner">0</b></span>
+        <span>🌍 BCC: <b id="rfq-c-bcc">0</b></span>
+      </div>
+      <div style="overflow:auto;border:1px solid var(--border);border-radius:6px">
+        <table id="rfq-results" style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr id="rfq-results-head"></tr></thead>
+          <tbody id="rfq-results-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Chat-Zeile: Rückfrage zur ausgewerteten Anfrage -->
+      <div style="margin-top:10px">
+        <div id="rfq-chat-answer" style="display:none;font-size:12.5px;line-height:1.55;white-space:pre-wrap;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:var(--bg-input)"></div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="rfq-chat-input" placeholder="💬 Frage zur Anfrage stellen, z.B. „Welche Pakete brauchen einen Partner?" oder „Fasse die interessanten Pakete zusammen"" style="flex:1;font-size:12.5px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px" />
+          <button id="btn-rfq-chat-send" class="export-btn" style="font-size:12px">↑ Senden</button>
+        </div>
+      </div>
+
+      <!-- Kapazitätslisten-Editor (Modal) -->
+      <div id="rfq-cap-overlay" class="modal-overlay-base">
+        <div class="modal-base" style="max-width:880px;width:94%">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <h3 style="margin:0;font-size:15px">👥 Ressourcen-/Kapazitätslisten</h3>
+            <button id="btn-rfq-cap-close" class="export-btn" style="font-size:12px">✕</button>
+          </div>
+          <p class="planner-muted" style="font-size:12px;margin:0 0 8px">
+            Mehrere benannte Listen (Rollen/Partner mit Land, freier Kapazität, Skills). Per Häkchen
+            wählst du, welche Listen für Anfrage-Auswertung &amp; Planer <strong>aktiv</strong> sind —
+            die aktiven Listen werden vereinigt.
+          </p>
+          <!-- aktive Listen (Häkchen) -->
+          <div style="margin-bottom:8px">
+            <div style="font-size:12px;font-weight:600;margin-bottom:3px">Aktive Listen</div>
+            <div id="rfq-cap-active" class="check-list" style="display:flex;flex-wrap:wrap;gap:10px;font-size:12px;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:var(--bg-input)"></div>
+          </div>
+          <!-- Liste zum Bearbeiten wählen -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+            <label style="font-size:12px">Bearbeiten:
+              <select id="rfq-cap-listsel" class="sidebar-select" style="font-size:12px"></select>
+            </label>
+            <button id="btn-rfq-cap-new" class="export-btn" style="font-size:12px" title="Neue Liste anlegen">＋ Neue Liste</button>
+            <button id="btn-rfq-cap-rename" class="export-btn" style="font-size:12px" title="Aktuelle Liste umbenennen">✏ Umbenennen</button>
+            <button id="btn-rfq-cap-delete" class="export-btn btn-danger-sm" style="font-size:12px" title="Aktuelle Liste löschen">🗑 Liste</button>
+          </div>
+          <div style="max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:8px">
+            <table id="rfq-cap-table" style="width:100%;border-collapse:collapse;font-size:12px"></table>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="btn-rfq-cap-add" class="export-btn" style="font-size:12px">＋ Zeile</button>
+            <button id="btn-rfq-cap-import" class="export-btn" style="font-size:12px">⬆ CSV-Import</button>
+            <input type="file" id="rfq-cap-csv" accept=".csv" style="display:none" />
+            <button id="btn-rfq-cap-save" class="export-btn">💾 Liste speichern</button>
+            <span id="rfq-cap-status" class="planner-muted" style="font-size:11.5px;align-self:center"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Eigene Bewertungsspalten (Modal) -->
+      <div id="rfq-cols-overlay" class="modal-overlay-base">
+        <div class="modal-base" style="max-width:760px;width:94%">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <h3 style="margin:0;font-size:15px">🧩 Eigene Bewertungsspalten</h3>
+            <button id="btn-rfq-cols-close" class="export-btn" style="font-size:12px">✕</button>
+          </div>
+          <p class="planner-muted" style="font-size:12px;margin:0 0 8px">
+            Zusätzliche Spalten, die je Arbeitspaket ausgewertet werden. Wähle entweder
+            einen <strong>Agenten</strong> (bewertet mit seiner Fachrolle) oder gib einen
+            <strong>freien Prompt</strong> (Frage/Vorgabe) an. Jede Spalte = ein zusätzlicher
+            LLM-Aufruf pro Paket. Wird im Raster und im XLSX-Export angezeigt.
+          </p>
+          <div id="rfq-cols-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="btn-rfq-cols-add" class="export-btn" style="font-size:12px">＋ Spalte</button>
+            <button id="btn-rfq-cols-save" class="export-btn">💾 Übernehmen</button>
+            <span class="planner-muted" style="font-size:11.5px;align-self:center">max. 6 Spalten</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Übergabe in den Planer -->
+      <div id="rfq-plan-overlay" class="modal-overlay-base">
+        <div class="modal-base" style="max-width:480px;width:92%">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <h3 style="margin:0;font-size:15px">➜ In Planer übernehmen</h3>
+            <button id="btn-rfq-plan-close" class="export-btn" style="font-size:12px">✕</button>
+          </div>
+          <p class="planner-muted" style="font-size:12px;margin:0 0 10px">
+            Für die gewählten Tickets schätzt die KI Aufwand (h) und Dauer (Tage) und legt
+            einen Plan an. Kapazität, Auslastung und Zukauf siehst du danach im Planer.
+          </p>
+          <label style="font-size:12.5px;display:block;margin-bottom:8px">Plan-Name<br>
+            <input type="text" id="rfq-plan-name" class="sidebar-select" style="width:100%;font-size:12px" value="Anfrage-Auswertung" /></label>
+          <label style="font-size:12.5px;display:block;margin-bottom:12px">Auswahl<br>
+            <select id="rfq-plan-selection" class="sidebar-select" style="width:100%;font-size:12px">
+              <option value="interesting" selected>nur interessante Tickets</option>
+              <option value="all">alle ausgewerteten Tickets</option>
+            </select></label>
+          <div id="rfq-plan-status" class="planner-muted" style="font-size:12px;margin-bottom:8px"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="btn-rfq-plan-go" class="export-btn">▶ Übernehmen & öffnen</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1027,6 +1240,13 @@
               <span id="ide-chat-status"></span>
             </div>
             <div id="ide-chat-history"></div>
+            <div id="ide-ai-controls" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:4px 8px;font-size:11.5px">
+              <label style="display:flex;align-items:center;gap:4px">Coding-Agent
+                <select id="ide-agent-select" class="sidebar-select" style="font-size:11.5px;max-width:180px"><option value="">— keiner —</option></select>
+              </label>
+              <label style="display:flex;align-items:center;gap:4px" title="Stellt vor dem Coden Rückfragen, bis genug Informationen vorliegen"><input type="checkbox" id="ide-clarify-toggle" checked /> Rückfragen</label>
+              <label style="display:flex;align-items:center;gap:4px" title="Analysiert die Begrifflichkeiten und wertet das Profil aus, um eine passende Experten-Rolle abzuleiten"><input type="checkbox" id="ide-adaptive-toggle" /> adaptiv</label>
+            </div>
             <div id="ide-ai-input-area">
               <textarea id="ide-chat-input"
                 placeholder="Beschreiben Sie was das Programm tun soll — die KI schreibt den Code automatisch.
@@ -1435,6 +1655,7 @@ Beispiele:
           <option value="Analyse">Analyse</option>
           <option value="Recherche">Recherche</option>
           <option value="Technik">Technik</option>
+          <option value="Programmieren">Programmieren</option>
         </select>
       </div>
     </div>
@@ -1456,6 +1677,15 @@ Beispiele:
       </label>
       <textarea id="field-agent-prompt"
         placeholder="Du bist ein spezialisierter Assistent für…&#10;&#10;Antworte immer auf Deutsch."
+      ></textarea>
+    </div>
+
+    <!-- Beispielcode (für Coding-Agenten) -->
+    <div class="form-group">
+      <label>Beispielcode <span class="label-hint">(optional — Stil-/Struktur-Vorlage für den Code-Assistenten im Code-Tab)</span></label>
+      <textarea id="field-agent-example-code" spellcheck="false"
+        placeholder="# Optionaler Beispielcode, an dem sich der Coding-Agent orientieren soll…"
+        style="min-height:80px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px"
       ></textarea>
     </div>
 
@@ -1681,10 +1911,35 @@ Beispiele:
         <option value="8192">8k (8192) — Standard</option>
         <option value="16384">16k (16384) — lange Berichte</option>
         <option value="32768">32k (32768) — sehr lang, viel VRAM</option>
+        <option value="65536">64k (65536) — sehr großer Rechner</option>
+        <option value="131072">128k (131072) — Maximum, sehr viel VRAM</option>
       </select>
       <p class="planner-muted" style="font-size:11.5px;margin:4px 0 0">
         Größeres Fenster verhindert abgeschnittene Antworten, kostet aber mehr GPU-Speicher
         (KV-Cache). Bei wenig VRAM kleiner wählen. Wirkt sofort beim nächsten Senden.
+      </p>
+    </div>
+
+    <div class="form-group" style="margin-top:14px">
+      <label>Token-Preis <span class="planner-muted" style="font-size:11px">für die Kostenschätzung im Token-Zähler</span></label>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+        <div>
+          <label style="font-size:11px">Preis je 1.000 Eingabe-Tokens</label>
+          <input type="number" id="profile-price-in" min="0" step="0.0001" placeholder="0.0" />
+        </div>
+        <div>
+          <label style="font-size:11px">Preis je 1.000 Ausgabe-Tokens</label>
+          <input type="number" id="profile-price-out" min="0" step="0.0001" placeholder="0.0" />
+        </div>
+        <div>
+          <label style="font-size:11px">Währung</label>
+          <input type="text" id="profile-currency" maxlength="4" placeholder="€" style="width:60px" />
+        </div>
+      </div>
+      <p class="planner-muted" style="font-size:11.5px;margin:4px 0 0">
+        Lokale Ollama-Modelle sind kostenlos (0 lassen). Für externe API-Anbieter den
+        jeweiligen Preis je 1.000 Tokens eintragen — der Zähler unten links zeigt die
+        geschätzten Sitzungskosten.
       </p>
     </div>
 
@@ -1695,19 +1950,19 @@ Beispiele:
       <div class="form-group">
         <label>Logo<br><span class="planner-muted" style="font-size:11px">512×512 px · PNG transparent</span></label>
         <img class="profile-asset-prev" id="prev-logo" alt="" />
-        <input type="file" id="file-logo" accept="image/*" />
+        <input type="file" id="file-logo" class="file-styled" accept="image/*" />
         <button class="export-btn profile-asset-del" data-kind="logo" style="font-size:11px">entfernen</button>
       </div>
       <div class="form-group">
         <label>Vorlagen-Deckblatt<br><span class="planner-muted" style="font-size:11px">1920×1080 px · JPG</span></label>
         <img class="profile-asset-prev" id="prev-cover" alt="" />
-        <input type="file" id="file-cover" accept="image/*" />
+        <input type="file" id="file-cover" class="file-styled" accept="image/*" />
         <button class="export-btn profile-asset-del" data-kind="cover" style="font-size:11px">entfernen</button>
       </div>
       <div class="form-group">
         <label>Vorlagen-Kopfzeile<br><span class="planner-muted" style="font-size:11px">1920×240 px · PNG/JPG</span></label>
         <img class="profile-asset-prev" id="prev-header" alt="" />
-        <input type="file" id="file-header" accept="image/*" />
+        <input type="file" id="file-header" class="file-styled" accept="image/*" />
         <button class="export-btn profile-asset-del" data-kind="header" style="font-size:11px">entfernen</button>
       </div>
     </div>
@@ -1954,7 +2209,7 @@ Beispiele:
 <!-- ── Ressourcen-/Bestellplan (Planer) ──────────────────────────────────── -->
 <div id="schedule-modal-overlay" class="modal-overlay-base">
   <div class="modal-base" style="max-width:860px">
-    <h3>📅 Ressourcen- &amp; Bestellplan</h3>
+    <h3>📅 Kapazität, Zukauf &amp; Bestellplan</h3>
     <p class="planner-muted" style="margin:4px 0 10px" id="schedule-hint">
       Wann wird welche Ressource gebraucht (frühester Start der Aufgabe) und – bei hinterlegter Lieferzeit – bis wann sie bestellt sein muss.
     </p>
@@ -2024,29 +2279,31 @@ Beispiele:
 <script src="/js/i18n.js?v=20260604"></script>
 <script src="/js/canvas.js?v=20260603"></script>
 <script src="/js/canvas_editor.js?v=20260603"></script>
-<script src="/js/agents.js?v=20260615plan"></script>
+<script src="/js/agents.js?v=20260610code"></script>
 <script src="/js/jury.js?v=20260613"></script>
-<script src="/js/chat.js?v=20260615plan"></script>
+<script src="/js/chat.js?v=20260610tokens"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260613"></script>
 <script src="/js/doc_generator.js?v=20260615plan"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260615pyexec"></script>
+<script src="/js/profile.js?v=20260610tokens"></script>
 <script src="/js/projects.js?v=20260603"></script>
-<script src="/js/planner.js?v=20260615plan2"></script>
+<script src="/js/planner.js?v=20260610auto"></script>
 <script src="/js/matrix_research.js?v=20260603"></script>
+<script src="/js/rfq.js?v=20260610f"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260603"></script>
 <script src="/js/json_editor.js?v=20260603"></script>
 <script src="/js/logger.js?v=20260603"></script>
-<script src="/js/ide.js?v=20260615pyexec"></script>
-<script src="/js/onboarding.js?v=20260607tabs"></script>
+<script src="/js/ide.js?v=20260610fix2"></script>
+<script src="/js/onboarding.js?v=20260610auswertung"></script>
 <script src="/js/medizin.js?v=20260615plan"></script>
 <script src="/js/mathe.js?v=20260615plan"></script>
 <script src="/js/dir_analysis.js?v=20260613"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
-<script src="/js/app.js?v=20260607guide"></script>
+<script src="/js/tokens.js?v=20260610"></script>
+<script src="/js/app.js?v=20260610tokens"></script>
 
 </body>
 </html>

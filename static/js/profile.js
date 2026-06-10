@@ -123,6 +123,12 @@ const Profile = (() => {
     document.getElementById('profile-compress-idle').value = _data.compress_idle_min || 10;
     const ctxEl = document.getElementById('profile-num-ctx');
     if (ctxEl) ctxEl.value = String(_data.chat_num_ctx || 8192);
+    const pInEl = document.getElementById('profile-price-in');
+    if (pInEl) pInEl.value = _data.price_per_1k_in != null ? _data.price_per_1k_in : '';
+    const pOutEl = document.getElementById('profile-price-out');
+    if (pOutEl) pOutEl.value = _data.price_per_1k_out != null ? _data.price_per_1k_out : '';
+    const curEl = document.getElementById('profile-currency');
+    if (curEl) curEl.value = _data.currency || '€';
     const replayEl = document.getElementById('profile-replay-intro');
     if (replayEl) replayEl.checked = !!_data.replay_intro;
     _fillModelSelects();
@@ -204,6 +210,9 @@ const Profile = (() => {
       compress_overflow_chars: parseInt(document.getElementById('profile-compress-overflow').value, 10) || 12000,
       compress_idle_min:       parseInt(document.getElementById('profile-compress-idle').value, 10) || 10,
       chat_num_ctx:            parseInt(document.getElementById('profile-num-ctx')?.value, 10) || 8192,
+      price_per_1k_in:         parseFloat(document.getElementById('profile-price-in')?.value) || 0,
+      price_per_1k_out:        parseFloat(document.getElementById('profile-price-out')?.value) || 0,
+      currency:                (document.getElementById('profile-currency')?.value || '€').trim() || '€',
       model_general:  document.getElementById('profile-model-general')?.value || '',
       model_coding:   document.getElementById('profile-model-coding')?.value || '',
       model_science:  document.getElementById('profile-model-science')?.value || '',

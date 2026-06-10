@@ -87,8 +87,19 @@ const Onboarding = (() => {
            + 'Konfliktwarnungen. Die KI hilft beim Ableiten und Detaillieren der Aufgaben.',
     },
     {
+      image: 'auswertung.png',
+      title: '10 · Anfrage-Auswertung',
+      text: 'Lade eine umfangreiche <strong>Ausschreibung/Anfrage als XLS/CSV</strong> (bis ~500 '
+           + 'Arbeitspakete) hoch: die KI bewertet jedes Paket einzeln – <strong>zuständige Fachrolle</strong>, '
+           + '<strong>interessant?</strong>, <strong>Partner nötig?</strong> und <strong>Best-Cost-Country</strong> '
+           + '– abgeglichen mit wählbaren <strong>Ressourcenlisten</strong>. Eigene Bewertungsspalten (Agent oder '
+           + 'Prompt) sind möglich. Das Ergebnis lässt sich als <strong>XLSX</strong>, in eine '
+           + '<strong>Wissensdatenbank</strong> oder direkt als <strong>Projektplan in den Planer</strong> '
+           + '(mit Aufwands- und Kapazitäts-/Zukauf-Analyse) übernehmen.',
+    },
+    {
       image: 'code.png',
-      title: '10 · Code-IDE',
+      title: '11 · Code-IDE',
       text: 'Schreibe und führe kleine Programme direkt im Browser aus: links der '
            + '<strong>Code-Editor</strong>, rechts die <strong>Live-Vorschau</strong> mit interaktiven '
            + 'Eingabefeldern und Canvas. Der <strong>KI-Assistent</strong> erzeugt den Code auf Zuruf '
@@ -98,7 +109,7 @@ const Onboarding = (() => {
     },
     {
       image: 'medizin.png',
-      title: '11 · Medizin',
+      title: '12 · Medizin',
       text: 'Demonstriert eine <strong>Zwei-Modell-Pipeline</strong>: das Standardmodell bereitet deine '
            + 'Frage auf, ein medizinisches Modell (z. B. MedGemma) prüft auf fehlende Angaben und stellt '
            + '<strong>Rückfragen</strong>, bevor es eine fundierte Einschätzung gibt – auf Wunsch in '
@@ -107,7 +118,7 @@ const Onboarding = (() => {
     },
     {
       image: 'mathe.png',
-      title: '12 · Mathe',
+      title: '13 · Mathe',
       text: 'Ein eigener <strong>Mathematik-Workspace</strong>: löse Gleichungen, Integrale und '
            + 'Matrizen mit SymPy/NumPy/SciPy, lass <strong>Funktionsgraphen</strong> automatisch '
            + 'zeichnen und exportiere Berichte als <strong>LaTeX/PDF</strong>. Im '
@@ -116,14 +127,14 @@ const Onboarding = (() => {
     },
     {
       image: 'Mail_System.png',
-      title: '13 · Mail-Bearbeitung',
+      title: '14 · Mail-Bearbeitung',
       text: 'Lies Postfächer (IMAP/POP3) und verarbeite Mails per Regeln: in eine Wissensdatenbank '
            + 'übernehmen, als Agenten-Aufgabe, an den Dokumentengenerator oder als Notiz. Der '
            + 'Versand bleibt <strong>immer manuell</strong>. <em>(🚧 in Entwicklung)</em>',
     },
     {
       image: 'verzeichnisanalyse.png',
-      title: '14 · Verzeichnis-Analyse',
+      title: '15 · Verzeichnis-Analyse',
       text: 'Lass die KI einen <strong>Ordner auf dem Rechner</strong> durchsehen: Sie erstellt einen '
            + 'Strukturüberblick, hebt <strong>interessante Dateien</strong> hervor und analysiert sie auf '
            + 'Wunsch im Detail. <strong>Personenbezogene Daten werden dabei automatisch anonymisiert.</strong> '
@@ -132,7 +143,7 @@ const Onboarding = (() => {
     },
     {
       image: 'morphologischer_kasten.png',
-      title: '15 · Morphologischer Kasten',
+      title: '16 · Morphologischer Kasten',
       text: 'Systematische Ideenfindung (Zwicky-Box): Die KI füllt ein Raster aus <strong>Parametern</strong> '
            + 'und <strong>Ausprägungen</strong>, bewertet Kombinationen und schlägt Alternativen vor. Mit '
            + '<strong>🃏 Ideen wischen</strong> wischst du KI-Konzepte durch (links = gut, rechts = schlecht) '
@@ -141,7 +152,7 @@ const Onboarding = (() => {
     },
     {
       image: 'jury.png',
-      title: '16 · Jury',
+      title: '17 · Jury',
       text: 'Stelle ein <strong>Gremium aus Agenten</strong> zusammen (z. B. ⚖️ Gesetzes-Agenten), das einen '
            + 'beliebigen Text bewertet: Jedes Mitglied gibt Score, Befund, Risiken und Empfehlung ab, danach '
            + 'folgt ein <strong>Gesamturteil</strong>. So prüfst du erzeugte Dokumente, System-Prompts oder '
@@ -149,7 +160,7 @@ const Onboarding = (() => {
     },
     {
       image: 'log_file.png',
-      title: '17 · Log-Datei',
+      title: '18 · Log-Datei',
       text: 'Im <strong>Log-Tab</strong> siehst du bei Bedarf, was im Hintergrund passiert: '
            + 'Modell-Antworten, Tool-Aufrufe und Diagnosen. Praktisch zur Fehlersuche – '
            + 'ein- und ausschaltbar und als Datei exportierbar.',

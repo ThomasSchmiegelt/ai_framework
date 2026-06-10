@@ -500,6 +500,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Matrix-Recherche
   MatrixResearch.init();
 
+  // Anfrage-Auswertung (RFQ)
+  if (typeof RFQ !== 'undefined') RFQ.init();
+
   // Präsentations-Assistent
   PresentationAssistant.init();
 
@@ -568,6 +571,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnClose.addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
   })();
+
+  // Token-Zähler (Sitzung) — nach Profile.init(), damit der Preis verfügbar ist
+  if (typeof TokenMeter !== 'undefined') TokenMeter.init();
 
   // Diagnose-Logger (als letztes, damit alle anderen Module bereits verdrahtet sind)
   await Logger.init();

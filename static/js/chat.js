@@ -92,6 +92,16 @@ const Chat = (() => {
     let text = input.value.trim();
     if (!text && pendingFiles.length === 0) return;
 
+    // Deepdive: „/dd10" / „/ddd10" / „/deepdive10" / „/deepdivedocument10" → eigener
+    // Ablauf (X Fragen zur letzten Antwort, der Reihe nach gesucht & beantwortet).
+    const dd = _parseDeepDive(text);
+    if (dd) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runDeepDive(dd.count, dd.asDocument, dd.extra);
+      return;
+    }
+
     // Slash-Agent: führendes „/Name" wählt nur für DIESE Nachricht einen Agenten
     let slashAgent = null;
     const slash = _resolveSlashAgent(text);
@@ -205,6 +215,8 @@ const Chat = (() => {
               insertAdaptiveNote(bubbleContent, textEl, event.role);
             } else if (event.type === 'thinking') {
               appendThinking(event.content);
+            } else if (event.type === 'done') {
+              if (event.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(event.tokens);
             }
           } catch (_) {}
         }
@@ -1033,6 +1045,133 @@ const Chat = (() => {
     } catch (e) {
       showToast('Fehler bei der Skill-Erstellung');
       console.error(e);
+    }
+  }
+
+  // ── Deepdive (/dd, /ddd) ─────────────────────────────────────────────────────
+  // Erkennt einen Deepdive-Befehl am Zeilenanfang. „/dd10" und „/deepdive10" =
+  // Chat-Vertiefung, „/ddd10" und „/deepdivedocument10" = Dokument. X optional
+  // (Default 5), Rest hinter dem Befehl gilt als Thema, falls keine Vorantwort da ist.
+  function _parseDeepDive(text) {
+    const m = text.match(/^\/(deepdivedocument|deepdive|ddd|dd)\s*(\d+)?\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    const tok = m[1].toLowerCase();
+    const asDocument = (tok === 'deepdivedocument' || tok === 'ddd');
+    const count = m[2] ? Math.max(1, Math.min(parseInt(m[2], 10), 20)) : 5;
+    return { asDocument, count, extra: (m[3] || '').trim() };
+  }
+
+  function _handleDeepDiveEvent(ev, ctx) {
+    const { asDocument, statusContent, chapterEls, docParts } = ctx;
+    if (ev.type === 'dd_questions') {
+      const qs = ev.questions || [];
+      statusContent.innerHTML = '<strong>🔎 Vertiefungsfragen:</strong><ol style="margin:6px 0 0 18px">'
+        + qs.map(q => `<li>${escHtml(q)}</li>`).join('') + '</ol>';
+      scrollToBottom();
+    } else if (ev.type === 'dd_chapter_start') {
+      if (!asDocument) {
+        const row = appendMessage('assistant', '', [], true);
+        const content = row.querySelector('.bubble-content');
+        content.innerHTML = `<div style="font-weight:600;margin-bottom:6px">${ev.index + 1}. ${escHtml(ev.question)}</div><em>⏳ recherchiert…</em>`;
+        chapterEls[ev.index] = content;
+      }
+    } else if (ev.type === 'dd_chapter_done') {
+      if (asDocument) {
+        docParts.push(`\n## ${ev.index + 1}. ${ev.question}\n\n${ev.answer || ''}\n`);
+        statusContent.innerHTML = `<strong>📕 Deepdive-Dokument…</strong> Kapitel ${ev.index + 1} fertig`;
+      } else {
+        const content = chapterEls[ev.index];
+        if (content) {
+          content.innerHTML = `<div style="font-weight:600;margin-bottom:6px">${ev.index + 1}. ${escHtml(ev.question)}</div>`;
+          const ans = document.createElement('div');
+          content.appendChild(ans);
+          renderMarkdown(ans, ev.answer || '');
+        }
+        messages.push({ role: 'assistant', content: `**${ev.question}**\n\n${ev.answer || ''}` });
+      }
+      scrollToBottom();
+    } else if (ev.type === 'error') {
+      showToast('Deepdive: ' + (ev.message || 'Fehler'));
+    }
+  }
+
+  async function runDeepDive(count, asDocument, extra) {
+    if (isStreaming) return;
+    const rev = [...messages].reverse();
+    const lastAnswer = (rev.find(m => m.role === 'assistant') || {}).content || '';
+    const lastUser = (rev.find(m => m.role === 'user') || {}).content || '';
+    if (!lastAnswer && !extra) {
+      showToast('Deepdive braucht eine vorherige Antwort (oder ein Thema nach dem Befehl).');
+      return;
+    }
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    const useSearch = document.getElementById('btn-search-toggle').classList.contains('active');
+    const ragCollections = (typeof RAG !== 'undefined') ? RAG.selectedCollections() : [];
+
+    appendMessage('user', asDocument
+      ? `📕 /ddd${count} — Deepdive-Dokument: ${count} Kapitel zur letzten Antwort`
+      : `🔎 /dd${count} — Deepdive: ${count} Fragen zur letzten Antwort`);
+
+    const statusRow = appendMessage('assistant', '', [], true);
+    const statusContent = statusRow.querySelector('.bubble-content');
+    statusContent.innerHTML = '<em>⏳ Vertiefungsfragen werden erzeugt…</em>';
+
+    const title = (lastUser || extra || 'Deepdive').split('\n')[0].slice(0, 80);
+    const docParts = asDocument
+      ? [`# ${title}\n\n## Vorwort\n\n${lastAnswer || extra}\n`]
+      : null;
+    const chapterEls = {};
+
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/deepdive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          last_answer: lastAnswer || extra,
+          topic: lastUser || extra || '',
+          count,
+          model,
+          as_document: asDocument,
+          web_search: useSearch,
+          rag_collections: ragCollections,
+        }),
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          _handleDeepDiveEvent(ev, { asDocument, statusContent, chapterEls, docParts });
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('Deepdive-Fehler: ' + e.message);
+    } finally {
+      isStreaming = false;
+      setBtnSendState(true);
+    }
+
+    if (asDocument && docParts && docParts.length > 1) {
+      const md = docParts.join('\n');
+      if (typeof DocGen !== 'undefined' && DocGen.showResult) {
+        DocGen.showResult(md);
+        switchTab('docgen');
+        showToast('✓ Deepdive-Dokument im Dokumente-Tab — als DOCX/PDF exportierbar');
+      }
     }
   }
 

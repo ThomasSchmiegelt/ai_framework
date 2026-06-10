@@ -479,15 +479,94 @@ if (!_drawFn) { _resize(); }
     }
   }
 
-  /* ── KI-Chat senden ──────────────────────────────────────────── */
+  /* ── Coding-Agenten laden ────────────────────────────────────── */
+  let _pendingPrompt = '';   // ursprüngliche Aufgabe während der Rückfragen-Phase
+
+  async function _loadCodingAgents() {
+    const sel = document.getElementById('ide-agent-select');
+    if (!sel) return;
+    try {
+      let agents = await (await fetch('/api/agents')).json();
+      if (!Array.isArray(agents)) agents = [];
+      // Coding-nahe Agenten zuerst (Kategorie/Beispielcode), dann der Rest
+      const isCode = a => /program|cod|entwickl|software/i.test((a.category || '') + ' ' + (a.name || '')) || a.example_code;
+      agents.sort((a, b) => (isCode(b) ? 1 : 0) - (isCode(a) ? 1 : 0));
+      sel.innerHTML = '<option value="">— keiner —</option>' +
+        agents.map(a => `<option value="${a.id}">${(a.icon || '🤖')} ${(a.name || a.id)}${a.example_code ? ' · 📎' : ''}</option>`).join('');
+    } catch (_) {}
+  }
+
+  /* ── KI-Chat senden (Code-Assistent mit Rückfragen) ──────────── */
   async function _sendChat() {
     if (_generating) return;
     const inputEl = document.getElementById('ide-chat-input');
     const msg = inputEl?.value.trim();
     if (!msg) { inputEl?.focus(); return; }
     inputEl.value = '';
+    _pendingPrompt = msg;
+    await _assist(msg, '', false);
+  }
 
-    await _runAI(_lang === 'py' ? PY_SYSTEM_PROMPT : SYSTEM_PROMPT, msg, _getCode());
+  /* ── Code-Assistent: Rückfragen ⇄ Code ───────────────────────── */
+  async function _assist(prompt, answers, forceCode) {
+    _setGenerating(true);
+    const clarify = document.getElementById('ide-clarify-toggle')?.checked !== false;
+    const adaptive = !!document.getElementById('ide-adaptive-toggle')?.checked;
+    const agent_id = document.getElementById('ide-agent-select')?.value || '';
+    if (answers) _addChatMsg('user', '↳ ' + answers);
+    else _addChatMsg('user', prompt.substring(0, 80) + (prompt.length > 80 ? '…' : ''));
+    const wrap = _addChatMsg('assistant', '⏳ …');
+    const model = (typeof Profile !== 'undefined' && Profile.modelFor) ? Profile.modelFor('coding') : undefined;
+    try {
+      const resp = await fetch('/api/code/assist', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt, answers, agent_id, adaptive,
+          force_code: forceCode || !clarify,
+          language: _lang === 'py' ? 'Python' : 'JavaScript',
+          current_code: _getCode(), model,
+        }),
+      });
+      const d = await resp.json();
+      if (!resp.ok) throw new Error(d.detail || ('HTTP ' + resp.status));
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens);
+      if (d.type === 'questions') {
+        _renderClarify(wrap, d.questions, d.adaptive_role);
+      } else {
+        if (d.code) { _setCode(d.code); _setDirty(); _run(); }
+        if (wrap) wrap.textContent = (d.adaptive_role ? `🧠 ${d.adaptive_role}\n` : '') + (d.note || '✓ Code erstellt');
+      }
+    } catch (e) {
+      if (wrap) wrap.textContent = '❌ ' + e.message;
+    } finally {
+      _setGenerating(false);
+    }
+  }
+
+  function _renderClarify(wrap, questions, role) {
+    if (wrap) wrap.textContent = (role ? `🧠 ${role}\n` : '') + '❓ Rückfragen vor dem Coden:';
+    const box = document.createElement('div');
+    box.className = 'ide-chat-msg assistant';
+    box.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+    box.innerHTML = '<ol style="margin:2px 0 4px 18px;padding:0">' +
+      questions.map(q => `<li>${_esc(q)}</li>`).join('') + '</ol>' +
+      '<textarea class="ide-clarify-answers" placeholder="Antworten hier (frei, je Zeile)…" ' +
+      'style="width:100%;min-height:54px;font-size:12px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px"></textarea>' +
+      '<div style="display:flex;gap:6px"><button class="export-btn ide-clarify-go" style="font-size:11.5px">↑ Antworten &amp; Code erstellen</button>' +
+      '<button class="export-btn ide-clarify-skip" style="font-size:11.5px">⏭ Trotzdem coden</button></div>';
+    document.getElementById('ide-chat-history').appendChild(box);
+    document.getElementById('ide-chat-history').scrollTop = 99999;
+    const ta = box.querySelector('.ide-clarify-answers');
+    box.querySelector('.ide-clarify-go').addEventListener('click', () => {
+      const a = (ta.value || '').trim();
+      box.remove();
+      _assist(_pendingPrompt, a || '(keine weiteren Angaben)', true);
+    });
+    box.querySelector('.ide-clarify-skip').addEventListener('click', () => {
+      box.remove();
+      _assist(_pendingPrompt, '', true);
+    });
+    ta.focus();
   }
 
   /* ── Auto-Reparatur ──────────────────────────────────────────── */
@@ -622,6 +701,8 @@ if (!_drawFn) { _resize(); }
     document.getElementById('ide-lang')?.addEventListener('change', e => _setLang(e.target.value));
     document.getElementById('btn-ide-chat-send')?.addEventListener('click', _sendChat);
     document.getElementById('btn-ide-repair')?.addEventListener('click', _autoRepair);
+    _loadCodingAgents();
+    document.querySelector('.tab-btn[data-tab="ide"]')?.addEventListener('click', _loadCodingAgents);
 
     const chatInput = document.getElementById('ide-chat-input');
     chatInput?.addEventListener('keydown', e => {

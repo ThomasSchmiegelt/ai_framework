@@ -205,6 +205,8 @@ const RAG = (() => {
         </details>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="export-btn rag-add-doc" data-id="${c.id}">＋ Dokument(e) hinzufügen</button>
+          <button class="export-btn rag-add-folder-srv" data-id="${c.id}" title="Alle Textdateien eines Server-Ordners einlesen">📁 Server-Ordner</button>
+          <button class="export-btn rag-add-folder-browser" data-id="${c.id}" title="Einen Ordner im Browser wählen (alle Dateien werden hochgeladen)">📂 Browser-Ordner</button>
           <button class="export-btn rag-del-coll" data-id="${c.id}">🗑 Datenbank löschen</button>
           <button class="export-btn rag-pub-coll" data-id="${c.id}" title="Sammlung als .ragpack.json in den Serverpfad exportieren"
             style="${c.server_path ? '' : 'opacity:.5'}">📤 Veröffentlichen</button>
@@ -221,6 +223,10 @@ const RAG = (() => {
     }
     wrap.querySelectorAll('.rag-add-doc').forEach(b =>
       b.addEventListener('click', () => { _uploadTargetId = b.dataset.id; document.getElementById('rag-file-input').click(); }));
+    wrap.querySelectorAll('.rag-add-folder-srv').forEach(b =>
+      b.addEventListener('click', () => _importServerFolder(b.dataset.id)));
+    wrap.querySelectorAll('.rag-add-folder-browser').forEach(b =>
+      b.addEventListener('click', () => _pickBrowserFolder(b.dataset.id)));
     wrap.querySelectorAll('.rag-del-coll').forEach(b =>
       b.addEventListener('click', () => _deleteCollection(b.dataset.id)));
     wrap.querySelectorAll('.rag-del-doc').forEach(b =>
@@ -414,6 +420,83 @@ const RAG = (() => {
         _hideOptCard();
         showToast(`Fehler bei ${f.name}: ${e.message}`);
       }
+    }
+    loadCollections();
+  }
+
+  // Ordner im Browser wählen → alle enthaltenen Dateien hochladen (reuse _uploadFiles).
+  // Erstellt einen verdeckten <input webkitdirectory>, damit keine HTML-Änderung nötig ist.
+  function _pickBrowserFolder(cid) {
+    _uploadTargetId = cid;
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.webkitdirectory = true;
+    inp.multiple = true;
+    inp.style.display = 'none';
+    inp.addEventListener('change', () => {
+      const files = Array.from(inp.files || []);
+      inp.remove();
+      if (!files.length) return;
+      showToast(`📂 ${files.length} Datei(en) aus Ordner werden eingelesen…`);
+      if (_ragOptimize) _uploadFilesOptimized(files);
+      else _uploadFiles(files);
+    });
+    document.body.appendChild(inp);
+    inp.click();
+  }
+
+  // Server-seitigen Ordner einlesen: Pfad abfragen, dann /folder mit SSE-Fortschritt.
+  async function _importServerFolder(cid) {
+    const path = prompt('Pfad zum Ordner auf dem Server (alle Textdateien werden eingelesen):', '');
+    if (!path || !path.trim()) return;
+    const recursive = confirm('Auch Unterordner einbeziehen?\n\nOK = ja (rekursiv), Abbrechen = nur dieser Ordner');
+    _showOptCard('Ordner wird gelesen…');
+    try {
+      const resp = await fetch(`/api/rag/collections/${cid}/folder`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path.trim(), recursive }),
+      });
+      if (!resp.ok || !resp.body) {
+        _hideOptCard();
+        let msg = 'HTTP ' + resp.status;
+        try { msg = (await resp.json()).detail || msg; } catch (_) {}
+        showToast('Fehler: ' + msg);
+        return;
+      }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let done = false;
+      while (!done) {
+        const { value, done: d } = await reader.read();
+        done = d;
+        if (value) buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          try {
+            const ev = JSON.parse(line.slice(5).trim());
+            if (ev.type === 'folder_start') {
+              _updateOptCard(`${ev.total} Datei(en) gefunden…`, 0);
+              if (!ev.total) showToast('Keine geeigneten Textdateien im Ordner gefunden');
+            } else if (ev.type === 'progress') {
+              _updateOptCard(`${ev.index + 1}/${ev.total}: ${ev.step}`, ev.pct ?? 50);
+            } else if (ev.type === 'done') {
+              _updateOptCard(`✓ ${ev.n_files} Datei(en), ${ev.n_chunks} Chunks`, 100);
+              setTimeout(_hideOptCard, 2500);
+              showToast(`✓ Ordner eingelesen: ${ev.n_files} Datei(en), ${ev.n_chunks} Chunks`
+                + (ev.errors && ev.errors.length ? ` (${ev.errors.length} übersprungen)` : ''));
+            } else if (ev.type === 'error') {
+              _hideOptCard();
+              showToast('Fehler: ' + ev.message);
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      _hideOptCard();
+      showToast('Fehler: ' + e.message);
     }
     loadCollections();
   }

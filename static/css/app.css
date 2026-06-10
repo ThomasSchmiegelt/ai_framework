@@ -1715,11 +1715,14 @@ html, body {
 #btn-docgen-run-present { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
 #btn-docgen-run-present:hover { background: var(--bg-active); border-color: var(--accent); }
 
-/* Datei-Auswahl-Knopf an das Design angleichen (runde Kanten statt OS-Default) */
+/* Datei-Auswahl-Knopf an das Design angleichen (runde Kanten statt OS-Default).
+   .file-styled ist die wiederverwendbare Klasse für alle sichtbaren Datei-Inputs. */
 #docgen-file,
-#mail-import-file { color: var(--text-dim); font-size: 12.5px; }
+#mail-import-file,
+.file-styled { color: var(--text-dim); font-size: 12.5px; }
 #docgen-file::file-selector-button,
-#mail-import-file::file-selector-button {
+#mail-import-file::file-selector-button,
+.file-styled::file-selector-button {
   margin-right: 10px;
   padding: 6px 14px;
   background: var(--bg-input);
@@ -1731,7 +1734,8 @@ html, body {
   transition: background .12s, border-color .12s;
 }
 #docgen-file::file-selector-button:hover,
-#mail-import-file::file-selector-button:hover {
+#mail-import-file::file-selector-button:hover,
+.file-styled::file-selector-button:hover {
   background: var(--bg-active);
   border-color: var(--accent);
 }

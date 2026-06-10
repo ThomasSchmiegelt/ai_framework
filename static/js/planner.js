@@ -34,6 +34,7 @@ const Planner = (() => {
   let _selectedTaskId = null; // ID der aktuell selektierten Aufgabe
   let _areaColors = {};       // cache: Bereich-Name → {border, bg}
   let _aiParsedTasks = null;  // vom KI-Chat geparste Aufgabenliste (für "übernehmen")
+  let _capacity = null;       // globale Kapazitätsliste (für Auslastung/Zukauf), lazy geladen
 
   const NODE_W  = 180;
   const NODE_H  = 72;
@@ -1481,6 +1482,157 @@ const Planner = (() => {
     showToast(`✓ Plan „${p.name}" geladen – ${_tasks.length} Aufgaben`);
   }
 
+  /* ── Automatisch strukturieren (intelligentes Verknüpfen) ────────── */
+  let _autoStructResult = null;   // {links, stats}
+  let _autoStructSnapshot = null; // JSON-Klon von _tasks vor dem Anwenden
+
+  function _openAutoStructure() {
+    if (!_tasks.length) { showToast('Keine Aufgaben zum Strukturieren'); return; }
+    document.getElementById('auto-structure-overlay')?.classList.add('active');
+    const statusEl  = document.getElementById('auto-struct-status');
+    const previewEl = document.getElementById('auto-struct-preview');
+    if (statusEl)  statusEl.textContent = '';
+    if (previewEl) previewEl.innerHTML = '';
+    document.getElementById('btn-auto-struct-apply').style.display = 'none';
+    // „Rückgängig" nur anbieten, solange ein Snapshot vorliegt
+    document.getElementById('btn-auto-struct-undo').style.display = _autoStructSnapshot ? '' : 'none';
+    _autoStructResult = null;
+  }
+
+  // Menschliche Rollen einer Aufgabe (für Ressourcen-Entzerrung)
+  function _taskRoles(t) {
+    const out = [];
+    for (const r of (t.resource_list || [])) {
+      if ((r.kind || 'human') === 'human' && r.name) out.push(r.name);
+    }
+    if (!out.length && t.area) out.push(t.area);
+    return out;
+  }
+
+  async function _computeAutoStructure() {
+    if (!_tasks.length) { showToast('Keine Aufgaben'); return; }
+    const opts = {
+      dependencies:     document.getElementById('auto-struct-deps')?.checked !== false,
+      phases:           document.getElementById('auto-struct-phases')?.checked !== false,
+      resource_leveling: document.getElementById('auto-struct-leveling')?.checked !== false,
+    };
+    if (!opts.dependencies && !opts.phases && !opts.resource_leveling) {
+      showToast('Bitte mindestens eine Option wählen'); return;
+    }
+    const statusEl  = document.getElementById('auto-struct-status');
+    const previewEl = document.getElementById('auto-struct-preview');
+    const runBtn    = document.getElementById('btn-auto-struct-run');
+    if (statusEl) statusEl.textContent = '⏳ KI analysiert Aufgaben…';
+    if (runBtn) runBtn.disabled = true;
+    document.getElementById('btn-auto-struct-apply').style.display = 'none';
+    _autoStructResult = null;
+
+    const tasks = _tasks.map(t => ({
+      id: t.id,
+      name: t.name || '',
+      area: t.area || '',
+      duration: Number(t.duration) || 1,
+      roles: _taskRoles(t),
+    }));
+
+    try {
+      const resp = await fetch('/api/plans/auto-structure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks, options: opts, description: _desc || '', model: _model() || '' }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      _autoStructResult = data;
+      _renderAutoStructPreview(data);
+      if (statusEl) statusEl.textContent = '✓ Vorschau bereit';
+      document.getElementById('btn-auto-struct-apply').style.display = '';
+    } catch (e) {
+      if (statusEl) statusEl.textContent = '❌ Fehler: ' + e.message;
+    } finally {
+      if (runBtn) runBtn.disabled = false;
+    }
+  }
+
+  function _renderAutoStructPreview(data) {
+    const previewEl = document.getElementById('auto-struct-preview');
+    if (!previewEl) return;
+    const st = data.stats || {};
+    const byId = {};
+    for (const t of _tasks) byId[t.id] = t;
+    // Phasen gruppieren
+    const phaseMap = {};
+    for (const l of (data.links || [])) {
+      const ph = l.area || '—';
+      (phaseMap[ph] = phaseMap[ph] || []).push(l);
+    }
+    let html = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="background:var(--bg-input);border-radius:6px;padding:4px 10px"><strong>${st.tasks ?? _tasks.length}</strong> Aufgaben</span>
+      <span style="background:var(--bg-input);border-radius:6px;padding:4px 10px">🔗 <strong>${st.dep_links ?? 0}</strong> fachliche Abhängigkeiten</span>
+      <span style="background:var(--bg-input);border-radius:6px;padding:4px 10px">⛓ <strong>${st.leveled_links ?? 0}</strong> Ressourcen-Entzerrungen</span>
+      <span style="background:var(--bg-input);border-radius:6px;padding:4px 10px">📑 <strong>${st.phases ?? 0}</strong> Phasen</span>
+    </div>`;
+    html += `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:4px 6px">Phase</th><th style="padding:4px 6px">Aufgabe</th><th style="padding:4px 6px">hängt ab von</th></tr></thead><tbody>`;
+    for (const ph of Object.keys(phaseMap)) {
+      const rows = phaseMap[ph];
+      rows.forEach((l, i) => {
+        const t = byId[l.id];
+        const preds = (l.predecessors || []).map(p => (byId[p]?.name ? `${p} (${byId[p].name})` : p)).join(', ') || '—';
+        html += `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:3px 6px;color:var(--text-muted)">${i === 0 ? _esc(ph) : ''}</td>
+          <td style="padding:3px 6px">${_esc(l.id)} · ${_esc(t?.name || '')}</td>
+          <td style="padding:3px 6px;color:var(--text-muted)">${_esc(preds)}</td></tr>`;
+      });
+    }
+    html += '</tbody></table>';
+    html += `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">
+      „Anwenden" ersetzt die bestehenden Verknüpfungen und Phasen dieser Aufgaben. Du kannst es mit „Rückgängig" zurücknehmen.</p>`;
+    previewEl.innerHTML = html;
+  }
+
+  function _esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  }
+
+  function _applyAutoStructure() {
+    if (!_autoStructResult || !Array.isArray(_autoStructResult.links)) { showToast('Erst Vorschau berechnen'); return; }
+    // Snapshot für Rückgängig
+    _autoStructSnapshot = JSON.parse(JSON.stringify(_tasks));
+    const byId = {};
+    for (const t of _tasks) byId[t.id] = t;
+    for (const l of _autoStructResult.links) {
+      const t = byId[l.id];
+      if (!t) continue;
+      t.predecessors = Array.isArray(l.predecessors) ? l.predecessors.filter(p => byId[p] && p !== l.id) : [];
+      t.successors = [];
+      if (l.area) t.area = l.area;
+    }
+    // Nachfolger aus Vorgängern symmetrisch rekonstruieren
+    _normalizeLinks();
+    _computeCPM();
+    _tasks.sort((a, b) => (_rank[a.id] || 0) - (_rank[b.id] || 0));
+    _recalcAndRender();
+    _fitView();
+    document.getElementById('btn-auto-struct-undo').style.display = '';
+    document.getElementById('auto-structure-overlay')?.classList.remove('active');
+    const st = _autoStructResult.stats || {};
+    showToast(`🔗 Strukturiert: ${st.dep_links ?? 0} Abhängigkeiten, ${st.leveled_links ?? 0} Entzerrungen, ${st.phases ?? 0} Phasen`);
+  }
+
+  function _undoAutoStructure() {
+    if (!_autoStructSnapshot) { showToast('Nichts rückgängig zu machen'); return; }
+    _tasks = _autoStructSnapshot;
+    _autoStructSnapshot = null;
+    _normalizeLinks();
+    _recalcAndRender();
+    _fitView();
+    document.getElementById('btn-auto-struct-undo').style.display = 'none';
+    document.getElementById('auto-structure-overlay')?.classList.remove('active');
+    showToast('↩ Auto-Strukturierung zurückgenommen');
+  }
+
   /* ── Projekt-Agent ableiten ──────────────────────────────────────── */
   async function _deriveAgent() {
     const desc = (document.getElementById('planner-desc')?.value || '').trim();
@@ -1994,19 +2146,119 @@ const Planner = (() => {
     el.textContent = parts.join('   ');
   }
 
-  function _openSchedule() {
+  /* ── Kapazität & Zukauf (Auslastung vs. globale Kapazitätsliste) ──── */
+  async function _ensureCapacity() {
+    if (_capacity) return _capacity;
+    try { _capacity = (await (await fetch('/api/capacity')).json()).items || []; }
+    catch (_) { _capacity = []; }
+    return _capacity;
+  }
+
+  function _capLookup(name) {
+    const n = String(name || '').toLowerCase().trim();
+    if (!n || !_capacity) return null;
+    let m = _capacity.find(c => String(c.name || '').toLowerCase().trim() === n);
+    if (!m) m = _capacity.find(c => {
+      const cn = String(c.name || '').toLowerCase().trim();
+      return cn && (cn.includes(n) || n.includes(cn));
+    });
+    return m || null;
+  }
+
+  // Liefert das letzte berechnete Kapazitäts-/Zukauf-Modell (für CSV-Export).
+  let _lastCapModel = null;
+
+  function _capacityAnalysisHtml() {
+    // Bedarf je Mensch-Rolle aggregieren (Σ qty×hours)
+    const demand = {};
+    for (const t of _tasks) {
+      for (const r of (t.resource_list || [])) {
+        if (r.kind !== 'human') continue;
+        const key = (r.name || '').trim() || 'unbestimmt';
+        if (!demand[key]) demand[key] = { name: key, hours: 0, rate: Number(r.rate) || 0, tasks: 0 };
+        demand[key].hours += (Number(r.qty) || 0) * (Number(r.hours) || 0);
+        demand[key].tasks += 1;
+        if (!demand[key].rate && r.rate) demand[key].rate = Number(r.rate) || 0;
+      }
+    }
+    const roles = Object.values(demand).sort((a, b) => b.hours - a.hours);
+    const model = [];
+    let intCost = 0, buyCost = 0;
+    for (const d of roles) {
+      const cap = _capLookup(d.name);
+      const capH = cap ? (Number(cap.capacity_h) || 0) : null;
+      const rate = d.rate || (cap ? Number(cap.rate) || 0 : 0);
+      const shortfall = (capH != null) ? Math.max(0, d.hours - capH) : null;
+      const util = (capH && capH > 0) ? Math.round(d.hours / capH * 100) : null;
+      intCost += d.hours * rate;
+      if (shortfall) buyCost += shortfall * rate;
+      model.push({ name: d.name, hours: d.hours, tasks: d.tasks, rate, country: cap ? cap.country : '',
+        capH, shortfall, util, hasCap: !!cap });
+    }
+    _lastCapModel = model;
+
+    const eur = v => (Math.round(v) ).toLocaleString('de-DE');
+    let html = '<div class="suggest-group-title">👥 Kapazität & Make-or-Buy (Bedarf vs. freie Kapazität)</div>';
+    if (!roles.length) {
+      html += '<p class="planner-muted" style="font-size:12px">Keine Mensch-Ressourcen mit Stunden hinterlegt.</p>';
+      return html;
+    }
+    html += `<table class="schedule-table"><thead><tr>
+      <th>Rolle</th><th>Land</th><th>Bedarf (h)</th><th>frei (h)</th><th>Auslastung</th>
+      <th>Fehlstunden</th><th>Kosten (€)</th><th>Bewertung</th></tr></thead><tbody>`;
+    for (const m of model) {
+      let verdict, color;
+      if (!m.hasCap) { verdict = 'keine Kapazität hinterlegt → zukaufen/anlegen'; color = '#9ca3af'; }
+      else if (m.shortfall > 0) { verdict = `Überlast → zukaufen (${Math.round(m.shortfall)} h)`; color = '#f87171'; }
+      else { verdict = 'im Rahmen'; color = '#34d399'; }
+      html += `<tr>
+        <td>${escHtml(m.name)}</td>
+        <td>${escHtml(m.country || '–')}</td>
+        <td style="text-align:right">${Math.round(m.hours)}</td>
+        <td style="text-align:right">${m.capH != null ? Math.round(m.capH) : '–'}</td>
+        <td style="text-align:right">${m.util != null ? m.util + '%' : '–'}</td>
+        <td style="text-align:right;${m.shortfall ? 'color:#f87171;font-weight:600' : ''}">${m.shortfall != null ? Math.round(m.shortfall) : '–'}</td>
+        <td style="text-align:right">${m.rate ? eur(m.hours * m.rate) : '–'}</td>
+        <td style="color:${color}">${escHtml(verdict)}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>
+      <p class="planner-muted" style="font-size:11.5px;margin-top:4px">
+        Geschätzte interne Kosten gesamt: <b>${eur(intCost)} €</b>${buyCost ? ` · davon Zukauf-Bedarf (Fehlstunden × Satz): <b style="color:#f87171">${eur(buyCost)} €</b>` : ''}.
+        Auslastung &gt; 100 % bedeutet Überlast → externe Kapazität / Partner / Best-Cost-Country.
+      </p>`;
+
+    // Partner- und BCC-Listen aus RFQ-Übergaben (falls vorhanden)
+    const partners = _tasks.filter(t => t.rfq && t.rfq.partner_needed);
+    const bccs = _tasks.filter(t => t.rfq && t.rfq.bcc_suitable);
+    if (partners.length) {
+      html += '<div class="suggest-group-title" style="margin-top:14px">🤝 Partner nötig</div><ul style="margin:4px 0 0 18px;font-size:12px">'
+        + partners.map(t => `<li>${escHtml(t.name)}${t.rfq.partner_type ? ' — ' + escHtml(t.rfq.partner_type) : ''}</li>`).join('') + '</ul>';
+    }
+    if (bccs.length) {
+      html += '<div class="suggest-group-title" style="margin-top:14px">🌍 Best-Cost-Country</div><ul style="margin:4px 0 0 18px;font-size:12px">'
+        + bccs.map(t => `<li>${escHtml(t.name)}${t.rfq.bcc_region ? ' → ' + escHtml(t.rfq.bcc_region) : ''}</li>`).join('') + '</ul>';
+    }
+    return html;
+  }
+
+  async function _openSchedule() {
     if (!_tasks.length) { showToast('Keine Aufgaben'); return; }
     _computeCPM();
+    await _ensureCapacity();
     const rows = _scheduleRows();
     const hint = document.getElementById('schedule-hint');
     if (hint) hint.textContent = _startDate
       ? `Kalenderdaten ab Projektstart ${_fmtDay(0)}. „Bestellen bis" = Bedarf − Lieferzeit.`
       : 'Tipp: Projektstart-Datum oben setzen, um echte Kalenderdaten statt „Tag X" zu sehen.';
     const body = document.getElementById('schedule-modal-body');
+    // Kapazitäts-/Zukauf-Analyse (primär) zuerst, dann der HW/SW-Bestellplan.
+    const capHtml = _capacityAnalysisHtml()
+      + '<div class="suggest-group-title" style="margin-top:16px">📦 Beschaffung Hardware/Software (Bestellplan)</div>';
     if (!rows.length) {
-      body.innerHTML = '<div class="planner-muted" style="padding:8px 0">Noch keine Ressourcen mit Bedarf hinterlegt. Lege je Aufgabe Ressourcen an (Spalte „Ressourcen / Kosten").</div>';
+      body.innerHTML = capHtml + '<div class="planner-muted" style="padding:8px 0">Noch keine Hardware/Software/Lieferpositionen mit Bedarf hinterlegt.</div>';
     } else {
-      body.innerHTML = `<table id="schedule-table" class="schedule-table">
+      body.innerHTML = capHtml + `<table id="schedule-table" class="schedule-table">
         <thead><tr>
           <th>Typ</th><th>Ressource</th><th>Aufgaben</th>
           <th>benötigt ab</th><th>Lieferz. (d)</th><th>bestellen bis</th>
@@ -2043,21 +2295,40 @@ const Planner = (() => {
 
   function _exportSchedule() {
     const rows = _scheduleRows();
-    if (!rows.length) { showToast('Keine Ressourcen vorhanden'); return; }
+    const cap = _lastCapModel || [];
+    if (!rows.length && !cap.length) { showToast('Keine Ressourcen vorhanden'); return; }
     const sep = ';';
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-    const header = [q('Typ'), q('Ressource'), q('Aufgaben'), q('benötigt ab'), q('Lieferzeit (d)'), q('bestellen bis')].join(sep);
-    const lines = rows.map(r => [
-      q(_KIND_DE[r.kind] || r.kind), q(r.name), q([...new Set(r.tasks)].join(', ')),
-      q(_fmtDay(r.needDay)), q(r.lead || 0), q(_fmtDay(r.orderDay)),
-    ].join(sep));
+    const out = [];
+    // Kapazitäts-/Zukauf-Abschnitt
+    if (cap.length) {
+      out.push([q('Rolle'), q('Land'), q('Bedarf (h)'), q('frei (h)'), q('Auslastung %'),
+                q('Fehlstunden'), q('Kosten (€)'), q('Bewertung')].join(sep));
+      for (const m of cap) {
+        const verdict = !m.hasCap ? 'keine Kapazität hinterlegt'
+          : (m.shortfall > 0 ? 'Überlast - zukaufen' : 'im Rahmen');
+        out.push([q(m.name), q(m.country || ''), q(Math.round(m.hours)),
+          q(m.capH != null ? Math.round(m.capH) : ''), q(m.util != null ? m.util : ''),
+          q(m.shortfall != null ? Math.round(m.shortfall) : ''),
+          q(m.rate ? Math.round(m.hours * m.rate) : ''), q(verdict)].join(sep));
+      }
+      out.push('');
+    }
+    // Bestellplan-Abschnitt (HW/SW Lieferzeiten)
+    if (rows.length) {
+      out.push([q('Typ'), q('Ressource'), q('Aufgaben'), q('benötigt ab'), q('Lieferzeit (d)'), q('bestellen bis')].join(sep));
+      for (const r of rows) {
+        out.push([q(_KIND_DE[r.kind] || r.kind), q(r.name), q([...new Set(r.tasks)].join(', ')),
+          q(_fmtDay(r.needDay)), q(r.lead || 0), q(_fmtDay(r.orderDay))].join(sep));
+      }
+    }
     const name = document.getElementById('planner-plan-name')?.value?.trim() || 'plan';
-    const blob = new Blob(['﻿' + [header, ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob(['﻿' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `${name}_bestellplan.csv`; a.click();
+    a.href = url; a.download = `${name}_kapazitaet_bestellplan.csv`; a.click();
     URL.revokeObjectURL(url);
-    showToast(`✓ Bestellplan exportiert: ${rows.length} Ressourcen`);
+    showToast('✓ Kapazität & Bestellplan exportiert');
   }
 
   function _closeSchedule() {
@@ -2198,6 +2469,23 @@ const Planner = (() => {
   function _updateCatalogStatus() {
     const el = document.getElementById('planner-catalog-status');
     if (el) el.textContent = _catalog.length ? `📋 Katalog: ${_catalog.length} Ressourcen` : '';
+  }
+
+  // Ressourcen aus der globalen Kapazitätsliste (Anfrage-Tab) als Katalog übernehmen.
+  // Es werden nur die vom Planer genutzten Felder {kind,name,rate} projiziert.
+  async function _catalogFromGlobal() {
+    try {
+      const items = (await (await fetch('/api/capacity')).json()).items || [];
+      if (!items.length) { showToast('Globale Kapazitätsliste ist leer (im Anfrage-Tab pflegen)'); return; }
+      _catalog = items.map(it => ({ kind: it.kind || 'human', name: it.name, rate: it.rate || 0 }));
+      if (_resMode === 'free') {
+        _resMode = 'extend';
+        const sel = document.getElementById('planner-res-mode');
+        if (sel) sel.value = 'extend';
+      }
+      _updateCatalogStatus();
+      showToast(`✓ ${_catalog.length} Ressourcen aus globaler Liste übernommen`);
+    } catch (e) { showToast('Fehler: ' + e.message); }
   }
 
   // Verwendete Ressourcen über alle Aufgaben aggregieren und als CSV exportieren
@@ -2480,6 +2768,7 @@ const Planner = (() => {
     const catInput = document.getElementById('catalog-csv-input');
     document.getElementById('btn-import-catalog')?.addEventListener('click', () => catInput?.click());
     catInput?.addEventListener('change', e => { if (e.target.files[0]) _importCatalog(e.target.files[0]); e.target.value = ''; });
+    document.getElementById('btn-catalog-from-global')?.addEventListener('click', _catalogFromGlobal);
     document.getElementById('btn-export-resources')?.addEventListener('click', _exportResources);
 
     // Ressourcen-Modal
@@ -2539,6 +2828,14 @@ const Planner = (() => {
     document.getElementById('btn-from-list-run')?.addEventListener('click', _generateFromList);
     document.getElementById('btn-from-list-load')?.addEventListener('click', _loadFromListPlan);
 
+    // Automatisch strukturieren
+    document.getElementById('btn-auto-structure')?.addEventListener('click', _openAutoStructure);
+    document.getElementById('btn-auto-structure-close')?.addEventListener('click', () =>
+      document.getElementById('auto-structure-overlay')?.classList.remove('active'));
+    document.getElementById('btn-auto-struct-run')?.addEventListener('click', _computeAutoStructure);
+    document.getElementById('btn-auto-struct-apply')?.addEventListener('click', _applyAutoStructure);
+    document.getElementById('btn-auto-struct-undo')?.addEventListener('click', _undoAutoStructure);
+
     // Resize
     new ResizeObserver(_recalcAndRender).observe(_canvas.parentElement);
 
@@ -2556,6 +2853,14 @@ const Planner = (() => {
     _recalcAndRender();
   }
 
-  return { init };
+  // Von anderen Tabs (z. B. Anfrage-Auswertung) aufrufbar: Plan per ID laden und
+  // in den Planer wechseln.
+  async function openPlan(id) {
+    await _loadPlanList();
+    await _loadPlan(id);
+    if (typeof switchTab === 'function') switchTab('planner');
+  }
+
+  return { init, openPlan };
 
 })();

@@ -205,7 +205,14 @@ async def chat(client: httpx.AsyncClient, payload: dict) -> "LLMResponse":
                            resp.status_code)
     data = _safe_json(resp)
     choices = data.get("choices") or [{}]
-    return LLMResponse({"message": _openai_msg_to_ollama(choices[0].get("message") or {})}, 200)
+    out = {"message": _openai_msg_to_ollama(choices[0].get("message") or {})}
+    # Token-Verbrauch (OpenAI ``usage``) auf Ollama-Felder abbilden, damit der
+    # Token-Zähler im Backend Anbieter-unabhängig funktioniert.
+    usage = data.get("usage") or {}
+    if usage:
+        out["prompt_eval_count"] = int(usage.get("prompt_tokens") or 0)
+        out["eval_count"] = int(usage.get("completion_tokens") or 0)
+    return LLMResponse(out, 200)
 
 
 async def stream(client: httpx.AsyncClient, payload: dict) -> AsyncIterator[dict]:

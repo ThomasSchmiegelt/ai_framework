@@ -41,7 +41,7 @@ DEFAULT_MODEL: str = _CONFIG.get("default_model", "ministral-3:3b")
 # Satz abbrechen. Höher kostet KV-Cache-VRAM (config.json: "chat_num_ctx").
 CHAT_NUM_CTX: int = int(_CONFIG.get("chat_num_ctx", 8192))
 # Im Profil wählbare Kontextfenster-Stufen (Tokens). Mehr = mehr KV-Cache-VRAM.
-_ALLOWED_NUM_CTX: tuple[int, ...] = (4096, 8192, 16384, 32768)
+_ALLOWED_NUM_CTX: tuple[int, ...] = (4096, 8192, 16384, 32768, 65536, 131072)
 # Wie lange ein geladenes Modell ohne neue Anfrage im VRAM bleibt (Ollama keep_alive).
 # Lang genug, damit es zwischen Schritten nicht ständig neu lädt; endlich, damit der
 # VRAM im Leerlauf wieder frei wird. Bei Modellwechsel entlädt _model_session sofort.
@@ -78,6 +78,8 @@ DOSSIERS_DIR = DATA_DIR / "dossiers"   # automatisch exportierte Planer-Recherch
 CODE_DIR = DATA_DIR / "code"
 JURIES_DIR = DATA_DIR / "juries"   # gespeicherte Bewertungs-Jurys (Gruppen von Agenten)
 JURY_DOCS_DIR = DATA_DIR / "jury_docs"   # im Jury-Tab erstellte/geprüfte Dokumente
+RFQ_DIR = DATA_DIR / "rfq"   # Anfrage-Auswertung: Job-Zwischenstände (resume-fähig)
+CAPACITY_FILE = DATA_DIR / "capacity.json"   # globale Kapazitätsliste (tab-übergreifend)
 BILDER_DIR = Path(__file__).parent / "bilder"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
 PROFILE_ASSETS_DIR = DATA_DIR / "profile_assets"
@@ -86,7 +88,7 @@ PROJECTS_FILE = DATA_DIR / "projects.json"
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, PROFILE_ASSETS_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PROFILE_ASSETS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -987,12 +989,27 @@ class AgentDef(BaseModel):
     # Fest an den Agenten gebundene Wissensdatenbanken (z. B. ein Gesetzes-/Regel-
     # Agent mit hinterlegtem Normtext); werden im Chat automatisch aktiviert.
     rag_collections: List[str] = []
+    # Optionaler Beispielcode (für Coding-Agenten): wird dem Code-Assistenten als
+    # Stil-/Struktur-Vorlage mitgegeben.
+    example_code: Optional[str] = ""
 
 
 class ResearchRequest(BaseModel):
     topic: str
     aspects: List[str]
     model: str = ""   # leer → Wissenschafts-Modell aus dem Profil
+
+
+class DeepDiveRequest(BaseModel):
+    """Deepdive: aus der letzten Antwort X Vertiefungsfragen ableiten und der Reihe
+    nach abarbeiten (je Frage eine Websuche + optional RAG → eine Antwort)."""
+    last_answer: str = ""           # letzte Assistenten-Antwort = Kontext / Vorwort
+    topic: str = ""                 # letzte Nutzerfrage (Themenanker)
+    count: int = 5                  # X — Anzahl Fragen/Kapitel
+    model: str = ""                 # leer → aktuelles Chat-Modell (general)
+    as_document: bool = False       # True → /ddd (Vorwort + Kapitel), False → /dd
+    web_search: bool = True
+    rag_collections: List[str] = []
 
 
 # ── Routen ────────────────────────────────────────────────────────────────────
@@ -1241,6 +1258,132 @@ async def _research_generator(request: ResearchRequest):
     for i, word in enumerate(words):
         yield _sse({"type": "text", "content": word + (" " if i < len(words) - 1 else "")})
         await asyncio.sleep(0.004)
+
+    yield _sse({"type": "done"})
+
+
+@app.post("/api/deepdive")
+async def deepdive(request: DeepDiveRequest):
+    return StreamingResponse(
+        _deepdive_generator(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _deepdive_questions(model: str, context: str, topic: str, count: int) -> list:
+    """Leitet aus der letzten Antwort genau ``count`` Vertiefungsfragen ab.
+    Gibt eine Liste von Fragestrings zurück (Fallback: generische Fragen)."""
+    sys = (
+        "Du bist ein gründlicher Rechercheur. Aus dem gegebenen Text leitest du "
+        f"genau {count} weiterführende, eigenständige Vertiefungsfragen ab, die das "
+        "Thema systematisch vertiefen (verschiedene Aspekte, keine Dopplungen). "
+        "Jede Frage muss für sich als Suchanfrage funktionieren. "
+        'Antworte NUR als JSON: {"questions": ["…", "…"]}.'
+    )
+    usr = (f"Thema/Ausgangsfrage: {topic}\n\n" if topic else "") + (
+        f"Ausgangstext (letzte Antwort):\n{context[:6000]}\n\n"
+        f"Formuliere genau {count} Vertiefungsfragen auf Deutsch."
+    )
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model,
+                "think": False,
+                "stream": False,
+                "format": "json",
+                "messages": [
+                    {"role": "system", "content": sys},
+                    {"role": "user", "content": usr},
+                ],
+                "options": {"num_ctx": _profile_num_ctx()},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+    except Exception:
+        data = {}
+    qs = data.get("questions") if isinstance(data, dict) else None
+    out = [str(q).strip() for q in qs if str(q).strip()] if isinstance(qs, list) else []
+    # Auf gewünschte Anzahl bringen (kürzen bzw. generisch auffüllen).
+    out = out[:count]
+    base = (topic or "das Thema").strip()
+    while len(out) < count:
+        out.append(f"Welche weiteren wichtigen Aspekte zu {base} sind relevant? (Teil {len(out)+1})")
+    return out
+
+
+async def _deepdive_answer(model: str, question: str, web: bool, rag_collections: list) -> str:
+    """Beantwortet EINE Deepdive-Frage: Websuche (+ optional RAG) als Beleg, dann
+    ein LLM-Aufruf. Gibt den fertigen Markdown-Antworttext zurück."""
+    from tools.search import search_with_sources
+    blocks = []
+    if web:
+        try:
+            _, text = await search_with_sources(question, 5)
+            if text:
+                blocks.append("### Websuche\n" + text[:3000])
+        except Exception as e:
+            blocks.append(f"### Websuche\n(Suche fehlgeschlagen: {e})")
+    if rag_collections:
+        try:
+            from tools.rag import query_collections
+            hits = await query_collections(rag_collections, question, top_k_cap=5)
+            if hits:
+                rag_txt = "\n\n".join(
+                    f"[{h.get('collection_name','?')} · {h.get('filename','?')}]\n{h.get('text','')}"
+                    for h in hits
+                )
+                blocks.append("### Wissensdatenbank\n" + rag_txt[:3000])
+        except Exception:
+            pass
+    grounding = "\n\n".join(blocks)
+    sys = "\n\n".join(p for p in (_augment_prefix(question), _SCIENCE_PROMPT) if p)
+    usr = (
+        (f"Belegmaterial:\n{grounding}\n\n" if grounding else "")
+        + f"Beantworte ausführlich und strukturiert (Markdown) folgende Frage:\n\n{question}\n\n"
+        + ("Stütze dich auf das Belegmaterial und nenne Quellen." if grounding
+           else "Antworte aus deinem Fachwissen.")
+    )
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            resp = await _llm.chat(client, {
+                "model": model,
+                "think": False,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": sys},
+                    {"role": "user", "content": usr},
+                ],
+                "options": {"num_ctx": _profile_num_ctx()},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            content = resp.json().get("message", {}).get("content", "")
+    except Exception as e:
+        return f"_(Antwort fehlgeschlagen: {e})_"
+    return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+
+async def _deepdive_generator(request: DeepDiveRequest):
+    model = _pick_model(request.model, _model_for("general"))
+    count = max(1, min(int(request.count or 5), 20))   # Sicherheitsgrenze
+    context = (request.last_answer or request.topic or "").strip()
+    if not context:
+        yield _sse({"type": "error", "message": "Keine vorherige Antwort für den Deepdive vorhanden."})
+        return
+
+    yield _sse({"type": "dd_meta", "count": count, "as_document": request.as_document})
+
+    # 1) Vertiefungsfragen ableiten
+    questions = await _deepdive_questions(model, context, request.topic, count)
+    yield _sse({"type": "dd_questions", "questions": questions})
+
+    # 2) Fragen der Reihe nach abarbeiten (je Frage Suche + Antwort)
+    for idx, question in enumerate(questions):
+        yield _sse({"type": "dd_chapter_start", "index": idx, "question": question})
+        answer = await _deepdive_answer(model, question, request.web_search, request.rag_collections)
+        yield _sse({"type": "dd_chapter_done", "index": idx, "question": question, "answer": answer})
 
     yield _sse({"type": "done"})
 
@@ -1523,6 +1666,60 @@ async def rag_from_text(cid: str, req: Request):
     return {"ok": True, "n_chunks": n}
 
 
+# In den RAG geeignete Dateiendungen (Textextraktion via tools/files.py).
+_RAG_FOLDER_EXTS = {
+    ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt", ".md", ".rtf",
+    ".py", ".js", ".json", ".yaml", ".yml", ".html", ".htm", ".css",
+}
+
+
+@app.post("/api/rag/collections/{cid}/folder")
+async def rag_add_folder(cid: str, req: Request):
+    """Baut aus allen Textdateien eines Server-seitigen Ordners eine Wissensdatenbank
+    auf: Datei für Datei extrahieren → (in ingest_file) bereinigen, chunken, einbetten.
+    Streamt SSE-Fortschritt. Hinweis: liest serverseitige Pfade — im Mehrbenutzer-/
+    Server-Modus bewusst sparsam einsetzen."""
+    coll = await _db.rag_get_collection(cid)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Wissensdatenbank nicht gefunden")
+    body = await req.json()
+    raw_path = str(body.get("path", "")).strip()
+    recursive = bool(body.get("recursive", True))
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="Kein Ordnerpfad angegeben")
+    folder = Path(raw_path).expanduser()
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"Ordner nicht gefunden: {folder}")
+
+    it = folder.rglob("*") if recursive else folder.glob("*")
+    files = sorted(p for p in it if p.is_file() and p.suffix.lower() in _RAG_FOLDER_EXTS)
+
+    async def gen():
+        from tools.rag import ingest_file
+        total = len(files)
+        yield _sse({"type": "folder_start", "total": total, "folder": str(folder)})
+        n_chunks = 0
+        n_ok = 0
+        errors: list = []
+        for i, fp in enumerate(files):
+            yield _sse({"type": "progress", "step": fp.name, "index": i,
+                        "total": total, "pct": int(i / total * 100) if total else 100})
+            try:
+                text = await asyncio.to_thread(_extract_text, fp)
+                if not text or text.startswith("[Lesefehler") or text.startswith("[Kann Datei"):
+                    errors.append(f"{fp.name}: kein Text")
+                    continue
+                c = await ingest_file(coll, text, fp.name, f"doc_{uuid.uuid4().hex[:12]}")
+                n_chunks += c
+                n_ok += 1
+            except Exception as e:
+                errors.append(f"{fp.name}: {e}")
+        yield _sse({"type": "done", "n_files": n_ok, "n_chunks": n_chunks, "errors": errors[:20]})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 async def _derive_adaptive_prompt(user_text: str, model: str, num_ctx: int = CHAT_NUM_CTX):
     """Leitet aus der Nutzerfrage einen fragespezifischen Experten-System-Prompt ab.
     Rückgabe: (rolle, system_prompt) – bei Fehler ("", "").
@@ -1774,6 +1971,8 @@ async def _chat_generator(request: ChatRequest):
     # _num_ctx wurde bereits oben (vor der adaptiven Ableitung) bestimmt.
     # Denkprozess anfordern? Wird abgeschaltet, falls das Modell 'think' nicht unterstützt.
     _think_on = bool(request.show_thinking)
+    _tok_in = 0   # summierte Prompt-Tokens über alle Loop-Iterationen
+    _tok_out = 0  # summierte Antwort-Tokens
     # Agentic Loop
     for _iter in range(8):
         payload = {
@@ -1797,6 +1996,8 @@ async def _chat_generator(request: ChatRequest):
                     resp = await _llm.chat(client,payload)
                 resp.raise_for_status()
                 result = resp.json()
+                _tok_in += int(result.get("prompt_eval_count") or 0)
+                _tok_out += int(result.get("eval_count") or 0)
         except Exception as e:
             # Bekannte Ollama-Fragilität: kleine Modelle erzeugen beim Tool-Calling
             # gelegentlich ungültige Escapes (\( … ) → HTTP 500. Wollte der Nutzer einen
@@ -1950,8 +2151,9 @@ async def _chat_generator(request: ChatRequest):
                 "resp_len": len(content),
                 "tools_called": _tools_called,
                 "ms": int((time.time() - _log_t0) * 1000),
+                "tok_in": _tok_in, "tok_out": _tok_out,
             })
-            yield _sse({"type": "done"})
+            yield _sse({"type": "done", "tokens": {"in": _tok_in, "out": _tok_out}})
             return
 
         # Tool-Calls ausführen
@@ -2817,6 +3019,787 @@ async def get_upload(fid: str):
     return FileResponse(fp)
 
 
+# ── Globale Kapazitätsliste ───────────────────────────────────────────────────
+# Tab-übergreifende Liste von Ressourcen/Partnern auf Basis des Planer-Schemas
+# ({kind,name,rate}), erweitert um Land/Region, freie Kapazität (h) und Skills.
+# Wird vom Planer (Katalog-Import) und der Anfrage-Auswertung (RFQ) genutzt.
+
+def _coerce_capacity(item: dict) -> dict:
+    """Bringt einen Kapazitätseintrag auf das interne Schema und säubert Typen."""
+    name = str(item.get("name", "")).strip()[:120]
+    kind = str(item.get("kind", "human")).lower().strip()
+    if kind not in ("human", "hardware", "software"):
+        kind = _classify_resource_kind(name) or "human"
+    def _num(v):
+        try:
+            return max(0, float(v))
+        except (TypeError, ValueError):
+            return 0
+    return {
+        "kind": kind,
+        "name": name,
+        "rate": _num(item.get("rate", 0)),
+        "country": str(item.get("country", "")).strip()[:60],
+        "capacity_h": _num(item.get("capacity_h", 0)),
+        "skills": str(item.get("skills", "")).strip()[:300],
+    }
+
+
+# ── Mehrere benannte Ressourcen-/Kapazitätslisten ──────────────────────────────
+# Datenmodell: data/capacity_lists.json = {lists:[{id,name,items,updated_at}],
+# selected:[ids]}. Mehrere Listen sind per Häkchen aktivierbar; _load_capacity()
+# liefert die VEREINIGUNG der aktiven Listen (dedupliziert nach Name). Migration
+# aus der alten Einzelliste capacity.json erfolgt transparent beim ersten Zugriff.
+CAP_LISTS_FILE = DATA_DIR / "capacity_lists.json"
+
+
+def _load_capacity_file() -> list:
+    """Liest die alte Einzelliste (capacity.json) — nur noch für die Migration."""
+    if not CAPACITY_FILE.exists():
+        return []
+    try:
+        data = json.loads(CAPACITY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    items = data.get("items") if isinstance(data, dict) else data
+    return [_coerce_capacity(i) for i in items if isinstance(i, dict) and str(i.get("name", "")).strip()] if isinstance(items, list) else []
+
+
+def _coerce_cap_list(lst: dict) -> dict:
+    items = lst.get("items") if isinstance(lst, dict) else None
+    items = items if isinstance(items, list) else []
+    return {
+        "id": str(lst.get("id") or uuid.uuid4().hex[:12]),
+        "name": str(lst.get("name", "")).strip()[:80] or "Liste",
+        "items": [_coerce_capacity(i) for i in items
+                  if isinstance(i, dict) and str(i.get("name", "")).strip()],
+        "updated_at": lst.get("updated_at") or time.time(),
+    }
+
+
+def _save_cap_lists(data: dict) -> dict:
+    lists = [_coerce_cap_list(l) for l in (data.get("lists") or []) if isinstance(l, dict)]
+    ids = {l["id"] for l in lists}
+    selected = [s for s in (data.get("selected") or []) if s in ids]
+    out = {"lists": lists, "selected": selected, "updated_at": time.time()}
+    CAP_LISTS_FILE.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
+
+
+def _load_cap_lists() -> dict:
+    """Liefert {lists, selected} mit transparenter Migration aus capacity.json."""
+    if CAP_LISTS_FILE.exists():
+        try:
+            data = json.loads(CAP_LISTS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        lists = [_coerce_cap_list(l) for l in (data.get("lists") or []) if isinstance(l, dict)]
+        ids = {l["id"] for l in lists}
+        selected = [s for s in (data.get("selected") or []) if s in ids]
+        if not selected and lists:
+            selected = [lists[0]["id"]]
+        return {"lists": lists, "selected": selected}
+    # Migration: alte Einzelliste → eine Liste „Standard"
+    legacy = _load_capacity_file()
+    migrated = {"lists": [{"id": "standard", "name": "Standard",
+                           "items": legacy, "updated_at": time.time()}],
+                "selected": ["standard"]}
+    return _save_cap_lists(migrated)
+
+
+def _load_capacity() -> list:
+    """Vereinigung der aktiven (angehakten) Listen, dedupliziert nach Name."""
+    data = _load_cap_lists()
+    sel = set(data["selected"])
+    seen, out = set(), []
+    for l in data["lists"]:
+        if l["id"] not in sel:
+            continue
+        for it in l["items"]:
+            key = it["name"].strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(it)
+    return out
+
+
+def _save_capacity(items: list) -> list:
+    """Rückwärtskompatibel: speichert in die erste aktive Liste (legt „Standard" an,
+    falls noch keine existiert). Wird vom alten Einzel-Editor genutzt."""
+    clean = [_coerce_capacity(i) for i in items
+             if isinstance(i, dict) and str(i.get("name", "")).strip()]
+    data = _load_cap_lists()
+    target = data["selected"][0] if data["selected"] else (data["lists"][0]["id"] if data["lists"] else None)
+    if target is None:
+        data["lists"].append({"id": "standard", "name": "Standard", "items": clean, "updated_at": time.time()})
+        data["selected"] = ["standard"]
+    else:
+        for l in data["lists"]:
+            if l["id"] == target:
+                l["items"] = clean
+                l["updated_at"] = time.time()
+    _save_cap_lists(data)
+    return clean
+
+
+def _capacity_context(items: list = None) -> str:
+    """Kompakter Listentext der Kapazitäten für den Auswertungs-Prompt."""
+    items = _load_capacity() if items is None else items
+    if not items:
+        return ""
+    lines = []
+    for it in items:
+        parts = [it["name"]]
+        if it.get("skills"):
+            parts.append(f"Skills: {it['skills']}")
+        if it.get("country"):
+            parts.append(f"Land: {it['country']}")
+        if it.get("capacity_h"):
+            parts.append(f"frei: {it['capacity_h']:g} h")
+        lines.append("- " + " · ".join(parts))
+    return "\n".join(lines)
+
+
+@app.get("/api/capacity")
+async def get_capacity():
+    return {"items": _load_capacity()}
+
+
+@app.put("/api/capacity")
+async def put_capacity(req: Request):
+    body = await req.json()
+    items = body.get("items") if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items-Liste erwartet")
+    return {"items": _save_capacity(items)}
+
+
+# ── Verwaltung mehrerer benannter Ressourcenlisten ──────────────────────────────
+@app.get("/api/capacity/lists")
+async def get_capacity_lists():
+    """Übersicht aller Listen + aktuelle Auswahl (ohne die vollen Items)."""
+    data = _load_cap_lists()
+    return {
+        "lists": [{"id": l["id"], "name": l["name"], "n_items": len(l["items"]),
+                   "updated_at": l["updated_at"]} for l in data["lists"]],
+        "selected": data["selected"],
+    }
+
+
+@app.get("/api/capacity/lists/{list_id}")
+async def get_capacity_list(list_id: str):
+    data = _load_cap_lists()
+    for l in data["lists"]:
+        if l["id"] == list_id:
+            return l
+    raise HTTPException(status_code=404, detail="Liste nicht gefunden")
+
+
+@app.post("/api/capacity/lists")
+async def create_capacity_list(req: Request):
+    body = await req.json()
+    name = str(body.get("name", "")).strip()[:80] or "Neue Liste"
+    data = _load_cap_lists()
+    new = {"id": uuid.uuid4().hex[:12], "name": name, "items": [], "updated_at": time.time()}
+    data["lists"].append(new)
+    data["selected"] = list(data["selected"]) + [new["id"]]
+    _save_cap_lists(data)
+    return {"id": new["id"], "name": new["name"]}
+
+
+@app.put("/api/capacity/lists/{list_id}")
+async def update_capacity_list(list_id: str, req: Request):
+    body = await req.json()
+    data = _load_cap_lists()
+    found = None
+    for l in data["lists"]:
+        if l["id"] == list_id:
+            found = l
+            break
+    if found is None:
+        # Upsert: unbekannte ID neu anlegen (erlaubt Anlegen über PUT)
+        found = {"id": list_id, "name": "", "items": [], "updated_at": time.time()}
+        data["lists"].append(found)
+        if list_id not in data["selected"]:
+            data["selected"].append(list_id)
+    if "name" in body:
+        found["name"] = str(body.get("name", "")).strip()[:80] or found.get("name") or "Liste"
+    if "items" in body and isinstance(body["items"], list):
+        found["items"] = body["items"]
+    found["updated_at"] = time.time()
+    saved = _save_cap_lists(data)
+    out = next((l for l in saved["lists"] if l["id"] == found["id"]), found)
+    return out
+
+
+@app.delete("/api/capacity/lists/{list_id}")
+async def delete_capacity_list(list_id: str):
+    data = _load_cap_lists()
+    data["lists"] = [l for l in data["lists"] if l["id"] != list_id]
+    data["selected"] = [s for s in data["selected"] if s != list_id]
+    _save_cap_lists(data)
+    return {"ok": True}
+
+
+@app.put("/api/capacity/selection")
+async def set_capacity_selection(req: Request):
+    """Setzt, welche Listen (per Häkchen) für Auswertung & Planer aktiv sind."""
+    body = await req.json()
+    sel = body.get("selected") if isinstance(body, dict) else body
+    if not isinstance(sel, list):
+        raise HTTPException(status_code=400, detail="selected-Liste erwartet")
+    data = _load_cap_lists()
+    ids = {l["id"] for l in data["lists"]}
+    data["selected"] = [s for s in sel if s in ids]
+    _save_cap_lists(data)
+    return {"selected": data["selected"]}
+
+
+# ── Anfrage-Auswertung (RFQ) ──────────────────────────────────────────────────
+# Große XLS-Anfragen mit vielen Arbeitspaketen: je Paket ein Dispatcher-/Master-
+# Aufruf, der die zuständige Fachrolle bestimmt und interessant/Partner/Best-Cost-
+# Country bewertet. Robust mit Zwischenspeicherung (data/rfq/{job}.json) + Resume.
+
+_RFQ_SYSTEM = (
+    "Du bist Angebots- und Vergabemanager. Du bekommst EIN Arbeitspaket aus einer "
+    "großen Anfrage. Bestimme die zuständige Fachrolle/Disziplin (bevorzugt eine aus "
+    "der bereitgestellten Kapazitätsliste) und bewerte das Paket nüchtern. "
+    "Nutze die Kapazitätsliste (Rollen, Skills, Land) für die Zuordnung und für die "
+    "Best-Cost-Country-Einschätzung. Erfinde nichts; bei Unklarheit 'prüfen'. "
+    "Antworte NUR mit JSON in genau diesem Format: "
+    '{"responsible":"Fachrolle/Disziplin",'
+    '"interesting":{"verdict":"ja|nein|pruefen","reason":"kurz"},'
+    '"partner":{"needed":true,"type":"Art des Partners oder leer"},'
+    '"bcc":{"suitable":true,"region":"Land/Region oder leer","reason":"kurz"}}'
+)
+
+
+def _rfq_job_path(job_id: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "", job_id or "")[:40] or uuid.uuid4().hex[:12]
+    return RFQ_DIR / f"{safe}.json"
+
+
+_RFQ_CUSTOM_SYSTEM = (
+    "Du bewertest EIN Arbeitspaket aus einer großen Anfrage anhand einer konkreten "
+    "Vorgabe/Frage. Antworte knapp und sachlich, erfinde nichts. "
+    'Antworte NUR mit JSON: {"value":"kurze Antwort/Einordnung (wenige Worte)",'
+    '"note":"optionale 1-Satz-Begründung"}.'
+)
+
+
+def _rfq_agent_prompt(agent_id: str) -> str:
+    """System-Prompt eines Agenten anhand seiner ID (für agentenbasierte Spalten)."""
+    if not agent_id:
+        return ""
+    fp = _agent_path_by_id(agent_id)
+    if not fp:
+        return ""
+    try:
+        return str((json.loads(fp.read_text(encoding="utf-8")) or {}).get("system_prompt", "")).strip()
+    except Exception:
+        return ""
+
+
+def _sanitize_rfq_columns(cols) -> list:
+    """Eigene Bewertungsspalten säubern: max. 6, je {key,name,prompt?,agent_id?}."""
+    out = []
+    for c in (cols or []):
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("name", "")).strip()[:40]
+        raw_key = str(c.get("key", "")).strip() or name
+        key = re.sub(r"[^a-z0-9_]", "", raw_key.lower())[:24]
+        if not key or not name:
+            continue
+        # Spalte braucht eine Vorgabe: freier Prompt ODER ein Agent
+        if not str(c.get("prompt", "")).strip() and not str(c.get("agent_id", "")).strip():
+            continue
+        # Doppelte Keys eindeutig machen
+        if any(o["key"] == key for o in out):
+            key = (key + "_" + uuid.uuid4().hex[:3])[:24]
+        out.append({
+            "key": key, "name": name,
+            "prompt": str(c.get("prompt", "")).strip()[:1000],
+            "agent_id": str(c.get("agent_id", "")).strip()[:64],
+        })
+        if len(out) >= 6:
+            break
+    return out
+
+
+def _llm_tok(j: dict) -> tuple:
+    """(prompt_tokens, completion_tokens) aus einer Ollama-förmigen Antwort."""
+    return int((j or {}).get("prompt_eval_count") or 0), int((j or {}).get("eval_count") or 0)
+
+
+async def _rfq_eval_custom(client, model: str, task: str, columns: list):
+    """Wertet je eigener Spalte EIN Arbeitspaket aus → ({key: {value, note}}, tok_in, tok_out).
+    Pro Spalte ein LLM-Aufruf (Agent-Persona oder freier Prompt als Vorgabe)."""
+    out = {}
+    tin = tout = 0
+    for col in columns:
+        key = col.get("key")
+        if not key:
+            continue
+        instr = (col.get("prompt") or "").strip()
+        persona = _rfq_agent_prompt(col.get("agent_id") or "")
+        if persona:
+            sys = persona + '\n\nAntworte NUR mit JSON: {"value":"kurze Antwort","note":"1-Satz-Begründung"}.'
+            usr = (f"Arbeitspaket:\n{task[:3000]}"
+                   + (f"\n\nZusätzliche Vorgabe: {instr}" if instr else ""))
+        else:
+            sys = _RFQ_CUSTOM_SYSTEM
+            usr = (f"Vorgabe/Frage für die Spalte „{col.get('name', '')}\":\n"
+                   f"{instr or col.get('name', '')}\n\nArbeitspaket:\n{task[:3000]}")
+        try:
+            async with _model_session(model):
+                resp = await _llm.chat(client, {
+                    "model": model, "think": False, "stream": False, "format": "json",
+                    "messages": [{"role": "system", "content": sys},
+                                 {"role": "user", "content": usr}],
+                    "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+                })
+                resp.raise_for_status()
+            _j = resp.json()
+            _ti, _to = _llm_tok(_j)
+            tin += _ti; tout += _to
+            d = _parse_llm_json(_j.get("message", {}).get("content", "")) or {}
+            out[key] = {"value": str(d.get("value", "")).strip()[:200],
+                        "note": str(d.get("note", "")).strip()[:300]}
+        except Exception as e:
+            out[key] = {"value": "(Fehler)", "note": str(e)[:120]}
+    return out, tin, tout
+
+
+async def _rfq_eval_one(client, model: str, task: str, capacity_ctx: str,
+                        web: bool, rag_collections: list,
+                        custom_columns: list = None) -> dict:
+    """Wertet EIN Arbeitspaket aus → strukturiertes Ergebnis-dict."""
+    grounding = []
+    if web and task.strip():
+        try:
+            from tools.search import search_with_sources
+            _, txt = await search_with_sources(task[:200], 4)
+            if txt:
+                grounding.append("Websuche:\n" + txt[:1800])
+        except Exception:
+            pass
+    if rag_collections:
+        try:
+            from tools.rag import query_collections
+            hits = await query_collections(rag_collections, task[:500], top_k_cap=4)
+            if hits:
+                grounding.append("Wissensdatenbank:\n" + "\n".join(
+                    h.get("text", "") for h in hits)[:1800])
+        except Exception:
+            pass
+    user = ""
+    if capacity_ctx:
+        user += f"Kapazitätsliste (verfügbare Rollen/Partner):\n{capacity_ctx}\n\n"
+    if grounding:
+        user += "\n\n".join(grounding) + "\n\n"
+    user += f"Arbeitspaket:\n{task[:4000]}"
+    # _model_session serialisiert lokale Generierungen (VRAM-Lock) und ist für
+    # Remote-Modelle ein No-op → mehrere Remote-Aufrufe laufen echt parallel.
+    async with _model_session(model):
+        resp = await _llm.chat(client, {
+            "model": model,
+            "think": False,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": _RFQ_SYSTEM},
+                {"role": "user", "content": user},
+            ],
+            "options": {"num_ctx": _profile_num_ctx()},
+            "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+    _j = resp.json()
+    _ti, _to = _llm_tok(_j)
+    data = _parse_llm_json(_j.get("message", {}).get("content", "")) or {}
+    inter = data.get("interesting") or {}
+    partner = data.get("partner") or {}
+    bcc = data.get("bcc") or {}
+    result = {
+        "responsible": str(data.get("responsible", "")).strip(),
+        "interesting": str(inter.get("verdict", "")).strip().lower(),
+        "interesting_reason": str(inter.get("reason", "")).strip(),
+        "partner_needed": bool(partner.get("needed")),
+        "partner_type": str(partner.get("type", "")).strip(),
+        "bcc_suitable": bool(bcc.get("suitable")),
+        "bcc_region": str(bcc.get("region", "")).strip(),
+        "bcc_reason": str(bcc.get("reason", "")).strip(),
+    }
+    if custom_columns:
+        cres, cti, cto = await _rfq_eval_custom(client, model, task, custom_columns)
+        result["custom"] = cres
+        _ti += cti; _to += cto
+    # Token-Verbrauch für den Sitzungszähler (wird in gen() summiert, vor dem Streamen entfernt)
+    result["__tok"] = {"in": _ti, "out": _to}
+    return result
+
+
+@app.post("/api/rfq/ask")
+async def rfq_ask(req: Request):
+    """Freie Rückfrage zur ausgewerteten Anfrage (Chat-Zeile im Anfrage-Tab). Ein
+    LLM-Aufruf mit einer kompakten Zusammenfassung der Auswertung als Kontext."""
+    body = await req.json()
+    question = str(body.get("question", "")).strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Keine Frage angegeben")
+    context = str(body.get("context", "")).strip()[:9000]
+    model = _pick_model(body.get("model"), _model_for("general"))
+    sys = (
+        "Du bist Angebots- und Vergabeassistent. Beantworte die Frage des Nutzers zur "
+        "ausgewerteten Anfrage knapp, konkret und auf Deutsch — möglichst nur auf Basis "
+        "der bereitgestellten Auswertung. Fehlt eine Information, sage das."
+    )
+    usr = (f"Auswertung (Auszug):\n{context}\n\n" if context else "") + f"Frage: {question}"
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": sys},
+                             {"role": "user", "content": usr}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+        answer = str(_j.get("message", {}).get("content", "")).strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Anfrage-Chat fehlgeschlagen: {e}")
+    _ti, _to = _llm_tok(_j)
+    return {"answer": answer or "(keine Antwort)", "tokens": {"in": _ti, "out": _to}}
+
+
+@app.post("/api/rfq/preview")
+async def rfq_preview(file: UploadFile = File(...), sheet: str = Form(""),
+                      header_row: int = Form(0)):
+    """Lädt die Anfrage-Datei hoch und liefert Blätter/Spalten/Beispielzeilen zur
+    Spaltenzuordnung zurück."""
+    from tools.files import read_table
+    fid = f"rfq_{uuid.uuid4().hex[:8]}_{file.filename}"
+    fp = UPLOADS_DIR / fid
+    fp.write_bytes(await file.read())
+    try:
+        tbl = await asyncio.to_thread(read_table, fp, sheet or None, int(header_row), 5)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Tabelle nicht lesbar: {e}")
+    if tbl.get("error"):
+        raise HTTPException(status_code=400, detail=tbl["error"])
+    # Gesamtzeilenzahl (ohne 5er-Limit) separat bestimmen
+    full = await asyncio.to_thread(read_table, fp, tbl.get("sheet") or None, int(header_row), None)
+    return {
+        "file_id": fid,
+        "sheets": tbl.get("sheets", []),
+        "sheet": tbl.get("sheet", ""),
+        "headers": tbl.get("headers", []),
+        "sample_rows": tbl.get("rows", []),
+        "n_rows": len(full.get("rows", [])),
+    }
+
+
+@app.post("/api/rfq/evaluate")
+async def rfq_evaluate(req: Request):
+    body = await req.json()
+    file_id = str(body.get("file_id", "")).strip()
+    fp = UPLOADS_DIR / file_id
+    if not file_id or not fp.exists():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden — bitte erneut hochladen")
+    sheet = str(body.get("sheet", "")).strip() or None
+    header_row = int(body.get("header_row", 0) or 0)
+    task_col = int(body.get("task_col", -1))
+    id_col = body.get("id_col")
+    title_col = body.get("title_col")
+    model = _pick_model(body.get("model"), _model_for("general"))
+    web = bool(body.get("web_search"))
+    rag_collections = body.get("rag_collections") or []
+    custom_columns = _sanitize_rfq_columns(body.get("custom_columns"))
+    limit = body.get("limit")
+    job_id = str(body.get("job_id", "")).strip() or uuid.uuid4().hex[:12]
+    resume = bool(body.get("resume"))
+    # Parallelität nur für Remote-Modelle (externe API) — lokal bremst der VRAM-Lock
+    # ohnehin auf 1. Client darf override liefern; sonst Default 6 (remote) / 1 (lokal).
+    _remote = _llm.is_remote(model)
+    try:
+        _req_conc = int(body.get("concurrency", 0))
+    except (TypeError, ValueError):
+        _req_conc = 0
+    concurrency = max(1, min(_req_conc or 6, 12)) if _remote else 1
+
+    async def gen():
+        from tools.files import read_table
+        tbl = await asyncio.to_thread(read_table, fp, sheet, header_row, None)
+        rows = tbl.get("rows", [])
+        headers = tbl.get("headers", [])
+        if task_col < 0 or task_col >= len(headers):
+            yield _sse({"type": "error", "message": "Keine gültige Aufgaben-Spalte gewählt"})
+            return
+        if isinstance(limit, int) and limit > 0:
+            rows = rows[:limit]
+        capacity_ctx = _capacity_context()
+
+        # Job-Datei laden (Resume) oder neu anlegen
+        jpath = _rfq_job_path(job_id)
+        done: dict = {}
+        if resume and jpath.exists():
+            try:
+                done = (json.loads(jpath.read_text(encoding="utf-8")) or {}).get("results", {})
+            except Exception:
+                done = {}
+
+        def _cell(row, idx):
+            try:
+                return row[int(idx)] if idx is not None and int(idx) >= 0 else ""
+            except (TypeError, ValueError, IndexError):
+                return ""
+
+        _EMPTY = {"responsible": "", "interesting": "", "interesting_reason": "(leer)",
+                  "partner_needed": False, "partner_type": "", "bcc_suitable": False,
+                  "bcc_region": "", "bcc_reason": ""}
+
+        async def _one(i, row, client):
+            """Liefert (i, rid, title, task, cells, result, is_new)."""
+            task = str(_cell(row, task_col)).strip()
+            rid = str(_cell(row, id_col)).strip() if id_col is not None else ""
+            title = str(_cell(row, title_col)).strip() if title_col is not None else ""
+            key = str(i)
+            if key in done:
+                return i, rid, title, task, list(row), done[key], False
+            if not task:
+                return i, rid, title, task, list(row), dict(_EMPTY), False
+            try:
+                result = await _rfq_eval_one(client, model, task, capacity_ctx, web,
+                                             rag_collections, custom_columns)
+            except Exception as e:
+                result = {"responsible": "", "interesting": "fehler",
+                          "interesting_reason": str(e)[:200], "partner_needed": False,
+                          "partner_type": "", "bcc_suitable": False, "bcc_region": "",
+                          "bcc_reason": ""}
+            return i, rid, title, task, list(row), result, True
+
+        total = len(rows)
+        yield _sse({"type": "start", "job_id": job_id, "total": total,
+                    "headers": headers, "concurrency": concurrency, "remote": _remote,
+                    "custom_columns": custom_columns})
+        counts = {"interesting": 0, "partner": 0, "bcc": 0}
+        tok_total = {"in": 0, "out": 0}
+        indexed = list(enumerate(rows))
+        async with httpx.AsyncClient(timeout=300) as client:
+            # In Blöcken der Größe `concurrency` abarbeiten (remote echt parallel,
+            # lokal = 1). Reihenfolge der Ausgabe bleibt erhalten; pro Block persistieren.
+            for bs in range(0, total, concurrency):
+                batch = indexed[bs:bs + concurrency]
+                done_batch = await asyncio.gather(*(_one(i, row, client) for i, row in batch))
+                dirty = False
+                for i, rid, title, task, cells, result, is_new in done_batch:
+                    # Token-Verbrauch herausziehen (nicht streamen/persistieren)
+                    _tk = result.pop("__tok", None) if isinstance(result, dict) else None
+                    if _tk:
+                        tok_total["in"] += int(_tk.get("in") or 0)
+                        tok_total["out"] += int(_tk.get("out") or 0)
+                    if is_new:
+                        done[str(i)] = result
+                        dirty = True
+                    if result.get("interesting") == "ja":
+                        counts["interesting"] += 1
+                    if result.get("partner_needed"):
+                        counts["partner"] += 1
+                    if result.get("bcc_suitable"):
+                        counts["bcc"] += 1
+                    yield _sse({"type": "row", "index": i, "id": rid, "title": title,
+                                "task": task, "result": result, "cells": cells,
+                                "pct": int((i + 1) / total * 100) if total else 100})
+                if dirty:
+                    try:
+                        jpath.write_text(json.dumps({"job_id": job_id, "results": done},
+                                                    ensure_ascii=False), encoding="utf-8")
+                    except Exception:
+                        pass
+        yield _sse({"type": "done", "job_id": job_id, "summary": {"n": total, **counts},
+                    "tokens": tok_total})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── RFQ → Planer-Übergabe ─────────────────────────────────────────────────────
+# Ausgewählte (interessante) Tickets gesamthaft in EINEN Plan überführen. Da RFQ
+# keine Stunden liefert, schätzt das LLM bei der Übergabe Aufwand + Dauer je Ticket
+# (nur für die Teilmenge). Die „Zuständige Rolle" wird zur Ressource; Kosten/Auslastung
+# rechnet der Planer anschließend gegen die globale Kapazitätsliste.
+
+_RFQ_ESTIMATE_SYSTEM = (
+    "Du bist Projektkalkulator. Schätze für EIN Arbeitspaket realistisch den Aufwand in "
+    "Personenstunden (hours) und die Dauer in Arbeitstagen (duration_days) für die genannte "
+    "Rolle. Sei nüchtern; bei Unklarheit konservativ. "
+    'Antworte NUR mit JSON: {"hours":Zahl,"duration_days":Zahl}.'
+)
+
+
+async def _rfq_estimate_one(client, model: str, task: str, role: str) -> dict:
+    """Schätzt Aufwand (h) und Dauer (Tage) für ein Ticket. Fallback 8 h / 1 Tag."""
+    usr = f"Rolle: {role or 'unbestimmt'}\n\nArbeitspaket:\n{task[:3000]}"
+    try:
+        async with _model_session(model):
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False, "format": "json",
+                "messages": [
+                    {"role": "system", "content": _RFQ_ESTIMATE_SYSTEM},
+                    {"role": "user", "content": usr},
+                ],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+    except Exception:
+        data = {}
+
+    def _num(v, default):
+        try:
+            n = float(v)
+            return n if n > 0 else default
+        except (TypeError, ValueError):
+            return default
+    return {"hours": _num(data.get("hours"), 8.0), "duration_days": _num(data.get("duration_days"), 1.0)}
+
+
+def _rfq_task_note(rid: str, res: dict) -> str:
+    bits = []
+    if rid:
+        bits.append(f"ID {rid}")
+    if res.get("interesting"):
+        bits.append(f"interessant: {res['interesting']}")
+    if res.get("partner_needed"):
+        bits.append(f"Partner: {res.get('partner_type') or 'ja'}")
+    if res.get("bcc_suitable"):
+        bits.append(f"BCC: {res.get('bcc_region') or 'ja'}")
+    return " · ".join(bits)
+
+
+@app.post("/api/rfq/to-plan")
+async def rfq_to_plan(req: Request):
+    body = await req.json()
+    file_id = str(body.get("file_id", "")).strip()
+    fp = UPLOADS_DIR / file_id
+    if not file_id or not fp.exists():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden — bitte erneut hochladen")
+    job_id = str(body.get("job_id", "")).strip()
+    jpath = _rfq_job_path(job_id) if job_id else None
+    if not jpath or not jpath.exists():
+        raise HTTPException(status_code=400, detail="Keine Auswertung gefunden — bitte zuerst auswerten")
+    sheet = str(body.get("sheet", "")).strip() or None
+    header_row = int(body.get("header_row", 0) or 0)
+    task_col = int(body.get("task_col", -1))
+    id_col = body.get("id_col")
+    title_col = body.get("title_col")
+    model = _pick_model(body.get("model"), _model_for("general"))
+    plan_name = str(body.get("plan_name", "")).strip() or "Anfrage-Auswertung"
+    selection = body.get("selection", "interesting")
+    _remote = _llm.is_remote(model)
+    try:
+        _req_conc = int(body.get("concurrency", 0))
+    except (TypeError, ValueError):
+        _req_conc = 0
+    concurrency = max(1, min(_req_conc or 6, 12)) if _remote else 1
+
+    async def gen():
+        from tools.files import read_table
+        try:
+            results = (json.loads(jpath.read_text(encoding="utf-8")) or {}).get("results", {})
+        except Exception:
+            results = {}
+        tbl = await asyncio.to_thread(read_table, fp, sheet, header_row, None)
+        rows = tbl.get("rows", [])
+        headers = tbl.get("headers", [])
+        if task_col < 0 or task_col >= len(headers):
+            yield _sse({"type": "error", "message": "Keine gültige Aufgaben-Spalte gewählt"})
+            return
+
+        def _cell(row, idx):
+            try:
+                return row[int(idx)] if idx is not None and int(idx) >= 0 else ""
+            except (TypeError, ValueError, IndexError):
+                return ""
+
+        # Zu übernehmende Zeilen bestimmen
+        if isinstance(selection, list):
+            sel = [int(i) for i in selection if isinstance(i, int) or str(i).isdigit()]
+        else:
+            sel = []
+            for i in range(len(rows)):
+                r = results.get(str(i)) or {}
+                if selection == "all":
+                    if r:
+                        sel.append(i)
+                elif (r.get("interesting") or "") == "ja":
+                    sel.append(i)
+        sel = [i for i in sel if 0 <= i < len(rows)]
+        total = len(sel)
+        yield _sse({"type": "start", "total": total, "concurrency": concurrency, "remote": _remote})
+        if not total:
+            yield _sse({"type": "error", "message": "Keine passenden Tickets für die Auswahl"})
+            return
+
+        cap_items = _load_capacity()
+
+        async def _one(n, i, client):
+            row = rows[i]
+            res = results.get(str(i)) or {}
+            task = str(_cell(row, task_col)).strip()
+            rid = str(_cell(row, id_col)).strip() if id_col is not None else ""
+            title = str(_cell(row, title_col)).strip() if title_col is not None else ""
+            role = str(res.get("responsible", "")).strip()
+            est = await _rfq_estimate_one(client, model, task, role)
+            cap = _match_catalog(role, cap_items) if role else None
+            rate = float((cap or {}).get("rate", 0) or 0)
+            name = (title or task[:80] or f"Paket {i + 1}").strip()
+            return {
+                "id": f"T{n + 1}", "name": name, "duration": round(est["duration_days"], 1),
+                "predecessors": [], "successors": [], "resources": "",
+                "resource_list": [{"kind": "human", "name": role or "unbestimmt", "qty": 1,
+                                   "hours": round(est["hours"], 1), "rate": rate, "lead": 0}],
+                "notes": _rfq_task_note(rid, res), "area": role or "Sonstige",
+                "is_start": False, "is_end": False,
+                "rfq": {"interesting": res.get("interesting", ""),
+                        "partner_needed": bool(res.get("partner_needed")),
+                        "partner_type": res.get("partner_type", ""),
+                        "bcc_suitable": bool(res.get("bcc_suitable")),
+                        "bcc_region": res.get("bcc_region", "")},
+            }
+
+        tasks = [None] * total
+        async with httpx.AsyncClient(timeout=300) as client:
+            enum_sel = list(enumerate(sel))
+            for bs in range(0, total, concurrency):
+                batch = enum_sel[bs:bs + concurrency]
+                computed = await asyncio.gather(*(_one(n, i, client) for n, i in batch))
+                for t in computed:
+                    tasks[int(t["id"][1:]) - 1] = t
+                yield _sse({"type": "progress", "done": min(bs + concurrency, total), "total": total})
+
+        catalog = [{"kind": c.get("kind", "human"), "name": c.get("name", ""), "rate": c.get("rate", 0)}
+                   for c in cap_items if c.get("name")]
+        plan_id = uuid.uuid4().hex[:12]
+        plan = {
+            "id": plan_id, "name": plan_name,
+            "created_at": time.time(), "updated_at": time.time(),
+            "tasks": tasks,
+            "description": f"Aus Anfrage-Auswertung übernommen ({total} Tickets).",
+            "system_prompt": "",
+            "resource_catalog": catalog, "resource_mode": "extend",
+            "start_date": time.strftime("%Y-%m-%d"), "end_date": "", "workdays": True,
+        }
+        _plan_path(plan_id, plan_name).write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+        yield _sse({"type": "done", "plan_id": plan_id, "plan_name": plan_name, "n": total})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @app.get("/api/dossiers")
 async def list_dossiers():
     """Listet die automatisch erzeugten Planer-Recherche-Dossiers (.md) auf –
@@ -3472,12 +4455,14 @@ async def create_legal_agent(
     file: UploadFile = File(...),
     title: str = Form(""),
     web_search: bool = Form(False),
+    domain: str = Form(""),
 ):
-    """Erzeugt aus einem hochgeladenen Gesetzestext / einer Norm einen spezialisierten
-    Gesetzes-/Regel-Agenten. Der Text wird beim Hochladen nach Markdown konvertiert;
-    bei kurzem Text direkt in den system_prompt eingebettet, bei langem Text in eine
-    eigene Wissensdatenbank ('Gesetz: …') ausgelagert und fest an den Agenten gebunden
-    (rag_collections) — die Entscheidung fällt automatisch nach Länge."""
+    """Erzeugt aus einem hochgeladenen Fachdokument einen spezialisierten Dokument-Experten.
+    Über `domain` (Fachgebiet/Rolle, z. B. „Recht", „Physik", „Medizin") wird die Persona
+    und der Zitierstil angepasst — leer ⇒ juristischer Modus (rückwärtskompatibel). Der
+    Text wird nach Markdown konvertiert; bei kurzem Text direkt in den system_prompt
+    eingebettet, bei langem Text in eine eigene Wissensdatenbank ausgelagert und fest an
+    den Agenten gebunden (rag_collections) — die Entscheidung fällt automatisch nach Länge."""
     from tools.rag import ingest_file
     tmp = UPLOADS_DIR / f"legal_{uuid.uuid4().hex}_{file.filename}"
     async with aiofiles.open(tmp, "wb") as fh:
@@ -3492,16 +4477,28 @@ async def create_legal_agent(
     if not raw or raw.startswith("[Lesefehler"):
         raise HTTPException(status_code=400, detail=f"Text konnte nicht extrahiert werden: {raw}")
 
-    name = (title or "").strip() or Path(file.filename or "Gesetz").stem
+    name = (title or "").strip() or Path(file.filename or "Dokument").stem
     md = _legal_to_md(raw, name)
     tools_list = ["web_search"] if web_search else []
+
+    # Fachgebiet/Rolle bestimmt Persona, Zitierstil, Kategorie & Icon.
+    domain = (domain or "").strip()[:40]
+    _is_legal = (not domain) or domain.lower() in (
+        "recht", "gesetz", "gesetze", "jura", "legal", "norm", "juristisch")
+    if _is_legal:
+        persona = f"ein juristischer Fachassistent für „{name}“"
+        cite = "die einschlägige Fundstelle (§ bzw. Artikel)"
+        coll_prefix, category, icon = "Gesetz", "Recht", "⚖️"
+    else:
+        persona = f"ein Fachassistent für {domain} zum Thema „{name}“"
+        cite = "die Fundstelle (z. B. Abschnitt, Kapitel, Gleichung oder Seite)"
+        coll_prefix, category, icon = domain, domain, "📚"
 
     if len(md) <= _LEGAL_PROMPT_LIMIT:
         mode, rag_ids = "prompt", []
         system_prompt = (
-            f"Du bist ein juristischer Fachassistent für „{name}“. Beantworte Fragen "
-            f"AUSSCHLIESSLICH auf Basis des folgenden Regel-/Gesetzestextes und nenne immer "
-            f"die einschlägige Fundstelle (§ bzw. Artikel). Steht die Antwort nicht im Text, "
+            f"Du bist {persona}. Beantworte Fragen AUSSCHLIESSLICH auf Basis des folgenden "
+            f"Dokuments und nenne immer {cite}. Steht die Antwort nicht im Text, "
             f"sage das klar und rate nicht. Antworte präzise und auf Deutsch.\n\n"
             f"--- {name} ---\n\n{md}"
         )
@@ -3509,7 +4506,7 @@ async def create_legal_agent(
         mode = "rag"
         coll = {
             "id": f"rag_{uuid.uuid4().hex[:12]}",
-            "name": f"Gesetz: {name}",
+            "name": f"{coll_prefix}: {name}",
             "embed_model": EMBED_MODEL,
             "tier": "korrekt",
             "chunk_size": 1200, "chunk_overlap": 200, "top_k": 6,
@@ -3526,21 +4523,20 @@ async def create_legal_agent(
                 detail=f"Einbetten fehlgeschlagen — ist das Embedding-Modell '{EMBED_MODEL}' gepullt? ({e})")
         rag_ids = [coll["id"]]
         system_prompt = (
-            f"Du bist ein juristischer Fachassistent für „{name}“. Dir ist der vollständige "
-            f"Regel-/Gesetzestext als Wissensdatenbank hinterlegt. Beantworte Fragen "
-            f"AUSSCHLIESSLICH anhand der eingeblendeten Auszüge und nenne immer die "
-            f"einschlägige Fundstelle (§ bzw. Artikel). Steht die Antwort nicht in den "
-            f"Auszügen, sage das klar und rate nicht. Antworte präzise und auf Deutsch."
+            f"Du bist {persona}. Dir ist das vollständige Dokument als Wissensdatenbank "
+            f"hinterlegt. Beantworte Fragen AUSSCHLIESSLICH anhand der eingeblendeten Auszüge "
+            f"und nenne immer {cite}. Steht die Antwort nicht in den Auszügen, sage das klar "
+            f"und rate nicht. Antworte präzise und auf Deutsch."
         )
 
     agent = AgentDef(
         id=_to_slug(name) + "_" + uuid.uuid4().hex[:4],
         name=name,
-        description=f"Gesetzes-/Regel-Agent zu „{name}“ (automatisch aus hochgeladenem Text erstellt).",
+        description=f"Dokument-Experte ({category}) zu „{name}“ (automatisch aus hochgeladenem Text erstellt).",
         system_prompt=system_prompt,
         tools=tools_list,
-        icon="⚖️",
-        category="Recht",
+        icon=icon,
+        category=category,
         favorite=True,
         rag_collections=rag_ids,
     )
@@ -3548,6 +4544,7 @@ async def create_legal_agent(
     fp.write_text(json.dumps(agent.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "agent_id": agent.id, "name": name, "mode": mode, "chars": len(md),
+        "category": category, "coll_prefix": coll_prefix,
         "rag_collection_id": (rag_ids[0] if rag_ids else None),
     }
 
@@ -4580,6 +5577,13 @@ async def save_profile(req: Request):
     except (TypeError, ValueError):
         _nctx = CHAT_NUM_CTX
     profile["chat_num_ctx"] = _nctx if _nctx in _ALLOWED_NUM_CTX else CHAT_NUM_CTX
+    # Token-Preis (für den Kostenschätzer im Token-Zähler). Lokale Modelle = 0.
+    for _pk in ("price_per_1k_in", "price_per_1k_out"):
+        try:
+            profile[_pk] = max(0.0, float(body.get(_pk, 0) or 0))
+        except (TypeError, ValueError):
+            profile[_pk] = 0.0
+    profile["currency"] = (str(body.get("currency", "€") or "€").strip() or "€")[:4]
     # Erst-Start-Einleitung: einmal absolviert? + beim nächsten Start erneut zeigen?
     profile["onboarding_done"] = bool(body.get("onboarding_done", False))
     profile["replay_intro"] = bool(body.get("replay_intro", False))
@@ -5723,6 +6727,156 @@ async def plan_from_list(req: Request):
     return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
+# ── Intelligente Verknüpfung / Auto-Strukturierung ────────────────────────────
+
+def _reachable(start: str, target: str, preds: dict) -> bool:
+    """Ist ``target`` ein (transitiver) Vorgänger von ``start`` (folgt preds)?"""
+    stack = list(preds.get(start, ()))
+    seen = set()
+    while stack:
+        n = stack.pop()
+        if n == target:
+            return True
+        if n in seen:
+            continue
+        seen.add(n)
+        stack.extend(preds.get(n, ()))
+    return False
+
+
+def _add_edge(p: str, t: str, preds: dict) -> bool:
+    """Setzt ``p`` als Vorgänger von ``t``, falls das weder Zyklus noch Redundanz
+    erzeugt. Gibt True zurück, wenn eine Kante hinzugefügt wurde."""
+    if p == t or p in preds[t]:
+        return False
+    if _reachable(p, t, preds):   # t ist schon Vorgänger von p → würde Zyklus bilden
+        return False
+    if _reachable(t, p, preds):   # p ist bereits (transitiv) Vorgänger von t → redundant
+        return False
+    preds[t].add(p)
+    return True
+
+
+def _topo_order(ids: list, preds: dict) -> list:
+    from collections import deque
+    indeg = {i: 0 for i in ids}
+    succ = {i: [] for i in ids}
+    for t in ids:
+        for p in preds.get(t, ()):
+            if p in indeg:
+                succ[p].append(t)
+                indeg[t] += 1
+    q = deque([i for i in ids if indeg[i] == 0])
+    order = []
+    while q:
+        n = q.popleft()
+        order.append(n)
+        for s in succ[n]:
+            indeg[s] -= 1
+            if indeg[s] == 0:
+                q.append(s)
+    order += [i for i in ids if i not in order]   # evtl. Restzyklen hinten anhängen
+    return order
+
+
+@app.post("/api/plans/auto-structure")
+async def auto_structure_plan(req: Request):
+    """Schlägt für BESTEHENDE Aufgaben automatisch Phasen + Abhängigkeiten vor
+    (fachlich via LLM), optional mit Ressourcen-Entzerrung (gleiche Rolle nicht
+    parallel) und ohne künstliche Verkettung unabhängiger Stränge. Liefert
+    {links:[{id,predecessors,area}], stats:{…}} — der Plan wird NICHT gespeichert;
+    das Frontend zeigt eine Vorschau und wendet sie auf Bestätigung an."""
+    body = await req.json()
+    tasks_in = body.get("tasks") or []
+    if not tasks_in:
+        raise HTTPException(status_code=400, detail="Keine Aufgaben übergeben")
+    opts = body.get("options") or {}
+    want_deps = opts.get("dependencies", True)
+    want_phases = opts.get("phases", True)
+    want_leveling = bool(opts.get("resource_leveling"))
+    model = _pick_model(body.get("model"), _model_for("general"))
+    description = (body.get("description") or "").strip()
+
+    ids, name_by, roles_by, area_by = [], {}, {}, {}
+    for i, t in enumerate(tasks_in, 1):
+        tid = str(t.get("id") or f"T{i}").strip() or f"T{i}"
+        if tid in name_by:
+            continue
+        ids.append(tid)
+        name_by[tid] = str(t.get("name", tid))[:120]
+        roles_by[tid] = [str(r).strip() for r in (t.get("roles") or []) if str(r).strip()]
+        area_by[tid] = str(t.get("area") or "").strip()[:40]
+    idset = set(ids)
+    preds = {i: set() for i in ids}
+    area_out = dict(area_by)
+
+    # 1) Fachliche Abhängigkeiten + Phasen via LLM
+    if want_deps or want_phases:
+        listing = "\n".join(
+            f"- {tid}: {name_by[tid]}" + (f"  [Bereich: {area_by[tid]}]" if area_by[tid] else "")
+            for tid in ids)
+        sys = (
+            "Du bist erfahrener Projektmanager. Du erhältst eine Liste bestehender "
+            "Projektaufgaben mit IDs. Bestimme die LOGISCHE Struktur: welche Aufgabe muss "
+            "vor welcher fertig sein (direkte Vorgänger), und ordne jede Aufgabe einer "
+            "Projektphase (area) zu. Verkette NICHT künstlich — fachlich unabhängige Aufgaben "
+            "dürfen parallel bleiben. Verwende AUSSCHLIESSLICH die vorgegebenen IDs. "
+            'Antworte NUR mit JSON: {"links":[{"id":"T1","predecessors":["T2"],"area":"Konstruktion"}]}.'
+        )
+        usr = (f"Projektkontext: {description}\n\n" if description else "") + f"Aufgaben:\n{listing}"
+        try:
+            async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+                resp = await _llm.chat(client, {
+                    "model": model, "think": False, "stream": False, "format": "json",
+                    "messages": [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
+                    "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+                })
+                resp.raise_for_status()
+            data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Strukturierung fehlgeschlagen: {e}")
+        for link in (data.get("links") or []):
+            if not isinstance(link, dict):
+                continue
+            tid = str(link.get("id", "")).strip()
+            if tid not in idset:
+                continue
+            if want_phases:
+                a = str(link.get("area") or "").strip()[:40]
+                if a:
+                    area_out[tid] = a
+            if want_deps:
+                for p in (link.get("predecessors") or []):
+                    p = str(p).strip()
+                    if p in idset:
+                        _add_edge(p, tid, preds)
+
+    dep_links = sum(len(v) for v in preds.values())
+
+    # 2) Ressourcen-Entzerrung: Aufgaben gleicher Rolle nacheinander legen
+    leveled = 0
+    if want_leveling:
+        order = _topo_order(ids, preds)
+        rank = {tid: n for n, tid in enumerate(order)}
+        role_tasks = {}
+        for tid in ids:
+            for role in roles_by[tid]:
+                role_tasks.setdefault(role.lower(), []).append(tid)
+        for tlist in role_tasks.values():
+            if len(tlist) < 2:
+                continue
+            tlist = sorted(tlist, key=lambda x: rank.get(x, 0))
+            for a, b in zip(tlist, tlist[1:]):
+                if _add_edge(a, b, preds):
+                    leveled += 1
+
+    links = [{"id": tid, "predecessors": sorted(preds[tid]), "area": area_out.get(tid, "")}
+             for tid in ids]
+    n_phases = len({a for a in area_out.values() if a})
+    return {"links": links, "stats": {"tasks": len(ids), "dep_links": dep_links,
+                                      "leveled_links": leveled, "phases": n_phases}}
+
+
 @app.post("/api/plans/generate")
 async def generate_plan(req: Request):
     """Generiert aus einer Projektbeschreibung einen vollständigen Projektplan
@@ -5923,6 +7077,12 @@ async def create_backup():
         if PROJECTS_FILE.exists():
             zf.write(PROJECTS_FILE, "projects.json")
 
+        # Ressourcen-/Kapazitätslisten
+        if CAP_LISTS_FILE.exists():
+            zf.write(CAP_LISTS_FILE, "capacity_lists.json")
+        elif CAPACITY_FILE.exists():
+            zf.write(CAPACITY_FILE, "capacity.json")
+
         # Gespräche
         convs = await _db.list_conversations(limit=9999)
         for c in convs:
@@ -6021,6 +7181,20 @@ async def restore_backup(file: UploadFile = File(...)):
                     stats["projects"] = True
                 except Exception as e:
                     stats["errors"].append(f"projects.json: {e}")
+
+            # Ressourcen-/Kapazitätslisten
+            if "capacity_lists.json" in names:
+                try:
+                    CAP_LISTS_FILE.write_bytes(zf.read("capacity_lists.json"))
+                    stats["capacity_lists"] = True
+                except Exception as e:
+                    stats["errors"].append(f"capacity_lists.json: {e}")
+            elif "capacity.json" in names:
+                try:
+                    CAPACITY_FILE.write_bytes(zf.read("capacity.json"))
+                    stats["capacity"] = True
+                except Exception as e:
+                    stats["errors"].append(f"capacity.json: {e}")
 
             # Gespräche
             for name in names:
@@ -6292,6 +7466,134 @@ def _code_path_by_id(prog_id: str) -> Optional[Path]:
         except Exception:
             pass
     return None
+
+
+def _agent_def_by_id(agent_id: str) -> dict:
+    if not agent_id:
+        return {}
+    fp = _agent_path_by_id(agent_id)
+    if not fp:
+        return {}
+    try:
+        return json.loads(fp.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _profile_code_context() -> str:
+    """Kurzer Profil-Kontext für den adaptiven Code-Agenten."""
+    p = _load_profile()
+    bits = []
+    for k, label in (("position", "Position"), ("department", "Abteilung"),
+                     ("company", "Firma")):
+        v = str(p.get(k, "")).strip()
+        if v:
+            bits.append(f"{label}: {v}")
+    mode = str(p.get("mode", "")).strip()
+    if mode:
+        bits.append(f"Fachmodus: {mode}")
+    return "; ".join(bits)
+
+
+_CODE_BASE_SYS = (
+    "Du bist ein erfahrener Software-Entwickler. Schreibe sauberen, lauffähigen, "
+    "sinnvoll kommentierten Code. Halte Erklärungen kurz — der Code steht im Vordergrund."
+)
+
+
+@app.post("/api/code/assist")
+async def code_assist(req: Request):
+    """Code-Assistent für den Code-Tab. Stellt — sofern nötig — zuerst Rückfragen
+    (Phase 1), erzeugt dann Code (Phase 2). Optional mit wählbarem Coding-Agenten
+    (inkl. hinterlegtem Beispielcode) und adaptiver Rollen-/Profil-Analyse."""
+    body = await req.json()
+    prompt = str(body.get("prompt", "")).strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Keine Aufgabe angegeben")
+    answers = str(body.get("answers", "")).strip()
+    language = str(body.get("language", "") or "").strip()[:30]
+    agent_id = str(body.get("agent_id", "")).strip()
+    adaptive = bool(body.get("adaptive"))
+    force_code = bool(body.get("force_code"))
+    current_code = str(body.get("current_code", "") or "")[:8000]
+    model = _pick_model(body.get("model"), _model_for("coding"))
+    num_ctx = _profile_num_ctx()
+
+    agent = _agent_def_by_id(agent_id)
+    persona = str(agent.get("system_prompt", "")).strip()
+    example_code = str(agent.get("example_code", "")).strip()
+
+    # Adaptiver Agent: Experten-Rolle aus Aufgabe ableiten (nur ohne expliziten Agenten)
+    adaptive_note = ""
+    if adaptive and not persona:
+        role, sysp = await _derive_adaptive_prompt(prompt, model, num_ctx)
+        if sysp:
+            persona, adaptive_note = sysp, role
+
+    sys_parts = [persona or _CODE_BASE_SYS]
+    pctx = _profile_code_context()
+    if adaptive and pctx:
+        sys_parts.append(f"Kontext zum Nutzer (nutze, wenn hilfreich): {pctx}.")
+    if example_code:
+        sys_parts.append("Orientiere dich an Stil und Struktur dieses Beispielcodes:\n"
+                         "```\n" + example_code[:4000] + "\n```")
+    if language:
+        sys_parts.append(f"Bevorzugte Programmiersprache: {language}.")
+    system = "\n\n".join(sys_parts)
+
+    # ── Phase 1: Rückfragen ─────────────────────────────────────────────────
+    if not force_code and not answers:
+        clarify_sys = system + (
+            "\n\nPrüfe, ob WESENTLICHE Informationen fehlen, um die Aufgabe korrekt zu "
+            "lösen (Eingaben/Ausgaben, Sprache, Rahmenbedingungen). Wenn ja: stelle bis zu "
+            "4 kurze, konkrete Rückfragen. Wenn alles hinreichend klar ist: leere Liste. "
+            'Antworte NUR mit JSON: {"questions":["…"]}.')
+        try:
+            async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+                resp = await _llm.chat(client, {
+                    "model": model, "think": False, "stream": False, "format": "json",
+                    "messages": [{"role": "system", "content": clarify_sys},
+                                 {"role": "user", "content": f"Aufgabe:\n{prompt}"}],
+                    "options": {"num_ctx": num_ctx}, "keep_alive": KEEP_ALIVE,
+                })
+                resp.raise_for_status()
+            _jc = resp.json()
+            _cti, _cto = _llm_tok(_jc)
+            d = _parse_llm_json(_jc.get("message", {}).get("content", "")) or {}
+            qs = [str(q).strip() for q in (d.get("questions") or []) if str(q).strip()][:4]
+        except Exception:
+            qs, _cti, _cto = [], 0, 0
+        if qs:
+            return {"type": "questions", "questions": qs, "adaptive_role": adaptive_note,
+                    "tokens": {"in": _cti, "out": _cto}}
+
+    # ── Phase 2: Code erzeugen ──────────────────────────────────────────────
+    usr = f"Aufgabe:\n{prompt}"
+    if answers:
+        usr += f"\n\nZusätzliche Antworten/Vorgaben:\n{answers}"
+    if current_code:
+        usr += f"\n\nBestehender Code (anpassen/erweitern, falls passend):\n```\n{current_code}\n```"
+    usr += "\n\nGib eine vollständige, lauffähige Lösung — Code in EINEM ```-Codeblock."
+    code_sys = system + "\n\nAntworte mit einer kurzen Erklärung und dem Code in genau EINEM ```-Codeblock."
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=240) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": code_sys},
+                             {"role": "user", "content": usr}],
+                "options": {"num_ctx": num_ctx, "temperature": 0.2}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _jc = resp.json()
+        _cti, _cto = _llm_tok(_jc)
+        content = str(_jc.get("message", {}).get("content", ""))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Code-Erzeugung fehlgeschlagen: {e}")
+    code = _extract_code_block(content) or content.strip()
+    note = re.sub(r"```[a-zA-Z0-9_+-]*\n[\s\S]*?```", "", content).strip()[:600]
+    return {"type": "code", "code": code, "note": note,
+            "adaptive_role": adaptive_note, "language": language,
+            "tokens": {"in": _cti, "out": _cto}}
 
 
 @app.get("/api/code")

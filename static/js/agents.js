@@ -234,6 +234,8 @@ const AgentManager = (() => {
     document.getElementById('field-agent-desc').value = tmpl.description;
     document.getElementById('field-agent-category').value = tmpl.category;
     document.getElementById('field-agent-prompt').value = tmpl.system_prompt;
+    const exTmpl = document.getElementById('field-agent-example-code');
+    if (exTmpl) exTmpl.value = tmpl.example_code || '';
     document.getElementById('field-agent-task').value = '';
 
     document.querySelectorAll('#field-agent-tools .checkbox-item').forEach(el => {
@@ -258,6 +260,8 @@ const AgentManager = (() => {
     document.getElementById('field-agent-icon').value = agent?.icon ?? '🤖';
     document.getElementById('field-agent-desc').value = agent?.description ?? '';
     document.getElementById('field-agent-prompt').value = agent?.system_prompt ?? '';
+    const exEl = document.getElementById('field-agent-example-code');
+    if (exEl) exEl.value = agent?.example_code ?? '';
     document.getElementById('field-agent-model').value = agent?.model ?? '';
     document.getElementById('field-agent-category').value = agent?.category ?? 'Sonstige';
     document.getElementById('field-agent-task').value = '';
@@ -405,6 +409,7 @@ const AgentManager = (() => {
       description: document.getElementById('field-agent-desc').value.trim(),
       category: document.getElementById('field-agent-category').value,
       system_prompt: document.getElementById('field-agent-prompt').value.trim(),
+      example_code: document.getElementById('field-agent-example-code')?.value || '',
       model: document.getElementById('field-agent-model').value.trim() || null,
       tools,
       rag_collections,
@@ -496,22 +501,26 @@ const AgentManager = (() => {
   // je nach Länge direkt in den Prompt oder in eine eigene Wissensdatenbank.
   async function createLegalAgent(file) {
     if (!file) return;
-    const def = (file.name || 'Gesetz').replace(/\.[^.]+$/, '');
-    const title = prompt('Titel des Gesetzes / der Norm (z. B. „DIN EN ISO 9001" oder „BGB"):', def);
+    const def = (file.name || 'Dokument').replace(/\.[^.]+$/, '');
+    const title = prompt('Titel des Dokuments (z. B. „DIN EN ISO 9001", „BGB" oder „Gerthsen Physik"):', def);
     if (title === null) return;   // abgebrochen
-    showToast('⚖️ Gesetz-/Regel-Agent wird erstellt…');
+    // Fachgebiet/Rolle: leer ⇒ juristischer Modus (rückwärtskompatibel)
+    const domain = prompt('Fachgebiet / Rolle des Experten (z. B. „Recht", „Physik", „Medizin"; leer = Recht):', 'Recht');
+    if (domain === null) return;
+    showToast('📚 Dokument-Experte wird erstellt…');
     const fd = new FormData();
     fd.append('file', file);
     fd.append('title', (title || '').trim());
+    fd.append('domain', (domain || '').trim());
     try {
       const r = await fetch('/api/agents/from-legal', { method: 'POST', body: fd });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
       const data = await r.json();
       await load();
       const where = data.mode === 'rag'
-        ? `mit eigener Wissensdatenbank „Gesetz: ${data.name}"`
+        ? `mit eigener Wissensdatenbank „${data.coll_prefix || 'Doku'}: ${data.name}"`
         : 'mit Text direkt im Prompt';
-      showToast(`✓ Agent „${data.name}" erstellt (${where}, ${data.chars} Zeichen)`);
+      showToast(`✓ Experte „${data.name}" (${data.category || 'Recht'}) erstellt (${where}, ${data.chars} Zeichen)`);
     } catch (e) {
       showToast('Erstellung fehlgeschlagen: ' + e.message);
     }

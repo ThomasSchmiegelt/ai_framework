@@ -135,6 +135,20 @@ Seitenleiste bleibt unverändert. Über der Antwort erscheint ein Hinweis „➜
 diese Frage)". Wird kein passender Agent gefunden, kommt ein kurzer Hinweis und die
 Nachricht wird normal gesendet.
 
+**🔎 Deepdive mit `/dd` und `/ddd`:** Vertieft die **letzte Antwort** automatisch. Tippe
+`/dd10` (oder `/deepdive10`): die KI leitet **10 Vertiefungsfragen** ab und arbeitet sie
+**der Reihe nach** ab — jede Frage wird als eigene Suchanfrage genutzt und einzeln
+beantwortet (Web­suche je nach 🔍-Schalter, plus die im Chat aktiven Wissensdatenbanken).
+Die Zahl ist frei wählbar (z. B. `/dd5`, `/dd20`; ohne Zahl = 5).
+`/ddd10` (oder `/deepdivedocument10`) macht dasselbe **als Dokument**: die letzte Antwort
+wird zum **Vorwort**, jede Frage zu einem **Kapitel** mit der Antwort als Inhalt. Das
+fertige Dokument öffnet sich im **Dokumente-Tab** und ist dort als **DOCX/PDF**
+exportierbar.
+
+**Kontextfenster:** Im Profil wählbar von **4k bis 128k** Tokens (Chat &
+Dokumentengenerator). Größer verhindert abgeschnittene Antworten, kostet aber mehr
+GPU-Speicher — bei viel VRAM ruhig hoch wählen.
+
 **Formeln & Quellen:** Berechnungen werden als **mathematische Formeln mit
 Formelzeichen** dargestellt (z. B. σ = F/A, sauber gesetzt). Erkennt die Antwort
 **Normen** (DIN/EN/ISO/VDI …) oder **Gesetzes-/Paragrafenangaben** (z. B. § 433 BGB),
@@ -333,6 +347,21 @@ wieder **entfernen**.
 > Bei großen PDFs kann das Einbetten einen Moment dauern — eine Meldung bestätigt
 > den Abschluss („✓ Datei: N Chunks").
 
+### Ganzen Ordner einlesen
+
+Statt einzelner Dateien lässt sich ein **kompletter Ordner** in eine Wissensdatenbank
+überführen — alle enthaltenen Textdateien (PDF, DOCX, XLSX, CSV, TXT, MD, gängige
+Code-/Markup-Dateien) werden nacheinander extrahiert, bereinigt, gechunkt und eingebettet:
+
+- **📁 Server-Ordner:** einen Pfad auf dem Rechner eingeben (z. B. `C:\Dokumente\Projekt`
+  oder `/mnt/share/rag`). Auf Nachfrage werden auch **Unterordner** rekursiv einbezogen.
+  Ideal für große Bestände, da nichts hochgeladen werden muss.
+- **📂 Browser-Ordner:** einen Ordner im Datei-Dialog wählen; alle Dateien werden
+  hochgeladen und eingelesen. Funktioniert auch im Server-/Mehrbenutzerbetrieb.
+
+Eine Fortschrittskarte zeigt Datei für Datei den Stand; am Ende erscheint die Gesamtzahl
+eingelesener Dateien und Chunks (übersprungene Dateien werden gemeldet).
+
 ### Gespräch in eine Sammlung übernehmen
 
 Im Block **💬 → 📚 Gespräch in Sammlung übernehmen** ein gespeichertes Gespräch und
@@ -424,6 +453,64 @@ Im Abschnitt **📎 Quellmaterial** kannst du der Aufgabe konkrete Vorlagen beil
 Aus dem **Chat** bringt der Knopf **„→ 📄 Doku"** (in der Eingabeleiste) das laufende
 Gespräch komprimiert hierher — praktisch, um z. B. aus einer Unterhaltung eine
 Besprechung zu planen.
+
+---
+
+## Anfrage-Auswertung (📋 Anfrage)
+
+Für umfangreiche Anfragen/Ausschreibungen, die als **XLS/CSV mit vielen Arbeitspaketen**
+(bis ~500 Zeilen) kommen. Jedes Paket wird automatisch ausgewertet: ein „Masteragent"
+bestimmt die **zuständige Fachrolle** und bewertet **interessant?**, **Partner nötig?**
+und **Best-Cost-Country?** — abgeglichen mit einer **globalen Kapazitätsliste**.
+
+**Ablauf:**
+1. **Datei einlesen** — XLS/CSV wählen, dann **Blatt**, **Kopfzeile** und die
+   **Aufgaben-Spalte** zuordnen (ID-/Titel-Spalte optional). Eine Vorschau zeigt die
+   ersten Zeilen.
+2. **Lauf-Optionen** — Modell wählen, optional **Websuche je Paket** und
+   **Wissensdatenbanken** einbeziehen, **Umfang** festlegen (Testlauf „erste 25" … „alle").
+3. **▶ Auswerten starten** — das Ergebnisraster füllt sich Paket für Paket (Zuständig,
+   Interessant, Partner, Best-Cost-Country) mit Live-Zählern. Mit **✕ Abbrechen** stoppen
+   und mit **⏩ Fortsetzen** später nahtlos weitermachen (Zwischenstand wird serverseitig
+   gesichert).
+4. **📋 XLSX exportieren** — Originalspalten + Auswertungsspalten (inkl. eigener Spalten)
+   als Excel-Datei. Mit **„nur interessante"** das Raster filtern.
+
+**🧩 Eigene Spalten:** zusätzlich zu den festen Spalten lassen sich **bis zu 6 eigene
+Bewertungsspalten** definieren. Je Spalte wählst du entweder einen **Agenten** (bewertet
+mit seiner Fachrolle) oder gibst einen **freien Prompt** (Frage/Vorgabe) an, z. B. „Wie
+hoch ist das technische Risiko (niedrig/mittel/hoch)?". Jede Spalte ist ein zusätzlicher
+LLM-Aufruf pro Paket und erscheint im Raster und im Export.
+
+**💬 Chat-Zeile:** unter dem Raster eine freie Rückfrage zur ausgewerteten Anfrage stellen
+(z. B. „Fasse die interessanten Pakete zusammen", „Welche brauchen einen Partner?"). Die KI
+antwortet auf Basis der aktuellen Auswertung.
+
+**📚 In RAG übernehmen:** Die fertige Auswertung als Dokument in eine **Wissensdatenbank**
+übernehmen (du wählst die Sammlung). So lässt sich später im Chat oder in weiteren Anfragen
+darauf zugreifen.
+
+**👥 Kapazitätslisten (mehrere):** Rollen/Partner mit **Land**, **freier Kapazität (h)**,
+**Kostensatz** und **Skills**. Du kannst **mehrere benannte Listen** anlegen (Button
+**👥 Kapazitätslisten**) und **direkt im Anfrage-Tab per Häkchen** (Feld **„Ressourcenlisten
+(aktiv)"** neben den Wissensdatenbanken) festlegen, welche **aktiv** sind — die aktiven Listen
+werden vereinigt und gelten für Auswertung **und** Planer. CSV-Import möglich
+(`Typ;Name;Satz;Land;Kapazität;Skills`).
+
+**➜ In Planer übernehmen:** Die ausgewählten Tickets (nur interessante oder alle) werden
+**gesamthaft in einen Plan** überführt. Da die Anfrage keine Stunden enthält, **schätzt die
+KI bei der Übergabe** je Ticket **Aufwand (h) und Dauer (Tage)**; die zuständige Rolle wird
+zur Ressource. Anschließend öffnet sich der **Planer** und im Dialog **„📅 Kapazität &
+Zukauf"** siehst du je Rolle **Bedarf vs. freie Kapazität (Auslastung %)**, **Fehlstunden
+(Make-or-Buy)**, die **Kostenschätzung** sowie die aggregierten **Partner-** und
+**Best-Cost-Country-Listen** — und darunter den **Bestellplan** für Hardware/Software mit
+Lieferzeiten. So wird sichtbar, **wo Ressourcen überbucht sind** und **was zugekauft werden
+muss**. (Tickets ohne gepflegte Abhängigkeiten starten rechnerisch alle am Projektstart —
+deshalb ist hier die kapazitätsbasierte Auslastung die maßgebliche Sicht, nicht die
+Termin-Überlappung.)
+
+> Tipp: Bei sehr großen Anfragen zuerst einen **Testlauf (erste 25)** machen, Spaltenzuordnung
+> und Ergebnisqualität prüfen, dann auf **„alle"** stellen.
 
 ---
 
@@ -833,6 +920,30 @@ Pfad** (rot).
   wählen → die KI liest beide und schlägt passende Zwischenvorgänge vor. Nach Auswahl
   wird `A → neu → B` verdrahtet und eine direkte Kante A→B aufgelöst.
 
+### 🔗 Auto-Strukturieren — Projekt automatisch verknüpfen
+
+Hast du eine **flache Aufgabenliste ohne Abhängigkeiten** (z. B. aus einer Anfrage
+über **➜ In Planer übernehmen** oder **📋 Aus Liste**), strukturiert **🔗 Auto-Strukturieren**
+sie automatisch. Die KI berücksichtigt dabei vier Aspekte:
+
+- **Fachliche Abhängigkeiten** — leitet ab, welche Aufgabe vor welcher fertig sein muss.
+- **Phasen / Bereiche** — ordnet jede Aufgabe einer Projektphase zu (Konzept,
+  Konstruktion, Test …).
+- **Ressourcen-Entzerrung** — legt Aufgaben **derselben Rolle nacheinander** statt
+  parallel, damit eine Person/Maschine nicht doppelt belegt wird.
+- **Parallelstränge** bleiben erhalten — fachlich unabhängige Aufgaben werden **nicht**
+  künstlich verkettet.
+
+Du wählst per Häkchen, welche der drei Verknüpfungs-Arten genutzt werden, und klickst
+**▶ Vorschau berechnen**. Die **Vorschau** zeigt je Phase, welche Aufgabe von welcher
+abhängt, plus eine Zusammenfassung (Anzahl Abhängigkeiten, Entzerrungen, Phasen). Erst
+**✓ Anwenden** ersetzt die bestehenden Verknüpfungen — alle Zyklen werden dabei
+verhindert. Mit **↩ Rückgängig** nimmst du die Strukturierung wieder zurück.
+
+> Danach im **📅-Dialog** die **Kapazität & Zukauf**-Analyse öffnen: durch die
+> Entzerrung verteilen sich die Aufgaben über die Zeit, und der Bestellplan/​Konflikt­
+> abschnitt wird aussagekräftig.
+
 ### Ressourcen & Kosten
 
 - Spalte **Ressourcen / Kosten**: auf den Button klicken → Detailfenster mit
@@ -935,6 +1046,21 @@ leer = `ministral-3:3b`).
 > *„Zeige ein Balkendiagramm der Zugfestigkeit für Stahl, Alu und Titan"*
 > *„Erstelle eine Toleranzanalyse für drei Bauteile"*
 
+**Rückfragen vor dem Coden:** Ist die Option **„Rückfragen"** aktiv (Standard), stellt der
+Assistent zuerst kurze Rückfragen, wenn wesentliche Informationen fehlen. Du beantwortest
+sie im Feld und klickst **„↑ Antworten & Code erstellen"** — oder **„⏭ Trotzdem coden"**,
+wenn es direkt losgehen soll.
+
+**Coding-Agent:** Über das Auswahlfeld **Coding-Agent** wählst du einen Agenten, dessen
+Fachrolle (System-Prompt) und optionaler **Beispielcode** den Stil/Struktur der Lösung
+vorgeben. Beispielcode hinterlegst du beim Agenten (Tab **🤖 Agenten** → Feld
+**Beispielcode**). Agenten der Kategorie *Programmieren* bzw. mit Beispielcode (📎) stehen
+oben in der Liste.
+
+**Adaptiv:** Mit dem Häkchen **„adaptiv"** analysiert die KI die Begrifflichkeiten der
+Aufgabe und wertet dein **Profil** (Position, Abteilung, Firma, Fachmodus) aus, um eine
+passende Experten-Rolle abzuleiten — auch ohne expliziten Agenten.
+
 ### Komfort-Editor
 
 Der Code-Editor bietet **Syntax-Highlighting, Zeilennummern, automatische Klammern,
@@ -1012,14 +1138,16 @@ Agenten sind Profile mit eigenem System-Prompt, Tool-Set und optionalem Modell.
 - **Erstellen:** Tab **🤖 Agenten** → **＋ Neuer Agent**, Formular ausfüllen
   (Name, Icon, Beschreibung, System-Prompt, Modell, Tools). Der Button
   **System-Prompt generieren** erzeugt einen Vorschlag per KI.
-- **⚖️ Gesetz-/Regel-Agent aus Datei:** Lade einen Gesetzestext oder eine Norm
-  (PDF/DOCX/TXT) hoch und vergib einen Titel — daraus entsteht **automatisch** ein
-  spezialisierter Agent. Der Text wird beim Hochladen nach Markdown umgewandelt
-  (Paragrafen/Artikel werden zu Überschriften). Kurze Texte landen direkt im
-  System-Prompt; lange Texte werden in eine eigene Wissensdatenbank
-  („Gesetz: …") ausgelagert und fest an den Agenten gebunden. Der Agent antwortet
-  dann ausschließlich auf Basis dieses Textes und nennt die Fundstelle (§ / Artikel).
-  > Für lange Gesetze muss das Embedding-Modell installiert sein (`ollama pull nomic-embed-text`).
+- **📚 Dokument-Experte aus Datei:** Lade ein **Fachdokument** (Gesetz, Norm, Skript,
+  Handbuch — PDF/DOCX/TXT) hoch, vergib einen Titel und ein **Fachgebiet/Rolle**
+  (z. B. „Recht", „Physik", „Medizin"; leer = Recht) — daraus entsteht **automatisch**
+  ein spezialisierter Experte. Das Fachgebiet passt **Persona und Zitierstil** an: ein
+  Physik-Skript ergibt also einen Physik-Experten (Fundstelle = Abschnitt/Kapitel/
+  Gleichung), ein Gesetzestext einen juristischen Assistenten (§/Artikel). Kurze Texte
+  landen direkt im System-Prompt; lange Texte werden in eine eigene Wissensdatenbank
+  ausgelagert und fest an den Agenten gebunden. Der Experte antwortet dann ausschließlich
+  auf Basis des Dokuments und nennt die Fundstelle.
+  > Für lange Dokumente muss das Embedding-Modell installiert sein (`ollama pull nomic-embed-text`).
 - **⚖️ Jurys:** Über den Button **⚖️ Jurys** mehrere Agenten zu einem
   **Bewertungs-Gremium** bündeln (siehe Abschnitt 16a). Eine Jury bewertet einen Text
   — z. B. ein erzeugtes Dokument, einen System-Prompt oder den im Profil/Planer
@@ -1159,6 +1287,17 @@ API-Anbieter** einbinden (z. B. **OpenRouter**, OpenAI, Groq, Together):
 > - **Remote-Aufrufe verlassen deinen Rechner** (Daten gehen an den Anbieter) und
 >   belegen **kein** lokales VRAM — die Ein-Modell-Beschränkung gilt nur für lokale
 >   Ollama-Modelle.
+
+### 🔢 Token-Zähler & Preis (im Profil)
+
+Unten links in der Seitenleiste zeigt ein **Token-Zähler** den Verbrauch der laufenden
+Sitzung (↓ Eingabe / ↑ Ausgabe) und – sofern ein Preis hinterlegt ist – die **geschätzten
+Kosten**. Gezählt werden die wichtigsten KI-Aktionen: **Chat**, **Anfrage-Auswertung**
+(inkl. eigener Spalten & Chat-Zeile) und der **Code-Assistent**. Den Preis setzt du im
+**Profil**: *Preis je 1.000 Eingabe-Tokens*, *je 1.000 Ausgabe-Tokens* und die *Währung*.
+Lokale Ollama-Modelle sind kostenlos (0 lassen); für externe API-Anbieter den jeweiligen
+Tarif eintragen. Der Zähler überlebt einen Reload; ein Klick darauf setzt die
+Sitzungssumme zurück.
 
 ### 👁 Tab-Sichtbarkeit (im Profil)
 

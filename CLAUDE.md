@@ -17,7 +17,7 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 AI_Framework_Thomas is a German-language, **general-purpose** AI chat interface that runs entirely locally: local Ollama LLMs wrapped in a **FastAPI** backend with a **vanilla-JS** frontend, plus a tool-calling agentic loop, SQLite conversation persistence, and productivity tools (engineering calculators, material lookup, unit conversion, SymPy solver, matplotlib charting, PDF/DOCX/PPTX/LaTeX generation, planner/CPM, research, RAG).
 
-Derived from IG-11 as the general variant. The UI has **16 tabs** (Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail 🚧, Planer, Matrix, Code, Verzeichnis-Analyse, Morph-Kasten, Jury, Logs) and **seven modes** (`maschinenbau`, `ki`, `soziales`, `marketing`, `finanz`, `geschaeftsfuehrung`, plus a user-configurable `custom`) that drive the color scheme and an optional domain framing. See `docs/ENTWICKLUNG.md` for the mode/system-prompt machinery (`_augment_prefix`, `pure_llm`, `lang`).
+Derived from IG-11 as the general variant. The UI has **17 tabs** (Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail 🚧, Planer, Matrix, Anfrage, Code, Verzeichnis-Analyse, Morph-Kasten, Jury, Logs) and **seven modes** (`maschinenbau`, `ki`, `soziales`, `marketing`, `finanz`, `geschaeftsfuehrung`, plus a user-configurable `custom`) that drive the color scheme and an optional domain framing. See `docs/ENTWICKLUNG.md` for the mode/system-prompt machinery (`_augment_prefix`, `pure_llm`, `lang`).
 
 ## Running the App
 
@@ -78,6 +78,13 @@ Each subsystem's deep documentation is in `docs/ENTWICKLUNG.md` (section numbers
 | RAG engine | `tools/rag.py`, `rag.js`, `db.py` | §13 |
 | Agents (favorites, slash, adaptive, legal) | `data/agents/`, `agents.js`, `main.py` | §14 |
 | Jury (multi-agent evaluation) | `data/juries/`, `jury.js` | §15 |
+| Anfrage-Auswertung (RFQ, XLS-Stapel) | `rfq.js`, `/api/rfq/*` (eval, to-plan, ask), eigene Bewertungsspalten (Agent/Prompt, `_sanitize_rfq_columns`), `tools/files.read_table` | — |
+| Mehrere Ressourcenlisten | `/api/capacity/lists*` + `/api/capacity/selection`, `data/capacity_lists.json` (Migration aus `capacity.json`); `_load_capacity()` = Vereinigung der aktiven Listen | — |
+| Token-Zähler | `static/js/tokens.js` (`TokenMeter`), Profil `price_per_1k_in/out`+`currency`; `tokens:{in,out}` aus Chat-`done`, RFQ-`done`, `/api/code/assist`, `/api/rfq/ask`; `_llm_tok()` + `tools/llm.py` usage-Mapping | — |
+| Code-Assistent (Code-Tab) | `ide.js` `_assist`/`_renderClarify`, `/api/code/assist` (Rückfragen→Code, Coding-Agent + `example_code`, adaptiv via `_derive_adaptive_prompt`) | — |
+| Dokument-Experte (verallgemeinert) | `/api/agents/from-legal` mit `domain` (Fachgebiet/Rolle), `agents.js` `createLegalAgent` | §14 |
+| Kapazität & Zukauf (Planer) | `planner.js` `_openSchedule`/`_capacityAnalysisHtml`, `Planner.openPlan` | — |
+| Auto-Strukturieren (Planer) | `planner.js` `_openAutoStructure`/`_applyAutoStructure`, `/api/plans/auto-structure` (LLM-Abhängigkeiten+Phasen, Ressourcen-Entzerrung, zyklensicher) | — |
 | Verzeichnis-Analyse & Morph-Kasten | `dir_analysis.js`/`morph_box.js`, `tools/anonymize.py` | §16 |
 | Mathe (tutor, auto-verify, plotting) | `mathe.js`, `main.py`, `tools/engineering.py` | §2.3, §17 |
 | Medizin 2-model pipeline | `medizin.js`, `/api/medizin/*` | §2.3 |
