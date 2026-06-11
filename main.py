@@ -992,6 +992,8 @@ class AgentDef(BaseModel):
     # Optionaler Beispielcode (für Coding-Agenten): wird dem Code-Assistenten als
     # Stil-/Struktur-Vorlage mitgegeben.
     example_code: Optional[str] = ""
+    # Optionale Projekt-Zuordnung (z. B. von „/plan" gemeinsam mit Plan & Jury angelegt).
+    project_id: Optional[str] = None
 
 
 class ResearchRequest(BaseModel):
@@ -4316,6 +4318,31 @@ async def derive_persona(req: Request):
     return {"persona_name": persona_name, "system_prompt": system_prompt}
 
 
+def _slide_fields_from_partial(raw: str):
+    """Bergungs-Parser für (evtl. ABGESCHNITTENES) Slide-JSON: zieht title, bullets
+    und caption per Regex heraus, auch wenn das JSON nie geschlossen wurde. So landet
+    bei trunkierter Modellantwort kein roher ``{"title":…``-Text auf der Folie."""
+    title = ""
+    mt = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+    if mt:
+        title = mt.group(1)
+    bullets = []
+    mb = re.search(r'"bullets"\s*:\s*\[(.*)', raw, re.DOTALL)
+    if mb:
+        seg = mb.group(1)
+        end = seg.find("]")
+        if end >= 0:
+            seg = seg[:end]            # nur bis zum schließenden ] (falls vorhanden)
+        # Vollständig in Anführungszeichen stehende Strings — ein abgeschnittener
+        # (nicht geschlossener) letzter Stichpunkt wird so automatisch übersprungen.
+        bullets = re.findall(r'"((?:[^"\\]|\\.)*)"', seg)
+    caption = ""
+    mc = re.search(r'"caption"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+    if mc:
+        caption = mc.group(1)
+    return title, bullets, caption
+
+
 @app.post("/api/analyze-image")
 async def analyze_image(req: Request):
     """Analysiert ein einzelnes Bild mit einem Vision-Modell und liefert
@@ -4367,10 +4394,14 @@ async def analyze_image(req: Request):
         resp = await _llm.chat(client,{
             "model": _model,
             "think": False,
+            # format:"json" + ausreichendes Kontextfenster verhindern Vorgeplapper und
+            # abgeschnittene Antworten (sonst landet roher JSON-Text auf der Folie).
+            "format": "json",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text, "images": [small]},
             ],
+            "options": {"num_ctx": _profile_num_ctx()},
             "stream": False,
         })
         resp.raise_for_status()
@@ -4385,19 +4416,24 @@ async def analyze_image(req: Request):
         return re.sub(r"\s+", " ", s).strip()
 
     title, bullets, caption = (label if descriptive else "Abbildung"), [], ""
-    m = re.search(r"\{[\s\S]*\}", raw)
-    if m:
-        try:
-            data = json.loads(m.group(0))
-            title = _strip_md(data.get("title") or title) or title
-            b = data.get("bullets") or []
-            bullets = [_strip_md(str(x)) for x in b if str(x).strip()][:3]
-            caption = _strip_md(data.get("caption") or "")
-        except Exception:
-            pass
+    data = _parse_llm_json(raw)
+    if isinstance(data, dict):
+        title = _strip_md(str(data.get("title") or "")) or title
+        b = data.get("bullets") or []
+        bullets = [_strip_md(str(x)) for x in b if str(x).strip()][:3]
+        caption = _strip_md(str(data.get("caption") or ""))
     if not bullets and not caption:
-        # Fallback: roher Text als Bildunterschrift
-        caption = _strip_md(raw)[:200]
+        # Bergung aus (evtl. abgeschnittenem) JSON — kein roher JSON-Müll auf der Folie.
+        st, sb, sc = _slide_fields_from_partial(raw)
+        if st:
+            title = _strip_md(st) or title
+        bullets = [_strip_md(str(x)) for x in sb if str(x).strip()][:3]
+        caption = _strip_md(sc)
+    if not bullets and not caption:
+        # Letzter Fallback: nur echten Fließtext zeigen, niemals JSON-Fragmente.
+        plain = raw.strip()
+        looks_json = plain.startswith("{") or '"bullets"' in plain or '"title"' in plain
+        caption = "" if looks_json else _strip_md(plain)[:200]
 
     return {
         "title": title,
@@ -4405,6 +4441,71 @@ async def analyze_image(req: Request):
         "caption": caption,
         "descriptive_filename": descriptive,
     }
+
+
+@app.post("/api/illus/intro")
+async def illus_intro(req: Request):
+    """Schreibt die Beschreibung der bebilderten Präsentation als Einleitungsfolie
+    NEU — aus Sicht des gewählten/abgeleiteten Experten (Persona). Liefert kurze
+    Stichpunkte für die Folie ``Über diese Präsentation``."""
+    import re
+    body = await req.json()
+    description = (body.get("description") or "").strip()
+    title = (body.get("title") or "").strip()
+    persona = (body.get("system_prompt") or "").strip() or (
+        "Du bist ein fachkundiger Experte und formulierst auf Deutsch knapp und sachlich."
+    )
+    if not description:
+        return {"bullets": []}
+    _model = _pick_model(body.get("model"))
+
+    sysmsg = (
+        persona
+        + "\n\nDu formulierst die Einleitungsfolie einer Präsentation. Schreibe die "
+        "vorgegebene Beschreibung in eigenen Worten zu einer knappen, professionellen "
+        "Einleitung um (nicht wörtlich kopieren). Antworte NUR mit JSON in genau diesem "
+        'Format, ohne weiteren Text:\n{"bullets":["Stichpunkt 1","Stichpunkt 2","Stichpunkt 3"]}\n'
+        "Maximal 5 kurze Stichpunkte (je höchstens ein knapper Satz). "
+        "Kein Markdown, keine Sternchen, keine Aufzählungszeichen im Text."
+    )
+    usermsg = (f"Titel der Präsentation: {title}\n" if title else "") + \
+        f"Beschreibung:\n{description}"
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
+        resp = await _llm.chat(client, {
+            "model": _model,
+            "think": False,
+            "format": "json",   # erzwingt valides, vollständiges JSON (kein Vorgeplapper)
+            "messages": [
+                {"role": "system", "content": sysmsg},
+                {"role": "user", "content": usermsg},
+            ],
+            "stream": False,
+            "options": {"num_ctx": _profile_num_ctx()},
+        })
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+
+    def _strip_md(s: str) -> str:
+        s = re.sub(r"[*_`#>]+", "", s)
+        s = re.sub(r"^\s*[-•]\s*", "", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    bullets: list[str] = []
+    data = _parse_llm_json(raw)
+    if isinstance(data, dict):
+        b = data.get("bullets") or []
+        bullets = [_strip_md(str(x)) for x in b if str(x).strip()][:5]
+    if not bullets:
+        # Bergung aus (evtl. abgeschnittenem) JSON
+        _, sb, _c = _slide_fields_from_partial(raw)
+        bullets = [_strip_md(str(x)) for x in sb if str(x).strip()][:5]
+    if not bullets:
+        # Letzter Fallback: die ORIGINAL-Beschreibung in Sätze zerlegen (nie JSON-Text).
+        plain = _strip_md(description)
+        bullets = [s.strip() for s in re.split(r"(?<=[.!?])\s+", plain) if s.strip()][:5]
+    return {"bullets": bullets}
 
 
 @app.post("/api/agents")
@@ -4610,6 +4711,7 @@ async def create_jury(req: Request):
         "name": name,
         "description": (body.get("description") or "").strip(),
         "member_agent_ids": members,
+        "project_id": (body.get("project_id") or "").strip(),
         "created_at": time.time(),
     }
     fp = JURIES_DIR / f"{_to_slug(name)}_{jury['id'][-6:]}.json"
@@ -5797,6 +5899,7 @@ async def create_plan(req: Request):
         "resource_mode": str(body.get("resource_mode", "free")).strip(),
         "start_date": str(body.get("start_date", "")).strip(),
         "workdays": bool(body.get("workdays", False)),
+        "project_id": str(body.get("project_id", "")).strip(),
     }
     _plan_path(plan["id"], name).write_text(
         json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -7146,6 +7249,317 @@ async def generate_plan(req: Request):
 
     return {"name": "", "description": description, "tasks": tasks,
             "requested": max_tasks, "warning": warning.strip()}
+
+
+# ── /plan — Chat-getriebener Strategie- & Einsatzplan-Orchestrator ────────────
+# Aus dem Chat-Verlauf (Briefing) baut der Befehl `/plan` in einem Zug: eine
+# Strategie (Markdown), die nötigen Beratungs-Agenten (Vorschlag), einen Einsatz-/
+# Ressourcenplan (Planer-Schema, Vorschlag) und eine Bewertungs-Jury (Vorschlag).
+# Es wird NICHTS gespeichert — das Frontend zeigt eine Vorschau und legt auf
+# Bestätigung über die vorhandenen Endpoints (/api/agents, /api/plans, /api/juries) an.
+
+
+class PlanStrategyRequest(BaseModel):
+    brief: str = ""                 # Chat-Verlauf als Briefing (frei diskutiert)
+    extra: str = ""                 # optionale Randbedingungen nach „/plan"
+    model: str = ""                 # leer → general-Modell aus dem Profil
+    web_search: bool = False
+    rag_collections: List[str] = []
+    # Feste Agenten: per „/plan … /dsgvo /tisax" angepinnte, bereits vorhandene
+    # Agenten, die in jedem Fall als Berater + Jury-Mitglied verwendet werden.
+    # Jeder Eintrag: {id, name, description, system_prompt, icon, category, tools}.
+    pinned_agents: List[dict] = []
+
+
+async def _plan_ground(query: str, web: bool, rag_collections: list) -> str:
+    """Sammelt optionales Belegmaterial (Websuche + RAG) wie beim Deepdive."""
+    blocks = []
+    if web and query:
+        try:
+            from tools.search import search_with_sources
+            _, text = await search_with_sources(query, 5)
+            if text:
+                blocks.append("### Websuche\n" + text[:3000])
+        except Exception:
+            pass
+    if rag_collections:
+        try:
+            from tools.rag import query_collections
+            hits = await query_collections(rag_collections, query or "Strategie", top_k_cap=5)
+            if hits:
+                blocks.append("### Wissensdatenbank\n" + "\n\n".join(
+                    f"[{h.get('collection_name','?')} · {h.get('filename','?')}]\n{h.get('text','')}"
+                    for h in hits)[:3000])
+        except Exception:
+            pass
+    return "\n\n".join(blocks)
+
+
+async def _plan_llm_json(model: str, sys: str, usr: str):
+    """Ein LLM-Aufruf mit erzwungenem JSON → (data, tok_in, tok_out)."""
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False, "format": "json",
+                "messages": [{"role": "system", "content": sys},
+                             {"role": "user", "content": usr}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            j = resp.json()
+        data = _parse_llm_json(j.get("message", {}).get("content", "")) or {}
+        ti, to = _llm_tok(j)
+        return data, ti, to
+    except Exception:
+        return {}, 0, 0
+
+
+def _plan_clean_agents(data) -> list:
+    """Holt aus einer (evtl. eigenwillig geformten) LLM-Antwort eine Agentenliste.
+    Toleriert {agents:[…]}, eine nackte Liste oder ein einzelnes Agent-Objekt."""
+    if isinstance(data, dict):
+        raw = data.get("agents")
+        if not isinstance(raw, list):
+            raw = [data] if data.get("name") and data.get("system_prompt") else []
+    elif isinstance(data, list):
+        raw = data
+    else:
+        raw = []
+    out = []
+    for ag in raw[:6]:
+        if not isinstance(ag, dict):
+            continue
+        nm = str(ag.get("name") or "").strip()[:60]
+        sp = str(ag.get("system_prompt") or ag.get("prompt") or "").strip()
+        if not nm or not sp:
+            continue
+        tools = [str(t).strip() for t in (ag.get("tools") or []) if str(t).strip()][:6] \
+            or ["web_search", "calculate"]
+        out.append({
+            "name": nm,
+            "description": str(ag.get("description") or "").strip()[:300],
+            "system_prompt": sp,
+            "icon": (str(ag.get("icon") or "🤖").strip() or "🤖")[:4],
+            "category": str(ag.get("category") or "Beratung").strip()[:40] or "Beratung",
+            "tools": tools,
+        })
+    return out
+
+
+def _plan_pinned_agents(pinned) -> list:
+    """Bringt die per „/plan … /agent" angepinnten, BEREITS vorhandenen Agenten auf
+    die Vorschlags-Form und markiert sie (``pinned``=True, vorhandene ``id`` behalten)."""
+    out = []
+    for ag in (pinned or []):
+        if not isinstance(ag, dict):
+            continue
+        nm = str(ag.get("name") or "").strip()[:60]
+        sp = str(ag.get("system_prompt") or "").strip()
+        if not nm:
+            continue
+        out.append({
+            "id": str(ag.get("id") or "").strip() or None,
+            "name": nm,
+            "description": str(ag.get("description") or "").strip()[:300],
+            "system_prompt": sp,
+            "icon": (str(ag.get("icon") or "🤖").strip() or "🤖")[:4],
+            "category": str(ag.get("category") or "Beratung").strip()[:40] or "Beratung",
+            "tools": [str(t).strip() for t in (ag.get("tools") or []) if str(t).strip()][:6]
+                     or ["web_search", "calculate"],
+            "pinned": True,
+        })
+    return out
+
+
+async def _plan_agents(model: str, task_text: str, strategy_md: str, pinned: list = None):
+    """Schlägt die Beratungs-Agenten vor → (agents, tok_in, tok_out). Angepinnte
+    feste Agenten stehen IMMER an erster Stelle; das LLM ergänzt nur fehlende Rollen
+    (kein Duplikat). Mit einem Retry über einen schlankeren Prompt, falls ein kleines
+    Modell zunächst leer/eigenwillig antwortet (3B-Modelle kollabieren sonst auf 0)."""
+    fixed = _plan_pinned_agents(pinned)
+    have = {a["name"].lower() for a in fixed}
+    fixed_note = ""
+    if fixed:
+        fixed_note = ("\n\nDiese Experten sind bereits FEST gesetzt (NICHT erneut vorschlagen, "
+                      "nicht duplizieren): " + ", ".join(a["name"] for a in fixed)
+                      + ". Schlage nur ERGÄNZENDE, noch fehlende Experten vor.")
+    sys_b = (
+        "Du leitest aus Strategie und Briefing die nötigen FACH-Beratungs-Agenten ab "
+        "(z. B. Kosten-, Datenschutz-/Compliance-, Zeitplan-, Hardware-Experte). Jeder "
+        "Agent erhält einen prägnanten Namen, eine kurze Beschreibung und einen system_prompt, "
+        "der seine Fachperspektive, Prüfkriterien und den deutschen Antwortstil festlegt. "
+        "Antworte NUR mit JSON in genau diesem Format:\n"
+        '{"agents":[{"name":"Kosten-Experte","description":"…","system_prompt":"Du bist …",'
+        '"icon":"💶","category":"Beratung","tools":["web_search","calculate"]}]}\n'
+        "Lege für JEDES genannte Bewertungskriterium einen eigenen Experten an. "
+        "Maximal 6 Agenten, mindestens 2. icon ist ein passendes Emoji." + fixed_note
+    )
+    # Briefing zuerst (enthält die Kriterien), Strategie nur als kurzer Auszug —
+    # ein langer Strategie-Block lässt kleine Modelle auf einen Agenten kollabieren.
+    usr_b = task_text + (f"\n\nStrategie-Auszug:\n{strategy_md[:1200]}" if strategy_md else "")
+    data, ti, to = await _plan_llm_json(model, sys_b, usr_b)
+    extra_agents = _plan_clean_agents(data)
+    if not extra_agents and not fixed:
+        # Retry: minimaler, sehr direktiver Prompt nur auf Basis des Briefings.
+        sys_r = (
+            "Lies das Briefing und nenne die Fach-Experten, die das Vorhaben bewerten sollten "
+            "(je Bewertungskriterium einen). Antworte NUR mit JSON: "
+            '{"agents":[{"name":"…","description":"…","system_prompt":"Du bist …","icon":"🤖",'
+            '"category":"Beratung","tools":["web_search","calculate"]}]}. Mindestens 2 Experten.'
+        )
+        data2, ti2, to2 = await _plan_llm_json(model, sys_r, task_text)
+        extra_agents = _plan_clean_agents(data2); ti += ti2; to += to2
+    # Zusammenführen: feste zuerst, dann neue ohne Namens-Duplikate, gesamt ≤ 6.
+    merged = list(fixed)
+    for a in extra_agents:
+        if a["name"].lower() in have:
+            continue
+        have.add(a["name"].lower())
+        merged.append(a)
+        if len(merged) >= 6:
+            break
+    return merged, ti, to
+
+
+def _plan_norm_tasks(rawtasks: list, max_tasks: int = 40) -> list:
+    """Bringt KI-Aufgaben aufs Planer-Schema (wie generate_plan): IDs eindeutig,
+    Ressourcen normalisiert, Vorgänger gesäubert, Nachfolger + Start/Ende abgeleitet."""
+    tasks, seen = [], set()
+    for i, t in enumerate((rawtasks or [])[:max_tasks], start=1):
+        if not isinstance(t, dict):
+            continue
+        tid = str(t.get("id") or f"T{i}").strip() or f"T{i}"
+        while tid in seen:
+            tid = f"{tid}_{i}"
+        seen.add(tid)
+        try:
+            dur = max(0, float(t.get("duration", 1)))
+        except Exception:
+            dur = 1
+        res = [_coerce_resource(r) for r in (t.get("resource_list") or t.get("resources") or [])
+               if isinstance(r, dict)][:6]
+        preds = [str(p).strip() for p in (t.get("predecessors") or []) if str(p).strip()]
+        roles = [str(r).strip() for r in (t.get("roles") or []) if str(r).strip()][:6]
+        tasks.append({
+            "id": tid, "name": str(t.get("name", tid)).strip()[:120], "duration": dur,
+            "predecessors": preds, "successors": [], "resources": "",
+            "resource_list": res, "roles": roles, "area": str(t.get("area") or "").strip()[:40],
+            "notes": str(t.get("notes") or "").strip()[:300], "is_start": False, "is_end": False,
+        })
+    ids = {t["id"] for t in tasks}
+    by_id = {t["id"]: t for t in tasks}
+    for t in tasks:
+        t["predecessors"] = [p for p in t["predecessors"] if p in ids and p != t["id"]]
+    for t in tasks:
+        for p in t["predecessors"]:
+            by_id[p]["successors"].append(t["id"])
+    for t in tasks:
+        if not t["predecessors"]:
+            t["is_start"] = True
+        if not t["successors"]:
+            t["is_end"] = True
+    return tasks
+
+
+async def _plan_strategy_generator(req: PlanStrategyRequest):
+    model = _pick_model(req.model, _model_for("general"))
+    brief = (req.brief or "").strip()
+    extra = (req.extra or "").strip()
+    if not brief and not extra:
+        yield _sse({"type": "error", "message": "Kein Briefing — bitte erst im Chat diskutieren, dann /plan."})
+        return
+    task_text = "\n\n".join(p for p in (
+        f"Diskussion / Briefing:\n{brief[:6000]}" if brief else "",
+        f"Zusätzliche Randbedingungen:\n{extra}" if extra else "",
+    ) if p)
+    query = (extra or brief).split("\n", 1)[0][:200]
+    tin = tout = 0
+
+    # ── Phase A — Strategie (Markdown, optional geerdet) ──────────────────────
+    yield _sse({"type": "phase", "label": "Strategie wird entwickelt…"})
+    grounding = await _plan_ground(query, req.web_search, req.rag_collections)
+    sys_a = (
+        "Du bist ein erfahrener Strategie- und Projektberater. Aus der Diskussion "
+        "entwickelst du eine klare, umsetzbare Strategie. Gliedere als Markdown mit "
+        "diesen Abschnitten: '## Ziel', '## Optionen', '## Bewertungskriterien', "
+        "'## Vorgehen', '## Risiken', '## Meilensteine'. Sei konkret und entscheidungs"
+        "orientiert. Wenn dir Belegmaterial eingeblendet ist, stütze dich darauf und "
+        "nenne Quellen; erfinde keine Preise oder Rechtsstände."
+    )
+    usr_a = (f"Belegmaterial:\n{grounding}\n\n" if grounding else "") + task_text
+    strategy_md = ""
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": sys_a},
+                             {"role": "user", "content": usr_a}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            j = resp.json()
+        strategy_md = re.sub(r"<think>.*?</think>", "", j.get("message", {}).get("content", ""),
+                             flags=re.DOTALL).strip()
+        a, b = _llm_tok(j); tin += a; tout += b
+    except Exception as e:
+        strategy_md = f"_(Strategie konnte nicht erstellt werden: {e})_"
+    yield _sse({"type": "strategy", "markdown": strategy_md})
+
+    # ── Phase B — Beratungs-Agenten (Vorschlag) ───────────────────────────────
+    yield _sse({"type": "phase", "label": "Beratungs-Agenten werden abgeleitet…"})
+    agents, a, b = await _plan_agents(model, task_text, strategy_md, req.pinned_agents)
+    tin += a; tout += b
+    yield _sse({"type": "agents", "agents": agents})
+
+    # ── Phase C — Einsatz-/Ressourcenplan (Vorschlag) ─────────────────────────
+    yield _sse({"type": "phase", "label": "Einsatz- & Ressourcenplan wird erstellt…"})
+    roles_hint = ", ".join(a["name"] for a in agents) or "die nötigen Fachrollen"
+    sys_c = (
+        "Du bist ein erfahrener Projektplaner. Erstelle aus Strategie und Briefing einen "
+        "Einsatz- und Ressourcenplan in sinnvollen Phasen. Vergib fortlaufende IDs T1, T2, …. "
+        "Jede Aufgabe hat: id, name, duration (Tage), predecessors (Liste direkter Vorgänger-IDs; "
+        "die erste hat []), area (Projektphase), roles (zuständige Rollen — nutze wo passend die "
+        f"Beratungsrollen: {roles_hint}) und resource_list (Mensch/Hardware/Software) mit "
+        "kind (human|hardware|software), name, qty, hours (bei Hardware/Software 0) und rate (€). "
+        "Füge einen resource_catalog mit den verwendeten Rollen/Ressourcen und Kostensätzen an. "
+        "Antworte NUR mit JSON in genau diesem Format, ohne Markdown:\n"
+        '{"name":"Projektname","description":"…","tasks":[{"id":"T1","name":"Anforderungen klären",'
+        '"duration":3,"predecessors":[],"area":"Vorbereitung","roles":["Projektleiter"],'
+        '"resource_list":[{"kind":"human","name":"Projektleiter","qty":1,"hours":16,"rate":90}]}],'
+        '"resource_catalog":[{"kind":"human","name":"Projektleiter","rate":90}]}\n'
+        "8 bis 16 Aufgaben."
+    )
+    usr_c = (f"Strategie:\n{strategy_md[:4000]}\n\n" if strategy_md else "") + task_text
+    data_c, a, b = await _plan_llm_json(model, sys_c, usr_c); tin += a; tout += b
+    plan_tasks = _plan_norm_tasks(data_c.get("tasks") or [])
+    plan = {
+        "name": str(data_c.get("name") or (query[:60] or "Einsatzplan")).strip()[:120],
+        "description": str(data_c.get("description") or "").strip()[:1000],
+        "tasks": plan_tasks,
+        "resource_catalog": _normalize_catalog(data_c.get("resource_catalog")),
+        "resource_mode": "free",
+    }
+    yield _sse({"type": "plan", "plan": plan})
+
+    # ── Phase D — Bewertungs-Jury (Vorschlag) ─────────────────────────────────
+    yield _sse({"type": "phase", "label": "Bewertungs-Jury wird zusammengestellt…"})
+    jury = {
+        "name": (f"Bewertung: {query[:48]}" if query else "Bewertungs-Jury").strip(),
+        "description": "Bewertet das Vorhaben aus den Fachperspektiven der Beratungs-Agenten.",
+        "member_agent_names": [a["name"] for a in agents],
+    }
+    yield _sse({"type": "jury", "jury": jury})
+
+    yield _sse({"type": "done", "tokens": {"in": tin, "out": tout}})
+
+
+@app.post("/api/plan/strategy")
+async def plan_strategy(req: PlanStrategyRequest):
+    return StreamingResponse(
+        _plan_strategy_generator(req),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Backup / Restore ─────────────────────────────────────────────────────────

@@ -102,6 +102,17 @@ const Chat = (() => {
       return;
     }
 
+    // Plan-Orchestrator: „/plan <Zusatz>" baut aus dem Chat-Verlauf eine Strategie,
+    // Beratungs-Agenten, einen Einsatz-/Ressourcenplan und eine Bewertungs-Jury
+    // (Vorschau → auf Bestätigung anlegen). Vor der Slash-Agent-Auflösung prüfen.
+    const pl = _parsePlan(text);
+    if (pl) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runPlan(pl.extra, pl.pinned, pl.unresolved);
+      return;
+    }
+
     // Slash-Agent: führendes „/Name" wählt nur für DIESE Nachricht einen Agenten
     let slashAgent = null;
     const slash = _resolveSlashAgent(text);
@@ -292,6 +303,19 @@ const Chat = (() => {
   }
   // Auch für andere Tabs nutzbar machen (Medizin, Mathe, Dokumente): /Agent in jeder Chatzeile
   window.resolveSlashAgent = _resolveSlashAgent;
+
+  // Löst EINEN Token (ohne führenden „/") in einen vorhandenen Agenten auf — für
+  // feste Agenten in „/plan … /dsgvo /tisax". Gibt das Agent-Objekt oder null zurück.
+  function _findAgentByToken(token) {
+    let agents = [];
+    try { agents = (typeof AgentManager !== 'undefined' && AgentManager.getAgents()) || []; } catch (_) {}
+    const norm = s => String(s || '').toLowerCase();
+    const slug = s => norm(s).replace(/[^a-z0-9]/g, '');
+    const t = norm(token);
+    let a = agents.find(x => norm(x.id) === t || norm(x.name) === t || slug(x.name) === slug(t));
+    if (!a) a = agents.find(x => norm(x.id).startsWith(t) || norm(x.name).startsWith(t) || slug(x.name).startsWith(slug(t)));
+    return a || null;
+  }
 
   function insertAgentNote(container, beforeEl, agent) {
     if (!agent) return;
@@ -1172,6 +1196,303 @@ const Chat = (() => {
         switchTab('docgen');
         showToast('✓ Deepdive-Dokument im Dokumente-Tab — als DOCX/PDF exportierbar');
       }
+    }
+  }
+
+  // ── /plan — Strategie- & Einsatzplan-Orchestrator ────────────────────────────
+  // „/plan" (optional mit Zusatz) baut aus dem bisherigen Chat-Verlauf in einem Zug
+  // Strategie + Beratungs-Agenten + Einsatz-/Ressourcenplan + Bewertungs-Jury als
+  // VORSCHAU. Gespeichert wird nichts; erst „✅ Alles anlegen" legt über die
+  // vorhandenen Endpoints (/api/agents, /api/plans, /api/juries) an.
+  function _parsePlan(text) {
+    const m = text.match(/^\/plan\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    let rest = (m[1] || '').trim();
+    const pinned = [], unresolved = [];
+    // „/token"-Referenzen aus dem Rest ziehen = feste, bereits vorhandene Agenten.
+    rest = rest.replace(/\/(\S+)/g, (full, tok) => {
+      const a = _findAgentByToken(tok);
+      if (a) { if (!pinned.some(p => p.id === a.id)) pinned.push(a); return ''; }
+      unresolved.push(tok); return full;   // unaufgelöst → im Briefing belassen
+    }).replace(/\s{2,}/g, ' ').trim();
+    return { extra: rest, pinned, unresolved };
+  }
+
+  // Briefing = die letzten Gesprächsbeiträge (User + Assistent), als Text.
+  function _planBrief(maxTurns = 8) {
+    const turns = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+    return turns.slice(-maxTurns)
+      .map(m => `${m.role === 'user' ? 'Nutzer' : 'Assistent'}: ${m.content || ''}`)
+      .join('\n\n').slice(0, 8000);
+  }
+
+  function _planSection(title) {
+    const sec = document.createElement('div');
+    sec.style.margin = '10px 0';
+    const h = document.createElement('div');
+    h.style.cssText = 'font-weight:600;margin-bottom:4px';
+    h.textContent = title;
+    const body = document.createElement('div');
+    sec.appendChild(h); sec.appendChild(body);
+    return { sec, body };
+  }
+
+  // Button-Fabrik: immer type="button" (sonst könnte ein Klick als Formular-Submit
+  // gewertet werden und der eigentliche Handler scheinbar „nicht reagieren").
+  function _planBtn(cls, label, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function _handlePlanEvent(ev, ctx) {
+    const { statusEl, card, proposal } = ctx;
+    if (ev.type === 'phase') {
+      statusEl.innerHTML = `<em>⏳ ${escHtml(ev.label || '')}</em>`;
+    } else if (ev.type === 'strategy') {
+      proposal.strategy = ev.markdown || '';
+      const { sec, body } = _planSection('🧭 Strategie');
+      renderMarkdown(body, proposal.strategy);
+      card.appendChild(sec);
+    } else if (ev.type === 'agents') {
+      proposal.agents = ev.agents || [];
+      const { sec, body } = _planSection(`🤖 Beratungs-Agenten (${proposal.agents.length})`);
+      body.innerHTML = proposal.agents.map(a =>
+        `<div style="margin:3px 0">${escHtml(a.icon || '🤖')} <strong>${escHtml(a.name)}</strong>`
+        + (a.pinned ? ' <span title="Fester Agent" style="opacity:.8">📌 fest</span>' : '')
+        + (a.description ? ` — <span style="opacity:.8">${escHtml(a.description)}</span>` : '') + '</div>'
+      ).join('') || '<em>keine</em>';
+      card.appendChild(sec);
+    } else if (ev.type === 'plan') {
+      proposal.plan = ev.plan || null;
+      const t = (proposal.plan && proposal.plan.tasks) || [];
+      const { sec, body } = _planSection(`📅 Einsatz- & Ressourcenplan (${t.length} Aufgaben)`);
+      body.innerHTML = `<div style="margin-bottom:4px"><strong>${escHtml(proposal.plan?.name || 'Plan')}</strong></div>`
+        + '<ol style="margin:0 0 0 18px">' + t.map(x =>
+          `<li>${escHtml(x.name)}${x.area ? ` <span style="opacity:.7">[${escHtml(x.area)}]</span>` : ''}`
+          + `${x.duration ? ` · ${x.duration} T` : ''}</li>`).join('') + '</ol>';
+      card.appendChild(sec);
+    } else if (ev.type === 'jury') {
+      proposal.jury = ev.jury || null;
+      const m = (proposal.jury && proposal.jury.member_agent_names) || [];
+      const { sec, body } = _planSection('⚖️ Bewertungs-Jury');
+      body.innerHTML = `<div><strong>${escHtml(proposal.jury?.name || 'Jury')}</strong></div>`
+        + `<div style="opacity:.8">Mitglieder: ${m.map(escHtml).join(', ') || '—'}</div>`;
+      card.appendChild(sec);
+    } else if (ev.type === 'done') {
+      if (ev.tokens && typeof TokenMeter !== 'undefined' && TokenMeter.add) {
+        TokenMeter.add({ in: ev.tokens.in || 0, out: ev.tokens.out || 0 });
+      }
+    } else if (ev.type === 'error') {
+      showToast('Plan: ' + (ev.message || 'Fehler'));
+    }
+  }
+
+  function _finishPlanCard(ctx) {
+    const { statusEl, card, proposal } = ctx;
+    const note = document.createElement('div');
+    note.style.cssText = 'margin:8px 0;font-size:.85em;opacity:.75';
+    note.textContent = 'Hinweis: Kosten-/Rechtsangaben sind ein Entscheidungs­hilfe-Entwurf. '
+      + 'Für DSGVO/EU AI Act/Preise echte Quellen prüfen (Recherche/Web-Toggle) – kein Rechtsrat.';
+    card.appendChild(note);
+
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px';
+    bar.appendChild(_planBtn('btn-save', '✅ Alles anlegen', () => _applyPlan(proposal, bar, statusEl)));
+    bar.appendChild(_planBtn('btn-cancel', '📄 In Dokumente', () => {
+      if (!proposal.strategy) { showToast('Keine Strategie vorhanden'); return; }
+      if (typeof DocGen !== 'undefined' && DocGen.showResult) {
+        DocGen.showResult(proposal.strategy); switchTab('docgen');
+        showToast('✓ Strategie im Dokumente-Tab');
+      } else { showToast('Dokumente-Tab nicht verfügbar'); }
+    }));
+    bar.appendChild(_planBtn('btn-cancel', '📚 In Wissensdatenbank', () => {
+      if (!proposal.strategy) { showToast('Keine Strategie vorhanden'); return; }
+      if (typeof RAG !== 'undefined' && RAG.ingestText) {
+        RAG.ingestText((proposal.plan?.name || 'Strategie'), proposal.strategy);
+      } else { showToast('Wissensdatenbank nicht verfügbar'); }
+    }));
+    card.appendChild(bar);
+    statusEl.innerHTML = '<strong>✅ Vorschau fertig</strong> — prüfen und anlegen.';
+    scrollToBottom();
+  }
+
+  async function _applyPlan(proposal, bar, statusEl) {
+    bar.querySelectorAll('button').forEach(b => b.disabled = true);
+    statusEl.innerHTML = '<em>⏳ Projekt, Agenten, Plan und Jury werden angelegt…</em>';
+    const agentIds = [];
+    let created = 0, reused = 0;
+    try {
+      // 0) Projekt anlegen — Plan, Agenten und Jury werden damit verknüpft.
+      let projectId = null, projectName = '';
+      {
+        projectName = (proposal.plan && proposal.plan.name) || 'Strategie-Projekt';
+        const r = await fetch('/api/projects', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: projectName,
+            description: (proposal.plan && proposal.plan.description) || (proposal.strategy || '').slice(0, 300),
+          }),
+        });
+        if (r.ok) { const pj = await r.json(); projectId = pj.id; }
+      }
+
+      for (const a of (proposal.agents || [])) {
+        // Fester, bereits vorhandener Agent → nicht erneut anlegen, vorhandene id nutzen.
+        if (a.id) { agentIds.push(a.id); reused++; continue; }
+        const r = await fetch('/api/agents', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: a.name, description: a.description || '', system_prompt: a.system_prompt,
+            tools: a.tools || ['web_search', 'calculate'], icon: a.icon || '🤖',
+            category: a.category || 'Beratung', favorite: false, project_id: projectId,
+          }),
+        });
+        if (r.ok) { const saved = await r.json(); if (saved.id) { agentIds.push(saved.id); created++; } }
+      }
+
+      let planId = null;
+      if (proposal.plan) {
+        const r = await fetch('/api/plans', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: proposal.plan.name, description: proposal.plan.description || '',
+            tasks: proposal.plan.tasks || [],
+            resource_catalog: proposal.plan.resource_catalog || [],
+            resource_mode: proposal.plan.resource_mode || 'free', project_id: projectId,
+          }),
+        });
+        if (r.ok) { const saved = await r.json(); planId = saved.id; }
+      }
+
+      let juryId = null;
+      if (proposal.jury) {
+        const r = await fetch('/api/juries', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: proposal.jury.name, description: proposal.jury.description || '',
+            member_agent_ids: agentIds, project_id: projectId,
+          }),
+        });
+        if (r.ok) { const saved = await r.json(); juryId = saved.id; }
+      }
+
+      if (typeof AgentManager !== 'undefined' && AgentManager.load) { try { await AgentManager.load(); } catch (_) {} }
+      // Projekt-Auswahl aktualisieren, aktuelle Unterhaltung dem Projekt zuordnen.
+      if (projectId && typeof Projects !== 'undefined') {
+        try { await Projects.load(); } catch (_) {}
+        if (window._currentConvId && Projects.assignCurrentChat) {
+          try { await Projects.assignCurrentChat(projectId); } catch (_) {}
+        }
+      }
+
+      statusEl.innerHTML = `<strong>✅ Angelegt:</strong> `
+        + (projectId ? `Projekt „${escHtml(projectName)}", ` : '')
+        + `${created} neue Agenten`
+        + (reused ? ` (+ ${reused} feste übernommen)` : '')
+        + (planId ? ', 1 Plan' : '') + (juryId ? ', 1 Jury' : '')
+        + (projectId ? ' — alles mit dem Projekt verknüpft.' : '.');
+      const done = document.createElement('div');
+      done.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px';
+      if (projectId && typeof Projects !== 'undefined' && Projects.openModal) {
+        done.appendChild(_planBtn('btn-cancel', '📁 Projekt', () => Projects.openModal()));
+      }
+      if (planId) {
+        done.appendChild(_planBtn('btn-cancel', '📅 Plan öffnen', () => {
+          if (typeof Planner !== 'undefined' && Planner.openPlan) Planner.openPlan(planId);
+          else switchTab('planner');
+        }));
+      }
+      done.appendChild(_planBtn('btn-cancel', '🤖 Agenten', () => switchTab('agents')));
+      if (juryId) {
+        done.appendChild(_planBtn('btn-cancel', '⚖️ Jury starten', () => {
+          switchTab('jury');
+          if (typeof Jury !== 'undefined' && Jury.openManager) Jury.openManager();
+        }));
+      }
+      bar.parentElement.appendChild(done);
+      showToast('✓ Strategie umgesetzt — Agenten, Plan und Jury angelegt');
+    } catch (e) {
+      statusEl.innerHTML = '<strong>⚠️ Fehler beim Anlegen:</strong> ' + escHtml(e.message || '');
+      bar.querySelectorAll('button').forEach(b => b.disabled = false);
+    }
+  }
+
+  async function runPlan(extra, pinned, unresolved) {
+    if (isStreaming) return;
+    pinned = pinned || []; unresolved = unresolved || [];
+    const brief = _planBrief();
+    if (!brief && !extra && !pinned.length) {
+      showToast('„/plan" braucht eine vorherige Diskussion im Chat (oder Zusatz nach dem Befehl).');
+      return;
+    }
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    const useSearch = document.getElementById('btn-search-toggle').classList.contains('active');
+    const ragCollections = (typeof RAG !== 'undefined') ? RAG.selectedCollections() : [];
+
+    // Feste Agenten auf die Backend-Form bringen (id behalten → nicht neu anlegen).
+    const pinnedPayload = pinned.map(a => ({
+      id: a.id, name: a.name, description: a.description || '',
+      system_prompt: a.system_prompt || '', icon: a.icon || '🤖',
+      category: a.category || 'Beratung', tools: a.tools || ['web_search', 'calculate'],
+    }));
+
+    let echo = '🧭 /plan — Strategie & Einsatzplan aus der Diskussion';
+    if (pinned.length) echo += '\n\n📌 Feste Agenten: ' + pinned.map(a => (a.icon ? a.icon + ' ' : '') + a.name).join(', ');
+    if (unresolved.length) echo += '\n\n⚠️ Nicht gefunden (als Text behandelt): ' + unresolved.map(t => '/' + t).join(' ');
+    if (extra) echo += `\n\nZusatz: ${extra}`;
+    appendMessage('user', echo);
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const statusEl = document.createElement('div');
+    statusEl.innerHTML = '<em>⏳ Strategie wird vorbereitet…</em>';
+    const card = document.createElement('div');
+    content.appendChild(statusEl);
+    content.appendChild(card);
+
+    const ctx = { statusEl, card, proposal: { strategy: '', agents: [], plan: null, jury: null } };
+
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/plan/strategy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          brief, extra, model, web_search: useSearch, rag_collections: ragCollections,
+          pinned_agents: pinnedPayload,
+        }),
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          _handlePlanEvent(ev, ctx);
+          scrollToBottom();
+        }
+      }
+      _finishPlanCard(ctx);
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('Plan-Fehler: ' + e.message);
+    } finally {
+      isStreaming = false;
+      setBtnSendState(true);
     }
   }
 

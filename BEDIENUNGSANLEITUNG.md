@@ -145,6 +145,29 @@ wird zum **Vorwort**, jede Frage zu einem **Kapitel** mit der Antwort als Inhalt
 fertige Dokument öffnet sich im **Dokumente-Tab** und ist dort als **DOCX/PDF**
 exportierbar.
 
+**🧭 Strategie & Einsatzplan mit `/plan`:** Diskutiere dein Vorhaben zuerst frei im
+Chat (z. B. „Vergleich von drei KI-Tools nach Kosten, Datenschutz, Zeitplan und
+Hardware"), dann tippe **`/plan`**. Aus dem **bisherigen Gesprächsverlauf** baut die KI
+in einem Zug eine **Vorschau** mit vier Bausteinen: eine **Strategie** (Ziel, Optionen,
+Bewertungskriterien, Vorgehen, Risiken, Meilensteine), die nötigen **Beratungs-Agenten**
+(z. B. Kosten-, Datenschutz-, Zeitplan-, Hardware-Experte), einen **Einsatz- und
+Ressourcenplan** (Phasen, Aufgaben, Dauern, Rollen, Kosten) und eine **Bewertungs-Jury**.
+Optional kannst du Randbedingungen anhängen: `/plan Budget 10k €, Start im Q3`. Der
+🔍-Schalter und die aktiven Wissensdatenbanken erden die Strategie mit echten Quellen.
+**Feste Agenten erzwingen:** Hängst du vorhandene Agenten als `/Kürzel` an, werden sie
+**auf jeden Fall** als Berater und Jury-Mitglied verwendet (die KI ergänzt nur fehlende
+Rollen) — z. B. `/plan Einsatz Copilot /dsgvo /tisax` nutzt zwingend deinen DSGVO- und
+deinen TISAX-Agenten. Diese festen Agenten sind in der Vorschau mit **📌** markiert und
+werden beim Anlegen **nicht doppelt** erzeugt, sondern direkt der Jury zugeordnet. Ein
+nicht gefundenes Kürzel wird als normaler Text behandelt (Hinweis in der Vorschau).
+**Es wird zunächst nichts gespeichert** — erst mit **„✅ Alles anlegen"** wird ein
+**Projekt** (benannt nach dem Plan) angelegt und damit **alles verknüpft**: die
+Agenten, der Plan (im **Planer**) und die Jury (im **Jury-Tab**) erhalten die Projekt­-
+Zuordnung, und die aktuelle Unterhaltung wird dem Projekt zugewiesen. Danach führen
+Knöpfe direkt dorthin (u. a. **📁 Projekt** zur Projektverwaltung). Die Strategie lässt sich zusätzlich **in die Dokumente** oder **in die
+Wissensdatenbank** übernehmen. *Hinweis:* Kosten- und Rechtsangaben sind eine
+Entscheidungs­hilfe — für DSGVO/EU AI Act/Preise echte Quellen prüfen, kein Rechtsrat.
+
 **Kontextfenster:** Im Profil wählbar von **4k bis 128k** Tokens (Chat &
 Dokumentengenerator). Größer verhindert abgeschnittene Antworten, kostet aber mehr
 GPU-Speicher — bei viel VRAM ruhig hoch wählen.
@@ -261,16 +284,20 @@ Im Canvas-Tab auf **🖼️ Bild-Präsentation** klicken. Hier erzeugt die KI au
 beschrieben wird:
 
 1. **Titel** und **Beschreibung & Ziel** der Präsentation eingeben.
-2. **🧠 Analyse-Experte ableiten** — aus der Beschreibung wird eine fachliche
-   Persona erzeugt (z. B. ein „Elektrotechnik-Experte" bei E-Maschinen-Themen).
-   Den Text kannst du vor dem Start noch anpassen.
+2. **Experten wählen** — entweder einen **festen Agenten** aus der Liste
+   (sein System-Prompt wird übernommen) **oder** mit **🧠 Analyse-Experte
+   ableiten** aus der Beschreibung eine fachliche Persona erzeugen (z. B. ein
+   „Elektrotechnik-Experte" bei E-Maschinen-Themen). Den Text kannst du vor dem
+   Start noch anpassen.
 3. **📁 Bilderordner wählen** — alle Bilder des Ordners werden geladen.
 4. **▶ Präsentation erstellen** — pro Bild prüft die KI den Dateinamen und
    **analysiert das Bild** (lokales Vision-Modell). Es entsteht je Bild eine Folie
    mit dem Bild auf der einen und einem kurzen Text auf der anderen Hälfte.
 
-Aufbau: Deckblatt → kurze Beschreibung → Bildfolien → Abschluss. Anschließend mit
-dem WYSIWYG-Editor (siehe Abschnitt 7) feinjustierbar.
+Aufbau: **Deckblatt (nur der Titel)** → **Einleitungsfolie** (der gewählte Experte
+formuliert die Beschreibung neu) → Bildfolien → Abschluss. Anschließend mit dem
+WYSIWYG-Editor (siehe Abschnitt 7) feinjustierbar. Der **PDF-Export** enthält die
+Bilder ebenso wie der PPTX-Export.
 
 ---
 

@@ -306,12 +306,17 @@
           <span id="illus-folder-info" class="illus-muted">Kein Ordner gewählt</span>
         </div>
 
+        <label class="illus-label">Fester Agent (optional)</label>
+        <select id="illus-agent" title="Einen vorhandenen Agenten als Analyse-Experten verwenden. Sein System-Prompt wird unten übernommen und kann editiert werden.">
+          <option value="">— Experte aus Beschreibung ableiten —</option>
+        </select>
+
         <div class="illus-row">
           <button id="btn-illus-persona" class="export-btn">🧠 Analyse-Experte ableiten</button>
           <span id="illus-persona-name" class="illus-muted"></span>
         </div>
         <textarea id="illus-persona" rows="3"
-          placeholder="System-Prompt des Analyse-Experten (wird abgeleitet, hier editierbar)…"></textarea>
+          placeholder="System-Prompt des Analyse-Experten (abgeleitet oder fester Agent — hier editierbar)…"></textarea>
 
         <div class="pres-action-bar">
           <button id="btn-illus-generate" class="export-btn pres-generate-btn">▶ Präsentation erstellen</button>
@@ -2287,7 +2292,7 @@ Beispiele:
 <script src="/js/canvas_editor.js?v=20260603"></script>
 <script src="/js/agents.js?v=20260610code"></script>
 <script src="/js/jury.js?v=20260610mapreduce"></script>
-<script src="/js/chat.js?v=20260610tokens"></script>
+<script src="/js/chat.js?v=20260611plan3"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260613"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
@@ -2299,7 +2304,7 @@ Beispiele:
 <script src="/js/matrix_research.js?v=20260603"></script>
 <script src="/js/rfq.js?v=20260610f"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
-<script src="/js/illustrated_presentation.js?v=20260603"></script>
+<script src="/js/illustrated_presentation.js?v=20260610illus"></script>
 <script src="/js/json_editor.js?v=20260603"></script>
 <script src="/js/logger.js?v=20260603"></script>
 <script src="/js/ide.js?v=20260610fix2"></script>

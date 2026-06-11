@@ -960,6 +960,54 @@ def _slide_bullets(sd: dict) -> list:
     return bullets or []
 
 
+def _pdf_embed_image(fig, data_url: str, x0: float, y0: float,
+                     bw: float, bh: float, sw: float, sh: float) -> None:
+    """Bettet ein Base64-Bild seitenverhältnis-erhaltend (contain) und zentriert
+    in die Figur-Box (x0, y0, bw, bh in Figur-Fraktion) ein. ``sw``/``sh`` sind
+    die Figurmaße in Zoll, damit das Seitenverhältnis nicht verzerrt."""
+    import base64, io
+    try:
+        _, b64 = data_url.split(",", 1)
+        raw = base64.b64decode(b64)
+        from PIL import Image
+        import numpy as np
+        with Image.open(io.BytesIO(raw)) as im:
+            im = im.convert("RGB")
+            iw, ih = im.size
+            arr = np.asarray(im)
+    except Exception:
+        return
+    box_w_in, box_h_in = bw * sw, bh * sh
+    aspect = (iw / ih) if ih else 1.0
+    draw_w_in = box_w_in
+    draw_h_in = draw_w_in / aspect
+    if draw_h_in > box_h_in:
+        draw_h_in = box_h_in
+        draw_w_in = draw_h_in * aspect
+    dw, dh = draw_w_in / sw, draw_h_in / sh
+    ox = x0 + (bw - dw) / 2
+    oy = y0 + (bh - dh) / 2
+    iax = fig.add_axes([ox, oy, dw, dh])
+    iax.axis("off")
+    iax.imshow(arr, aspect="auto")
+
+
+def _pdf_fullbleed_image(fig, img_path) -> bool:
+    """Legt ein Bild vollflächig (randlos) hinter den Folieninhalt — für das
+    Corporate-Deckblatt (cover.jpg), analog zum PPTX-Export. Gibt True bei Erfolg."""
+    try:
+        import numpy as np
+        from PIL import Image
+        with Image.open(str(img_path)) as im:
+            arr = np.asarray(im.convert("RGB"))
+    except Exception:
+        return False
+    iax = fig.add_axes([0, 0, 1, 1])
+    iax.axis("off")
+    iax.imshow(arr, aspect="auto")
+    return True
+
+
 def _pdf_presentation(data: dict, fp: Path) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
@@ -970,21 +1018,36 @@ def _pdf_presentation(data: dict, fp: Path) -> None:
     slides = data.get("slides", []) or []
 
     with PdfPages(str(fp)) as pdf:
-        for sd in slides:
+        for slide_idx, sd in enumerate(slides):
             layout = sd.get("layout", "bullets")
             title = sd.get("title", "")
             fig = plt.figure(figsize=(SW, SH))
             ax = fig.add_axes([0, 0, 1, 1]); ax.axis("off")
             ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+            cover_used = False
 
             if layout == "title":
-                ax.add_patch(Rectangle((0, 0), 1, 1, color=_PDF_DARK))
-                ax.text(0.5, 0.56, title, ha="center", va="center", fontsize=34,
-                        fontweight="bold", color=_PDF_WHITE, wrap=True, parse_math=False)
-                sub = sd.get("content", "")
-                if sub:
-                    ax.text(0.5, 0.40, sub, ha="center", va="center", fontsize=18,
-                            color=(0.64, 0.78, 0.92), wrap=True, parse_math=False)
+                # Erste Titelfolie: Corporate-Deckblatt (cover.jpg) als Hintergrund,
+                # genau wie im PPTX-Export. Sonst dunkler Standard-Hintergrund.
+                if slide_idx == 0 and _DECKBLATT.exists() and _pdf_fullbleed_image(fig, _DECKBLATT):
+                    cover_used = True
+                    # Titel über das Deckblatt legen (eigene Achse oben drauf, links).
+                    tax = fig.add_axes([0, 0, 1, 1]); tax.axis("off")
+                    tax.set_xlim(0, 1); tax.set_ylim(0, 1)
+                    tax.text(0.06, 0.46, title, ha="left", va="center", fontsize=30,
+                             fontweight="bold", color=_PDF_WHITE, wrap=True, parse_math=False)
+                    sub = sd.get("content", "")
+                    if sub:
+                        tax.text(0.06, 0.34, sub, ha="left", va="center", fontsize=16,
+                                 color=(0.90, 0.90, 0.90), wrap=True, parse_math=False)
+                else:
+                    ax.add_patch(Rectangle((0, 0), 1, 1, color=_PDF_DARK))
+                    ax.text(0.5, 0.56, title, ha="center", va="center", fontsize=34,
+                            fontweight="bold", color=_PDF_WHITE, wrap=True, parse_math=False)
+                    sub = sd.get("content", "")
+                    if sub:
+                        ax.text(0.5, 0.40, sub, ha="center", va="center", fontsize=18,
+                                color=(0.64, 0.78, 0.92), wrap=True, parse_math=False)
             elif layout == "section":
                 ax.add_patch(Rectangle((0, 0), 1, 1, color=(0, 0x3A / 255, 0x74 / 255)))
                 ax.text(0.5, 0.55, title, ha="center", va="center", fontsize=30,
@@ -998,21 +1061,36 @@ def _pdf_presentation(data: dict, fp: Path) -> None:
                 ax.add_patch(Rectangle((0, 0.86), 1, 0.14, color=_PDF_DARK))
                 ax.text(0.04, 0.93, title, ha="left", va="center", fontsize=22,
                         fontweight="bold", color=_PDF_WHITE, parse_math=False)
-                # Inhalt sammeln (Formeln bleiben erhalten)
+                # Bild rechts (bebilderte Präsentation) — Text dann nur links
+                img_r = sd.get("image_right") or sd.get("image")
+                if img_r:
+                    _pdf_embed_image(fig, img_r, 0.52, 0.08, 0.45, 0.72, SW, SH)
+                wrap = 40 if img_r else 78
+                # Inhalt sammeln (Formeln bleiben erhalten) und ALLE Zeilen vorab
+                # umbrechen, damit Schriftgröße/Zeilenabstand an die Folienhöhe
+                # angepasst werden können — so wird nichts mehr abgeschnitten.
                 bullets = _slide_bullets(sd)
-                yb = 0.78
+                lines = []   # (text, ist_erste_zeile_eines_stichpunkts)
                 for b in bullets:
-                    if yb < 0.08:
-                        break
                     clean = _strip_md_keep_math(_math_to_mpl(str(b)))
-                    for i, ln in enumerate(_wrap_keep_math(clean, 78)):
-                        txt = ("◆  " + ln) if i == 0 else "    " + ln
-                        _pdf_text(ax, 0.05, yb, txt, ha="left", va="top",
-                                  fontsize=17, color=_PDF_DARK)
-                        yb -= 0.062
+                    for i, ln in enumerate(_wrap_keep_math(clean, wrap)):
+                        lines.append(("◆  " + ln) if i == 0 else "    " + ln)
+                top, bottom = 0.80, 0.06
+                avail = top - bottom
+                n = max(1, len(lines))
+                # Standard-Abstand 0.062 (≈ Schriftgröße 17); bei zu vielen Zeilen
+                # proportional verkleinern (Mindestgröße 8, damit lesbar bleibt).
+                spacing = min(0.062, avail / n)
+                fontsize = max(8.0, min(17.0, 17.0 * spacing / 0.062))
+                yb = top
+                for txt in lines:
+                    _pdf_text(ax, 0.05, yb, txt, ha="left", va="top",
+                              fontsize=fontsize, color=_PDF_DARK)
+                    yb -= spacing
 
-            ax.text(0.5, 0.02, footer_text, ha="center", va="center",
-                    fontsize=8, color=_PDF_GRAY, parse_math=False)
+            if not cover_used:
+                ax.text(0.5, 0.02, footer_text, ha="center", va="center",
+                        fontsize=8, color=_PDF_GRAY, parse_math=False)
             pdf.savefig(fig)
             plt.close(fig)
 

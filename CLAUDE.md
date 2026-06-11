@@ -85,6 +85,7 @@ Each subsystem's deep documentation is in `docs/ENTWICKLUNG.md` (section numbers
 | Dokument-Experte (verallgemeinert) | `/api/agents/from-legal` mit `domain` (Fachgebiet/Rolle), `agents.js` `createLegalAgent` | §14 |
 | Kapazität & Zukauf (Planer) | `planner.js` `_openSchedule`/`_capacityAnalysisHtml`, `Planner.openPlan` | — |
 | Auto-Strukturieren (Planer) | `planner.js` `_openAutoStructure`/`_applyAutoStructure`, `/api/plans/auto-structure` (LLM-Abhängigkeiten+Phasen, Ressourcen-Entzerrung, zyklensicher) | — |
+| `/plan`-Orchestrator (Chat) | `chat.js` `_parsePlan`/`runPlan`/`_handlePlanEvent`/`_applyPlan`, SSE `/api/plan/strategy` (`_plan_strategy_generator`): Strategie→Agenten→Plan→Jury als **Vorschau**, speichert nichts; Anlegen via vorhandene `/api/agents`+`/api/plans`+`/api/juries`. Feste Agenten via `/plan … /kürzel` (`_findAgentByToken` → `pinned_agents`, `_plan_pinned_agents`): pinned zuerst, LLM ergänzt nur, beim Anlegen per vorhandener `id` wiederverwendet (kein Duplikat). „Alles anlegen" erstellt zuerst ein **Projekt** und verknüpft Plan/Agenten/Jury (Feld `project_id` in `create_plan`/`create_jury`/`AgentDef`) + ordnet die Unterhaltung zu | — |
 | Verzeichnis-Analyse & Morph-Kasten | `dir_analysis.js`/`morph_box.js`, `tools/anonymize.py` | §16 |
 | Mathe (tutor, auto-verify, plotting) | `mathe.js`, `main.py`, `tools/engineering.py` | §2.3, §17 |
 | Medizin 2-model pipeline | `medizin.js`, `/api/medizin/*` | §2.3 |

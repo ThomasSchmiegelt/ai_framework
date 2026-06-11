@@ -8,6 +8,7 @@ const IllustratedPresentation = (() => {
 
   const IMG_RE = /\.(jpe?g|png|gif|webp|bmp)$/i;
   let _images = [];          // [{name, dataUrl}]
+  let _agents = [];          // vorhandene Agenten (für festen Experten)
   let _busy = false;
 
   /* ── Panel öffnen/schließen ──────────────────────────────────── */
@@ -52,6 +53,32 @@ const IllustratedPresentation = (() => {
       r.onload = e => res(e.target.result);
       r.readAsDataURL(file);
     });
+  }
+
+  /* ── Festen Agenten als Experten anbieten ────────────────────── */
+  async function _loadAgents() {
+    const sel = document.getElementById('illus-agent');
+    if (!sel) return;
+    try {
+      let agents = await (await fetch('/api/agents')).json();
+      if (!Array.isArray(agents)) agents = [];
+      _agents = agents;
+      sel.innerHTML = '<option value="">— Experte aus Beschreibung ableiten —</option>' +
+        agents.map(a => `<option value="${a.id}">${(a.icon || '🤖')} ${(a.name || a.id)}</option>`).join('');
+    } catch (_) {}
+  }
+
+  function _onAgentPick() {
+    const sel = document.getElementById('illus-agent');
+    const a = _agents.find(x => x.id === sel?.value);
+    const ta = document.getElementById('illus-persona');
+    const nm = document.getElementById('illus-persona-name');
+    if (a) {
+      if (ta) ta.value = a.system_prompt || '';
+      if (nm) nm.textContent = `Experte: ${a.name || a.id}`;
+    } else if (nm) {
+      nm.textContent = '';
+    }
   }
 
   /* ── Analyse-Experte (Persona) ableiten ──────────────────────── */
@@ -127,15 +154,28 @@ const IllustratedPresentation = (() => {
     if (btn) btn.disabled = true;
     const setProg = m => { if (prog) { prog.style.display = ''; prog.textContent = m; } };
 
-    const { authorLine, projectLine } = await _loadAuthorLine();
+    const { authorLine } = await _loadAuthorLine();
     const slides = [];
 
-    // Deckblatt
-    slides.push({ layout: 'title', title, content: [authorLine, projectLine].filter(Boolean).join('  |  ') });
+    // Deckblatt — nur der Titel
+    slides.push({ layout: 'title', title });
 
-    // Beschreibungsfolie
+    // Beschreibungsfolie — vom Experten neu formuliert
     if (desc) {
-      slides.push({ layout: 'bullets', title: 'Über diese Präsentation', bullets: _sentences(desc) });
+      setProg('Einleitung wird vom Experten formuliert…');
+      let introBullets = _sentences(desc);
+      try {
+        const r = await fetch('/api/illus/intro', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: desc, system_prompt: persona, title }),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          if (Array.isArray(d.bullets) && d.bullets.length) introBullets = d.bullets;
+        }
+      } catch (_) {}
+      slides.push({ layout: 'bullets', title: 'Über diese Präsentation', bullets: introBullets });
     }
 
     // Bildfolien
@@ -182,13 +222,15 @@ const IllustratedPresentation = (() => {
   function init() {
     const btnOpen = document.getElementById('btn-illus-pres');
     if (!btnOpen) return;
-    btnOpen.addEventListener('click', _togglePanel);
+    btnOpen.addEventListener('click', () => { _togglePanel(); _loadAgents(); });
     document.getElementById('btn-illus-close')?.addEventListener('click', () => {
       document.getElementById('illus-pres-panel').style.display = 'none';
     });
     document.getElementById('btn-illus-folder')?.addEventListener('click', _pickFolder);
     document.getElementById('btn-illus-persona')?.addEventListener('click', _derivePersona);
     document.getElementById('btn-illus-generate')?.addEventListener('click', _generate);
+    document.getElementById('illus-agent')?.addEventListener('change', _onAgentPick);
+    _loadAgents();
   }
 
   return { init };
