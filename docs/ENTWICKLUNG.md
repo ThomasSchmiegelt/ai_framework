@@ -150,7 +150,8 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `POST /api/plans/suggest-tasks` | Vorgänger/Nachfolger-Vorschläge zu einer Aufgabe (JSON, respektiert `is_start`/`is_end` + Katalog-Modus) |
 | `POST /api/plans/detail-task` | Aufgabe detaillieren: verfeinert Name/Dauer/Notiz/Ressourcen **und** schlägt Vorgänger/Nachfolger vor → im Frontend wähl- & editierbar, „Übernehmen" |
 | `POST /api/plans/insert-between` | KI liest Bezeichnung/Notiz zweier Aufgaben A und B → schlägt 1–3 passende **Zwischenvorgänge** vor; Frontend verdrahtet A→neu→B und löst die direkte Kante A→B |
-| `POST /api/plans/generate` | Kompletten Projektplan per LLM generieren (`max_tasks` frei bis 200, **keine 20er-Grenze** mehr; `format:"json"` + `num_ctx 8192` bei großen Plänen; Rettungs-Parser für abgeschnittenes JSON; gibt `warning` zurück, wenn viel angefordert wird / das Modell zu wenig liefert; IDs/Vorgänger validiert, Nachfolger abgeleitet) |
+| `POST /api/plans/generate` | Kompletten Projektplan per LLM generieren. Dünner Wrapper über den geteilten Kern **`_generate_plan_core(...)`** (`max_tasks` frei **bis 300**, **keine 20er-Grenze**; `format:"json"` + `num_ctx 8192` bei großen Plänen bzw. `num_ctx`-Override; Rettungs-Parser für abgeschnittenes JSON; `warning` bei zu wenig gelieferten Aufgaben; IDs/Vorgänger validiert, Nachfolger abgeleitet). RAG-Auflösung via gemeinsamem `_plan_rag_context(...)` (akzeptiert Liste **oder** kommagetrennten String) |
+| `POST /api/plans/from-document` | **Dokument → Plan** (multipart `file` + `max_tasks`/`model`/`resource_mode`/`rag_collections`): `_extract_text` (PDF/DOCX/MD/TXT/XLSX/CSV) → `_generate_plan_core` mit `num_ctx = max(8192, _profile_num_ctx())` und Doku-Budget `num_ctx*2` Zeichen. Setzt Plannamen aus Dateinamen, kurze `description`, `source_document`. Frontend: `planner.js` `_importDocPlan` (Button `#btn-plan-from-doc`) |
 | `POST /api/derive-persona` | Bild-Analyse-Persona aus Präsentationsbeschreibung ableiten |
 | `POST /api/analyze-image` | Einzelbild per Vision-Modell beschreiben → `{title, bullets, caption}` |
 | `POST /api/medizin/consult` | 🩺 2-Modell-Konsultation (SSE: `stage`/`question`/`text`/`done`/`error`); Rückfragen bis 2 Runden, dann Einschätzung |
@@ -457,6 +458,14 @@ Wissensbasis-Multiselect (`#field-agent-rag`, befüllt aus `/api/rag/collections
 System-Prompt wird zur Laufzeit der Nutzernachricht vorangestellt. Standard-Agenten u. a.
 `latex_experte`, `mathe_experte`, `mathe_tutor`, `medizin_assistent`, `coder`, `presenter`.
 
+- **Projekt-gebundene Skill-Agenten (`project_id`):** über `/plan` erzeugte Berater
+  bekommen beim „Alles anlegen" eine `project_id` und gehören **ausschließlich** ihrem
+  Projekt. `GET /api/agents` liefert ohne Param weiterhin **alle** (Kompatibilität: Jury,
+  Slash-Auflösung), mit **`?project_id=…`** nur die Skill-Agenten des Projekts. Das
+  globale Grid (`agents.js renderGrid`) blendet `project_id`-Agenten aus; der Projekt-
+  Dialog (`projects.js _renderProjectList`) zeigt sie als 🧩 Skills. `DELETE /api/projects/{pid}`
+  **kaskadiert** und löscht die projekt-gebundenen Agenten mit (`agents_removed`).
+
 - **Sidebar = Favoriten:** der Sidebar-Agentenselektor listet **nur `favorite:true`**
   (+ „Kein Agent" + adaptiv). Jede Agentenkarte hat einen ⭐-Toggle
   (`AgentManager.toggleFavorite`). Die Chat-Toolbar hat zwei Schnellwähler — **📊
@@ -508,7 +517,10 @@ Mitglieder), dann `done`. Nutzt `_parse_llm_json` + `_sse`.
 
 **Frontend (`jury.js`):** Verwaltungs-Modal aus dem 🤖 Agenten-Tab (`#btn-juries`);
 wiederverwendbares Overlay **`Jury.evaluate(text, {title, context})`** (Streamer
-`_streamEval`). Eingebunden in Dokumente (`#btn-docgen-jury`) und Agent-Edit-Modal
+`_streamEval`). Der **Mitglieder-Picker** (`_renderMemberPicker`) ist **nach Projekt
+gruppiert**: zuerst „Allgemein" (Agenten ohne `project_id`), dann je Projekt ein Abschnitt
+mit dessen Skill-Agenten (`_projects` aus `/api/projects`), zuletzt ein Fallback für
+verwaiste Projekt-Agenten. Checkbox-Struktur unverändert (`_selectedMembers`). Eingebunden in Dokumente (`#btn-docgen-jury`) und Agent-Edit-Modal
 (`#btn-agent-prompt-jury`). Der Planer prüft Projekt-Agenten **nicht mehr selbst**
 (früher `#btn-planner-agent-jury`); stattdessen wird der abgeleitete Agent über
 „💾 Als Agent speichern" (`_saveAsAgent` → `AgentManager.openModal`) in den Agenten-Tab

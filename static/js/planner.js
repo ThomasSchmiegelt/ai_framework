@@ -1707,6 +1707,63 @@ const Planner = (() => {
     }
   }
 
+  /* ── Dokument → Plan: Datei importieren, Ressourcen ableiten, Plan bauen ── */
+  async function _importDocPlan(file) {
+    if (!file) return;
+    let count = parseInt(document.getElementById('planner-task-count')?.value, 10);
+    if (!Number.isFinite(count)) count = 12;
+    count = Math.max(5, Math.min(count, 300));
+    if (count > 30 && !confirm(
+        `${count} Aufgaben angefordert.\n\nKleine lokale Modelle liefern bei so großen Plänen ` +
+        `oft unvollständige Ergebnisse – auf einem leistungsfähigen Rechner mit großem Modell ` +
+        `ist das jedoch kein Problem.\n\nFortfahren?`)) return;
+    if (_tasks.length && !confirm('Bestehende Aufgaben durch den aus dem Dokument abgeleiteten Plan ersetzen?')) return;
+
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('max_tasks', String(count));
+    const model = _model();
+    if (model) fd.append('model', model);
+    fd.append('resource_mode', _resMode || 'free');
+    fd.append('rag_collections', (_currentRag() || []).join(','));
+
+    const btn = document.getElementById('btn-plan-from-doc');
+    if (btn) { btn.disabled = true; btn.textContent = '📄 liest…'; }
+    showToast(`📄 „${file.name}" wird gelesen, Ressourcen & Plan werden abgeleitet (${count} Aufgaben)… ${count > 30 ? 'das kann dauern' : ''}`);
+    try {
+      const r = await fetch('/api/plans/from-document', { method: 'POST', body: fd });
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { msg = (await r.json()).detail || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const d = await r.json();
+      if (!(d.tasks || []).length) throw new Error('Kein gültiger Plan erhalten');
+      _planId = null;
+      _tasks = d.tasks;
+      if (d.name) {
+        const nameEl = document.getElementById('planner-plan-name'); if (nameEl) nameEl.value = d.name;
+      }
+      if (d.description) {
+        _desc = d.description;
+        const descEl = document.getElementById('planner-desc'); if (descEl) descEl.value = d.description;
+      }
+      const sel = document.getElementById('planner-plan-select'); if (sel) sel.value = '';
+      const delBtn = document.getElementById('btn-delete-plan'); if (delBtn) delBtn.style.display = 'none';
+      _recalcAndRender();
+      showToast(`✓ Plan aus „${d.source_document || file.name}" abgeleitet: ${_tasks.length} Aufgaben`);
+      if (d.warning) {
+        const status = document.getElementById('planner-agent-status');
+        if (status) { status.textContent = `⚠ ${d.warning}`; status.title = d.warning; }
+        showToast('⚠ ' + d.warning);
+      }
+    } catch (e) {
+      showToast('Import fehlgeschlagen: ' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '📄 Dokument → Plan'; }
+    }
+  }
+
   /* ── Vorschläge für Vorgänger/Nachfolger ─────────────────────────── */
   async function _suggestFor(idx) {
     const anchor = _tasks[idx];
@@ -2729,6 +2786,14 @@ const Planner = (() => {
     document.getElementById('btn-plan-import-csv')?.addEventListener('click', () => planCsvInput?.click());
     planCsvInput?.addEventListener('change', e => {
       if (e.target.files[0]) _importCsv(e.target.files[0]);
+      e.target.value = '';
+    });
+
+    // Dokument → Plan (Strategiepapier o. Ä. importieren → Ressourcen + Plan ableiten)
+    const planDocInput = document.getElementById('plan-doc-input');
+    document.getElementById('btn-plan-from-doc')?.addEventListener('click', () => planDocInput?.click());
+    planDocInput?.addEventListener('change', e => {
+      if (e.target.files[0]) _importDocPlan(e.target.files[0]);
       e.target.value = '';
     });
 

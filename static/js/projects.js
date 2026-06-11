@@ -46,7 +46,7 @@ const Projects = (() => {
     document.getElementById('project-modal-overlay').classList.remove('active');
   }
 
-  function _renderProjectList() {
+  async function _renderProjectList() {
     const list = document.getElementById('project-list');
     if (!list) return;
     list.innerHTML = '';
@@ -54,7 +54,21 @@ const Projects = (() => {
       list.innerHTML = '<div style="color:var(--text-dim);font-size:13px">Noch keine Projekte.</div>';
       return;
     }
+    // Projekt-gebundene Skill-Agenten einmalig laden und je Projekt gruppieren.
+    let allAgents = [];
+    try { allAgents = await (await fetch('/api/agents')).json(); } catch (_) {}
+    const skillsByProject = {};
+    for (const a of allAgents) {
+      if (a.project_id) (skillsByProject[a.project_id] ||= []).push(a);
+    }
     for (const p of _projects) {
+      const skills = skillsByProject[p.id] || [];
+      const skillsHtml = skills.length
+        ? `<div class="project-skills" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+             <span style="color:var(--text-dim);font-size:12px">🧩 Skills:</span>`
+          + skills.map(a => `<span class="tool-badge" title="${escHtml(a.description || '')}">${(a.icon || '🤖')} ${escHtml(a.name)}</span>`).join('')
+          + `</div>`
+        : '';
       const row = document.createElement('div');
       row.className = 'project-row';
       row.innerHTML = `
@@ -62,17 +76,21 @@ const Projects = (() => {
           <span class="project-number">${escHtml(p.number || '')}</span>
           <span class="project-name">${escHtml(p.name)}</span>
           <span class="project-desc">${escHtml(p.description || '')}</span>
+          ${skillsHtml}
         </div>
-        <button class="btn-delete-project" data-id="${escHtml(p.id)}" title="Löschen">🗑</button>
+        <button class="btn-delete-project" data-id="${escHtml(p.id)}" data-skills="${skills.length}" title="Löschen">🗑</button>
       `;
       list.appendChild(row);
     }
     list.querySelectorAll('.btn-delete-project').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Projekt löschen?')) return;
+        const n = parseInt(btn.dataset.skills, 10) || 0;
+        const msg = n ? `Projekt löschen? Die ${n} projekt-eigenen Skill-Agenten werden mitgelöscht.` : 'Projekt löschen?';
+        if (!confirm(msg)) return;
         await fetch(`/api/projects/${btn.dataset.id}`, { method: 'DELETE' });
         await load();
         _renderProjectList();
+        if (typeof AgentManager !== 'undefined' && AgentManager.load) { try { await AgentManager.load(); } catch (_) {} }
       });
     });
   }

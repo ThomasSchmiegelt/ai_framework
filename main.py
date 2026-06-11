@@ -1668,6 +1668,43 @@ async def rag_from_text(cid: str, req: Request):
     return {"ok": True, "n_chunks": n}
 
 
+@app.post("/api/matrix/export-md-zip")
+async def matrix_export_md_zip(req: Request):
+    """Packt übergebene Markdown-Dokumente (Matrix-Recherche: eine Zelle je Datei,
+    benannt thema_prompt.md) in ein ZIP-Archiv zum Download. Dateinamen werden
+    serverseitig auf einen sicheren Basisnamen reduziert (kein Pfad-Traversal)."""
+    import io, zipfile, re as _re
+    body = await req.json()
+    files = body.get("files") or []
+    if not isinstance(files, list) or not files:
+        raise HTTPException(status_code=400, detail="Keine Dateien übergeben")
+    zipname = _re.sub(r"[^\w\-]+", "_", str(body.get("zipname", "")).strip()) or "markdown"
+    buf = io.BytesIO()
+    seen: set[str] = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, f in enumerate(files):
+            name = _re.sub(r"[\\/]+", "_", str((f or {}).get("name", "")).strip()).lstrip(".")
+            content = str((f or {}).get("content", ""))
+            if not name:
+                name = f"doc_{i + 1}.md"
+            if not name.lower().endswith(".md"):
+                name += ".md"
+            base = name
+            n = 2
+            while name in seen:
+                name = f"{base[:-3]}_{n}.md"
+                n += 1
+            seen.add(name)
+            zf.writestr(name, content)
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse as SR
+    return SR(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zipname}.zip"'},
+    )
+
+
 # In den RAG geeignete Dateiendungen (Textextraktion via tools/files.py).
 _RAG_FOLDER_EXTS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt", ".md", ".rtf",
@@ -4188,13 +4225,17 @@ async def download_report(filename: str):
 
 
 @app.get("/api/agents")
-async def list_agents():
+async def list_agents(project_id: Optional[str] = None):
+    """Listet Agenten. Ohne ``project_id`` werden ALLE zurückgegeben (Kompatibilität);
+    mit ``project_id`` nur die diesem Projekt fest zugeordneten Skill-Agenten."""
     agents = []
     for f in AGENTS_DIR.glob("*.json"):
         try:
             agents.append(json.loads(f.read_text(encoding="utf-8")))
         except Exception:
             pass
+    if project_id is not None:
+        agents = [a for a in agents if (a.get("project_id") or "") == project_id]
     return agents
 
 
@@ -4535,6 +4576,109 @@ async def delete_agent(aid: str):
     if fp:
         fp.unlink(missing_ok=True)
     return {"ok": True}
+
+
+class AgentMergeReq(BaseModel):
+    ids: List[str]
+    model: Optional[str] = None
+    name: Optional[str] = None
+
+
+@app.post("/api/agents/merge")
+async def merge_agents(req: AgentMergeReq):
+    """Verschmilzt mehrere vorhandene Agenten zu EINEM neuen Agenten: System-Prompts
+    werden per LLM zu einer widerspruchsfreien Experten-Persona zusammengeführt,
+    Tools und gebundene Wissensdatenbanken als Vereinigung übernommen. Der neue Agent
+    wird gespeichert und zurückgegeben; die Quell-Agenten bleiben erhalten."""
+    sources: list[dict] = []
+    for aid in req.ids:
+        d = _load_agent_dict(aid)
+        if d:
+            sources.append(d)
+    if len(sources) < 2:
+        raise HTTPException(400, "Mindestens zwei Agenten zum Verschmelzen wählen")
+
+    # Vereinigung von Tools, Wissensdatenbanken, Beispielcode (Reihenfolge erhalten)
+    tools: list[str] = []
+    rag: list[str] = []
+    example_blocks: list[str] = []
+    for s in sources:
+        for t in (s.get("tools") or []):
+            if t not in tools:
+                tools.append(t)
+        for c in (s.get("rag_collections") or []):
+            if c not in rag:
+                rag.append(c)
+        ex = (s.get("example_code") or "").strip()
+        if ex:
+            example_blocks.append(f"# {s.get('name', '')}\n{ex}")
+
+    names = [s.get("name", "") for s in sources if s.get("name")]
+    prompts_block = "\n\n".join(
+        f"### Agent: {s.get('name', '')}\n{(s.get('system_prompt') or '').strip()}"
+        for s in sources
+    )
+
+    model = _pick_model(req.model)
+    merged_name = (req.name or "").strip()
+    merged_desc = ""
+    merged_prompt = ""
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model,
+                "think": False,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Du verschmilzt mehrere KI-Agenten zu EINEM kohärenten Experten, "
+                            "der die Fachgebiete und Fähigkeiten aller vereint. Antworte NUR mit "
+                            'JSON in genau diesem Format, ohne weiteren Text: '
+                            '{"name":"Kurzname","description":"ein Satz","system_prompt":"Du bist ..."}. '
+                            "Der system_prompt beginnt mit 'Du bist', vereint alle Rollen "
+                            "widerspruchsfrei, nennt die Kernaufgaben und weist an, auf Deutsch zu antworten."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Verschmilz diese Agenten zu einem einzigen Experten:\n\n{prompts_block}",
+                    },
+                ],
+                "stream": False,
+            })
+            resp.raise_for_status()
+            data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+        merged_prompt = (data.get("system_prompt") or "").strip()
+        merged_name = merged_name or (data.get("name") or "").strip()
+        merged_desc = (data.get("description") or "").strip()
+    except Exception:
+        pass
+
+    # Deterministische Fallbacks, falls das LLM nichts Brauchbares liefert
+    if not merged_name:
+        merged_name = (" + ".join(names))[:80] or "Verschmolzener Agent"
+    if not merged_prompt:
+        merged_prompt = "\n\n".join(
+            f"# {s.get('name', '')}\n{(s.get('system_prompt') or '').strip()}" for s in sources
+        )
+    if not merged_desc:
+        merged_desc = "Verschmolzen aus: " + ", ".join(names)
+
+    agent = AgentDef(
+        name=merged_name,
+        description=merged_desc,
+        system_prompt=merged_prompt,
+        tools=tools or ["web_search", "calculate"],
+        rag_collections=rag,
+        example_code="\n\n".join(example_blocks),
+        icon=sources[0].get("icon", "🤖"),
+        category=sources[0].get("category", "Sonstige"),
+    )
+    agent.id = _to_slug(agent.name or "agent") + "_" + uuid.uuid4().hex[:4]
+    fp = _unique_agent_path(agent.name or agent.id, exclude_id=agent.id)
+    fp.write_text(json.dumps(agent.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+    return agent.model_dump()
 
 
 # Schwelle (Zeichen): bis hierher Text direkt in den system_prompt, darüber RAG-Basis.
@@ -5837,7 +5981,18 @@ async def update_project(pid: str, req: Request):
 async def delete_project(pid: str):
     projects = [p for p in _load_projects() if p["id"] != pid]
     PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True}
+    # Projekt-gebundene Skill-Agenten mitlöschen (sie sind ausschließlich diesem
+    # Projekt zugeordnet und sonst nirgends sichtbar → keine Karteileichen hinterlassen).
+    removed = 0
+    for f in list(AGENTS_DIR.glob("*.json")):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (data.get("project_id") or "") == pid:
+            f.unlink(missing_ok=True)
+            removed += 1
+    return {"ok": True, "agents_removed": removed}
 
 
 @app.put("/api/conversations/{cid}/project")
@@ -7074,48 +7229,22 @@ async def auto_structure_plan(req: Request):
                                       "leveled_links": leveled, "phases": n_phases}}
 
 
-@app.post("/api/plans/generate")
-async def generate_plan(req: Request):
-    """Generiert aus einer Projektbeschreibung einen vollständigen Projektplan
-    (Aufgaben mit Dauer, Abhängigkeiten und Ressourcen) per lokalem LLM.
-    Nachfolger werden serverseitig aus den Vorgängern abgeleitet."""
+async def _generate_plan_core(_model, description, max_tasks, system_prompt="",
+                              catalog=None, res_mode="free", rag_context="", num_ctx=None):
+    """Kern der Plan-Generierung (Aufgaben mit Dauer, Abhängigkeiten, Ressourcen) per
+    lokalem LLM. Gemeinsam genutzt von /api/plans/generate und /api/plans/from-document.
+    ``num_ctx`` erzwingt ein größeres Kontextfenster (z. B. großes Dokument auf starkem
+    Rechner). Nachfolger werden aus den Vorgängern abgeleitet."""
     import re
-    body = await req.json()
-    _model = _pick_model(body.get("model"))
-    description = (body.get("description") or "").strip()
-    if not description:
-        raise HTTPException(400, "Keine Projektbeschreibung angegeben")
-    try:
-        max_tasks = int(body.get("max_tasks", 12))
-    except Exception:
-        max_tasks = 12
-    # Keine harte 20er-Grenze mehr – nur ein großzügiges Sicherheitsnetz gegen Ausreißer.
-    max_tasks = max(5, min(max_tasks, 200))
+    # Keine harte 20er-Grenze – nur ein großzügiges Sicherheitsnetz gegen Ausreißer.
+    max_tasks = max(5, min(int(max_tasks or 12), 300))
     big_request = max_tasks > 30
-    system_prompt = (body.get("system_prompt") or "").strip() or (
+    system_prompt = (system_prompt or "").strip() or (
         "Du bist ein erfahrener Projektplaner und zerlegst Projekte in sinnvolle, "
         "chronologisch abhängige Arbeitspakete."
     )
-    catalog = _normalize_catalog(body.get("resource_catalog"))
-    res_mode = str(body.get("resource_mode", "free")).lower().strip()
-
-    # Optionale Wissensdatenbanken zur Informationsbeschaffung (Grounding)
-    rag_context = ""
-    rag_ids = list(body.get("rag_collections") or [])
-    if rag_ids:
-        from tools.rag import query_collections
-        colls = []
-        for cid in rag_ids:
-            c = await _db.rag_get_collection(cid) if cid else None
-            if c:
-                colls.append(c)
-        if colls:
-            try:
-                hits = await query_collections(colls, description)
-                if hits:
-                    rag_context = "\n\n".join(h.get("text", "") for h in hits[:8])[:4000]
-            except Exception:
-                rag_context = ""
+    catalog = catalog or []
+    res_mode = str(res_mode or "free").lower().strip()
 
     user = (
         (f"Verfügbares Hintergrundwissen (als Grundlage nutzen, nicht erfinden):\n{rag_context}\n\n" if rag_context else "") +
@@ -7143,7 +7272,10 @@ async def generate_plan(req: Request):
         ],
         "stream": False,
     }
-    if big_request:
+    if num_ctx:
+        # explizit gewünschtes Kontextfenster (z. B. großes Dokument auf starkem Rechner)
+        payload["options"] = {"num_ctx": int(num_ctx)}
+    elif big_request:
         # größeres Kontextfenster, damit lange Pläne nicht abgeschnitten werden
         payload["options"] = {"num_ctx": 8192}
 
@@ -7251,6 +7383,100 @@ async def generate_plan(req: Request):
             "requested": max_tasks, "warning": warning.strip()}
 
 
+async def _plan_rag_context(rag_collections, query: str) -> str:
+    """Löst RAG-Collection-IDs (Liste oder kommagetrennt) auf und zieht Grounding-Kontext."""
+    if isinstance(rag_collections, str):
+        rag_ids = [c.strip() for c in rag_collections.split(",") if c.strip()]
+    else:
+        rag_ids = [c for c in (rag_collections or []) if c]
+    if not rag_ids:
+        return ""
+    from tools.rag import query_collections
+    colls = []
+    for cid in rag_ids:
+        c = await _db.rag_get_collection(cid) if cid else None
+        if c:
+            colls.append(c)
+    if not colls:
+        return ""
+    try:
+        hits = await query_collections(colls, (query or "Plan")[:500])
+        if hits:
+            return "\n\n".join(h.get("text", "") for h in hits[:8])[:4000]
+    except Exception:
+        pass
+    return ""
+
+
+@app.post("/api/plans/generate")
+async def generate_plan(req: Request):
+    """Generiert aus einer Projektbeschreibung einen vollständigen Projektplan
+    (Aufgaben mit Dauer, Abhängigkeiten und Ressourcen) per lokalem LLM."""
+    body = await req.json()
+    _model = _pick_model(body.get("model"))
+    description = (body.get("description") or "").strip()
+    if not description:
+        raise HTTPException(400, "Keine Projektbeschreibung angegeben")
+    catalog = _normalize_catalog(body.get("resource_catalog"))
+    res_mode = str(body.get("resource_mode", "free")).lower().strip()
+    rag_context = await _plan_rag_context(body.get("rag_collections"), description)
+    return await _generate_plan_core(
+        _model, description, body.get("max_tasks", 12),
+        body.get("system_prompt"), catalog, res_mode, rag_context)
+
+
+@app.post("/api/plans/from-document")
+async def plan_from_document(
+    file: UploadFile = File(...),
+    max_tasks: int = Form(12),
+    model: str = Form(""),
+    resource_mode: str = Form("free"),
+    rag_collections: str = Form(""),
+):
+    """Importiert ein Dokument (z. B. Strategiepapier), leitet daraus die nötigen
+    Ressourcen ab und erzeugt einen vollständigen Projektplan mit der gewünschten
+    Aufgabenzahl. Auf einem leistungsfähigen Rechner sind auch große Pläne möglich."""
+    import os
+    _model = _pick_model(model or None)
+    tmp = UPLOADS_DIR / f"plandoc_{uuid.uuid4().hex}_{file.filename}"
+    async with aiofiles.open(tmp, "wb") as fh:
+        await fh.write(await file.read())
+    try:
+        text = await asyncio.to_thread(_extract_text, tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+    text = (text or "").strip()
+    if not text or text.startswith("[Lesefehler"):
+        raise HTTPException(400, f"Dokument „{file.filename}“ konnte nicht gelesen werden.")
+    try:
+        max_tasks = max(5, min(int(max_tasks), 300))
+    except Exception:
+        max_tasks = 12
+    # Eingabebudget an das Kontextfenster koppeln (großer Rechner → großes num_ctx).
+    num_ctx = max(8192, _profile_num_ctx())
+    doc = text[: num_ctx * 2]
+    rag_context = await _plan_rag_context(rag_collections, doc[:500])
+    system_prompt = (
+        "Du bist ein erfahrener Projektplaner. Lies das beigefügte Dokument (z. B. ein "
+        "Strategiepapier), leite die nötigen Arbeitspakete und Ressourcen ab und zerlege "
+        "das Vorhaben in sinnvolle, chronologisch abhängige Aufgaben."
+    )
+    description = (
+        f"Aus folgendem Dokument „{file.filename}“ einen Projektplan ableiten. Stütze "
+        "Aufgaben und Ressourcen ausschließlich auf den Inhalt, erfinde nichts hinzu.\n\n"
+        f"--- DOKUMENT ---\n{doc}"
+    )
+    result = await _generate_plan_core(
+        _model, description, max_tasks, system_prompt, [], resource_mode,
+        rag_context, num_ctx=num_ctx)
+    result["name"] = (os.path.splitext(file.filename or "")[0] or "Importierter Plan")[:120]
+    result["description"] = (
+        f"Automatisch aus „{file.filename}“ abgeleiteter Plan (Ziel: {max_tasks} Vorgänge)."
+    )
+    result["source_document"] = file.filename
+    return result
+
+
 # ── /plan — Chat-getriebener Strategie- & Einsatzplan-Orchestrator ────────────
 # Aus dem Chat-Verlauf (Briefing) baut der Befehl `/plan` in einem Zug: eine
 # Strategie (Markdown), die nötigen Beratungs-Agenten (Vorschlag), einen Einsatz-/
@@ -7265,14 +7491,18 @@ class PlanStrategyRequest(BaseModel):
     model: str = ""                 # leer → general-Modell aus dem Profil
     web_search: bool = False
     rag_collections: List[str] = []
+    count: int = 12                 # Zielanzahl Aufgaben im Einsatzplan (4–60)
     # Feste Agenten: per „/plan … /dsgvo /tisax" angepinnte, bereits vorhandene
     # Agenten, die in jedem Fall als Berater + Jury-Mitglied verwendet werden.
     # Jeder Eintrag: {id, name, description, system_prompt, icon, category, tools}.
     pinned_agents: List[dict] = []
 
 
-async def _plan_ground(query: str, web: bool, rag_collections: list) -> str:
-    """Sammelt optionales Belegmaterial (Websuche + RAG) wie beim Deepdive."""
+async def _plan_ground(query: str, web: bool, rag_collections: list,
+                       top_k: int = 5, char_budget: int = 3000) -> str:
+    """Sammelt optionales Belegmaterial (Websuche + RAG) wie beim Deepdive.
+    ``top_k``/``char_budget`` skalieren den RAG-Abruf — für die Planerzeugung wird
+    bewusst mehr aus der hinterlegten Datei gezogen, damit das ganze Dokument abgedeckt ist."""
     blocks = []
     if web and query:
         try:
@@ -7285,11 +7515,11 @@ async def _plan_ground(query: str, web: bool, rag_collections: list) -> str:
     if rag_collections:
         try:
             from tools.rag import query_collections
-            hits = await query_collections(rag_collections, query or "Strategie", top_k_cap=5)
+            hits = await query_collections(rag_collections, query or "Strategie", top_k_cap=top_k)
             if hits:
-                blocks.append("### Wissensdatenbank\n" + "\n\n".join(
+                blocks.append("### Wissensdatenbank (hinterlegte Datei)\n" + "\n\n".join(
                     f"[{h.get('collection_name','?')} · {h.get('filename','?')}]\n{h.get('text','')}"
-                    for h in hits)[:3000])
+                    for h in hits)[:char_budget])
         except Exception:
             pass
     return "\n\n".join(blocks)
@@ -7473,11 +7703,16 @@ async def _plan_strategy_generator(req: PlanStrategyRequest):
         f"Zusätzliche Randbedingungen:\n{extra}" if extra else "",
     ) if p)
     query = (extra or brief).split("\n", 1)[0][:200]
+    count = max(4, min(int(req.count or 12), 60))
     tin = tout = 0
 
     # ── Phase A — Strategie (Markdown, optional geerdet) ──────────────────────
     yield _sse({"type": "phase", "label": "Strategie wird entwickelt…"})
-    grounding = await _plan_ground(query, req.web_search, req.rag_collections)
+    # Für die Planung mehr aus der hinterlegten Datei ziehen (skaliert mit der
+    # gewünschten Aufgabenzahl), damit das ganze Dokument abgedeckt ist.
+    grounding = await _plan_ground(
+        query, req.web_search, req.rag_collections,
+        top_k=max(8, min(count, 40)), char_budget=min(12000, 3000 + count * 150))
     sys_a = (
         "Du bist ein erfahrener Strategie- und Projektberater. Aus der Diskussion "
         "entwickelst du eine klare, umsetzbare Strategie. Gliedere als Markdown mit "
@@ -7527,11 +7762,16 @@ async def _plan_strategy_generator(req: PlanStrategyRequest):
         '"duration":3,"predecessors":[],"area":"Vorbereitung","roles":["Projektleiter"],'
         '"resource_list":[{"kind":"human","name":"Projektleiter","qty":1,"hours":16,"rate":90}]}],'
         '"resource_catalog":[{"kind":"human","name":"Projektleiter","rate":90}]}\n'
-        "8 bis 16 Aufgaben."
+        f"Erzeuge möglichst genau {count} Aufgaben mit echten Abhängigkeiten — lieber feinere "
+        "Granularität als zu wenige. Stütze die Aufgaben, wo Belegmaterial vorliegt, auf dessen Inhalt."
     )
-    usr_c = (f"Strategie:\n{strategy_md[:4000]}\n\n" if strategy_md else "") + task_text
+    usr_c = (
+        (f"Belegmaterial (hinterlegte Datei):\n{grounding}\n\n" if grounding else "")
+        + (f"Strategie:\n{strategy_md[:4000]}\n\n" if strategy_md else "")
+        + task_text
+    )
     data_c, a, b = await _plan_llm_json(model, sys_c, usr_c); tin += a; tout += b
-    plan_tasks = _plan_norm_tasks(data_c.get("tasks") or [])
+    plan_tasks = _plan_norm_tasks(data_c.get("tasks") or [], max_tasks=count)
     plan = {
         "name": str(data_c.get("name") or (query[:60] or "Einsatzplan")).strip()[:120],
         "description": str(data_c.get("description") or "").strip()[:1000],

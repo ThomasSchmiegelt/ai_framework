@@ -992,6 +992,13 @@ html, body {
   box-shadow: 0 0 0 1px rgba(var(--accent-rgb),0.18), 0 4px 16px rgba(0,0,0,0.3);
 }
 
+/* Zum Verschmelzen markierte Karte */
+.agent-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.35);
+}
+.agent-card .agent-select-cb { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+
 .agent-card .agent-icon { font-size: 28px; }
 .agent-card .agent-name { font-size: 15px; font-weight: 600; }
 .agent-card .agent-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
@@ -2743,6 +2750,13 @@ html, body {
   color: var(--text); font-size: 13px; font-family: inherit; outline: none; resize: vertical;
 }
 #illus-pres-panel textarea:focus { border-color: var(--accent); }
+/* Fester-Agent-Auswahl: gleiche Optik wie die Textfelder im Panel */
+#illus-agent {
+  width: calc(100% - 24px); margin: 4px 12px; padding: 8px 10px; box-sizing: border-box;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+}
+#illus-agent:focus { border-color: var(--accent); }
 .illus-row {
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 12px;
 }

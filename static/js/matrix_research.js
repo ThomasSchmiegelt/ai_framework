@@ -311,7 +311,83 @@ const MatrixResearch = (() => {
     }
   }
 
-  /* ── In Wissensdatenbank übernehmen ──────────────────────────────── */
+  /* ── Eine Zelle = ein Markdown-Dokument (thema_prompt.md) ─────────── */
+  // Bereinigt Text zu einem Dateinamen-tauglichen Slug.
+  function _slug(s) {
+    return (s || '').trim().toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'leer';
+  }
+
+  // Baut für jede befüllte Zelle ein Dokument: Thema + Prompt als Überschrift
+  // (Kontext für den Embedder!), dann der Zellinhalt. Name = thema_prompt.
+  function _cellDocs() {
+    const docs = [];
+    const used = {};
+    for (let r = 0; r < _rows.length; r++) {
+      const topic = _rows[r]?.topic?.trim();
+      if (!topic) continue;
+      for (let c = 0; c < _cols.length; c++) {
+        const prompt = _cols[c]?.prompt?.trim();
+        const txt = _cells[r]?.[c]?.text?.trim();
+        if (!prompt || !txt) continue;
+        const base = `${_slug(topic)}_${_slug(prompt)}`;
+        let name = base, i = 2;
+        while (used[name]) name = `${base}_${i++}`;
+        used[name] = true;
+        docs.push({ name: `${name}.md`, title: name, content: `# ${topic}\n## ${prompt}\n\n${txt}\n` });
+      }
+    }
+    return docs;
+  }
+
+  // Alle Zellen einzeln als .md-Dateien in einem ZIP herunterladen.
+  async function _exportMdZip() {
+    const docs = _cellDocs();
+    if (!docs.length) { showToast('Keine befüllten Zellen'); return; }
+    showToast('⏳ ZIP wird erstellt…');
+    try {
+      const resp = await fetch('/api/matrix/export-md-zip', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zipname: 'matrix_markdown', files: docs.map(d => ({ name: d.name, content: d.content })) }),
+      });
+      if (!resp.ok) throw new Error(resp.status);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'matrix_markdown.zip'; a.click();
+      URL.revokeObjectURL(url);
+      showToast(`✓ ${docs.length} Markdown-Dateien als ZIP`);
+    } catch (e) {
+      showToast('Export fehlgeschlagen: ' + e.message);
+    }
+  }
+
+  // Jede Zelle als eigenes Dokument direkt in eine Wissensdatenbank übernehmen.
+  async function _ingestPerCell() {
+    const docs = _cellDocs();
+    if (!docs.length) { showToast('Keine befüllten Zellen'); return; }
+    if (typeof RAG === 'undefined' || !RAG.pickCollection) { showToast('RAG nicht verfügbar'); return; }
+    const cid = await RAG.pickCollection(`${docs.length} Zellen einzeln übernehmen (thema_prompt.md)`);
+    if (!cid) return;
+    let ok = 0, fail = 0;
+    for (const d of docs) {
+      try {
+        const r = await fetch(`/api/rag/collections/${cid}/from-text`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: d.title, text: d.content }),
+        });
+        if (!r.ok) throw new Error();
+        ok++;
+      } catch (_) { fail++; }
+      showToast(`⏳ ${ok + fail}/${docs.length} eingebettet…`);
+    }
+    showToast(`✓ ${ok} Dokumente übernommen${fail ? `, ${fail} fehlgeschlagen` : ''}`);
+    if (RAG.loadCollections) RAG.loadCollections();
+  }
+
+  /* ── In Wissensdatenbank übernehmen (alles in EIN Dokument) ───────── */
   function _exportRag() {
     const parts = [`# Matrix-Recherche`];
     for (let r = 0; r < _rows.length; r++) {
@@ -439,6 +515,8 @@ const MatrixResearch = (() => {
     document.getElementById('btn-matrix-export')?.addEventListener('click', _exportXlsx);
     document.getElementById('btn-matrix-export-csv')?.addEventListener('click', _exportCsv);
     document.getElementById('btn-matrix-rag')?.addEventListener('click', _exportRag);
+    document.getElementById('btn-matrix-rag-cells')?.addEventListener('click', _ingestPerCell);
+    document.getElementById('btn-matrix-md-zip')?.addEventListener('click', _exportMdZip);
     document.getElementById('btn-matrix-clear')?.addEventListener('click', _clear);
 
     const csvInput = document.getElementById('matrix-csv-input');

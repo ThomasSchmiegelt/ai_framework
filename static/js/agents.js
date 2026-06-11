@@ -5,6 +5,7 @@ const AgentManager = (() => {
   let editingId = null;
   let searchQuery = '';
   let activeCategory = '';
+  const selected = new Set();   // IDs der zum Verschmelzen markierten Agenten
 
   const AVAILABLE_TOOLS = [
     { id: 'web_search',          label: '🔍 Websuche' },
@@ -120,6 +121,9 @@ const AgentManager = (() => {
 
     const q = searchQuery.toLowerCase();
     const filtered = agents.filter(a => {
+      // Projekt-gebundene Skill-Agenten gehören ausschließlich zu ihrem Projekt
+      // (sichtbar im Projekt-Dialog) und tauchen nicht im globalen Verzeichnis auf.
+      if (a.project_id) return false;
       const matchCat = !activeCategory || (a.category || 'Sonstige') === activeCategory;
       const matchQ = !q ||
         a.name.toLowerCase().includes(q) ||
@@ -132,16 +136,20 @@ const AgentManager = (() => {
         ? 'Noch keine Agenten. Erstelle deinen ersten!'
         : 'Keine Agenten gefunden.';
       grid.innerHTML = `<p style="color:var(--text-muted);grid-column:1/-1">${msg}</p>`;
+      _updateMergeBar();
       return;
     }
 
     for (const agent of filtered) {
       const card = document.createElement('div');
-      card.className = 'agent-card';
+      card.className = 'agent-card' + (selected.has(agent.id) ? ' selected' : '');
       const cat = agent.category || 'Sonstige';
       card.innerHTML = `
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-          <div class="agent-icon">${agent.icon || '🤖'}</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" class="agent-select-cb" data-id="${agent.id}" ${selected.has(agent.id) ? 'checked' : ''} title="Zum Verschmelzen markieren" />
+            <div class="agent-icon">${agent.icon || '🤖'}</div>
+          </div>
           <span class="agent-category-badge">${escHtml(cat)}</span>
         </div>
         <div class="agent-name">${escHtml(agent.name)}</div>
@@ -162,6 +170,12 @@ const AgentManager = (() => {
         </div>
       `;
 
+      card.querySelector('.agent-select-cb').addEventListener('change', e => {
+        e.stopPropagation();
+        if (e.target.checked) selected.add(agent.id); else selected.delete(agent.id);
+        card.classList.toggle('selected', e.target.checked);
+        _updateMergeBar();
+      });
       card.querySelector('.btn-fav-agent').addEventListener('click', e => {
         e.stopPropagation();
         toggleFavorite(agent.id);
@@ -176,6 +190,46 @@ const AgentManager = (() => {
       });
 
       grid.appendChild(card);
+    }
+    _updateMergeBar();
+  }
+
+  // ── Mehrfachauswahl & Verschmelzen ─────────────────────────────────────────
+
+  function _updateMergeBar() {
+    const btn = document.getElementById('btn-merge-agents');
+    if (!btn) return;
+    const n = selected.size;
+    btn.style.display = n >= 1 ? 'inline-block' : 'none';
+    btn.disabled = n < 2;
+    btn.textContent = `🔗 Verschmelzen (${n})`;
+  }
+
+  // Markierte Agenten serverseitig zu einem neuen Agenten zusammenführen.
+  async function mergeSelected() {
+    const ids = Array.from(selected).filter(id => agents.some(a => a.id === id));
+    if (ids.length < 2) { showToast('Mindestens zwei Agenten markieren'); return; }
+    const names = ids.map(id => agents.find(a => a.id === id)?.name).filter(Boolean);
+    if (!confirm(`Diese ${ids.length} Agenten zu einem neuen verschmelzen?\n\n• ${names.join('\n• ')}\n\nDie Originale bleiben erhalten.`)) return;
+
+    const btn = document.getElementById('btn-merge-agents');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Verschmelze…'; }
+    try {
+      const resp = await fetch('/api/agents/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || ('HTTP ' + resp.status));
+      const saved = await resp.json();
+      selected.clear();
+      await load();
+      openModal(saved);   // zur Kontrolle/Nachbearbeitung direkt öffnen
+      showToast(`✓ „${saved.name}" aus ${ids.length} Agenten verschmolzen`);
+    } catch (e) {
+      showToast('Verschmelzen fehlgeschlagen: ' + e.message);
+    } finally {
+      _updateMergeBar();
     }
   }
 
@@ -539,5 +593,6 @@ const AgentManager = (() => {
     getAgents,
     initSearch,
     createLegalAgent,
+    mergeSelected,
   };
 })();

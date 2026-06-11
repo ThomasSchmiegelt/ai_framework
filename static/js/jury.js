@@ -6,6 +6,7 @@
 const Jury = (() => {
   let _juries = [];
   let _agents = [];
+  let _projects = [];            // für die Gruppierung des Member-Pickers nach Projekt
   let _editId = null;            // aktuell bearbeitete Jury (null = neu)
   let _evalCtx = null;           // {text, context} für das Bewertungs-Overlay
   let _running = false;
@@ -15,6 +16,7 @@ const Jury = (() => {
   async function _fetchAll() {
     try { _juries = await (await fetch('/api/juries')).json(); } catch (_) { _juries = []; }
     try { _agents = await (await fetch('/api/agents')).json(); } catch (_) { _agents = []; }
+    try { _projects = await (await fetch('/api/projects')).json(); } catch (_) { _projects = []; }
   }
 
   function _esc(s) {
@@ -66,7 +68,9 @@ const Jury = (() => {
     const box = _el('jury-members');
     box.innerHTML = '';
     const sel = new Set(selected || []);
-    for (const a of _sortedAgents()) {
+    const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
+
+    const addAgent = (a) => {
       const lab = document.createElement('label');
       lab.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer';
       const cb = document.createElement('input');
@@ -74,7 +78,32 @@ const Jury = (() => {
       lab.appendChild(cb);
       lab.appendChild(document.createTextNode(`${a.icon || '🤖'} ${a.name}` + (a.category === 'Recht' ? '  ⚖️' : '')));
       box.appendChild(lab);
+    };
+    const addHeader = (text) => {
+      const h = document.createElement('div');
+      h.style.cssText = 'font-size:11.5px;font-weight:600;color:var(--text-dim);margin:8px 0 2px;text-transform:uppercase;letter-spacing:.04em';
+      h.textContent = text;
+      box.appendChild(h);
+    };
+
+    // 1) Allgemeine Agenten (kein Projekt) — wie bisher sortiert.
+    const globals = _sortedAgents().filter(a => !a.project_id);
+    if (globals.length) { addHeader('Allgemein'); globals.forEach(addAgent); }
+
+    // 2) Je Projekt eine Gruppe mit dessen Skill-Agenten.
+    const projOrder = [..._projects].sort((a, b) =>
+      (a.number || '').localeCompare(b.number || '') || (a.name || '').localeCompare(b.name || ''));
+    for (const p of projOrder) {
+      const members = _agents.filter(a => (a.project_id || '') === p.id).sort(byName);
+      if (!members.length) continue;
+      addHeader('📁 ' + (p.number ? `[${p.number}] ` : '') + p.name);
+      members.forEach(addAgent);
     }
+
+    // 3) Fallback: Projekt-Agenten, deren Projekt nicht (mehr) existiert.
+    const knownIds = new Set(_projects.map(p => p.id));
+    const orphans = _agents.filter(a => a.project_id && !knownIds.has(a.project_id)).sort(byName);
+    if (orphans.length) { addHeader('📁 Weitere Projekte'); orphans.forEach(addAgent); }
   }
 
   function _selectedMembers() {

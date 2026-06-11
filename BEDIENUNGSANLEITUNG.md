@@ -152,8 +152,12 @@ in einem Zug eine **Vorschau** mit vier Bausteinen: eine **Strategie** (Ziel, Op
 Bewertungskriterien, Vorgehen, Risiken, Meilensteine), die nötigen **Beratungs-Agenten**
 (z. B. Kosten-, Datenschutz-, Zeitplan-, Hardware-Experte), einen **Einsatz- und
 Ressourcenplan** (Phasen, Aufgaben, Dauern, Rollen, Kosten) und eine **Bewertungs-Jury**.
-Optional kannst du Randbedingungen anhängen: `/plan Budget 10k €, Start im Q3`. Der
-🔍-Schalter und die aktiven Wissensdatenbanken erden die Strategie mit echten Quellen.
+Optional kannst du Randbedingungen anhängen: `/plan Budget 10k €, Start im Q3`. Mit
+einer **Zahl direkt am Befehl** legst du die gewünschte Aufgabenzahl im Einsatzplan
+fest, z. B. **`/plan50`** (4–60; ohne Angabe 12). Der 🔍-Schalter und die aktiven
+Wissensdatenbanken erden **Strategie *und* Plan** mit echten Quellen — lege ein
+Strategiepapier in eine **Wissensdatenbank** und wähle sie aus, dann werden die Aufgaben
+auf dessen Inhalt gestützt.
 **Feste Agenten erzwingen:** Hängst du vorhandene Agenten als `/Kürzel` an, werden sie
 **auf jeden Fall** als Berater und Jury-Mitglied verwendet (die KI ergänzt nur fehlende
 Rollen) — z. B. `/plan Einsatz Copilot /dsgvo /tisax` nutzt zwingend deinen DSGVO- und
@@ -163,7 +167,10 @@ nicht gefundenes Kürzel wird als normaler Text behandelt (Hinweis in der Vorsch
 **Es wird zunächst nichts gespeichert** — erst mit **„✅ Alles anlegen"** wird ein
 **Projekt** (benannt nach dem Plan) angelegt und damit **alles verknüpft**: die
 Agenten, der Plan (im **Planer**) und die Jury (im **Jury-Tab**) erhalten die Projekt­-
-Zuordnung, und die aktuelle Unterhaltung wird dem Projekt zugewiesen. Danach führen
+Zuordnung, und die aktuelle Unterhaltung wird dem Projekt zugewiesen. Die neu erzeugten
+Beratungs-Agenten gehören **ausschließlich diesem Projekt** (projekt-eigene „Skills"):
+Sie erscheinen **nicht** im globalen Agenten-Verzeichnis, sondern nur im **Projekt-Dialog**,
+und werden beim Löschen des Projekts mitentfernt. Danach führen
 Knöpfe direkt dorthin (u. a. **📁 Projekt** zur Projektverwaltung). Die Strategie lässt sich zusätzlich **in die Dokumente** oder **in die
 Wissensdatenbank** übernehmen. *Hinweis:* Kosten- und Rechtsangaben sind eine
 Entscheidungs­hilfe — für DSGVO/EU AI Act/Preise echte Quellen prüfen, kein Rechtsrat.
@@ -926,12 +933,19 @@ Pfad** (rot).
 - **🪄 KI-Projekt generieren** — das lokale LLM erstellt einen **kompletten Plan**
   (Aufgaben, Abhängigkeiten, Dauern, Ressourcen). IDs und Verknüpfungen werden
   automatisch geprüft, Start-/Endaufgaben markiert. Über das Feld **Aufgaben**
-  bestimmst du die gewünschte Anzahl (keine feste Obergrenze mehr).
+  bestimmst du die gewünschte Anzahl (bis 300).
   > **Hinweis:** Bei vielen Aufgaben (> 30) stoßen kleine lokale Modelle an ihre
   > Grenzen – es kommt eine Rückfrage, und das Ergebnis kann unvollständig sein.
   > Für große Pläne ein **größeres/leistungsfähigeres Modell** verwenden oder den
   > Plan **in Phasen** generieren. Liefert das Modell zu wenig, erscheint eine
   > Warnung.
+- **📄 Dokument → Plan** — importiere ein **Dokument** (PDF/DOCX/**MD**/TXT/XLSX/CSV,
+  z. B. ein Strategiepapier). Die KI **liest es, leitet die nötigen Ressourcen ab** und
+  erstellt einen kompletten Plan mit der bei **Aufgaben** gewählten Ziel-Vorgangszahl.
+  Eine zusätzlich gewählte **📚 Wissensdatenbank** fließt als Beleg mit ein. Eingabe-
+  und Kontextfenster sind gekoppelt (`num_ctx = max(8192, Profil-Kontext)`) — auf einem
+  **leistungsfähigen Rechner mit großem Modell** sind so auch 100+ Vorgänge in einem
+  Zug möglich.
 - **✨** an einer Aufgabe — schlägt **Vorgänger und Nachfolger** vor (mit Dauer und
   Ressourcen). Du wählst per Häkchen, was übernommen wird — nichts wird automatisch
   eingefügt. Übernommene Aufgaben werden direkt verknüpft.
@@ -1194,6 +1208,9 @@ Agenten sind Profile mit eigenem System-Prompt, Tool-Set und optionalem Modell.
   abgeleiteten Projekt-Agenten.
 - **⚖️ Von Jury prüfen** im Agenten-Bearbeiten-Dialog lässt den aktuellen
   System-Prompt von einer Jury bewerten.
+- **Projekt-gebundene Skill-Agenten:** Über **`/plan`** im Chat erzeugte Berater werden
+  ihrem Projekt fest zugeordnet und erscheinen **nicht** im globalen Verzeichnis, sondern
+  nur unter ihrem Projekt (siehe Abschnitt 18). So bleibt der Agenten-Tab übersichtlich.
 - Agenten werden unter sprechenden Dateinamen gespeichert (`data/agents/`).
 
 ### 16a. Bewertungs-Jurys (⚖️)
@@ -1204,7 +1221,9 @@ KI-generierten — und liefert **pro Mitglied ein Votum** (Score 0–100, Befund
 Risiken/Verstöße mit Fundstelle, Empfehlung) plus ein **Gesamturteil**.
 
 **Jury anlegen:** im Agenten-Tab auf **⚖️ Jurys** → Name vergeben, Mitglieder
-(Agenten) ankreuzen, speichern. Jurys lassen sich später bearbeiten und löschen.
+(Agenten) ankreuzen, speichern. Jurys lassen sich später bearbeiten und löschen. Die
+Mitglieder-Auswahl ist **nach Projekt gruppiert**: oben die allgemeinen Agenten, darunter
+je Projekt dessen Skill-Agenten — so findest du die projekt-eigenen Berater gezielt wieder.
 
 **Bewerten lassen** kannst du an mehreren Stellen — überall öffnet sich dasselbe
 Bewertungs-Fenster (Jury wählen → ▶ Bewerten):
@@ -1391,7 +1410,10 @@ Zusammenfassung ersetzt die älteren Nachrichten; die letzten Austausche bleiben
 ### Projekte (**📁 Projekte**)
 Projekte mit Nummer, Name und Beschreibung anlegen. Den aktiven Chat über das
 Dropdown **„Aktuellen Chat Projekt zuordnen"** zuweisen. Über den Projekt-Filter
-oben in der Sidebar die Gesprächsliste nach Projekt einschränken.
+oben in der Sidebar die Gesprächsliste nach Projekt einschränken. Ein Projekt kann
+**eigene Skill-Agenten** besitzen (z. B. die von **`/plan`** erzeugten Berater); sie
+werden im Projekt-Dialog als **🧩 Skills** aufgelistet. Beim **Löschen** eines Projekts
+werden diese projekt-eigenen Agenten **mitgelöscht** (Nachfrage nennt die Anzahl).
 
 ---
 

@@ -338,6 +338,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.target.files[0]) AgentManager.createLegalAgent(e.target.files[0]);
     e.target.value = '';
   });
+  document.getElementById('btn-merge-agents')?.addEventListener('click', () => AgentManager.mergeSelected());
   AgentManager.initSearch();
 
   // Agenten-Selektor Änderung

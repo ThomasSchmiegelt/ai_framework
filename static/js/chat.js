@@ -109,7 +109,7 @@ const Chat = (() => {
     if (pl) {
       input.value = '';
       autoResizeTextarea(input);
-      runPlan(pl.extra, pl.pinned, pl.unresolved);
+      runPlan(pl.extra, pl.pinned, pl.unresolved, pl.count);
       return;
     }
 
@@ -1205,9 +1205,11 @@ const Chat = (() => {
   // VORSCHAU. Gespeichert wird nichts; erst „✅ Alles anlegen" legt über die
   // vorhandenen Endpoints (/api/agents, /api/plans, /api/juries) an.
   function _parsePlan(text) {
-    const m = text.match(/^\/plan\b\s*([\s\S]*)$/i);
+    // „/plan" oder „/plan50" (Zielanzahl Aufgaben, optional). Default 12.
+    const m = text.match(/^\/plan(\d+)?\b\s*([\s\S]*)$/i);
     if (!m) return null;
-    let rest = (m[1] || '').trim();
+    const count = m[1] ? Math.max(4, Math.min(parseInt(m[1], 10), 60)) : 12;
+    let rest = (m[2] || '').trim();
     const pinned = [], unresolved = [];
     // „/token"-Referenzen aus dem Rest ziehen = feste, bereits vorhandene Agenten.
     rest = rest.replace(/\/(\S+)/g, (full, tok) => {
@@ -1215,7 +1217,7 @@ const Chat = (() => {
       if (a) { if (!pinned.some(p => p.id === a.id)) pinned.push(a); return ''; }
       unresolved.push(tok); return full;   // unaufgelöst → im Briefing belassen
     }).replace(/\s{2,}/g, ' ').trim();
-    return { extra: rest, pinned, unresolved };
+    return { extra: rest, pinned, unresolved, count };
   }
 
   // Briefing = die letzten Gesprächsbeiträge (User + Assistent), als Text.
@@ -1421,9 +1423,10 @@ const Chat = (() => {
     }
   }
 
-  async function runPlan(extra, pinned, unresolved) {
+  async function runPlan(extra, pinned, unresolved, count) {
     if (isStreaming) return;
     pinned = pinned || []; unresolved = unresolved || [];
+    count = Math.max(4, Math.min(parseInt(count, 10) || 12, 60));
     const brief = _planBrief();
     if (!brief && !extra && !pinned.length) {
       showToast('„/plan" braucht eine vorherige Diskussion im Chat (oder Zusatz nach dem Befehl).');
@@ -1444,7 +1447,8 @@ const Chat = (() => {
       category: a.category || 'Beratung', tools: a.tools || ['web_search', 'calculate'],
     }));
 
-    let echo = '🧭 /plan — Strategie & Einsatzplan aus der Diskussion';
+    let echo = `🧭 /plan — Strategie & Einsatzplan aus der Diskussion (~${count} Aufgaben)`;
+    if (ragCollections.length) echo += '\n\n📂 Quelle: hinterlegte Datei(en) — ' + ragCollections.join(', ');
     if (pinned.length) echo += '\n\n📌 Feste Agenten: ' + pinned.map(a => (a.icon ? a.icon + ' ' : '') + a.name).join(', ');
     if (unresolved.length) echo += '\n\n⚠️ Nicht gefunden (als Text behandelt): ' + unresolved.map(t => '/' + t).join(' ');
     if (extra) echo += `\n\nZusatz: ${extra}`;
@@ -1467,7 +1471,7 @@ const Chat = (() => {
         signal: abortController.signal,
         body: JSON.stringify({
           brief, extra, model, web_search: useSearch, rag_collections: ragCollections,
-          pinned_agents: pinnedPayload,
+          count, pinned_agents: pinnedPayload,
         }),
       });
       const reader = resp.body.getReader();
