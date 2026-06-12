@@ -92,6 +92,16 @@ const Chat = (() => {
     let text = input.value.trim();
     if (!text && pendingFiles.length === 0) return;
 
+    // Nutzer-Feedback: „/- <Text>" (Fehler/Problem) bzw. „/+ <Text>" (Idee/
+    // Verbesserung) wird ins Markdown-Protokoll geschrieben, nicht ans LLM gesendet.
+    const fb = _parseFeedback(text);
+    if (fb) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runFeedback(fb.kind, fb.text);
+      return;
+    }
+
     // Deepdive: „/dd10" / „/ddd10" / „/deepdive10" / „/deepdivedocument10" → eigener
     // Ablauf (X Fragen zur letzten Antwort, der Reihe nach gesucht & beantwortet).
     const dd = _parseDeepDive(text);
@@ -1198,6 +1208,45 @@ const Chat = (() => {
       }
     }
   }
+
+  // ── /- und /+ — Nutzer-Feedback ins Markdown-Protokoll ───────────────────────
+  // „/- <Text>" meldet ein Problem/eine Fehlermeldung, „/+ <Text>" notiert eine
+  // Idee/einen Verbesserungsvorschlag. Beides wird serverseitig als Markdown
+  // gesammelt (data/feedback.md) und NICHT an das LLM geschickt.
+  function _parseFeedback(text) {
+    const m = text.match(/^\/([+\-])\s+([\s\S]+)$/);
+    if (!m) return null;
+    return { kind: m[1] === '-' ? 'problem' : 'idea', text: m[2].trim() };
+  }
+
+  async function runFeedback(kind, text) {
+    if (!text) {
+      showToast(kind === 'problem'
+        ? 'Bitte nach „/-" die Fehlermeldung eintragen'
+        : 'Bitte nach „/+" den Verbesserungsvorschlag eintragen');
+      return;
+    }
+    const icon = kind === 'problem' ? '🔴' : '🟢';
+    const label = kind === 'problem' ? 'Fehler/Problem notiert' : 'Idee/Verbesserung notiert';
+    showWelcome(false);
+    try {
+      const r = await fetch('/api/feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, text, conversation_id: currentConvId || undefined }),
+      });
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { msg = (await r.json()).detail || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const d = await r.json();
+      appendMessage('assistant', `${icon} **${label}** (gespeichert in \`${d.file || 'feedback.md'}\`, ${d.count || 1} Einträge):\n\n> ${text}`);
+      showToast(`${icon} ${label}`);
+    } catch (e) {
+      showToast('Feedback konnte nicht gespeichert werden: ' + e.message);
+    }
+  }
+  window.runFeedback = runFeedback;
 
   // ── /plan — Strategie- & Einsatzplan-Orchestrator ────────────────────────────
   // „/plan" (optional mit Zusatz) baut aus dem bisherigen Chat-Verlauf in einem Zug

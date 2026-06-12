@@ -84,6 +84,9 @@ BILDER_DIR = Path(__file__).parent / "bilder"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
 PROFILE_ASSETS_DIR = DATA_DIR / "profile_assets"
 PROJECTS_FILE = DATA_DIR / "projects.json"
+# Nutzer-Feedback aus dem Chat: „/-" (Fehler/Problem) und „/+" (Idee/Verbesserung)
+# werden als Markdown-Protokoll gesammelt (für spätere Auswertung).
+FEEDBACK_FILE = DATA_DIR / "feedback.md"
 # Externe OpenAI-kompatible KI-Anbieter (enthält API-Keys → gitignored, NICHT im Backup)
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
@@ -7259,7 +7262,10 @@ async def _generate_plan_core(_model, description, max_tasks, system_prompt="",
         '{"tasks":[{"id":"T1","name":"Anforderungen klären","duration":3,"predecessors":[],'
         '"resources":[{"kind":"human","name":"Projektleiter","qty":1,"hours":16,"rate":90}]},'
         '{"id":"T2","name":"Konzept erstellen","duration":5,"predecessors":["T1"],"resources":[]}]}\n'
-        "kind ist genau einer von: human, hardware, software."
+        "kind ist genau einer von: human, hardware, software.\n\n"
+        f"WICHTIG: Der Plan MUSS GENAU {max_tasks} Aufgaben enthalten (IDs T1 bis "
+        f"T{max_tasks}) – nicht weniger und nicht mehr. Zerlege das Vorhaben fein genug, "
+        f"um auf {max_tasks} sinnvolle Arbeitspakete zu kommen."
     )
 
     payload = {
@@ -7459,7 +7465,9 @@ async def plan_from_document(
     system_prompt = (
         "Du bist ein erfahrener Projektplaner. Lies das beigefügte Dokument (z. B. ein "
         "Strategiepapier), leite die nötigen Arbeitspakete und Ressourcen ab und zerlege "
-        "das Vorhaben in sinnvolle, chronologisch abhängige Aufgaben."
+        f"das Vorhaben in GENAU {max_tasks} sinnvolle, chronologisch abhängige Aufgaben. "
+        f"Zerlege fein genug bzw. fasse passend zusammen, damit es exakt {max_tasks} "
+        "Arbeitspakete werden."
     )
     description = (
         f"Aus folgendem Dokument „{file.filename}“ einen Projektplan ableiten. Stütze "
@@ -7475,6 +7483,69 @@ async def plan_from_document(
     )
     result["source_document"] = file.filename
     return result
+
+
+# ── Nutzer-Feedback aus dem Chat („/-" Fehler, „/+" Idee) ─────────────────────
+# „/- <Text>" protokolliert ein Problem/eine Fehlermeldung, „/+ <Text>" eine Idee
+# bzw. einen Verbesserungsvorschlag. Alles landet als Markdown in FEEDBACK_FILE,
+# gruppiert nach Art, mit Zeitstempel und (optional) der Unterhaltungs-ID.
+
+_FEEDBACK_KINDS = {
+    "problem": ("🔴 Fehler & Probleme", "🔴"),
+    "idea":    ("🟢 Ideen & Verbesserungen", "🟢"),
+}
+
+
+def _read_feedback_md() -> str:
+    try:
+        return FEEDBACK_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+
+
+def _append_feedback(kind: str, text: str, conversation_id: str = "") -> int:
+    """Hängt einen Feedback-Eintrag an das Markdown-Protokoll an. Gibt die
+    Gesamtzahl der Einträge zurück. Robust gegen fehlende Datei."""
+    from datetime import datetime
+    kind = kind if kind in _FEEDBACK_KINDS else "idea"
+    _, icon = _FEEDBACK_KINDS[kind]
+    text = (text or "").strip()
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    existing = _read_feedback_md()
+    if not existing:
+        existing = (
+            "# Nutzer-Feedback\n\n"
+            "Im Chat erfasst: `/- …` meldet ein **Problem/einen Fehler**, "
+            "`/+ …` notiert eine **Idee/einen Verbesserungsvorschlag**.\n"
+        )
+    conv = f" · _{conversation_id}_" if conversation_id else ""
+    entry = f"\n- {icon} **[{ts}]**{conv} {text}\n"
+    FEEDBACK_FILE.write_text(existing.rstrip() + "\n" + entry, encoding="utf-8")
+    # Einträge zählen (Listenzeilen mit einem der Icons)
+    body = _read_feedback_md()
+    return sum(1 for ln in body.splitlines()
+               if ln.lstrip().startswith(("- 🔴", "- 🟢")))
+
+
+@app.post("/api/feedback")
+async def add_feedback(req: Request):
+    """Speichert Nutzer-Feedback aus dem Chat als Markdown-Protokoll.
+    Body: ``{"kind": "problem"|"idea", "text": "…", "conversation_id": "…"}``."""
+    body = await req.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Kein Feedback-Text angegeben")
+    kind = "problem" if body.get("kind") == "problem" else "idea"
+    count = await asyncio.to_thread(
+        _append_feedback, kind, text[:4000], str(body.get("conversation_id") or "")[:80])
+    return {"ok": True, "kind": kind, "count": count, "file": FEEDBACK_FILE.name}
+
+
+@app.get("/api/feedback")
+async def get_feedback():
+    """Liefert das gesammelte Feedback-Protokoll (Markdown) zurück."""
+    content = await asyncio.to_thread(_read_feedback_md)
+    return {"markdown": content, "file": FEEDBACK_FILE.name}
 
 
 # ── /plan — Chat-getriebener Strategie- & Einsatzplan-Orchestrator ────────────

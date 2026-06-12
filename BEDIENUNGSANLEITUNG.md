@@ -175,6 +175,34 @@ Knöpfe direkt dorthin (u. a. **📁 Projekt** zur Projektverwaltung). Die Strat
 Wissensdatenbank** übernehmen. *Hinweis:* Kosten- und Rechtsangaben sind eine
 Entscheidungs­hilfe — für DSGVO/EU AI Act/Preise echte Quellen prüfen, kein Rechtsrat.
 
+**📝 Feedback mit `/-` und `/+`:** Während der Arbeit kannst du direkt im Chat
+festhalten, was **nicht funktioniert** oder **besser werden** sollte – ohne den
+Gedankengang zu unterbrechen.
+
+- **`/- <Text>`** meldet ein **Problem / einen Fehler** (etwas ist schlecht oder
+  funktioniert nicht), z. B. `/- Der Plan-Import ignoriert die Aufgabenzahl`.
+- **`/+ <Text>`** notiert eine **Idee / einen Verbesserungsvorschlag**, z. B.
+  `/+ Export der Matrix-Zellen auch als CSV`.
+
+Diese Einträge werden **nicht an die KI gesendet**, sondern als Markdown-Protokoll in
+`data/feedback.md` gesammelt (mit Zeitstempel, Art-Symbol 🔴/🟢 und – falls vorhanden –
+der Unterhaltungs-ID). Im Chat erscheint eine kurze Bestätigung mit der Gesamtzahl der
+Einträge. So entsteht über die Zeit eine gepflegte **Fehler- und Ideenliste**, die du
+später auswerten oder ins Entwicklungs-Backlog übernehmen kannst.
+
+### Chat-Befehle (Slash-Befehle) im Überblick
+
+Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
+
+| Befehl | Wirkung |
+|--------|---------|
+| `/<Agentname> <Frage>` | **Schnell-Agent:** nur diese eine Frage läuft über den genannten Agenten (z. B. `/Mathe Löse x²−4=0`). Der Selektor bleibt unverändert. |
+| `/dd[N] [Zusatz]` · `/deepdive[N]` | **Deepdive:** vertieft die letzte Antwort mit *N* Folgefragen (ohne Zahl = 5), nacheinander recherchiert & beantwortet. |
+| `/ddd[N] [Zusatz]` · `/deepdivedocument[N]` | Wie Deepdive, aber **als Dokument** (Vorwort + Kapitel) im Dokumente-Tab. |
+| `/plan[N] [Zusatz] [/Kürzel …]` | **Strategie & Einsatzplan-Orchestrator:** baut aus dem Gesprächsverlauf eine Vorschau (Strategie + Agenten + Plan + Jury). `N` = Aufgabenzahl (4–60, Standard 12). `/Kürzel` erzwingt vorhandene Agenten. |
+| `/- <Text>` | **Feedback – Problem/Fehler** ins Protokoll `data/feedback.md` (nicht an die KI). |
+| `/+ <Text>` | **Feedback – Idee/Verbesserung** ins Protokoll `data/feedback.md` (nicht an die KI). |
+
 **Kontextfenster:** Im Profil wählbar von **4k bis 128k** Tokens (Chat &
 Dokumentengenerator). Größer verhindert abgeschnittene Antworten, kostet aber mehr
 GPU-Speicher — bei viel VRAM ruhig hoch wählen.

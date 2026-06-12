@@ -32,6 +32,7 @@ data/morph_training/*
 data/rfq/*
 data/capacity.json
 data/capacity_lists.json
+data/feedback.md
 
 # Selbstsignierte TLS-Zertifikate (privater Schlüssel!) — siehe scripts/gen_cert.*
 certs/

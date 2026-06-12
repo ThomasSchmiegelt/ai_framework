@@ -151,7 +151,8 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `POST /api/plans/detail-task` | Aufgabe detaillieren: verfeinert Name/Dauer/Notiz/Ressourcen **und** schlägt Vorgänger/Nachfolger vor → im Frontend wähl- & editierbar, „Übernehmen" |
 | `POST /api/plans/insert-between` | KI liest Bezeichnung/Notiz zweier Aufgaben A und B → schlägt 1–3 passende **Zwischenvorgänge** vor; Frontend verdrahtet A→neu→B und löst die direkte Kante A→B |
 | `POST /api/plans/generate` | Kompletten Projektplan per LLM generieren. Dünner Wrapper über den geteilten Kern **`_generate_plan_core(...)`** (`max_tasks` frei **bis 300**, **keine 20er-Grenze**; `format:"json"` + `num_ctx 8192` bei großen Plänen bzw. `num_ctx`-Override; Rettungs-Parser für abgeschnittenes JSON; `warning` bei zu wenig gelieferten Aufgaben; IDs/Vorgänger validiert, Nachfolger abgeleitet). RAG-Auflösung via gemeinsamem `_plan_rag_context(...)` (akzeptiert Liste **oder** kommagetrennten String) |
-| `POST /api/plans/from-document` | **Dokument → Plan** (multipart `file` + `max_tasks`/`model`/`resource_mode`/`rag_collections`): `_extract_text` (PDF/DOCX/MD/TXT/XLSX/CSV) → `_generate_plan_core` mit `num_ctx = max(8192, _profile_num_ctx())` und Doku-Budget `num_ctx*2` Zeichen. Setzt Plannamen aus Dateinamen, kurze `description`, `source_document`. Frontend: `planner.js` `_importDocPlan` (Button `#btn-plan-from-doc`) |
+| `POST /api/plans/from-document` | **Dokument → Plan** (multipart `file` + `max_tasks`/`model`/`resource_mode`/`rag_collections`): `_extract_text` (PDF/DOCX/MD/TXT/XLSX/CSV) → `_generate_plan_core` mit `num_ctx = max(8192, _profile_num_ctx())` und Doku-Budget `num_ctx*2` Zeichen. Setzt Plannamen aus Dateinamen, kurze `description`, `source_document`. Die gewünschte **Aufgabenzahl wird durchgesetzt**: `max_tasks` steht im `system_prompt` (Dokument-Variante) **und** als betonte Schlusszeile im Kern-Prompt (gegen das „Ignorieren" der Zielzahl bei großem Dokument-Kontext). Frontend: `planner.js` `_importDocPlan` (Button `#btn-plan-from-doc`) |
+| `POST /api/feedback` · `GET /api/feedback` | **Chat-Feedback** (`/-` Fehler, `/+` Idee): `POST {kind:"problem"\|"idea", text, conversation_id?}` hängt einen Markdown-Eintrag (Zeitstempel + 🔴/🟢 + Conv-ID) an `FEEDBACK_FILE` (`data/feedback.md`) via `_append_feedback` an und liefert `{count}`; `GET` gibt das Protokoll zurück. Frontend: `chat.js` `_parseFeedback`/`runFeedback` (im sendMessage-Pfad **vor** Deepdive/Plan/Slash-Agent, nicht ans LLM) |
 | `POST /api/derive-persona` | Bild-Analyse-Persona aus Präsentationsbeschreibung ableiten |
 | `POST /api/analyze-image` | Einzelbild per Vision-Modell beschreiben → `{title, bullets, caption}` |
 | `POST /api/medizin/consult` | 🩺 2-Modell-Konsultation (SSE: `stage`/`question`/`text`/`done`/`error`); Rückfragen bis 2 Runden, dann Einschätzung |
@@ -260,6 +261,7 @@ ai_framework_thomas_run(draw);   // PFLICHT am Ende — registriert + zeichnet, 
 | `data/uploads/` | temporäre Uploads |
 | `data/mail.json` | Postfach-Zugang `{protocol, host, port, user, ssl, password}` — **nicht** im Backup/git (Passwort im Klartext) |
 | `data/mail_rules.json` | Mail-Regeln `[{id, name, filter:{from,subject,domain}, actions:[…≤4]}]` — *🚧 in Entwicklung*, nicht in git |
+| `data/feedback.md` | Nutzer-Feedback aus dem Chat (`/-` Fehler, `/+` Idee) — Markdown-Liste mit Zeitstempel + 🔴/🟢; Laufzeitdaten, nicht in git/Backup |
 | `data/ai_framework_thomas.log` | Diagnose-Log (JSON-Lines, nur bei aktivem Logging) |
 
 Dateinamen werden über `_to_slug()` aus dem Anzeigenamen gebildet

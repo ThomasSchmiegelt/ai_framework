@@ -71,6 +71,11 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 ## Features
 
 - 💬 **Chat** mit Streaming (SSE), Websuche (standardmäßig **aus**), Berechnungen
+- ⌨️ **Chat-Befehle (Slash-Befehle)** am Zeilenanfang: `/<Agent> <Frage>` (Schnell-Agent),
+  `/dd[N]` / `/ddd[N]` (Deepdive bzw. Deepdive-Dokument), `/plan[N] [/Kürzel …]`
+  (Strategie- & Einsatzplan-Orchestrator), sowie **`/- <Text>`** (Problem/Fehler) und
+  **`/+ <Text>`** (Idee/Verbesserung) — letztere sammeln Nutzer-Feedback als Markdown in
+  `data/feedback.md`. Vollständige Übersicht in der [Bedienungsanleitung](BEDIENUNGSANLEITUNG.md#chat-befehle-slash-befehle-im-überblick)
 - 📈 **Funktion plotten** — nennst du eine Funktion (`f(x)=x^2`, `sin(x)`, `sqrt(x)`)
   oder bittest um einen Graphen, wird er **direkt im Chat** gezeichnet. Die Erkennung +
   Zeichnung laufen **deterministisch serverseitig** (mehrere Funktionen mit `und`/`;`,
