@@ -85,7 +85,7 @@ Sortier-Reihenfolge). Wiring: Sidebar-Default = `model_general`; Code-IDE + **Ma
 (`mathe.js` `_model()`) + `code_ide`-fähige Agenten → `model_coding` (gemeinsames Modell,
 keiner der beiden Tabs hat ein eigenes Auswahlfeld); `/api/research` + Wissenschaftspfad →
 `model_science`; 🩺 Medizin-Pipeline (MedGemma-Rolle) → `model_medical`
-(empfohlen `alibayram/medgemma`).
+(empfohlen `medgemma:4b`; in der Portable-Variante mitgebündelt).
 
 #### Funktionsgraphen: deterministisch, nicht modellgetrieben
 `plot_function` wird dem Modell **nicht** als Ollama-Tool angeboten (in `_chat_generator`

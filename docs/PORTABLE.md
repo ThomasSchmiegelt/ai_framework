@@ -10,7 +10,7 @@ AI_Framework_Thomas_Portable_YYYYMMDD\
 ├── python\           ← Embedded Python 3.12 (kein Install nötig)
 ├── ollama\
 │   ├── ollama.exe    ← Ollama Binary
-│   └── models\       ← nur die Whitelist-Modelle (ministral-3:3b, gemma4:e2b, nomic-embed-text)
+│   └── models\       ← nur die Whitelist-Modelle (ministral-3:3b, qwen3.5:4b, medgemma:4b, nomic-embed-text)
 ├── start.bat         ← Starten
 └── README.md
 ```
@@ -164,12 +164,13 @@ OLLAMA_HOST   = 127.0.0.1:11500
 | App + Python + Pakete | ~500 MB |
 | ollama.exe | ~200 MB |
 | ministral-3:3b | ~2 GB |
-| gemma4:e2b | ~2 GB |
+| qwen3.5:4b | ~2,5 GB |
+| medgemma:4b (🩺 Medizin) | ~2,5 GB |
 | nomic-embed-text | ~0,3 GB |
-| **Gesamt (Basis)** | **~5 GB** |
+| **Gesamt (Basis)** | **~7,5 GB** |
 
 > `make_portable.ps1` bündelt **gezielt nur** die Whitelist `$BUNDLE_MODELS`
-> (`ministral-3:3b`, `gemma4:e2b`, `nomic-embed-text:latest`) — nicht mehr das
+> (`ministral-3:3b`, `qwen3.5:4b`, `medgemma:4b`, `nomic-embed-text:latest`) — nicht mehr das
 > komplette lokale Modellverzeichnis. Fehlt eines lokal, wird es vor dem Kopieren
 > automatisch nachgezogen. Weitere Modelle in `$BUNDLE_MODELS` ergänzen, falls nötig.
 

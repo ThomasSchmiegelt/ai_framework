@@ -49,9 +49,9 @@ Standardmäßig wird **nur ein** kleines, lokal lauffähiges Modell installiert/
 | Modell | Rolle | Größe |
 |---|---|---|
 | `ministral-3:3b` | Standardmodell für alles (auch Vision) | ~2 GB |
-| `gemma4:e2b` | Alternatives kompaktes Chat-Modell | ~2 GB |
+| `qwen3.5:4b` | Stärkeres kompaktes Chat-Modell | ~2,5 GB |
 | `nomic-embed-text` | RAG-Embeddings (CPU) | ~0,3 GB |
-| `alibayram/medgemma` | *optional* — medizinisches Modell für den 🩺 Medizin-Tab | ~2,5 GB |
+| `medgemma:4b` | medizinisches Modell für den 🩺 Medizin-Tab (in der **Portable-Variante mitgebündelt**, sonst optional) | ~2,5 GB |
 
 **Vier Modell-Rollen im Profil:** Unter **👤 Profil → 🧠 Modelle** lässt sich je
 Einsatzzweck — **Allgemein**, **Programmieren / Mathe** (gemeinsames Modell für Code-IDE und

@@ -46,8 +46,8 @@ $GETPIP_URL    = "https://bootstrap.pypa.io/get-pip.py"
 # Abschnitt 4) – nicht mehr das komplette lokale Modellverzeichnis. So landen z. B.
 # nur die freigegebenen Modelle im Bundle und keine versehentlich lokal gepullten.
 # Fehlt eines lokal, wird es vor dem Kopieren automatisch nachgezogen.
-$BUNDLE_MODELS = @("ministral-3:3b", "gemma4:e2b", "nomic-embed-text:latest")  # ins Bundle
-$MODELS        = @("ministral-3:3b", "gemma4:e2b")   # Chat-Modelle (fürs README)
+$BUNDLE_MODELS = @("ministral-3:3b", "qwen3.5:4b", "medgemma:4b", "nomic-embed-text:latest")  # ins Bundle
+$MODELS        = @("ministral-3:3b", "qwen3.5:4b", "medgemma:4b")   # Modelle (fürs README): Chat + 🩺 Medizin
 $EMBED_MODEL   = "nomic-embed-text:latest"           # RAG-Embeddings
 
 function Write-Step  { param($t) Write-Host "`n[►] $t" -ForegroundColor Cyan }
@@ -289,7 +289,7 @@ cd /d "%~dp0app"
 
 :: Nutzt das INSTALLIERTE Ollama (Standard-Port 11434, dessen Modellverzeichnis).
 :: Voraussetzung: Ollama ist installiert und die Modelle sind gezogen
-::   ollama pull ministral-3:3b   &   ollama pull nomic-embed-text
+::   ollama pull ministral-3:3b   &   ollama pull qwen3.5:4b   &   ollama pull medgemma:4b   &   ollama pull nomic-embed-text
 "%~dp0python\python.exe" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$OLLAMA_PORT/api/tags', timeout=2)" >nul 2>&1
 if not errorlevel 1 goto ollamaready
 

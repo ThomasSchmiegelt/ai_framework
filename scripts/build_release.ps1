@@ -51,7 +51,7 @@ foreach ($plan in @($DEMO_PLAN, $DEMO_MATHE)) {
 
 # Frische, neutrale config.json sicherstellen (ohne evtl. lokale Anpassungen)
 $cfg = [ordered]@{
-    allowed_models = @("ministral-3:3b", "gemma4:e2b")
+    allowed_models = @("ministral-3:3b", "qwen3.5:4b")
     default_model  = "ministral-3:3b"
     embed_model    = "nomic-embed-text"
     ollama_base    = "http://localhost:11434"

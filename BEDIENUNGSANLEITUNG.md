@@ -710,11 +710,11 @@ In der Toolbar gibt es vier vordefinierte Schnelleinstieg-Buttons:
 
 ### Modell-Tipp
 
-Für die MedGemma-Rolle empfiehlt sich ein medizinisch trainiertes Modell. Getestet ist
-`alibayram/medgemma` (ein MedGemma-4B-Port, ~2,5 GB). Einmalig installieren und im
-Profil als **Medizin-Modell** hinterlegen:
+Für die MedGemma-Rolle empfiehlt sich ein medizinisch trainiertes Modell:
+`medgemma:4b` (MedGemma-4B, ~2,5 GB). In der **Portable-Variante ist es bereits
+mitgebündelt**; sonst einmalig installieren und im Profil als **Medizin-Modell** hinterlegen:
 ```bash
-ollama pull alibayram/medgemma
+ollama pull medgemma:4b
 ```
 Ohne medizinisches Modell läuft die Pipeline gegen das Standardmodell — funktioniert,
 ist aber fachlich schwächer.
@@ -1485,11 +1485,11 @@ Das aktive Modell wird unten in der Sidebar gewählt. Standardmäßig installier
 | Modell | Rolle |
 |--------|-------|
 | `ministral-3:3b` | Standardmodell für alles (auch Vision) |
-| `gemma4:e2b` | Alternatives kompaktes Chat-Modell |
+| `qwen3.5:4b` | Stärkeres kompaktes Chat-Modell |
 | `nomic-embed-text` | RAG-Embeddings (klein; läuft auf kleinen Karten bewusst auf der CPU) |
 
-Empfohlen für den Medizin-Tab: `alibayram/medgemma` (MedGemma-4B-Port, ~2,5 GB; separat
-laden: `ollama pull alibayram/medgemma`).
+Empfohlen für den Medizin-Tab: `medgemma:4b` (MedGemma-4B, ~2,5 GB). In der
+**Portable-Variante mitgebündelt**, sonst separat laden: `ollama pull medgemma:4b`.
 
 ### Vier Modell-Rollen im Profil
 

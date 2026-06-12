@@ -33,13 +33,13 @@ Doppelklick auf: install.bat
 3. Python-Abhängigkeiten in einer virtuellen Umgebung (`venv\`)
 4. **KI-Modelle** (Download mehrere GB):
    - `ministral-3:3b` (Standardmodell)
-   - `gemma4:e2b` (alternatives kompaktes Chat-Modell)
+   - `qwen3.5:4b` (stärkeres kompaktes Chat-Modell)
    - `nomic-embed-text` (RAG-Embeddings)
 
    Weitere Modelle bei Bedarf laden (`ollama pull <modell>`) und im
    **Profil → 🧠 Modelle** den Rollen Allgemein / Programmieren·Mathe / Wissenschaftlich /
    **Medizin** zuweisen (die Rolle „Programmieren / Mathe" gilt für Code-IDE und Mathe-Tab). Für den 🩺 Medizin-Tab empfiehlt sich ein medizinisches Modell:
-   `ollama pull alibayram/medgemma` (MedGemma-4B, ~2,5 GB; optional).
+   `ollama pull medgemma:4b` (MedGemma-4B, ~2,5 GB; optional — in der Portable-Variante bereits mitgebündelt).
 5. Desktop-Verknüpfung `AI_Framework_Thomas`
 
 ---
@@ -59,7 +59,7 @@ Auswahllisten im Profil zeigen **alle** in Ollama installierten Modelle:
 
 ```json
 {
-  "allowed_models": ["ministral-3:3b", "gemma4:e2b"],
+  "allowed_models": ["ministral-3:3b", "qwen3.5:4b"],
   "default_model": "ministral-3:3b"
 }
 ```

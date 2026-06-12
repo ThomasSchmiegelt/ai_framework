@@ -12,7 +12,7 @@
 $ErrorActionPreference = "Stop"
 
 $APP_DIR       = $PSScriptRoot
-$MODELS        = @("ministral-3:3b", "gemma4:e2b")   # Standardmodelle; weitere bei Bedarf via 'ollama pull'
+$MODELS        = @("ministral-3:3b", "qwen3.5:4b")   # Standardmodelle; weitere bei Bedarf via 'ollama pull'
 $EMBED_MODEL   = "nomic-embed-text"   # RAG-Embeddings (klein, CPU-tauglich)
 $PYTHON_MIN    = [Version]"3.11.0"
 $VENV_DIR      = Join-Path $APP_DIR "venv"
