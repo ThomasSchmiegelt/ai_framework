@@ -54,7 +54,12 @@ data/agents/.seeded
 # Laufzeit-/Dev-Artefakte
 /server.log
 /_test_*.py
+/_smoke_*.py
+/_smoke_*.log
 .claude/
+
+# Lokale Projekt-Snapshots/Backups (manuell erstellte ZIPs, nicht versionieren)
+consoc*.zip
 
 # Betriebssystem / Editor
 Thumbs.db

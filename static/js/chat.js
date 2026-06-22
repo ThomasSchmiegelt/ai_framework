@@ -91,6 +91,7 @@ const Chat = (() => {
     const input = document.getElementById('message-input');
     let text = input.value.trim();
     if (!text && pendingFiles.length === 0) return;
+    hideSlashHints();
 
     // Nutzer-Feedback: „/- <Text>" (Fehler/Problem) bzw. „/+ <Text>" (Idee/
     // Verbesserung) wird ins Markdown-Protokoll geschrieben, nicht ans LLM gesendet.
@@ -120,6 +121,26 @@ const Chat = (() => {
       input.value = '';
       autoResizeTextarea(input);
       runPlan(pl.extra, pl.pinned, pl.unresolved, pl.count);
+      return;
+    }
+
+    // Erweiterte Suche: „/such <Begriff>" (Aliase /suche, /finde, /search) lässt die KI
+    // alternative Suchbegriffe erzeugen, durchsucht damit das Web und fasst zusammen.
+    const se = _parseSearch(text);
+    if (se) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runSearch(se.query);
+      return;
+    }
+
+    // Rückfragen: „/frag <Aufgabe>" erzeugt eine dynamische Eingabemaske (Text/
+    // Auswahl), deren Antworten an die Aufgabe gehängt und normal gesendet werden.
+    const fr = _parseFrag(text);
+    if (fr) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runFrag(fr.task);
       return;
     }
 
@@ -237,7 +258,7 @@ const Chat = (() => {
             } else if (event.type === 'thinking') {
               appendThinking(event.content);
             } else if (event.type === 'done') {
-              if (event.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(event.tokens);
+              if (event.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(event.tokens, 'Chat');
             }
           } catch (_) {}
         }
@@ -1209,6 +1230,168 @@ const Chat = (() => {
     }
   }
 
+  // ── /such — Erweiterte Suche mit alternativen Suchbegriffen ──────────────────
+  // Erkennt „/such", „/suche", „/finde", „/search" am Anfang und liefert den
+  // Restbegriff. Die KI erzeugt daraus Synonyme/alternative Begriffe und sucht.
+  function _parseSearch(text) {
+    const m = text.match(/^\/(such|suche|finde|search)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { query: (m[2] || '').trim() };
+  }
+
+  function _renderSearchChips(container, terms) {
+    container.innerHTML = '';
+    if (!terms || !terms.length) return;
+    const lbl = document.createElement('div');
+    lbl.className = 'search-chips-label';
+    lbl.textContent = 'Alternative Suchbegriffe (Klick = einzeln im Web suchen):';
+    container.appendChild(lbl);
+    for (const t of terms) {
+      const chip = document.createElement('button');
+      chip.className = 'search-chip';
+      chip.type = 'button';
+      chip.textContent = t;
+      chip.title = `Mit „${t}" einzeln im Web suchen`;
+      chip.addEventListener('click', () => _searchWithTerm(t));
+      container.appendChild(chip);
+    }
+  }
+
+  // Klick auf einen Chip: Begriff ins Eingabefeld, Websuche aktivieren, normal senden.
+  function _searchWithTerm(term) {
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    const input = document.getElementById('message-input');
+    input.value = term;
+    const stb = document.getElementById('btn-search-toggle');
+    if (stb && !stb.classList.contains('active')) stb.classList.add('active');
+    sendMessage();
+  }
+
+  function _renderSearchSources(container, sources) {
+    if (!sources || !sources.length) return;
+    let box = container.querySelector('.search-sources');
+    if (!box) { box = document.createElement('div'); box.className = 'search-sources'; container.appendChild(box); }
+    let html = '<div class="search-sources-title">📎 Quellen</div><ol>';
+    for (const s of sources.slice(0, 12)) {
+      const u = escHtml(s.url || '');
+      const t = escHtml(s.title || s.url || '(ohne Titel)');
+      html += `<li><a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a></li>`;
+    }
+    html += '</ol>';
+    box.innerHTML = html;
+  }
+
+  async function runSearch(query) {
+    query = (query || '').trim();
+    if (!query) { showToast('Bitte nach „/such" einen Suchbegriff eingeben'); return; }
+    if (isStreaming) return;
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    appendMessage('user', '🔎 /such ' + query);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const chips = document.createElement('div');
+    chips.className = 'search-chips';
+    content.appendChild(chips);
+    const textEl = document.createElement('div');
+    textEl.className = 'bubble-text';
+    textEl.innerHTML = '<em>⏳ alternative Suchbegriffe werden erzeugt…</em>';
+    content.appendChild(textEl);
+
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    let answer = '';
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/search/expand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({ query, model }),
+      });
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'terms') {
+            _renderSearchChips(chips, ev.terms || []);
+          } else if (ev.type === 'searching') {
+            textEl.innerHTML = '<em>🔎 Websuche läuft…</em>';
+          } else if (ev.type === 'synthesizing') {
+            textEl.innerHTML = '<em>⏳ Ergebnisse werden zusammengefasst…</em>';
+            answer = '';
+          } else if (ev.type === 'text') {
+            answer += ev.content;
+            textEl.textContent = answer;
+            scrollToBottom();
+          } else if (ev.type === 'sources') {
+            _renderSearchSources(content, ev.data || []);
+          } else if (ev.type === 'error') {
+            textEl.innerHTML = `<em style="color:#ef4444">Fehler: ${escHtml(ev.message || '')}</em>`;
+          } else if (ev.type === 'done') {
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Suche');
+          }
+        }
+      }
+      // Abschluss: Markdown rendern, ins Verlaufsprotokoll übernehmen
+      if (answer && typeof marked !== 'undefined') {
+        if (window._ensureKatexMarked) window._ensureKatexMarked();
+        textEl.innerHTML = marked.parse(answer, { gfm: true, breaks: true });
+        textEl.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      }
+      if (answer) {
+        messages.push({ role: 'user', content: '/such ' + query });
+        messages.push({ role: 'assistant', content: answer });
+        loadConversationList();
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') textEl.innerHTML = `<em style="color:#ef4444">Suche fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      abortController = null;
+      isStreaming = false;
+      setBtnSendState(true);
+    }
+  }
+
+  // ── /frag — Dynamische Rückfragen (Eingabemaske) ────────────────────────────
+  function _parseFrag(text) {
+    const m = text.match(/^\/frag\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { task: (m[1] || '').trim() };
+  }
+
+  async function runFrag(task) {
+    task = (task || '').trim();
+    if (!task) { showToast('Bitte nach „/frag" eine Aufgabe eingeben'); return; }
+    if (isStreaming) return;
+    if (typeof Clarify === 'undefined') { showToast('Rückfrage-Modul nicht geladen'); return; }
+    showWelcome(false);
+    appendMessage('user', '❓ /frag ' + task);
+    const row = appendMessage('assistant', '', [], true);
+    const mount = row.querySelector('.bubble-content');
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    const res = await Clarify.ask({ task, domain: 'chat', model, mount });
+    if (!res) return;
+    if (res.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(res.tokens, 'Rückfragen');
+    // Augmentierte Aufgabe über den normalen Weg senden (Antwort streamt darunter)
+    const input = document.getElementById('message-input');
+    input.value = res.augmentedTask;
+    autoResizeTextarea(input);
+    sendMessage();
+  }
+
   // ── /- und /+ — Nutzer-Feedback ins Markdown-Protokoll ───────────────────────
   // „/- <Text>" meldet ein Problem/eine Fehlermeldung, „/+ <Text>" notiert eine
   // Idee/einen Verbesserungsvorschlag. Beides wird serverseitig als Markdown
@@ -1335,7 +1518,7 @@ const Chat = (() => {
       card.appendChild(sec);
     } else if (ev.type === 'done') {
       if (ev.tokens && typeof TokenMeter !== 'undefined' && TokenMeter.add) {
-        TokenMeter.add({ in: ev.tokens.in || 0, out: ev.tokens.out || 0 });
+        TokenMeter.add({ in: ev.tokens.in || 0, out: ev.tokens.out || 0 }, 'Deepdive');
       }
     } else if (ev.type === 'error') {
       showToast('Plan: ' + (ev.message || 'Fehler'));
@@ -1549,6 +1732,86 @@ const Chat = (() => {
     }
   }
 
+  // ── Befehls-Autocomplete in der Chatbox („/") ───────────────────────────────
+  // Beim Tippen eines führenden „/" erscheint über der Eingabe eine graue Liste der
+  // verfügbaren Slash-Befehle. Auswahl per Klick, Tab oder ↑/↓+Tab; Esc schließt.
+  const SLASH_COMMANDS = [
+    { key: '/such', ins: '/such ', cmd: '/such …', desc: 'Alternative Suchbegriffe finden + Web durchsuchen (auch /suche, /finde)' },
+    { key: '/frag', ins: '/frag ', cmd: '/frag …', desc: 'Rückfragen-Maske: fehlende Infos per Formular ergänzen, dann antworten' },
+    { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
+    { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
+    { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },
+    { key: '/+',    ins: '/+ ',    cmd: '/+ …',    desc: 'Verbesserungsidee ins Feedback-Protokoll (nicht ans LLM)' },
+    { key: '/-',    ins: '/- ',    cmd: '/- …',    desc: 'Fehler/Problem ins Feedback-Protokoll (nicht ans LLM)' },
+    { key: '/',     ins: '/',      cmd: '/<Agent>', desc: 'Agent nur für diese Nachricht (z. B. /datenschutz_berater)', info: true },
+  ];
+  let _slashMatches = [], _slashActive = 0;
+
+  function _slashBox() { return document.getElementById('slash-hints'); }
+
+  function hideSlashHints() {
+    const box = _slashBox();
+    if (box) box.style.display = 'none';
+    _slashMatches = []; _slashActive = 0;
+  }
+
+  function updateSlashHints(value) {
+    const box = _slashBox();
+    if (!box) return;
+    const m = (value || '').match(/^\/(\S*)$/);   // „/" + Befehlsname, noch kein Leerzeichen
+    if (!m) { hideSlashHints(); return; }
+    const token = ('/' + m[1]).toLowerCase();
+    _slashMatches = SLASH_COMMANDS.filter(c =>
+      c.info || c.key.toLowerCase().startsWith(token) || token.startsWith(c.key.toLowerCase()));
+    if (!_slashMatches.length) { hideSlashHints(); return; }
+    _slashActive = 0;
+    _renderSlashHints();
+    box.style.display = '';
+  }
+
+  function _renderSlashHints() {
+    const box = _slashBox();
+    if (!box) return;
+    box.innerHTML = _slashMatches.map((c, i) =>
+      `<div class="slash-hint${i === _slashActive ? ' active' : ''}" data-i="${i}">`
+      + `<span class="slash-hint-cmd">${escHtml(c.cmd)}</span>`
+      + `<span class="slash-hint-desc">${escHtml(c.desc)}</span></div>`).join('')
+      + '<div class="slash-hint-foot">↑↓ wählen · Tab/Klick übernehmen · Esc schließen</div>';
+    box.querySelectorAll('.slash-hint').forEach(el => {
+      // mousedown statt click: verhindert, dass das Eingabefeld vorher den Fokus verliert
+      el.addEventListener('mousedown', e => { e.preventDefault(); _acceptSlash(+el.dataset.i); });
+    });
+  }
+
+  function _acceptSlash(i) {
+    const c = _slashMatches[i];
+    if (!c) return;
+    const input = document.getElementById('message-input');
+    if (!input) return;
+    input.value = c.ins;
+    input.focus();
+    try { input.setSelectionRange(c.ins.length, c.ins.length); } catch (_) {}
+    if (typeof autoResizeTextarea === 'function') autoResizeTextarea(input);
+    if (c.info) updateSlashHints(input.value);   // „/" stehen lassen → Agentenname weiter tippen
+    else hideSlashHints();
+  }
+
+  // Rückgabe true = Taste verbraucht (app.js sendet dann NICHT bzw. unterdrückt Default).
+  function onSlashHintKeydown(e) {
+    const box = _slashBox();
+    if (!box || box.style.display === 'none' || !_slashMatches.length) return false;
+    if (e.key === 'ArrowDown') { _slashActive = (_slashActive + 1) % _slashMatches.length; _renderSlashHints(); return true; }
+    if (e.key === 'ArrowUp')   { _slashActive = (_slashActive - 1 + _slashMatches.length) % _slashMatches.length; _renderSlashHints(); return true; }
+    if (e.key === 'Tab')       { _acceptSlash(_slashActive); return true; }
+    if (e.key === 'Escape')    { hideSlashHints(); return true; }
+    return false;   // Enter → normal weiter (Senden); Liste wird dort geschlossen
+  }
+
+  function initSlashHints() {
+    const input = document.getElementById('message-input');
+    if (input) input.addEventListener('blur', () => setTimeout(hideSlashHints, 120));
+  }
+
   return {
     sendMessage,
     sendOrAbort,
@@ -1560,6 +1823,10 @@ const Chat = (() => {
     newConversation,
     loadConversationList,
     importConversation,
+    updateSlashHints,
+    onSlashHintKeydown,
+    hideSlashHints,
+    initSlashHints,
     renderMarkdown,   // wiederverwendbar (Dokumentengenerator, Recherche): identische
                       // Formel-/Normen-/Code-Aufbereitung wie im Chat
   };

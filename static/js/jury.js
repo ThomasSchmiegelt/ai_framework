@@ -215,7 +215,7 @@ const Jury = (() => {
           (pending[f.agent] || card('')).innerHTML = _memberHtml(f);
           out.members.push(f);
         } else if (f.type === 'done') {
-          if (f.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(f.tokens);
+          if (f.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(f.tokens, 'Jury');
         } else if (f.type === 'member' && f.status === 'error') {
           const el = pending[f.agent] || card('');
           el.innerHTML = `<div class="jury-card-head">${f.icon || '⚖️'} <strong>${_esc(f.agent)}</strong></div><div style="color:var(--danger,#e66);font-size:12.5px">Fehler: ${_esc(f.message)}</div>`;

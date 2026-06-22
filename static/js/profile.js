@@ -82,6 +82,13 @@ const Profile = (() => {
     if (pyOpt) pyOpt.style.display = window.AllowPythonExec ? '' : 'none';
     if (!window.AllowPythonExec && typeof CodeIDE !== 'undefined' && CodeIDE.disablePython) CodeIDE.disablePython();
     if (typeof I18n !== 'undefined' && _data.lang) I18n.setLang(_data.lang);
+    // Versionsnummer anzeigen (Profil-Modal + Seitenleiste)
+    if (_data.app_version) {
+      const pv = document.getElementById('profile-version');
+      if (pv) pv.textContent = 'v' + _data.app_version;
+      const sv = document.getElementById('sidebar-version');
+      if (sv) sv.textContent = ' · v' + _data.app_version;
+    }
     return _data;
   }
 

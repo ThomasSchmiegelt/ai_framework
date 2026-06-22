@@ -194,9 +194,15 @@ später auswerten oder ins Entwicklungs-Backlog übernehmen kannst.
 
 Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
 
+> **Tipp – Befehls-Vorschau:** Sobald du in der Chatbox ein **„/"** tippst, erscheint
+> direkt darüber eine **graue Liste der verfügbaren Befehle** mit Kurzbeschreibung.
+> Mit **↑/↓** wählen, mit **Tab** oder **Klick** übernehmen, **Esc** schließt sie wieder.
+
 | Befehl | Wirkung |
 |--------|---------|
 | `/<Agentname> <Frage>` | **Schnell-Agent:** nur diese eine Frage läuft über den genannten Agenten (z. B. `/Mathe Löse x²−4=0`). Der Selektor bleibt unverändert. |
+| `/such <Begriff>` · `/suche` · `/finde` · `/search` | **Erweiterte Suche:** die KI erzeugt **alternative Suchbegriffe** (Synonyme, Fach-/Umgangssprache, engl. Begriffe) als anklickbare Chips, durchsucht damit das Web und fasst die Treffer **mit Quellen** zusammen. Hilfreich, wenn man den treffenden Fachbegriff nicht kennt. |
+| `/frag <Aufgabe>` | **Rückfragen-Maske:** die KI prüft, ob ihr Infos fehlen, und zeigt bei Bedarf eine **dynamische Eingabemaske** (Text-, Einfach- und Mehrfachauswahl). Deine Antworten werden an die Aufgabe gehängt und dann normal beantwortet. Auch in **Medizin** und **Mathe** verfügbar. |
 | `/dd[N] [Zusatz]` · `/deepdive[N]` | **Deepdive:** vertieft die letzte Antwort mit *N* Folgefragen (ohne Zahl = 5), nacheinander recherchiert & beantwortet. |
 | `/ddd[N] [Zusatz]` · `/deepdivedocument[N]` | Wie Deepdive, aber **als Dokument** (Vorwort + Kapitel) im Dokumente-Tab. |
 | `/plan[N] [Zusatz] [/Kürzel …]` | **Strategie & Einsatzplan-Orchestrator:** baut aus dem Gesprächsverlauf eine Vorschau (Strategie + Agenten + Plan + Jury). `N` = Aufgabenzahl (4–60, Standard 12). `/Kürzel` erzwingt vorhandene Agenten. |
@@ -1094,6 +1100,11 @@ Tab **📊 Matrix** — Recherche als Tabelle:
   der **Halluzinationsprüfer** (prüft Angaben auf Plausibilität). *„Kein Agent"* =
   einfache Websuche.
 - Zelle anklicken = einzeln ausführen; **▶ Alle ausführen** = der Reihe nach.
+- **Pro Spalte schaltbar:** Häkchen **„ausführen"** (wird bei *Alle ausführen*
+  berücksichtigt), Häkchen **„Kontext"** (gibt die fertigen Ergebnisse der vorherigen
+  Spalten derselben Zeile als Grundlage mit) und **▶ Spalte** (führt nur diese eine
+  Spalte für alle Zeilen aus). So lässt sich eine mehrstufige Auswertung **Schritt
+  für Schritt** abarbeiten.
 - Bei vielen Spalten lässt sich die Tabelle **horizontal scrollen**.
 - **Live-Speicherung:** Ergebnisse (samt Agent-Zuordnung je Spalte) werden nach
   jeder Zelle automatisch im Browser gesichert — bei einem Absturz geht nichts
@@ -1105,6 +1116,36 @@ Tab **📊 Matrix** — Recherche als Tabelle:
 
 > **Wissenschaftsmodus:** Auch die Matrix-Recherche läuft immer im
 > Wissenschaftsmodus (quellengebunden, keine erfundenen Inhalte).
+
+### 🤝 Partner-Auswertung (Vertriebs-/Akquise-Recherche)
+
+Der Button **🤝 Partner-Auswertung** richtet die Matrix als mehrstufige
+Partner-/Lead-Recherche ein:
+
+1. **📋 Firmenliste** öffnet ein Eingabefenster — füge eine **beliebig lange Liste**
+   ein (eine Firma pro Zeile). Jede Zeile wird zu einer Tabellenzeile.
+2. **🤝 Partner-Auswertung** legt die vordefinierten Spalten an und erstellt – falls
+   noch nicht vorhanden – die nötigen **Agenten** (vorhandene werden **nicht**
+   überschrieben):
+   - **Interesse & Profil** — prüft per Websuche, ob die Firma als Partner/Kunde
+     interessant ist, erstellt ein Profil und nennt mögliche Ansprechpartner.
+   - **Kontaktdaten** — Name, Position, Telefon, E-Mail der Ansprechpartner
+     (nur öffentlich belegbar).
+   - **LinkedIn / X / Instagram / Facebook / GitHub** — je eine Spalte, sucht das
+     öffentliche Profil der Firma bzw. der Personen.
+   - **Kaltakquise-Mail** — formuliert eine personalisierte Erstkontakt-E-Mail aus
+     den gefundenen Infos.
+3. **Stufenweise arbeiten:** Nur die erste Spalte ist anfangs aktiv. Mit **▶ Spalte**
+   führst du die nächste Stufe aus; die Spalten mit **„Kontext"** nutzen dabei die
+   Ergebnisse der vorherigen Stufen derselben Zeile.
+
+Die beiden zentralen Agenten (**Partner-Rechercheur** und **Akquise-Texter**) sind
+**ganz normale Agenten** und im **🤖 Agenten-Tab** frei an deine Firma, Tonalität und
+Zielgruppe **anpassbar**.
+
+> **Hinweis:** Die Recherche stützt sich auf die öffentliche DuckDuckGo-Websuche;
+> je nach Plattform sind die Treffer unterschiedlich vollständig. Die Agenten sind
+> **DSGVO-bewusst** formuliert und nutzen nur öffentlich auffindbare Angaben.
 
 ---
 
@@ -1392,12 +1433,23 @@ API-Anbieter** einbinden (z. B. **OpenRouter**, OpenAI, Groq, Together):
 
 Unten links in der Seitenleiste zeigt ein **Token-Zähler** den Verbrauch der laufenden
 Sitzung (↓ Eingabe / ↑ Ausgabe) und – sofern ein Preis hinterlegt ist – die **geschätzten
-Kosten**. Gezählt werden die wichtigsten KI-Aktionen: **Chat**, **Anfrage-Auswertung**
-(inkl. eigener Spalten & Chat-Zeile) und der **Code-Assistent**. Den Preis setzt du im
-**Profil**: *Preis je 1.000 Eingabe-Tokens*, *je 1.000 Ausgabe-Tokens* und die *Währung*.
-Lokale Ollama-Modelle sind kostenlos (0 lassen); für externe API-Anbieter den jeweiligen
-Tarif eintragen. Der Zähler überlebt einen Reload; ein Klick darauf setzt die
-Sitzungssumme zurück.
+Kosten**. Darunter steht der **letzte Vorgang**.
+
+**Aufschlüsselung pro Vorgang:** Ein **Klick** auf den Zähler öffnet eine Übersicht, die
+den Aufwand **nach Vorgangsart** gruppiert (mit Anzahl und – falls Preis hinterlegt –
+Kosten) und die **letzten Vorgänge** chronologisch auflistet. So siehst du z. B., wie
+viele Tokens eine **Matrix-Recherche**, eine **Partner-Auswertung**, eine **Plan-Erstellung**
+oder eine **Suche** (`/such`) gekostet hat. Erfasst werden u. a.: **Chat**, **Deepdive**,
+**Suche**, **Rückfragen** (`/frag`), **Matrix-Recherche**, **Partner-Auswertung**, **Plan**,
+**Jury**, **Anfrage-Auswertung** und **Code-Assistent**.
+
+Den Preis setzt du im **Profil**: *Preis je 1.000 Eingabe-Tokens*, *je 1.000
+Ausgabe-Tokens* und die *Währung*. Lokale Ollama-Modelle sind kostenlos (0 lassen); für
+externe API-Anbieter den jeweiligen Tarif eintragen. Der Zähler überlebt einen Reload;
+in der Aufschlüsselung gibt es einen Knopf **Zähler zurücksetzen**.
+
+Die **Versionsnummer** des Frameworks steht im **👤 Profil** (neben „Nutzerprofil") und
+klein in der Seitenleiste; sie lässt sich in der `config.json` (`"version"`) setzen.
 
 ### 👁 Tab-Sichtbarkeit (im Profil)
 

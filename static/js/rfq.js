@@ -417,7 +417,7 @@ const RFQ = (() => {
       const s = ev.summary || {};
       document.getElementById('rfq-status').textContent =
         `✓ Fertig: ${s.n} Pakete · ${s.interesting} interessant · ${s.partner} Partner · ${s.bcc} BCC`;
-      if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens);
+      if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Anfrage');
     } else if (ev.type === 'error') {
       showToast('Fehler: ' + (ev.message || ''));
     }
@@ -564,7 +564,7 @@ const RFQ = (() => {
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || r.status);
       ansEl.textContent = d.answer || '(keine Antwort)';
-      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens);
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Anfrage-Frage');
       inp.value = '';
     } catch (e) {
       ansEl.textContent = '❌ ' + e.message;

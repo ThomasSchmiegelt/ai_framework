@@ -47,7 +47,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260611merge" />
+  <link rel="stylesheet" href="/css/app.css?v=20260622" />
 </head>
 <body>
 
@@ -105,14 +105,18 @@
       </div>
       <input type="file" id="restore-input" accept=".zip" style="display:none" />
       <button id="btn-profile" class="btn-sidebar-action" style="width:100%">👤 Profil bearbeiten</button>
-      <div id="token-meter" title="Tokens dieser Sitzung (Klick zum Zurücksetzen). Preis je 1.000 Tokens im Profil hinterlegen."
-           style="display:none;margin-top:8px;font-size:11px;opacity:.8;cursor:pointer;line-height:1.5;
+      <div id="token-meter" title="Tokens dieser Sitzung. Klick öffnet die Aufschlüsselung nach Vorgang. Preis je 1.000 Tokens im Profil hinterlegen."
+           style="display:none;margin-top:8px;font-size:11px;opacity:.85;cursor:pointer;line-height:1.5;position:relative;
                   border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--bg-input)">
-        <div style="display:flex;justify-content:space-between"><span>🔢 Tokens</span><span id="token-meter-total">0</span></div>
+        <div style="display:flex;justify-content:space-between"><span>🔢 Tokens (Sitzung)</span><span id="token-meter-total">0</span></div>
         <div style="display:flex;justify-content:space-between;opacity:.7"><span id="token-meter-io">↓0 ↑0</span><span id="token-meter-cost"></span></div>
+        <div id="token-meter-last" style="opacity:.65;margin-top:2px;display:none"></div>
+        <div id="token-meter-breakdown" style="display:none;position:absolute;bottom:calc(100% + 6px);left:0;right:0;z-index:2000;
+                  background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:8px;
+                  box-shadow:0 8px 28px rgba(0,0,0,.5);max-height:50vh;overflow:auto;cursor:default"></div>
       </div>
       <div id="sidebar-credit" style="margin-top:8px;text-align:center;font-size:11px;opacity:.55">
-        Entwickelt von Thomas Schmiegelt
+        Entwickelt von Thomas Schmiegelt<span id="sidebar-version"></span>
       </div>
     </div>
   </aside>
@@ -179,6 +183,8 @@
 
       <!-- Input-Bereich -->
       <div id="input-area">
+        <!-- Befehls-Vorschau: erscheint beim Tippen von „/" -->
+        <div id="slash-hints" style="display:none"></div>
         <div id="input-box">
           <div id="file-preview-area"></div>
 
@@ -1020,6 +1026,8 @@
     <div id="matrix-panel" class="panel">
       <div id="matrix-toolbar">
         <h2 style="font-size:16px">📊 Tabellen-Recherche</h2>
+        <button id="btn-matrix-partner" class="export-btn" style="font-size:12px" title="Partner-Auswertung einrichten: Firmen recherchieren, Ansprechpartner & Social-Media finden, Kaltakquise-Mail formulieren">🤝 Partner-Auswertung</button>
+        <button id="btn-matrix-companies" class="export-btn" style="font-size:12px" title="Firmenliste einlesen (eine Firma pro Zeile, beliebig lang)">📋 Firmenliste</button>
         <button id="btn-matrix-add-row" class="export-btn" style="font-size:12px">＋ Zeile</button>
         <button id="btn-matrix-add-col" class="export-btn" style="font-size:12px">＋ Spalte</button>
         <button id="btn-matrix-run-all" class="export-btn">▶ Alle ausführen</button>
@@ -1033,7 +1041,7 @@
         <button id="btn-matrix-clear" class="export-btn btn-danger-sm">✕ Leeren</button>
       </div>
       <div style="padding:8px 12px 4px;font-size:13px;color:var(--text-dim);display:flex;justify-content:space-between;align-items:center">
-        <span>Spalte 1 = Themen/Informationen · Kopfzeile ab Spalte 2 = Suchprompt + Agent (pro Spalte wählbar) · Zellen werden durch KI-Websuche befüllt</span>
+        <span>Spalte 1 = Themen/Firmen · Kopfzeile ab Spalte 2 = Suchprompt + Agent (pro Spalte wählbar, „ausführen"/„Kontext" schaltbar, ▶ Spalte = stufenweise) · Zellen per KI-Websuche · „🤝 Partner-Auswertung" richtet Firmen-Recherche → Ansprechpartner → Social → Kaltakquise-Mail ein</span>
         <span id="matrix-autosave-label" style="font-size:11px;color:var(--text-muted);display:none">💾 Gespeichert</span>
       </div>
       <div id="matrix-table-wrap">
@@ -1743,7 +1751,7 @@ Beispiele:
 <!-- ── Profil-Modal ───────────────────────────────────────────────────────── -->
 <div id="profile-modal-overlay" class="modal-overlay-base">
   <div class="modal-base">
-    <h3>👤 Nutzerprofil</h3>
+    <h3>👤 Nutzerprofil <span id="profile-version" style="font-size:12px;font-weight:normal;opacity:.55;margin-left:6px"></span></h3>
 
     <div class="form-group" style="margin-top:14px;max-width:280px">
       <label>🌐 Sprache / Language</label>
@@ -2296,30 +2304,31 @@ Beispiele:
 <script src="/js/canvas.js?v=20260603"></script>
 <script src="/js/canvas_editor.js?v=20260603"></script>
 <script src="/js/agents.js?v=20260611merge"></script>
-<script src="/js/jury.js?v=20260610mapreduce"></script>
-<script src="/js/chat.js?v=20260611plan3"></script>
+<script src="/js/jury.js?v=20260622"></script>
+<script src="/js/clarify.js?v=20260622"></script>
+<script src="/js/chat.js?v=20260622"></script>
 <script src="/js/research.js?v=20260603"></script>
-<script src="/js/rag.js?v=20260613"></script>
+<script src="/js/rag.js?v=20260622"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260610tokens"></script>
+<script src="/js/profile.js?v=20260622"></script>
 <script src="/js/projects.js?v=20260603"></script>
-<script src="/js/planner.js?v=20260610auto"></script>
-<script src="/js/matrix_research.js?v=20260611cells"></script>
-<script src="/js/rfq.js?v=20260610f"></script>
+<script src="/js/planner.js?v=20260622"></script>
+<script src="/js/matrix_research.js?v=20260622"></script>
+<script src="/js/rfq.js?v=20260622"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
 <script src="/js/json_editor.js?v=20260603"></script>
 <script src="/js/logger.js?v=20260603"></script>
-<script src="/js/ide.js?v=20260610fix2"></script>
-<script src="/js/onboarding.js?v=20260610auswertung"></script>
-<script src="/js/medizin.js?v=20260615plan"></script>
-<script src="/js/mathe.js?v=20260615plan"></script>
+<script src="/js/ide.js?v=20260622"></script>
+<script src="/js/onboarding.js?v=20260622"></script>
+<script src="/js/medizin.js?v=20260622"></script>
+<script src="/js/mathe.js?v=20260622"></script>
 <script src="/js/dir_analysis.js?v=20260613"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
-<script src="/js/tokens.js?v=20260610"></script>
-<script src="/js/app.js?v=20260611merge"></script>
+<script src="/js/tokens.js?v=20260622"></script>
+<script src="/js/app.js?v=20260622"></script>
 
 </body>
 </html>

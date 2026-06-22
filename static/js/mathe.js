@@ -118,11 +118,36 @@ const MatheChat = (() => {
 
   // ── Nachricht senden ──────────────────────────────────────────────────────
 
+  // Rückfragen-Maske (/frag): Antworten an die Aufgabe hängen und normal lösen.
+  async function _runFrag(task) {
+    task = (task || '').trim();
+    if (!task) { showToast('Bitte nach „/frag" eine Aufgabe eingeben'); return; }
+    if (_streaming) return;
+    if (typeof Clarify === 'undefined') { showToast('Rückfrage-Modul nicht geladen'); return; }
+    _appendMsg('user', '❓ /frag ' + task);
+    const mount = _appendMsg('assistant', '');
+    const res = await Clarify.ask({ task, domain: 'math', model: _model(), mount });
+    if (!res) return;
+    if (res.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(res.tokens, 'Rückfragen');
+    const input = document.getElementById('mathe-input');
+    if (input) { input.value = res.augmentedTask; if (typeof autoResizeTextarea === 'function') autoResizeTextarea(input); }
+    _sendMessage();
+  }
+
   async function _sendMessage() {
     if (_streaming) return;
     const input = document.getElementById('mathe-input');
     let text  = (input?.value || '').trim();
     if (!text && !_attachedFiles.length) return;
+
+    // Rückfragen: „/frag <Aufgabe>" erzeugt eine Eingabemaske, deren Antworten
+    // an die Aufgabe gehängt und dann normal gelöst werden.
+    if (/^\/frag\b/i.test(text)) {
+      const task = text.replace(/^\/frag\b\s*/i, '').trim();
+      if (input) { input.value = ''; if (typeof autoResizeTextarea === 'function') autoResizeTextarea(input); }
+      _runFrag(task);
+      return;
+    }
 
     // Slash-Agent: führendes „/Name" überschreibt nur für diese Nachricht den Agenten
     // (umgeht dann Tutor-Grounding und Auto-Verifizieren – der gewählte Agent steuert).

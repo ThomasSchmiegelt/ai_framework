@@ -49,6 +49,9 @@ KEEP_ALIVE: str = str(_CONFIG.get("model_keep_alive", "30m"))
 # Python-Ausführung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-/
 # Servermodus ggf. abschalten (config.json: "allow_python_exec": false).
 ALLOW_PYTHON_EXEC: bool = bool(_CONFIG.get("allow_python_exec", True))
+# Versionsnummer des Frameworks (in config.json überschreibbar). Wird über
+# /api/profile ans Frontend gespiegelt und im Profil-Modal angezeigt.
+APP_VERSION: str = str(_CONFIG.get("version") or "1.4.0")
 
 
 # Platzhalter-Werte aus den Frontend-Selektoren (kein echtes Modell)
@@ -1265,6 +1268,224 @@ async def _research_generator(request: ResearchRequest):
         await asyncio.sleep(0.004)
 
     yield _sse({"type": "done"})
+
+
+# ── Erweiterte Suche („/such"): alternative Suchbegriffe + Websuche + Zusammenfassung ──
+# Der Nutzer kennt oft den treffenden (Fach-)Begriff nicht. Diese Funktion lässt das
+# LLM alternative Suchbegriffe für dasselbe Anliegen erzeugen (Synonyme, Fach-/
+# Umgangssprache, engl. Entsprechungen), durchsucht damit das Web (DuckDuckGo) und
+# fasst die Treffer mit Quellen zusammen. Reine Wiederverwendung vorhandener Bausteine.
+
+class SearchExpandRequest(BaseModel):
+    query: str
+    model: Optional[str] = None
+    count: int = 6
+    search: bool = True
+
+
+@app.post("/api/search/expand")
+async def search_expand(request: SearchExpandRequest):
+    return StreamingResponse(
+        _search_expand_generator(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _search_expand_generator(request: SearchExpandRequest):
+    import re
+    from tools.search import search_with_sources
+
+    query = (request.query or "").strip()
+    if not query:
+        yield _sse({"type": "error", "message": "Kein Suchbegriff angegeben"})
+        return
+
+    _model = _pick_model(request.model, _model_for("science"))
+    n = max(3, min(int(request.count or 6), 12))
+    _ti = _to = 0
+
+    # 1) Alternative Suchbegriffe erzeugen (JSON, robust geparst)
+    term_prompt = (
+        f"Der Nutzer sucht Informationen, kennt aber evtl. nicht den treffenden Fachbegriff.\n"
+        f"Suchanliegen: \"{query}\"\n\n"
+        f"Erzeuge {n} alternative Suchbegriffe bzw. -phrasen, die DASSELBE beschreiben – "
+        f"Synonyme, Fachbegriff gegenüber Umgangssprache, enger und weiter gefasste "
+        f"Formulierungen sowie die wichtigsten englischen Entsprechungen. Jeweils kurz und "
+        f"suchtauglich (2–5 Wörter), keine Dopplungen.\n"
+        f"Antworte NUR mit JSON: {{\"terms\":[\"…\",\"…\"]}}"
+    )
+    try:
+        async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": _model, "think": False, "format": "json",
+                "messages": [
+                    {"role": "system", "content": "Du bist ein Recherche-Assistent für Suchbegriffe. Antworte ausschließlich mit gültigem JSON."},
+                    {"role": "user", "content": term_prompt},
+                ],
+                "stream": False, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            _j = resp.json()
+        a, b = _llm_tok(_j); _ti += a; _to += b
+        data = _parse_llm_json(_j.get("message", {}).get("content", "")) or {}
+        terms = [str(t).strip() for t in (data.get("terms") or []) if str(t).strip()]
+    except Exception:
+        terms = []
+
+    # Original zuerst, dann Alternativen; doppelte (case-insensitiv) entfernen
+    ordered, seen = [], set()
+    for t in [query] + terms:
+        k = t.lower()
+        if k and k not in seen:
+            seen.add(k); ordered.append(t)
+    yield _sse({"type": "terms", "query": query, "terms": ordered})
+
+    if not request.search:
+        yield _sse({"type": "done", "tokens": {"in": _ti, "out": _to}})
+        return
+
+    # 2) Websuche über die ergiebigsten Begriffe (begrenzt, parallel)
+    search_terms = ordered[:4]
+    yield _sse({"type": "searching", "terms": search_terms})
+    results = await asyncio.gather(
+        *[search_with_sources(t, 5) for t in search_terms], return_exceptions=True)
+
+    blocks, sources, seen_url = [], [], set()
+    for term, raw in zip(search_terms, results):
+        if isinstance(raw, Exception):
+            srcs, text = [], f"Suchfehler: {raw}"
+        else:
+            srcs, text = raw
+        blocks.append(f"### Treffer für „{term}“\n{text[:2500]}")
+        for s in srcs:
+            u = s.get("url", "")
+            if u and u not in seen_url:
+                seen_url.add(u); sources.append(s)
+    yield _sse({"type": "sources", "data": sources})
+    yield _sse({"type": "synthesizing"})
+
+    # 3) Antwort synthetisieren (Wissenschaftsmodus + Modus-Vorspann)
+    synth = (
+        f"Suchanliegen des Nutzers: „{query}“\n"
+        f"Verwendete alternative Suchbegriffe: {', '.join(search_terms)}\n\n"
+        + "\n\n".join(blocks)
+        + "\n\nFasse die Suchergebnisse zu einer klaren, strukturierten Antwort auf das "
+        "Suchanliegen zusammen (Deutsch, Markdown). Nenne die wichtigsten Erkenntnisse, "
+        "verweise wo sinnvoll auf Quellen, und schließe mit einem kurzen Hinweis, welche "
+        "Suchbegriffe am ergiebigsten waren. Wenn die Treffer dürftig sind, sage das ehrlich."
+    )
+    try:
+        _msgs = []
+        _sys = "\n\n".join(p for p in (_SCIENCE_PROMPT, _augment_prefix(query)) if p)
+        if _sys:
+            _msgs.append({"role": "system", "content": _sys})
+        _msgs.append({"role": "user", "content": synth})
+        async with _model_session(_model), httpx.AsyncClient(timeout=300) as client:
+            resp = await _llm.chat(client, {
+                "model": _model, "think": False, "messages": _msgs,
+                "stream": False, "options": {"num_ctx": _profile_num_ctx()},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            _j2 = resp.json()
+        a, b = _llm_tok(_j2); _ti += a; _to += b
+    except Exception as e:
+        yield _sse({"type": "error", "message": str(e)})
+        return
+
+    content = _j2.get("message", {}).get("content", "")
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    words = content.split(" ")
+    for i, word in enumerate(words):
+        yield _sse({"type": "text", "content": word + (" " if i < len(words) - 1 else "")})
+        await asyncio.sleep(0.004)
+
+    yield _sse({"type": "done", "tokens": {"in": _ti, "out": _to}})
+
+
+# ── Dynamische Rückfragen („/frag"): Eingabemaske mit Text-/Auswahlfeldern ──────
+# Erzeugt zu einer Aufgabe gezielte Rückfragen, BEVOR sie beantwortet wird. Jede
+# Frage hat einen Typ (text | single | multi) und ggf. Optionen, sodass das Frontend
+# eine Eingabemaske – auch mit Multiple-Choice – rendern kann. Genutzt in Chat,
+# Medizin und Mathe (Feld `domain` rahmt nur den Prompt, keine Modell-Sonderlogik).
+
+class ClarifyRequest(BaseModel):
+    prompt: str
+    domain: Optional[str] = "chat"
+    model: Optional[str] = None
+    max_questions: int = 4
+
+
+_CLARIFY_DOMAIN_HINT = {
+    "chat": "allgemeine Anfrage",
+    "medical": "medizinische Anfrage (Symptome, Vorgeschichte, Kontext) – KEINE Diagnose, nur Präzisierung",
+    "math": "mathematische Aufgabe (Gegebenes, Gesuchtes, Randbedingungen, Genauigkeit)",
+}
+
+
+@app.post("/api/clarify")
+async def clarify(request: ClarifyRequest):
+    """Liefert gezielte Rückfragen (Eingabemaske) zu einer Aufgabe – oder eine leere
+    Liste, wenn keine Klärung nötig ist. Robust gegen LLM-Geplapper (JSON-Extraktion)."""
+    prompt = (request.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Keine Aufgabe angegeben")
+    _model = _pick_model(request.model)
+    n = max(1, min(int(request.max_questions or 4), 6))
+    hint = _CLARIFY_DOMAIN_HINT.get((request.domain or "chat").lower(), _CLARIFY_DOMAIN_HINT["chat"])
+
+    user = (
+        f"Fachgebiet: {hint}.\n"
+        f"Aufgabe/Anfrage des Nutzers: \"{prompt}\"\n\n"
+        "Entscheide, ob dir wichtige Informationen fehlen, um eine wirklich gute Antwort zu geben.\n"
+        "- Wenn die Anfrage klar genug ist: gib eine LEERE Frageliste zurück.\n"
+        f"- Sonst stelle bis zu {n} kurze, gezielte Rückfragen. Bevorzuge Auswahlfragen, wo es passt.\n"
+        "Jede Frage ist ein Objekt: {\"question\": \"…\", \"type\": \"text\"|\"single\"|\"multi\", \"options\": [\"…\"]}.\n"
+        "Bei type \"single\"/\"multi\": 2–5 sinnvolle Optionen angeben. Bei \"text\": options leer lassen.\n"
+        "Antworte NUR mit JSON in diesem Format: {\"questions\": [ {\"question\":\"…\",\"type\":\"single\",\"options\":[\"A\",\"B\"]} ]}"
+    )
+    payload = {
+        "model": _model, "think": False, "format": "json", "stream": False,
+        "keep_alive": KEEP_ALIVE,
+        "messages": [
+            {"role": "system", "content": "Du formulierst gezielte Rückfragen zur Präzisierung einer Aufgabe. Antworte ausschließlich mit gültigem JSON."},
+            {"role": "user", "content": user},
+        ],
+    }
+    _ti = _to = 0
+    try:
+        async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, payload)
+            resp.raise_for_status()
+            _j = resp.json()
+        _ti, _to = _llm_tok(_j)
+        data = _parse_llm_json(_j.get("message", {}).get("content", "")) or {}
+    except Exception as e:
+        raise HTTPException(502, f"Rückfragen konnten nicht erzeugt werden: {e}")
+
+    raw_qs = data.get("questions") if isinstance(data, dict) else None
+    questions = []
+    for q in (raw_qs or [])[:n]:
+        if not isinstance(q, dict):
+            continue
+        text = str(q.get("question") or "").strip()
+        if not text:
+            continue
+        qtype = str(q.get("type") or "text").strip().lower()
+        if qtype not in ("text", "single", "multi"):
+            qtype = "text"
+        opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()][:6]
+        # Auswahltyp ohne Optionen → als Freitext behandeln
+        if qtype in ("single", "multi") and len(opts) < 2:
+            qtype, opts = "text", []
+        questions.append({"question": text, "type": qtype, "options": opts})
+
+    return {
+        "type": "questions" if questions else "none",
+        "questions": questions,
+        "tokens": {"in": _ti, "out": _to},
+    }
 
 
 @app.post("/api/deepdive")
@@ -5870,6 +6091,8 @@ async def get_profile():
     # Installer-Flag: ob Python im Code-Tab serverseitig ausgeführt werden darf
     # (read-only, aus config.json). Steuert die Sichtbarkeit der Python-Option.
     p["allow_python_exec"] = ALLOW_PYTHON_EXEC
+    # Versionsnummer (read-only) fürs Profil-Modal / Branding.
+    p["app_version"] = APP_VERSION
     # Kontextfenster-Default ans Frontend spiegeln, falls noch nichts gewählt wurde.
     p.setdefault("chat_num_ctx", CHAT_NUM_CTX)
     return p
@@ -7288,7 +7511,9 @@ async def _generate_plan_core(_model, description, max_tasks, system_prompt="",
     async with _model_session(_model), httpx.AsyncClient(timeout=600 if big_request else 300) as client:
         resp = await _llm.chat(client,payload)
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _j = resp.json()
+        raw = _j.get("message", {}).get("content", "")
+    _plan_ti, _plan_to = _llm_tok(_j)
 
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
@@ -7386,7 +7611,8 @@ async def _generate_plan_core(_model, description, max_tasks, system_prompt="",
         )
 
     return {"name": "", "description": description, "tasks": tasks,
-            "requested": max_tasks, "warning": warning.strip()}
+            "requested": max_tasks, "warning": warning.strip(),
+            "tokens": {"in": _plan_ti, "out": _plan_to}}
 
 
 async def _plan_rag_context(rag_collections, query: str) -> str:

@@ -32,7 +32,12 @@ const Onboarding = (() => {
       text: 'Das Herzstück. Stelle Fragen in natürlicher Sprache – die KI rechnet, sucht im Web, '
            + 'erzeugt Diagramme, Tabellen, Karten und Dateien, alles <strong>lokal</strong>. '
            + 'Hänge Dateien per 📎 an, schalte Websuche und Wissensdatenbanken (📚 RAG) zu und '
-           + 'blende bei Bedarf den <strong>Denkprozess</strong> rechts ein.',
+           + 'blende bei Bedarf den <strong>Denkprozess</strong> rechts ein.<br>'
+           + 'Tippe ein <strong>„/"</strong> in die Eingabe, und es erscheint eine Befehlsliste – '
+           + 'z. B. <strong>/such</strong> (findet alternative Suchbegriffe und durchsucht das Web) und '
+           + '<strong>/frag</strong> (stellt dir per Eingabemaske gezielte Rückfragen, bevor geantwortet wird). '
+           + 'Weiter gibt es u. a. <strong>/dd</strong> (Vertiefung), <strong>/plan</strong> (Strategie→Plan) '
+           + 'und <strong>/+ /-</strong> (Feedback).',
     },
     {
       image: 'agenten.png',

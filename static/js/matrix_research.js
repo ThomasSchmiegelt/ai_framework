@@ -11,6 +11,7 @@ const MatrixResearch = (() => {
   let _cells = [];  // _cells[r][c]
   let _running = false;
   let _favAgents = [];  // nur als Favorit markierte Agenten (auswählbar pro Spalte)
+  let _partnerMode = false;  // Partner-Auswertung aktiv (Spalten-Kaskade + Token-Label)
 
   const STORAGE_KEY = 'ai_framework_thomas_matrix_v1';
 
@@ -21,7 +22,7 @@ const MatrixResearch = (() => {
         row.map(c => c.status === 'running' ? { status: 'empty', text: '' } : c)
       );
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        rows: _rows, cols: _cols, cells: saveCells, savedAt: Date.now(),
+        rows: _rows, cols: _cols, cells: saveCells, partnerMode: _partnerMode, savedAt: Date.now(),
       }));
       _showSaveIndicator();
     } catch (_) {}
@@ -36,6 +37,7 @@ const MatrixResearch = (() => {
         _rows  = state.rows;
         _cols  = state.cols;
         _cells = state.cells;
+        _partnerMode = !!state.partnerMode;
         return true;
       }
     } catch (_) {}
@@ -114,13 +116,22 @@ const MatrixResearch = (() => {
 
     // Spalten-Köpfe
     for (let c = 0; c < _cols.length; c++) {
+      const col = _cols[c];
+      const active = col.active !== false;
       const th = document.createElement('th');
+      const labelHtml = col.label ? `<div class="matrix-col-label">${escHtml(col.label)}</div>` : '';
       th.innerHTML = `
+        ${labelHtml}
         <div class="matrix-header-cell-wrap">
-          <textarea class="matrix-cell-input" rows="2" placeholder="Suchprompt…" data-col="${c}">${escHtml(_cols[c].prompt)}</textarea>
+          <textarea class="matrix-cell-input" rows="2" placeholder="Suchprompt…" data-col="${c}">${escHtml(col.prompt)}</textarea>
           <button class="btn-del-matrix-col" data-col="${c}" title="Spalte löschen">✕</button>
         </div>
-        <select class="matrix-col-agent" data-col="${c}" title="Agent für diese Spalte (nur Favoriten)">${_agentOptionsHtml(_cols[c].agent || '')}</select>`;
+        <select class="matrix-col-agent" data-col="${c}" title="Agent für diese Spalte (nur Favoriten)">${_agentOptionsHtml(col.agent || '')}</select>
+        <div class="matrix-col-ctrls">
+          <label title="Diese Spalte bei „Alle ausführen“ berücksichtigen"><input type="checkbox" class="matrix-col-active" data-col="${c}"${active ? ' checked' : ''}> ausführen</label>
+          <label title="Ergebnisse der vorherigen Spalten dieser Zeile als Kontext mitgeben"><input type="checkbox" class="matrix-col-ctx" data-col="${c}"${col.ctx ? ' checked' : ''}> Kontext</label>
+          <button class="export-btn matrix-run-col" data-col="${c}" title="Nur diese Spalte für alle Zeilen ausführen">▶ Spalte</button>
+        </div>`;
       headerRow.appendChild(th);
     }
 
@@ -178,6 +189,15 @@ const MatrixResearch = (() => {
         _render();
       });
     });
+    headerRow.querySelectorAll('.matrix-col-active').forEach(cb => {
+      cb.addEventListener('change', () => { _cols[+cb.dataset.col].active = cb.checked; _saveState(); });
+    });
+    headerRow.querySelectorAll('.matrix-col-ctx').forEach(cb => {
+      cb.addEventListener('change', () => { _cols[+cb.dataset.col].ctx = cb.checked; _saveState(); });
+    });
+    headerRow.querySelectorAll('.matrix-run-col').forEach(btn => {
+      btn.addEventListener('click', () => _runColumn(+btn.dataset.col));
+    });
 
     // Events für Zeilen-Themen
     tbody.querySelectorAll('textarea[data-row]').forEach(ta => {
@@ -209,7 +229,24 @@ const MatrixResearch = (() => {
     const model = _getModel();
     const agentId = _cols[c]?.agent || '';
     const query = `${topic}: ${prompt}`;
-    const userMsg = `Recherchiere folgendes: "${query}"\n\nGib eine kompakte, strukturierte Antwort, die direkt zum Thema "${topic}" und zur Frage "${prompt}" passt.`;
+    let userMsg = `Recherchiere folgendes: "${query}"\n\nGib eine kompakte, strukturierte Antwort, die direkt zum Thema "${topic}" und zur Frage "${prompt}" passt.`;
+
+    // Spalten-Kaskade: Wenn „Kontext" aktiv ist, die bereits fertigen Ergebnisse der
+    // vorherigen Spalten dieser Zeile mitgeben (z. B. damit die Mail-Spalte die zuvor
+    // gefundenen Kontaktdaten kennt).
+    if (_cols[c]?.ctx) {
+      const prior = [];
+      for (let pc = 0; pc < c; pc++) {
+        const pcell = _cells[r]?.[pc];
+        if (pcell?.status === 'done' && pcell.text?.trim()) {
+          const lbl = _cols[pc].label || _cols[pc].prompt || `Spalte ${pc + 1}`;
+          prior.push(`### ${lbl}\n${pcell.text.trim()}`);
+        }
+      }
+      if (prior.length) {
+        userMsg += `\n\nBereits ermittelte Informationen zu "${topic}" (als verlässliche Grundlage nutzen, nicht widersprechen):\n\n${prior.join('\n\n')}`;
+      }
+    }
 
     // Mit gewähltem Agent: dessen System-Prompt (z. B. Bewertung/Plausibilitätsprüfung)
     // steuert die Antwort. Ohne Agent: einfacher Recherche-Assistent.
@@ -249,7 +286,11 @@ const MatrixResearch = (() => {
           try {
             const ev = JSON.parse(line.slice(6));
             if (ev.type === 'text') { text += ev.content; }
-            if (ev.type === 'done') break;
+            if (ev.type === 'done') {
+              if (ev.tokens && typeof TokenMeter !== 'undefined')
+                TokenMeter.add(ev.tokens, _partnerMode ? 'Partner-Auswertung' : 'Matrix-Recherche');
+              break;
+            }
           } catch (_) {}
         }
       }
@@ -279,6 +320,7 @@ const MatrixResearch = (() => {
     for (let r = 0; r < _rows.length; r++) {
       for (let c = 0; c < _cols.length; c++) {
         if (!_rows[r].topic?.trim() || !_cols[c].prompt?.trim()) continue;
+        if (_cols[c].active === false) continue;   // deaktivierte Spalte überspringen
         await _runCell(r, c);
         count++;
       }
@@ -286,6 +328,24 @@ const MatrixResearch = (() => {
     _running = false;
     document.getElementById('btn-matrix-run-all').disabled = false;
     showToast(`${count} Zellen ausgeführt`);
+  }
+
+  /* ── Nur eine Spalte (für alle Zeilen) ausführen – „stufenweise" ─────── */
+  async function _runColumn(c) {
+    if (_running) { showToast('Läuft bereits…'); return; }
+    const col = _cols[c];
+    if (!col || !col.prompt?.trim()) { showToast('Spalte hat keinen Prompt'); return; }
+    _running = true;
+    document.getElementById('btn-matrix-run-all').disabled = true;
+    let count = 0;
+    for (let r = 0; r < _rows.length; r++) {
+      if (!_rows[r].topic?.trim()) continue;
+      await _runCell(r, c);
+      count++;
+    }
+    _running = false;
+    document.getElementById('btn-matrix-run-all').disabled = false;
+    showToast(`Spalte „${col.label || col.prompt}“ – ${count} Zellen ausgeführt`);
   }
 
   /* ── Als XLSX exportieren ────────────────────────────────────────── */
@@ -481,11 +541,166 @@ const MatrixResearch = (() => {
     reader.readAsText(file, 'utf-8');
   }
 
+  /* ════════════════════════════════════════════════════════════════════
+     Partner-Auswertung: Firmenliste → Recherche-Stufen → Kaltakquise-Mail.
+     Baut auf der Matrix-Engine auf (Zeilen = Firmen, Spalten = Stufen).
+     ════════════════════════════════════════════════════════════════════ */
+
+  // Die nötigen Agenten. Stabile IDs → idempotent (kein Duplikat beim erneuten
+  // Einrichten). „Partner-Rechercheur" und „Akquise-Texter" sind bewusst editierbar
+  // (im Agenten-Tab anpassbar) – wie vom Nutzer gewünscht.
+  const PARTNER_AGENTS = {
+    partner_recherche: {
+      id: 'partner_recherche', name: 'Partner-Rechercheur', icon: '🔎',
+      category: 'Recherche', favorite: true, tools: ['web_search', 'calculate'],
+      model: null, rag_collections: [], example_code: '',
+      description: 'Prüft per Websuche, ob eine Firma als Partner/Kunde interessant ist, erstellt ein Profil und findet Ansprechpartner.',
+      system_prompt: 'Du bist ein B2B-Partner-Rechercheur. Recherchiere mit der Websuche öffentlich verfügbare Informationen zur genannten Firma. '
+        + 'Beurteile zuerst knapp, ob die Firma als Geschäftspartner/Kunde interessant ist (Ja/Nein + ein Satz Begründung). '
+        + 'Falls interessant: erstelle ein kurzes Profil (Geschäftsfeld, ungefähre Größe, Standort, Website, Relevanz) und nenne mögliche '
+        + 'Ansprechpartner (Name, Rolle/Abteilung), soweit öffentlich auffindbar. Antworte strukturiert auf Deutsch, nur belegbare Fakten, '
+        + 'keine Erfindungen. Markiere Unsicheres ausdrücklich als „unbestätigt".',
+    },
+    partner_kontakt: {
+      id: 'partner_kontakt', name: 'Kontaktdaten-Rechercheur', icon: '📇',
+      category: 'Recherche', favorite: true, tools: ['web_search', 'calculate'],
+      model: null, rag_collections: [], example_code: '',
+      description: 'Ermittelt geschäftliche Kontaktdaten (Name, Position, Telefon, E-Mail) der Ansprechpartner aus öffentlichen Quellen.',
+      system_prompt: 'Du bist ein Rechercheur für geschäftliche Kontaktdaten. Ermittle über die Websuche die geschäftlichen Kontaktdaten der '
+        + 'wichtigsten Ansprechpartner der Firma: Name, Position, geschäftliche Telefonnummer und E-Mail-Adresse. Nutze ausschließlich öffentlich '
+        + 'verfügbare, berufliche Quellen (Impressum, Firmen-Website, offizielle Unternehmensprofile). Gib pro Person eine kurze Karteizeile aus. '
+        + 'Wenn etwas nicht sicher belegbar ist, schreibe „nicht öffentlich auffindbar" statt zu raten. Antworte auf Deutsch.',
+    },
+    partner_social: {
+      id: 'partner_social', name: 'Social-Media-Rechercheur', icon: '🌐',
+      category: 'Recherche', favorite: true, tools: ['web_search', 'calculate'],
+      model: null, rag_collections: [], example_code: '',
+      description: 'Findet öffentliche Unternehmens-/Personenprofile auf einer sozialen Plattform (LinkedIn, X, Instagram, Facebook, GitHub).',
+      system_prompt: 'Du bist ein Rechercheur für öffentliche berufliche bzw. Unternehmens-Profile in sozialen Netzwerken. Finde mit der Websuche '
+        + '(z. B. per site:-Suche auf der jeweiligen Plattform) das passende öffentliche Profil zur Firma bzw. zu den genannten Ansprechpartnern '
+        + 'auf der in der Aufgabe genannten Plattform. Gib die Profil-URL und die wichtigsten öffentlich sichtbaren Infos (Rolle, Schwerpunkte, '
+        + 'letzte relevante Aktivität) an. Nur öffentlich zugängliche Informationen, keine Vermutungen. Wenn kein Profil auffindbar ist, sage das klar. '
+        + 'Antworte auf Deutsch.',
+    },
+    partner_mail: {
+      id: 'partner_mail', name: 'Akquise-Texter', icon: '✉️',
+      category: 'Recherche', favorite: true, tools: ['web_search', 'calculate'],
+      model: null, rag_collections: [], example_code: '',
+      description: 'Formuliert auf Basis der Recherche eine personalisierte, seriöse Kaltakquise-E-Mail. Vom Nutzer anpassbar.',
+      system_prompt: 'Du bist ein erfahrener Vertriebstexter für seriöse B2B-Kaltakquise. Formuliere auf Basis der zuvor recherchierten Firmen- und '
+        + 'Personeninfos eine personalisierte Erstkontakt-E-Mail (Cold Outreach). Struktur: Betreffzeile, persönliche Anrede mit Namen (falls bekannt), '
+        + 'kurzer Aufhänger mit konkretem Bezug zur Firma, 2–3 prägnante Absätze zum Mehrwert, ein klarer aber unaufdringlicher Call-to-Action, Grußformel. '
+        + 'Höflich, kein Spam, DSGVO-bewusst. Nutze die gefundenen Kontaktdaten in Anrede und Signatur. Antworte auf Deutsch. '
+        + 'HINWEIS: Diesen Agenten im Agenten-Tab an die eigene Firma/Tonalität anpassen.',
+    },
+  };
+
+  // Vordefinierte Spalten der Partner-Auswertung. Spätere Stufen sind anfangs
+  // deaktiviert (active:false) und nutzen den Kontext der vorherigen Spalten,
+  // damit man sich Stufe für Stufe „durchhangeln" kann.
+  function _PARTNER_COLUMNS() {
+    const social = (plat, host) => ({
+      label: plat, agent: 'partner_social', active: false, ctx: true,
+      prompt: `Finde das öffentliche ${plat}-Profil (site:${host}) der Firma bzw. der Ansprechpartner und gib URL + wichtigste öffentliche Infos an.`,
+    });
+    return [
+      {
+        label: 'Interesse & Profil', agent: 'partner_recherche', active: true, ctx: false,
+        prompt: 'Ist diese Firma ein interessanter Partner/Kunde? Kurzes Urteil (Ja/Nein + Begründung), dann – falls interessant – Detailprofil (Geschäftsfeld, Größe, Standort, Website) und mögliche Ansprechpartner.',
+      },
+      {
+        label: 'Kontaktdaten', agent: 'partner_kontakt', active: false, ctx: true,
+        prompt: 'Ermittle die geschäftlichen Kontaktdaten der wichtigsten Ansprechpartner: Name, Position, Telefon, E-Mail (nur öffentlich belegbar).',
+      },
+      social('LinkedIn', 'linkedin.com'),
+      social('X', 'x.com OR twitter.com'),
+      social('Instagram', 'instagram.com'),
+      social('Facebook', 'facebook.com'),
+      social('GitHub', 'github.com'),
+      {
+        label: 'Kaltakquise-Mail', agent: 'partner_mail', active: false, ctx: true,
+        prompt: 'Formuliere eine personalisierte Kaltakquise-E-Mail an den Ansprechpartner mit den gefundenen Kontaktdaten und Infos (Betreff, Anrede, 2–3 Absätze, Call-to-Action, Grußformel).',
+      },
+    ];
+  }
+
+  // Fehlende Partner-Agenten anlegen (vorhandene NICHT überschreiben, damit
+  // Nutzer-Anpassungen erhalten bleiben). Gibt die Zahl neu angelegter Agenten zurück.
+  async function _ensurePartnerAgents() {
+    let existing = [];
+    try { existing = await (await fetch('/api/agents')).json(); } catch (_) {}
+    const have = new Set((existing || []).map(a => a.id));
+    let created = 0;
+    for (const def of Object.values(PARTNER_AGENTS)) {
+      if (have.has(def.id)) continue;
+      try {
+        const r = await fetch('/api/agents', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(def),
+        });
+        if (r.ok) created++;
+      } catch (_) {}
+    }
+    await _loadAgents();
+    return created;
+  }
+
+  // Schlankes Textfenster (z. B. für lange Firmenlisten) – ohne zusätzliches HTML.
+  function _showTextModal(title, placeholder, onOk) {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:16px;width:min(620px,92vw);box-shadow:0 12px 44px rgba(0,0,0,.55)';
+    box.innerHTML = `<h3 style="margin:0 0 8px;font-size:15px">${escHtml(title)}</h3>
+      <textarea class="_pl_ta" style="width:100%;height:260px;resize:vertical;font-size:13px;box-sizing:border-box" placeholder="${escHtml(placeholder)}"></textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+        <button class="export-btn _pl_cancel">Abbrechen</button>
+        <button class="export-btn _pl_ok">Übernehmen</button></div>`;
+    ov.appendChild(box); document.body.appendChild(ov);
+    const close = () => ov.remove();
+    box.querySelector('._pl_cancel').addEventListener('click', close);
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    box.querySelector('._pl_ok').addEventListener('click', () => { const v = box.querySelector('._pl_ta').value; close(); onOk(v); });
+    box.querySelector('._pl_ta').focus();
+  }
+
+  // Firmenliste einlesen: jede nicht-leere Zeile wird zu einer Tabellenzeile (Firma).
+  function _importCompanyList() {
+    _showTextModal(
+      'Firmenliste einlesen — eine Firma pro Zeile (beliebig lang)',
+      'Muster GmbH, Musterstraße 1, 12345 Musterstadt\nBeispiel AG\n…',
+      (text) => {
+        const lines = (text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (!lines.length) { showToast('Keine Firmen erkannt'); return; }
+        if (_rows.some(r => r.topic?.trim()) &&
+            !confirm(`${lines.length} Firmen einlesen und bestehende Zeilen ersetzen?`)) return;
+        _rows = lines.map(l => ({ topic: l }));
+        _initCells();
+        _saveState(); _render();
+        showToast(`✓ ${lines.length} Firmen eingelesen`);
+      });
+  }
+
+  // Partner-Vorlage einrichten: Agenten sicherstellen + vordefinierte Spalten setzen.
+  async function _applyPartnerTemplate() {
+    if (!confirm('Partner-Auswertung einrichten?\n\nDie aktuellen Spalten werden durch die Partner-Stufen ersetzt '
+      + '(Firmen-Zeilen bleiben erhalten). Fehlende Agenten werden angelegt; vorhandene Anpassungen bleiben erhalten.')) return;
+    showToast('⏳ Partner-Agenten werden vorbereitet…');
+    const created = await _ensurePartnerAgents();
+    _cols = _PARTNER_COLUMNS();
+    _initCells();
+    _partnerMode = true;
+    _saveState(); _render();
+    showToast(`✓ Partner-Auswertung eingerichtet${created ? ` · ${created} Agent(en) angelegt` : ''}. `
+      + 'Firmenliste einlesen, dann Spalte für Spalte ausführen (▶ Spalte).');
+  }
+
   /* ── Reset ───────────────────────────────────────────────────────── */
   function _clear() {
     if (!confirm('Tabelle leeren?')) return;
     _rows  = [{ topic: '' }, { topic: '' }, { topic: '' }];
     _cols  = [{ prompt: '', agent: '' }, { prompt: '', agent: '' }];
+    _partnerMode = false;
     _initCells();
     _saveState();
     _render();
@@ -512,6 +727,8 @@ const MatrixResearch = (() => {
     });
 
     document.getElementById('btn-matrix-run-all')?.addEventListener('click', _runAll);
+    document.getElementById('btn-matrix-partner')?.addEventListener('click', _applyPartnerTemplate);
+    document.getElementById('btn-matrix-companies')?.addEventListener('click', _importCompanyList);
     document.getElementById('btn-matrix-export')?.addEventListener('click', _exportXlsx);
     document.getElementById('btn-matrix-export-csv')?.addEventListener('click', _exportCsv);
     document.getElementById('btn-matrix-rag')?.addEventListener('click', _exportRag);

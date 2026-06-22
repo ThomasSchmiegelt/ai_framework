@@ -1692,6 +1692,7 @@ const Planner = (() => {
       }
       const d = await r.json();
       if (!(d.tasks || []).length) throw new Error('Kein gültiger Plan erhalten');
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Plan');
       _tasks = d.tasks;
       _recalcAndRender();
       showToast(`✓ Projekt generiert: ${_tasks.length} Aufgaben`);
@@ -1739,6 +1740,7 @@ const Planner = (() => {
       }
       const d = await r.json();
       if (!(d.tasks || []).length) throw new Error('Kein gültiger Plan erhalten');
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Plan (Dokument)');
       _planId = null;
       _tasks = d.tasks;
       if (d.name) {

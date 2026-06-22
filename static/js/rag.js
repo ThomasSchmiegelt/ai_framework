@@ -648,11 +648,24 @@ const RAG = (() => {
     // Chat-Umschalter: Custom-Dropdown anzeigen
     const toggle = document.getElementById('btn-rag-toggle');
     const chatPanel = document.getElementById('rag-chat-panel');
+    // Panel oberhalb des Buttons als fixiertes Popover platzieren, damit es nicht
+    // von der (oft schmalen/abgeschnittenen) Composer-Leiste verdeckt wird.
+    function _positionChatPanel() {
+      const r = toggle.getBoundingClientRect();
+      chatPanel.style.left = Math.max(8, r.left) + 'px';
+      chatPanel.style.right = 'auto';
+      chatPanel.style.top = 'auto';
+      // nach oben aufklappen
+      chatPanel.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+    }
     toggle.addEventListener('click', () => {
       const nowActive = !toggle.classList.contains('active');
       toggle.classList.toggle('active', nowActive);
       chatPanel.style.display = nowActive ? '' : 'none';
-      if (nowActive) _fillChatSelect();
+      if (nowActive) { _fillChatSelect(); _positionChatPanel(); }
+    });
+    window.addEventListener('resize', () => {
+      if (chatPanel.style.display !== 'none') _positionChatPanel();
     });
     // Panel schließen bei Klick außerhalb
     document.addEventListener('click', e => {

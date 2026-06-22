@@ -529,7 +529,7 @@ if (!_drawFn) { _resize(); }
       });
       const d = await resp.json();
       if (!resp.ok) throw new Error(d.detail || ('HTTP ' + resp.status));
-      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens);
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Code-Assistent');
       if (d.type === 'questions') {
         _renderClarify(wrap, d.questions, d.adaptive_role);
       } else {

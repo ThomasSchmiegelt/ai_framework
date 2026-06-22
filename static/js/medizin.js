@@ -234,8 +234,32 @@ const MedizinChat = (() => {
   // ── Nachricht senden ──────────────────────────────────────────────────────
 
   // Router: Experten-Pipeline (2 Modelle) oder einfacher Direkt-Chat
+  // Rückfragen-Maske (/frag): Antworten an die Aufgabe hängen, dann normal beraten.
+  async function _runFrag(task) {
+    task = (task || '').trim();
+    if (!task) { showToast('Bitte nach „/frag" eine Aufgabe eingeben'); return; }
+    if (_streaming) return;
+    if (typeof Clarify === 'undefined') { showToast('Rückfrage-Modul nicht geladen'); return; }
+    _appendMsg('user', '❓ /frag ' + task);
+    const mount = _appendMsg('assistant', '');
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('medical') : '') || undefined;
+    const res = await Clarify.ask({ task, domain: 'medical', model, mount });
+    if (!res) return;
+    if (res.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(res.tokens, 'Rückfragen');
+    const input = document.getElementById('medizin-input');
+    if (input) { input.value = res.augmentedTask; if (typeof autoResizeTextarea === 'function') autoResizeTextarea(input); }
+    _sendMessage();
+  }
+
   async function _sendMessage() {
     if (_streaming) return;
+    const _inp = document.getElementById('medizin-input');
+    const _t = (_inp?.value || '').trim();
+    if (/^\/frag\b/i.test(_t)) {
+      const task = _t.replace(/^\/frag\b\s*/i, '').trim();
+      if (_inp) { _inp.value = ''; if (typeof autoResizeTextarea === 'function') autoResizeTextarea(_inp); }
+      return _runFrag(task);
+    }
     if (_expertMode) return _sendPipeline();
     return _sendSimple();
   }

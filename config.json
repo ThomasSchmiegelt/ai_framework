@@ -1,5 +1,6 @@
 {
   "_comment": "Modell-Tags bitte auf https://ollama.com/library verifizieren",
+  "version": "1.4.0",
   "allowed_models": [],
   "default_model": "ministral-3:3b",
   "chat_num_ctx": 8192,

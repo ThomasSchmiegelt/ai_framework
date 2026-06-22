@@ -288,12 +288,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Nachricht senden
   const input = document.getElementById('message-input');
   input.addEventListener('keydown', e => {
+    // Befehls-Vorschau („/"): ↑/↓ wählen, Tab übernehmen, Esc schließen
+    if (Chat.onSlashHintKeydown && Chat.onSlashHintKeydown(e)) { e.preventDefault(); return; }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       Chat.sendMessage();
     }
   });
-  input.addEventListener('input', () => autoResizeTextarea(input));
+  input.addEventListener('input', () => {
+    autoResizeTextarea(input);
+    if (Chat.updateSlashHints) Chat.updateSlashHints(input.value);
+  });
+  if (Chat.initSlashHints) Chat.initSlashHints();
 
   document.getElementById('btn-send').addEventListener('click', () => Chat.sendOrAbort());
 
