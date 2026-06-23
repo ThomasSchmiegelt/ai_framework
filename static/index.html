@@ -1858,6 +1858,10 @@ Beispiele:
       Standardmäßig läuft nur <strong>ministral-3:3b</strong>. Hier kannst du je Einsatzzweck ein
       anderes installiertes Modell zuweisen – es wird bei Bedarf nachgeladen (jeweils nur eines aktiv).
     </p>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0 0 10px;cursor:pointer">
+      <input type="checkbox" id="profile-free-only" style="width:auto" />
+      Nur kostenlose Modelle anzeigen <span class="planner-muted">(lokal &amp; OpenRouter <code>:free</code>)</span>
+    </label>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
       <div class="form-group">
         <label>Allgemein <span class="planner-muted" style="font-size:11px">Chat</span></label>
@@ -1876,6 +1880,14 @@ Beispiele:
         <select id="profile-model-medical" class="sidebar-select"></select>
       </div>
     </div>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-math-autoroute" style="width:auto;margin-top:2px" />
+      <span>Matheaufgaben automatisch ans Mathe-Modell weiterreichen
+        <span class="planner-muted">— greift nur, solange im Chat das schwache Standardmodell
+        (ministral-3:3b) aktiv ist; bei stärkerem Allgemein-Modell aus. Ziel ist die Rolle
+        „Programmieren / Mathe" oben.</span>
+      </span>
+    </label>
 
     <div id="provider-section">
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />

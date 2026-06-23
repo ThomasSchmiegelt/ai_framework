@@ -354,6 +354,50 @@ def _model_for(role: str) -> str:
     return val or DEFAULT_MODEL
 
 
+# ── Automatische Mathe-Weiche ────────────────────────────────────────────────
+# Wunsch: Solange im Chat nur das schwache Standardmodell (ministral-3:3b) aktiv
+# ist, sollen erkannte Matheaufgaben automatisch an das (stärkere) Mathe-Modell
+# der Rolle „Programmieren / Mathe" durchgereicht werden. Wählt der Nutzer ein
+# stärkeres Allgemein-Modell, entfällt die Umleitung (model != DEFAULT_MODEL).
+# Steuerbar über das Profil-Häkchen `math_autoroute` (Standard: an).
+
+# Schlüsselwörter, die typisch für eine konkrete Rechen-/Matheaufgabe sind.
+_MATH_KEYWORDS = re.compile(
+    r"\b(rechne|berechne|errechne|l[öo]se(?:n)?|gleichung(?:ssystem)?|ungleichung|"
+    r"integr(?:al|ier)|ableitung|ableiten|differenzier|grenzwert|limes|"
+    r"determinante|matrize?n?|vektor(?:en)?|wurzel|logarithm|exponent(?:ial)?|"
+    r"nullstelle|extrem(?:um|a|wert)|kurvendiskussion|polynom|faktorisier|"
+    r"umstellen|aufl[öo]sen|bruchrechnung|primzahl|fakult[äa]t|"
+    r"wahrscheinlichkeit|kombinatorik|binomial|sinus|cosinus|tangens|"
+    r"vereinfache|quadratische|terme?n?)\b",
+    re.IGNORECASE)
+
+# Starke Symbol-/Operator-Signale (Formel statt nur erwähnter Zahl).
+_MATH_SYMBOLS = re.compile(
+    r"[=≤≥≠±√∫∑∏∂πθ]"                  # Gleichheits-/Mathe-Sonderzeichen
+    r"|\b\d+(?:[.,]\d+)?\s*[\+\-*/^]\s*\d"  # 2+3, 4 * 5, 6^2 …
+    r"|\bx\s*\^?\s*\d"                       # x^2, x 2
+    r"|\bsqrt\b|\bd/dx\b|\b\d+\s*!"           # sqrt, d/dx, 5!
+)
+
+
+def _looks_like_math(text: str) -> bool:
+    """Heuristik: Wirkt die Nachricht wie eine zu rechnende Matheaufgabe?
+
+    Bewusst eher konservativ (Modellwechsel kostet bei ~6 GB VRAM ein Umladen):
+    ein klares Symbol-/Operator-Signal ODER ein Mathe-Schlüsselwort genügt.
+    Falschtreffer sind unkritisch — sie landen nur auf einem anderen, ebenfalls
+    fähigen Modell."""
+    t = text or ""
+    if not t.strip():
+        return False
+    return bool(_MATH_SYMBOLS.search(t) or _MATH_KEYWORDS.search(t))
+
+
+def _math_autoroute_enabled() -> bool:
+    return bool(_load_profile().get("math_autoroute", True))
+
+
 def _profile_num_ctx() -> int:
     """Im Profil gewähltes Kontextfenster (Tokens), validiert gegen die erlaubten
     Stufen. Wird auf ALLE lokalen Modellaufrufe eines Ablaufs angewandt, damit das
@@ -2154,6 +2198,15 @@ async def _chat_generator(request: ChatRequest):
             model = _model_for("science")
         else:
             model = _req
+        # Mathe-Weiche: Läuft nur das schwache Standardmodell und sieht die Nachricht
+        # nach einer Matheaufgabe aus, an das (stärkere) Mathe-Modell (Rolle
+        # „Programmieren / Mathe") weiterreichen. Greift nur, wenn dort tatsächlich ein
+        # anderes Modell hinterlegt ist – sonst bliebe es ein wirkungsloser Umweg.
+        if (model == DEFAULT_MODEL and _math_autoroute_enabled()
+                and _looks_like_math(_last_user)):
+            _math_model = _model_for("coding")
+            if _math_model and _math_model != DEFAULT_MODEL:
+                model = _math_model
 
     # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
     messages: list = []
@@ -6126,6 +6179,9 @@ async def save_profile(req: Request):
         val = str(body.get(_key, "") or "").strip()
         if val and val not in _MODEL_PLACEHOLDERS:
             profile[_key] = val
+    # Mathe-Weiche: erkannte Matheaufgaben ans Mathe-Modell durchreichen, solange nur
+    # das schwache Standardmodell aktiv ist (Standard: an).
+    profile["math_autoroute"] = bool(body.get("math_autoroute", True))
     # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
     profile["auto_compress"] = bool(body.get("auto_compress", False))
     try:

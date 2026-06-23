@@ -17,6 +17,14 @@ const Profile = (() => {
   // Modell-Auswahllisten im Profil aus allen installierten Ollama-Modellen UND den
   // konfigurierten externen API-Anbietern befüllen. Remote-Modelle tragen das Präfix
   // "<provider_id>::<model>" und werden mit ihrem Anbieter beschriftet.
+  // Filter „Nur kostenlose Modelle" (per localStorage gemerkt). „Frei" = lokale
+  // Ollama-Modelle (laufen lokal, kein Verbrauch) ODER Remote-Modelle mit :free-Suffix
+  // (z. B. OpenRouter ``…:free``).
+  function _freeOnly() {
+    try { return localStorage.getItem('profile_free_only') === '1'; } catch (_) { return false; }
+  }
+  function _isFreeModel(m) { return !m.remote || /:free$/i.test(m.name || ''); }
+
   async function _fillModelSelects() {
     let models = [];
     try {
@@ -24,22 +32,26 @@ const Profile = (() => {
       const data = await resp.json();
       models = (data.models || []);
     } catch (_) {}
+    const shown = _freeOnly() ? models.filter(_isFreeModel) : models;
     const names = models.map(m => m.name);
+    const shownNames = shown.map(m => m.name);
     const _label = m => m.remote ? `☁ ${m.name.split('::').slice(1).join('::')} (${m.provider || 'API'})` : m.name;
     for (const role of Object.keys(MODEL_ROLES)) {
       const sel = document.getElementById('profile-model-' + role);
       if (!sel) continue;
       const current = _data[MODEL_ROLES[role]] || '';
       sel.innerHTML = '<option value="">— Standard (ministral-3:3b) —</option>';
-      for (const m of models) {
+      for (const m of shown) {
         const opt = document.createElement('option');
         opt.value = m.name; opt.textContent = _label(m);
         sel.appendChild(opt);
       }
-      // Zugewiesenes Modell auswählen (auch wenn es derzeit nicht installiert ist)
-      if (current && !names.includes(current)) {
+      // Zugewiesenes Modell immer wählbar halten – auch wenn es weggefiltert (kostenpflichtig)
+      // oder derzeit nicht installiert ist, sonst ginge die Zuweisung beim Speichern verloren.
+      if (current && !shownNames.includes(current)) {
         const opt = document.createElement('option');
-        opt.value = current; opt.textContent = current + ' (nicht verfügbar)';
+        opt.value = current;
+        opt.textContent = current + (names.includes(current) ? ' (ausgeblendet)' : ' (nicht verfügbar)');
         sel.appendChild(opt);
       }
       sel.value = current;
@@ -138,6 +150,8 @@ const Profile = (() => {
     if (curEl) curEl.value = _data.currency || '€';
     const replayEl = document.getElementById('profile-replay-intro');
     if (replayEl) replayEl.checked = !!_data.replay_intro;
+    const mathRouteEl = document.getElementById('profile-math-autoroute');
+    if (mathRouteEl) mathRouteEl.checked = _data.math_autoroute !== false;  // Standard: an
     _fillModelSelects();
     _loadProviders();
     _refreshPreviews();
@@ -220,6 +234,7 @@ const Profile = (() => {
       price_per_1k_in:         parseFloat(document.getElementById('profile-price-in')?.value) || 0,
       price_per_1k_out:        parseFloat(document.getElementById('profile-price-out')?.value) || 0,
       currency:                (document.getElementById('profile-currency')?.value || '€').trim() || '€',
+      math_autoroute: document.getElementById('profile-math-autoroute')?.checked !== false,
       model_general:  document.getElementById('profile-model-general')?.value || '',
       model_coding:   document.getElementById('profile-model-coding')?.value || '',
       model_science:  document.getElementById('profile-model-science')?.value || '',
@@ -315,6 +330,16 @@ const Profile = (() => {
     document.getElementById('btn-profile-close').addEventListener('click', closeModal);
     document.getElementById('btn-profile-save').addEventListener('click', save);
     document.getElementById('btn-provider-add')?.addEventListener('click', _addProvider);
+    // Filter „Nur kostenlose Modelle": Zustand aus localStorage übernehmen, bei Änderung
+    // merken und die Rollen-Listen neu befüllen.
+    const freeChk = document.getElementById('profile-free-only');
+    if (freeChk) {
+      freeChk.checked = _freeOnly();
+      freeChk.addEventListener('change', () => {
+        try { localStorage.setItem('profile_free_only', freeChk.checked ? '1' : '0'); } catch (_) {}
+        _fillModelSelects();
+      });
+    }
     document.getElementById('profile-modal-overlay').addEventListener('click', e => {
       if (e.target === document.getElementById('profile-modal-overlay')) closeModal();
     });

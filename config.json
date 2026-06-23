@@ -8,5 +8,8 @@
   "ollama_base": "http://localhost:11434",
   "port": 8780,
   "host": "127.0.0.1",
-  "data_dir": "data"
+  "data_dir": "data",
+  "hidden_tabs_default": [],
+  "enable_api": true,
+  "allow_python_exec": true
 }
