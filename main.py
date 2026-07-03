@@ -82,6 +82,7 @@ CODE_DIR = DATA_DIR / "code"
 JURIES_DIR = DATA_DIR / "juries"   # gespeicherte Bewertungs-Jurys (Gruppen von Agenten)
 JURY_DOCS_DIR = DATA_DIR / "jury_docs"   # im Jury-Tab erstellte/geprüfte Dokumente
 RFQ_DIR = DATA_DIR / "rfq"   # Anfrage-Auswertung: Job-Zwischenstände (resume-fähig)
+PST_DIR = DATA_DIR / "pst"   # Postfach-Auswertung: geparste Mailstores (+ Anhänge, lokal)
 CAPACITY_FILE = DATA_DIR / "capacity.json"   # globale Kapazitätsliste (tab-übergreifend)
 BILDER_DIR = Path(__file__).parent / "bilder"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
@@ -94,7 +95,7 @@ FEEDBACK_FILE = DATA_DIR / "feedback.md"
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PROFILE_ASSETS_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, PROFILE_ASSETS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -354,6 +355,42 @@ def _model_for(role: str) -> str:
     return val or DEFAULT_MODEL
 
 
+async def _installed_local_models() -> list[str]:
+    """Namen der aktuell in Ollama installierten (lokalen) Modelle. Leere Liste,
+    wenn Ollama nicht erreichbar ist."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{OLLAMA_BASE}/api/tags")
+            return [m["name"] for m in resp.json().get("models", [])]
+    except Exception:
+        return []
+
+
+async def _local_llm_available() -> bool:
+    """Ist mindestens ein lokales LLM installiert und Ollama erreichbar?"""
+    return bool(await _installed_local_models())
+
+
+async def _local_model(preferred: Optional[str] = None) -> Optional[str]:
+    """Erzwingt ein LOKALES (nicht-remote) Modell für Funktionen, die ausschließlich
+    lokal laufen sollen (Verzeichnis-Analyse, PST-Auswertung, „Recherche lokal").
+    Reihenfolge: ``preferred`` (falls lokal & installiert) → general-Rolle (falls lokal)
+    → DEFAULT_MODEL → erstes installiertes Modell. ``None``, wenn kein lokales LLM da ist."""
+    installed = await _installed_local_models()
+    if not installed:
+        return None
+    def _ok(m: Optional[str]) -> bool:
+        return bool(m) and not _llm.is_remote(m) and m in installed
+    if _ok(preferred):
+        return preferred
+    gen = _model_for("general")
+    if _ok(gen):
+        return gen
+    if DEFAULT_MODEL in installed:
+        return DEFAULT_MODEL
+    return installed[0]
+
+
 # ── Automatische Mathe-Weiche ────────────────────────────────────────────────
 # Wunsch: Solange im Chat nur das schwache Standardmodell (ministral-3:3b) aktiv
 # ist, sollen erkannte Matheaufgaben automatisch an das (stärkere) Mathe-Modell
@@ -396,6 +433,13 @@ def _looks_like_math(text: str) -> bool:
 
 def _math_autoroute_enabled() -> bool:
     return bool(_load_profile().get("math_autoroute", True))
+
+
+def _research_local_only() -> bool:
+    """Profil-Schalter: Recherche (Matrix-Recherche + Recherche-Tab) zwingend lokal,
+    auch wenn die zugewiesene Rolle ein externes API-Modell ist (Datenschutz /
+    API-Beschränkungen)."""
+    return bool(_load_profile().get("research_local_only", False))
 
 
 def _profile_num_ctx() -> int:
@@ -769,8 +813,11 @@ TOOL_DEFS = [
         "function": {
             "name": "plot_chart",
             "description": (
-                "Erstellt ein 2D-Diagramm (Linien-, Balken- oder Streudiagramm) und zeigt es direkt an. "
-                "Ideal für Kraft-Weg-Kurven, Spannungs-Dehnungs-Diagramme, Kennlinien etc."
+                "Erstellt ein 2D-Diagramm aus DISKRETEN Wertepaaren (Mess-/Datenpunkte) — Linien-, "
+                "Balken- oder Streudiagramm — und zeigt es direkt an. Ideal für tabellarische Messdaten, "
+                "Kennlinien aus Datenpunkten etc. NICHT für mathematische Funktionen verwenden "
+                "(f(x)=…, sin(x), x^2, sqrt(x)) — dafür ist plot_function da; sonst entsteht aus wenigen "
+                "Stützpunkten ein grober Zickzack-Linienzug statt einer glatten Kurve."
             ),
             "parameters": {
                 "type": "object",
@@ -1247,6 +1294,13 @@ async def _research_generator(request: ResearchRequest):
     # Recherche ist immer wissenschaftlich → Wissenschafts-Modell (sofern nicht
     # explizit ein gültiges Modell angefordert wurde).
     _r_model = _pick_model(request.model, _model_for("science"))
+    # Profil-Schalter „Recherche lokal": externes Modell auf ein lokales umbiegen.
+    if _research_local_only() and _llm.is_remote(_r_model):
+        _loc = await _local_model(_r_model)
+        if not _loc:
+            yield _sse({"type": "error", "message": "Kein lokales LLM verfügbar – „Recherche lokal“ ist im Profil aktiv."})
+            return
+        _r_model = _loc
 
     yield _sse({"type": "research_start", "topic": request.topic, "aspects": aspects})
     tasks = [search_with_sources(f"{request.topic} {aspect}", 5) for aspect in aspects]
@@ -1973,6 +2027,138 @@ async def matrix_export_md_zip(req: Request):
     )
 
 
+_MATRIX_GRAPH_SYSTEM = (
+    "Du bist ein Analyst für Wissensgraphen. Du bekommst eine Liste von Knoten — jeder "
+    "Knoten ist ein Thema bzw. eine Firma aus einer Recherche-Tabelle samt der dazu "
+    "recherchierten Informationen. Finde inhaltlich belegbare, gerichtete Beziehungen "
+    "ZWISCHEN diesen Knoten (z. B. „liefert an\", „Tochter von\", „Wettbewerber von\", "
+    "„kooperiert mit\", „Kunde von\"). Nutze AUSSCHLIESSLICH die vorgegebenen Knoten-IDs "
+    "in eckigen Klammern. Erfinde nichts, was nicht aus den Texten hervorgeht; im Zweifel "
+    "lieber keine Kante. Halte die Beziehungsbezeichnung kurz (1–3 Wörter). "
+    'Antworte NUR mit JSON: {"edges":[{"source":"<id>","target":"<id>","label":"Beziehung"}]}.'
+)
+
+
+@app.post("/api/matrix/graph")
+async def matrix_graph(req: Request):
+    """KI-Vorschlag für die Verknüpfungen eines Wissensgraphen über die Matrix-Zeilen.
+    Knoten = Zeilen (Thema + recherchierte Zellinhalte). Liefert gerichtete Kanten
+    zwischen den übergebenen Knoten-IDs; der Nutzer korrigiert sie danach im
+    Graph-Editor (Hybrid: KI schlägt vor, Mensch entscheidet)."""
+    body = await req.json()
+    nodes = body.get("nodes") or []
+    if not isinstance(nodes, list) or len(nodes) < 2:
+        return {"edges": [], "tokens": {"in": 0, "out": 0}}
+    model = _pick_model(body.get("model"), DEFAULT_MODEL)
+    hint = str(body.get("hint", "")).strip()
+
+    valid_ids = {str(n.get("id")) for n in nodes if n.get("id")}
+    # Zeichenbudget je Knoten am Kontextfenster ausrichten (viele Knoten → knapper).
+    per_node = max(400, int(_profile_num_ctx() * 3.5 * 0.6 / max(1, len(nodes))))
+    lines = []
+    for n in nodes:
+        nid = str(n.get("id", "")).strip()
+        if not nid:
+            continue
+        label = str(n.get("label", "")).strip()
+        text = " ".join(str(n.get("text", "")).split())[:per_node]
+        lines.append(f"[{nid}] {label}" + (f"\n{text}" if text else ""))
+    usr = "Knoten:\n\n" + "\n\n".join(lines)
+    if hint:
+        usr += f"\n\nFokus/Hinweis für die Beziehungssuche: {hint}"
+
+    edges, tin, tout = [], 0, 0
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False, "format": "json",
+                "messages": [{"role": "system", "content": _MATRIX_GRAPH_SYSTEM},
+                             {"role": "user", "content": usr}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        j = resp.json()
+        tin, tout = _llm_tok(j)
+        data = _parse_llm_json(j.get("message", {}).get("content", "")) or {}
+        seen = set()
+        for e in (data.get("edges") or []):
+            s = str((e or {}).get("source", "")).strip()
+            t = str((e or {}).get("target", "")).strip()
+            lbl = str((e or {}).get("label", "")).strip()[:60]
+            if s in valid_ids and t in valid_ids and s != t and (s, t) not in seen:
+                seen.add((s, t))
+                edges.append({"source": s, "target": t, "label": lbl})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Graph-Analyse fehlgeschlagen: {e}")
+    return {"edges": edges, "tokens": {"in": tin, "out": tout}}
+
+
+_MATRIX_EXTRACT_SYSTEM = (
+    "Du extrahierst aus den Recherche-Informationen zu EINEM Eintrag (Thema/Firma) "
+    "typisierte Merkmale, die ihn charakterisieren. Du bekommst eine Liste von "
+    "Kategorien. Ordne dem Eintrag pro Kategorie null, ein oder mehrere KONKRETE "
+    "Werte zu, die im Text tatsächlich vorkommen (kurze Substantive/Eigennamen, "
+    "max. 4 Wörter). Mehrere Werte derselben Kategorie als EINZELNE Einträge. "
+    "Schreibe Werte einheitlich (z. B. Orte ohne Zusätze: „Berlin\", nicht "
+    "„Sitz in Berlin\"). Erfinde nichts; gibt der Text zu einer Kategorie nichts "
+    "her, lass sie weg. Nutze AUSSCHLIESSLICH die vorgegebenen Kategorienamen. "
+    'Antworte NUR mit JSON: {"attributes":[{"category":"<Kategorie>","value":"<Wert>"}]}.'
+)
+
+
+@app.post("/api/matrix/extract")
+async def matrix_extract(req: Request):
+    """Extrahiert für EINEN Matrix-Eintrag (Thema + recherchierte Zellinhalte)
+    typisierte Merkmale je vorgegebener Kategorie (z. B. Ort, Tool, Tätigkeit).
+    Der Frontend baut daraus „Merkmal-Knoten" (Hubs): Zeilen, die denselben Wert
+    teilen, hängen am selben Hub und sind so verbunden. Pro Zeile ein Aufruf."""
+    body = await req.json()
+    label = str(body.get("label", "")).strip()
+    text = " ".join(str(body.get("text", "")).split())
+    cats = [str(c).strip() for c in (body.get("categories") or []) if str(c).strip()]
+    if not cats:
+        cats = ["Tätigkeit", "Ort", "Tool", "Aufgabenbereich", "Name"]
+    if not label and not text:
+        return {"attributes": [], "tokens": {"in": 0, "out": 0}}
+    model = _pick_model(body.get("model"), DEFAULT_MODEL)
+    valid_cats = {c.lower(): c for c in cats}
+
+    budget = max(800, int(_profile_num_ctx() * 3.5 * 0.7))
+    usr = (
+        f"Eintrag: {label}\n\nInformationen:\n{text[:budget]}\n\n"
+        f"Kategorien: {', '.join(cats)}"
+    )
+
+    attrs, tin, tout = [], 0, 0
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False, "format": "json",
+                "messages": [{"role": "system", "content": _MATRIX_EXTRACT_SYSTEM},
+                             {"role": "user", "content": usr}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        j = resp.json()
+        tin, tout = _llm_tok(j)
+        data = _parse_llm_json(j.get("message", {}).get("content", "")) or {}
+        seen = set()
+        for a in (data.get("attributes") or []):
+            cat = str((a or {}).get("category", "")).strip()
+            val = str((a or {}).get("value", "")).strip()[:60]
+            canon = valid_cats.get(cat.lower())
+            if not canon or not val:
+                continue
+            key = (canon.lower(), val.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            attrs.append({"category": canon, "value": val})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Merkmal-Analyse fehlgeschlagen: {e}")
+    return {"attributes": attrs, "tokens": {"in": tin, "out": tout}}
+
+
 # In den RAG geeignete Dateiendungen (Textextraktion via tools/files.py).
 _RAG_FOLDER_EXTS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt", ".md", ".rtf",
@@ -2177,13 +2363,10 @@ async def _chat_generator(request: ChatRequest):
         active_tools = [t for t in active_tools
                         if t["function"]["name"] != "web_search"]
 
-    # plot_function dem Modell NICHT als Ollama-Tool anbieten: kleine Modelle (z. B.
-    # ministral-3:3b) erzeugen dabei häufig ungültige LaTeX-Escapes (\( … \)) in den
-    # Argumenten, an denen Ollama beim Parsen mit HTTP 500 scheitert. Funktionsgraphen
-    # werden stattdessen deterministisch serverseitig erzeugt (_extract_plot_request →
-    # plot_function als Fallback nach der Antwort). plot_chart bleibt verfügbar.
-    active_tools = [t for t in active_tools
-                    if t["function"]["name"] != "plot_function"]
+    # Ob plot_function dem Modell als Tool angeboten wird, entscheidet sich weiter unten
+    # NACH der endgültigen Modellwahl (nur fähige externe Modelle bekommen es, siehe
+    # Kommentar dort). Kleine lokale Modelle erzeugen dabei ungültige LaTeX-Escapes
+    # (\( … \)), an denen Ollama mit HTTP 500 scheitert.
 
     # Rollen-Modell wählen, sofern der Agent keines fest vorgibt:
     #  • Programmier-Agent (code_ide) → Programmier-Modell
@@ -2207,6 +2390,27 @@ async def _chat_generator(request: ChatRequest):
             _math_model = _model_for("coding")
             if _math_model and _math_model != DEFAULT_MODEL:
                 model = _math_model
+
+    # Profil-Schalter „Recherche lokal": Wissenschafts-/Recherchekontext (Matrix-Zellen
+    # laufen mit science=true) zwingend auf ein lokales Modell umbiegen, auch wenn die
+    # Rolle ein externes API-Modell ist. Ist kein lokales LLM da → Fehlerframe.
+    if request.science and _research_local_only() and _llm.is_remote(model):
+        _loc = await _local_model(model)
+        if not _loc:
+            yield _sse({"type": "error", "message": "Kein lokales LLM verfügbar – „Recherche lokal“ ist im Profil aktiv."})
+            return
+        model = _loc
+
+    # plot_function nur FÄHIGEN externen Modellen (OpenRouter/OpenAI/… — Namensschema
+    # „provider::modell") anbieten: sie erzeugen glatte Funktionsgraphen (400 Stützstellen)
+    # und haben den LaTeX-Escape-Bug kleiner lokaler Modelle nicht. Für lokale Modelle
+    # bleibt es ausgeblendet — dort greift der deterministische Fallback
+    # (_extract_plot_request → plot_function nach der Antwort). So werden Funktionen nicht
+    # mehr als grober Polygonzug über plot_chart „gemalt".
+    _is_remote_model = "::" in (model or "")
+    if not _is_remote_model:
+        active_tools = [t for t in active_tools
+                        if t["function"]["name"] != "plot_function"]
 
     # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
     messages: list = []
@@ -5540,7 +5744,11 @@ async def dir_scan(req: Request):
     base = _dir_resolve_base(body.get("path", ""))
     anonymize = True   # Anonymisierung von Personendaten ist PFLICHT (nicht abschaltbar)
     use_llm_ner = bool(body.get("llm_ner", False))   # zusätzlicher NER-Pass (langsamer)
-    model = _pick_model(body.get("model"), _model_for("general"))
+    # Verzeichnis-Analyse läuft AUSSCHLIESSLICH lokal (Datenschutz): remote-Modelle
+    # werden ignoriert; ist gar kein lokales LLM da, ist die Funktion nicht verfügbar.
+    model = await _local_model(body.get("model"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Verzeichnis-Analyse benötigt ein lokales Modell (Ollama).")
 
     files = _dir_walk(base)
     text_files = [f for f in files
@@ -5630,7 +5838,11 @@ async def dir_analyze_file(req: Request):
         raise HTTPException(status_code=400, detail="file_rel fehlt")
     target = _dir_safe_child(base, file_rel)
     use_llm_ner = bool(body.get("llm_ner", False))
-    model = _pick_model(body.get("model"), _model_for("general"))
+    # Verzeichnis-Analyse läuft AUSSCHLIESSLICH lokal (Datenschutz): remote-Modelle
+    # werden ignoriert; ist gar kein lokales LLM da, ist die Funktion nicht verfügbar.
+    model = await _local_model(body.get("model"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Verzeichnis-Analyse benötigt ein lokales Modell (Ollama).")
 
     try:
         if target.stat().st_size > 25_000_000:
@@ -5715,6 +5927,537 @@ async def dir_finalize(req: Request):
         rag_id = coll["id"]
 
     return {"ok": True, "path": str(target), "rag_collection_id": rag_id}
+
+
+# ── Postfach-Auswertung (PST/mbox/eml/msg) ──────────────────────────────────────
+# Liest ein Mail-Postfach ein (Stufe 1: Absender/Empfänger/Betreff/Datum/Inhalt),
+# legt es lokal unter data/pst/<id>/ ab und wertet auf Wunsch Anhänge aus (Stufe 2:
+# Dokument-Text via tools.files.extract + Bilder direkt am lokalen Vision-Modell,
+# kein OCR). Die Analyse (Stufe 2) läuft AUSSCHLIESSLICH lokal. Wissensgraph +
+# Konnektoren werden im Frontend gebildet.
+
+_PST_LIST_BODY_CHARS = 6000     # Body-Vorschau in der Listen-/Graph-Antwort (Volltext via mail-Endpoint)
+_PST_MAX_MAILS = 5000
+_PST_TAG_SYSTEM = (
+    "Du wertest EINE E-Mail (inkl. evtl. beigefügter Dokument-/Bildinhalte) aus. Vergib "
+    "kurze, treffende Schlagworte/Themen (Firmen, Produkte, Vorgänge, Fachbegriffe) und eine "
+    "knappe Zusammenfassung der Anhänge. Erfinde nichts. "
+    'Antworte NUR mit JSON: {"tags":["…"],"attachments_summary":"…"}.'
+)
+
+
+def _pst_resolve_file(p: str) -> Path:
+    fp = Path(str(p or "").strip()).expanduser()
+    if not fp.is_file():
+        raise HTTPException(status_code=400, detail=f"Datei nicht gefunden: {fp}")
+    return fp
+
+
+def _pst_store_dir(store_id: str) -> Path:
+    sid = re.sub(r"[^A-Za-z0-9]+", "", str(store_id or ""))
+    d = PST_DIR / sid
+    if not sid or not (d / "store.json").exists():
+        raise HTTPException(status_code=404, detail="Postfach nicht gefunden")
+    return d
+
+
+def _pst_load(store_id: str) -> tuple[Path, dict]:
+    d = _pst_store_dir(store_id)
+    return d, json.loads((d / "store.json").read_text(encoding="utf-8"))
+
+
+def _pst_list_view(mails: list) -> list:
+    """Kompakte Mail-Liste für Frontend (Graph/Konnektoren) — Body gekürzt."""
+    out = []
+    for m in mails:
+        out.append({
+            "mid": m.get("mid"), "folder": m.get("folder", ""),
+            "sender": m.get("sender", ""), "recipients": m.get("recipients", ""),
+            "cc": m.get("cc", ""), "subject": m.get("subject", ""),
+            "date": m.get("date", ""),
+            "body": (m.get("body", "") or "")[:_PST_LIST_BODY_CHARS],
+            "attachments": [{"name": a.get("name"), "ext": a.get("ext"), "size": a.get("size")}
+                            for a in (m.get("attachments") or [])],
+            "tags": m.get("tags") or [],
+            "attachments_summary": m.get("attachments_summary", ""),
+            "stage": m.get("stage", 1),
+        })
+    return out
+
+
+@app.get("/api/pst/formats")
+async def pst_formats():
+    """Welche Eingabeformate auf diesem System nutzbar sind (für die UI-Hinweise)."""
+    from tools import mailstore
+    return {"formats": mailstore.available_formats(), "local_llm": await _local_llm_available()}
+
+
+@app.get("/api/pst/stores")
+async def pst_stores():
+    """Bereits eingelesene (persistierte) Postfächer auflisten — zum Wieder-Öffnen ohne
+    erneutes Parsen der .pst. Muss VOR der {store_id}-Route stehen."""
+    out = []
+    if PST_DIR.exists():
+        for d in PST_DIR.iterdir():
+            sj = d / "store.json"
+            if not sj.is_file():
+                continue
+            try:
+                s = json.loads(sj.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            mails = s.get("mails", [])
+            out.append({
+                "store_id": s.get("id", d.name),
+                "source": s.get("source", ""),
+                "name": Path(s.get("source", "")).name or d.name,
+                "count": s.get("count", len(mails)),
+                "opened_at": s.get("opened_at", 0),
+                "stage2": sum(1 for m in mails if m.get("stage") == 2),
+                "has_similarity": (d / "similarity.json").is_file(),
+                "has_settings": bool(s.get("settings")),
+            })
+    out.sort(key=lambda x: x.get("opened_at", 0), reverse=True)
+    return {"stores": out}
+
+
+@app.get("/api/pst/{store_id}")
+async def pst_reopen(store_id: str):
+    """Ein persistiertes Postfach wieder öffnen (kein erneutes Parsen). Liefert die
+    Mailliste, die gecachten Ähnlichkeits-Kanten und die gespeicherten Einstellungen."""
+    d, store = _pst_load(store_id)
+    sim = []
+    sp = d / "similarity.json"
+    if sp.is_file():
+        try:
+            sim = json.loads(sp.read_text(encoding="utf-8")).get("edges", [])
+        except Exception:
+            sim = []
+    return {
+        "store_id": store.get("id", store_id),
+        "count": store.get("count", 0),
+        "source": store.get("source", ""),
+        "source_format": store.get("source_format", ""),
+        "mails": _pst_list_view(store.get("mails", [])),
+        "similarity": sim,
+        "settings": store.get("settings") or None,
+    }
+
+
+@app.post("/api/pst/{store_id}/settings")
+async def pst_save_settings(store_id: str, req: Request):
+    """Ansicht + Konnektoren zu einem Postfach speichern (in store.json)."""
+    d, store = _pst_load(store_id)
+    body = await req.json()
+    store["settings"] = body.get("settings") or {}
+    (d / "store.json").write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/api/pst/open")
+async def pst_open(req: Request):
+    """Postfach einlesen (Stufe 1). Reine Extraktion (kein LLM nötig). Legt den geparsten
+    Store + Anhänge lokal unter data/pst/<id>/ ab."""
+    from tools import mailstore
+    body = await req.json()
+    fp = _pst_resolve_file(body.get("path", ""))
+    password = str(body.get("password", "") or "") or None
+
+    # PST-Passwort (nur CRC-Prüfung, verschlüsselt nichts) → Hinweis für die UI.
+    pw_status = {"protected": False, "verified": False, "checked": False}
+    if fp.suffix.lower() == ".pst":
+        pw_status = await asyncio.to_thread(mailstore.pst_password_status, fp, password)
+
+    store_id = uuid.uuid4().hex[:12]
+    base = PST_DIR / store_id
+    att_dir = base / "att"
+    try:
+        mails = await asyncio.to_thread(mailstore.read_store, fp, password, att_dir, _PST_MAX_MAILS)
+    except mailstore.MailFormatUnavailable as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Postfach konnte nicht gelesen werden: {e}")
+
+    for m in mails:
+        m["stage"] = 1
+    store = {
+        "id": store_id, "source": str(fp), "source_format": fp.suffix.lower(),
+        "opened_at": time.time(), "count": len(mails), "mails": mails,
+    }
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "store.json").write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+    return {"store_id": store_id, "count": len(mails), "source_format": fp.suffix.lower(),
+            "password": pw_status, "mails": _pst_list_view(mails)}
+
+
+@app.get("/api/pst/{store_id}/mail/{mid}")
+async def pst_mail(store_id: str, mid: str):
+    """Vollständige E-Mail (Header + kompletter Body + Anhang-Infos) für die Klick-Ansicht."""
+    _, store = _pst_load(store_id)
+    for m in store.get("mails", []):
+        if m.get("mid") == mid:
+            return m
+    raise HTTPException(status_code=404, detail="Mail nicht gefunden")
+
+
+@app.delete("/api/pst/{store_id}")
+async def pst_delete(store_id: str):
+    """Geparstes Postfach (inkl. Anhängen) verwerfen."""
+    d = _pst_store_dir(store_id)
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
+    return {"ok": True}
+
+
+@app.post("/api/pst/analyze")
+async def pst_analyze(req: Request):
+    """Stufe 2: Anhänge lesen (Dokument-Text via tools.files.extract + Bilder am lokalen
+    Vision-Modell) und je Mail Themen-Schlagworte vergeben. AUSSCHLIESSLICH lokal."""
+    from tools import files as _files
+    body = await req.json()
+    d, store = _pst_load(str(body.get("store_id", "")))
+    att_base = d / "att"
+    mids = body.get("mids")
+    want_tags = bool(body.get("tags", True))
+
+    model = await _local_model(body.get("model"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Postfach-Analyse benötigt ein lokales Modell (Ollama).")
+
+    targets = [m for m in store.get("mails", []) if (not mids or m.get("mid") in set(mids))]
+    budget = max(1200, int(_profile_num_ctx() * 3.5 * 0.6))
+    tin = tout = 0
+    analyzed = 0
+
+    async with _model_session(model), httpx.AsyncClient(timeout=240) as client:
+        for m in targets:
+            doc_texts, images = [], []
+            for a in (m.get("attachments") or []):
+                rel = a.get("rel") or ""
+                if not rel:
+                    continue
+                ap = (att_base / rel).resolve()
+                try:
+                    if att_base.resolve() not in ap.parents:
+                        continue
+                except Exception:
+                    continue
+                if not ap.is_file():
+                    continue
+                ext = (a.get("ext") or "").lower()
+                if ext in ("jpg", "jpeg", "png", "gif", "webp", "bmp"):
+                    try:
+                        if len(images) < 3:
+                            images.append(base64.b64encode(ap.read_bytes()).decode())
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        txt = _files.extract(ap)
+                        if txt and not txt.startswith("["):
+                            doc_texts.append(f"[{a.get('name')}]\n{txt[:4000]}")
+                    except Exception:
+                        pass
+
+            if not want_tags and not images and not doc_texts:
+                continue
+
+            usr = (f"Betreff: {m.get('subject','')}\nAbsender: {m.get('sender','')}\n\n"
+                   f"Inhalt:\n{(m.get('body','') or '')[:budget]}")
+            if doc_texts:
+                usr += "\n\nDokument-Anhänge:\n" + "\n\n".join(doc_texts)
+            if images:
+                usr += "\n\n(Es sind Bild-Anhänge beigefügt — beschreibe/verwerte deren Inhalt.)"
+
+            msg = {"role": "user", "content": usr}
+            if images:
+                msg["images"] = images
+            try:
+                resp = await _llm.chat(client, {
+                    "model": model, "think": False, "stream": False, "format": "json",
+                    "messages": [{"role": "system", "content": _PST_TAG_SYSTEM}, msg],
+                    "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+                })
+                resp.raise_for_status()
+                j = resp.json()
+                a_in, a_out = _llm_tok(j); tin += a_in; tout += a_out
+                data = _parse_llm_json(j.get("message", {}).get("content", "")) or {}
+                tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()][:12]
+                m["tags"] = tags
+                m["attachments_summary"] = str(data.get("attachments_summary", "")).strip()[:1200]
+            except Exception:
+                m.setdefault("tags", [])
+            if doc_texts:
+                m["attachment_text"] = "\n\n".join(doc_texts)[:20000]
+            m["stage"] = 2
+            analyzed += 1
+
+    (d / "store.json").write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+    return {"analyzed": analyzed, "mails": _pst_list_view(store.get("mails", [])),
+            "tokens": {"in": tin, "out": tout}}
+
+
+def _pst_mail_text(m: dict) -> str:
+    """Textbasis einer Mail für Embeddings/RAG (Betreff + Body + Anhang-Zusammenfassung)."""
+    parts = [m.get("subject", ""), (m.get("body", "") or "")[:2000]]
+    if m.get("attachments_summary"):
+        parts.append(str(m["attachments_summary"]))
+    txt = "\n".join(p for p in parts if p).strip()
+    return txt or (m.get("subject") or m.get("sender") or "—")
+
+
+@app.post("/api/pst/similarity")
+async def pst_similarity(req: Request):
+    """Verwandtschaftsgrad = semantische Ähnlichkeit. Bettet jede Mail LOKAL ein (Ollama,
+    CPU) und liefert Mail-Paare mit Cosine-Score. Rein Vektor-Mathematik, kein Chat-LLM."""
+    from tools import rag as _rag
+    import numpy as np
+    body = await req.json()
+    d, store = _pst_load(str(body.get("store_id", "")))
+    if not await _local_llm_available():
+        raise HTTPException(status_code=503, detail="Kein lokales LLM/Ollama verfügbar – die Ähnlichkeitsanalyse braucht das lokale Embeddingmodell.")
+    mids = body.get("mids")
+    sel = set(mids) if mids else None
+    mails = [m for m in store.get("mails", []) if (sel is None or m.get("mid") in sel)]
+    if len(mails) < 2:
+        return {"edges": [], "count": len(mails)}
+    texts = [_pst_mail_text(m) for m in mails]
+    try:
+        vecs = await _rag.embed(texts, EMBED_MODEL, gpu=False)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Embeddings fehlgeschlagen (Modell {EMBED_MODEL} vorhanden?): {e}")
+    if len(vecs) != len(mails):
+        raise HTTPException(status_code=502, detail=f"Embedding-Anzahl passt nicht – ist '{EMBED_MODEL}' in Ollama vorhanden? (ollama pull {EMBED_MODEL})")
+    mat = np.asarray(vecs, dtype=np.float32)
+    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    mat = mat / norms
+    sims = mat @ mat.T
+    ids = [m.get("mid") for m in mails]
+    thr = float(body.get("min_score", 0.5))
+    n = len(ids)
+    edges = []
+    for i in range(n):
+        row = sims[i]
+        for j in range(i + 1, n):
+            s = float(row[j])
+            if s >= thr:
+                edges.append({"a": ids[i], "b": ids[j], "score": round(s, 4)})
+    edges.sort(key=lambda e: e["score"], reverse=True)
+    edges = edges[:6000]   # Graph lesbar / Datei klein halten
+    (d / "similarity.json").write_text(json.dumps({"edges": edges}, ensure_ascii=False), encoding="utf-8")
+    return {"edges": edges, "count": n}
+
+
+@app.post("/api/pst/to-rag")
+async def pst_to_rag(req: Request):
+    """Ausgewählte Mails in eine (neue oder bestehende) lokale Wissensdatenbank übernehmen.
+    Embeddings laufen lokal (Ollama, CPU) → 503, wenn kein lokales LLM vorhanden ist."""
+    from tools.rag import ingest_file, tier_config
+    body = await req.json()
+    d, store = _pst_load(str(body.get("store_id", "")))
+    if not await _local_llm_available():
+        raise HTTPException(status_code=503, detail="Kein lokales LLM/Ollama verfügbar – RAG-Embeddings brauchen ein lokales Modell.")
+    mids = body.get("mids")
+    sel = set(mids) if mids else None
+    include_att = bool(body.get("include_attachments", True))
+    new_name = str(body.get("new_collection_name", "") or "").strip()
+
+    if new_name:
+        tc = tier_config("regler")
+        coll = {
+            "id": f"rag_{uuid.uuid4().hex[:12]}", "name": new_name[:120],
+            "embed_model": EMBED_MODEL, "tier": "regler",
+            "chunk_size": tc["chunk_size"], "chunk_overlap": tc["chunk_overlap"],
+            "top_k": tc["top_k"], "embed_gpu": False, "clean": True,
+            "char_limit": tc["char_limit"], "strictness": "ausgewogen",
+            "created_at": time.time(),
+        }
+        await _db.rag_create_collection(coll)
+    else:
+        coll = await _db.rag_get_collection(body.get("collection_id"))
+        if not coll:
+            raise HTTPException(status_code=404, detail="Wissensdatenbank nicht gefunden")
+
+    targets = [m for m in store.get("mails", []) if (sel is None or m.get("mid") in sel)]
+    ingested = chunks = 0
+    for m in targets:
+        body_txt = (m.get("body", "") or "").strip()
+        if include_att and m.get("attachments_summary"):
+            body_txt += "\n\nAnhänge (Zusammenfassung): " + str(m["attachments_summary"])
+        if include_att and m.get("attachment_text"):
+            body_txt += "\n\n" + str(m["attachment_text"])
+        if not body_txt.strip() and not m.get("subject"):
+            continue
+        text = (f"Von: {m.get('sender','')}\nAn: {m.get('recipients','')}\n"
+                f"Datum: {m.get('date','')}\nBetreff: {m.get('subject','')}\n\n{body_txt}").strip()
+        title = f"Mail: {m.get('subject','') or m.get('sender','')}"[:120]
+        try:
+            n = await ingest_file(coll, text, title, f"mail_{uuid.uuid4().hex[:12]}")
+            ingested += 1
+            chunks += n
+        except Exception:
+            continue
+    return {"ok": True, "ingested": ingested, "chunks": chunks,
+            "collection_id": coll["id"], "collection_name": coll["name"]}
+
+
+@app.post("/api/pst/ask")
+async def pst_ask(req: Request):
+    """„Postfach fragen": Frage gegen eine lokale Wissensdatenbank (RAG) beantworten.
+    AUSSCHLIESSLICH lokal (Embedding-Suche + lokales Chat-Modell)."""
+    from tools.rag import query_collections
+    body = await req.json()
+    _pst_load(str(body.get("store_id", "")))   # Existenzprüfung
+    question = str(body.get("question", "")).strip()
+    cid = body.get("collection_id")
+    if not question:
+        raise HTTPException(status_code=400, detail="Keine Frage angegeben")
+    if not cid:
+        raise HTTPException(status_code=400, detail="Keine Wissensdatenbank gewählt – Mails erst per RAG-Übernahme einlesen.")
+    model = await _local_model(body.get("model"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – Postfach-Fragen laufen ausschließlich lokal.")
+    hits = await query_collections([cid], question, top_k_cap=8)
+    context = "\n\n---\n\n".join(f"[{h.get('filename','')}]\n{h.get('text','')}" for h in hits)
+    sys_p = ("Beantworte die Frage NUR anhand des bereitgestellten E-Mail-Kontexts. Wenn die "
+             "Antwort dort nicht steht, sage das offen. Antworte knapp auf Deutsch und nenne "
+             "relevante Betreffzeilen/Absender als Beleg.")
+    usr = f"Kontext (E-Mails):\n{context or '(keine Treffer)'}\n\nFrage: {question}"
+    tin = tout = 0
+    async with _model_session(model), httpx.AsyncClient(timeout=240) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "stream": False,
+            "messages": [{"role": "system", "content": sys_p}, {"role": "user", "content": usr}],
+            "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+        j = resp.json()
+        tin, tout = _llm_tok(j)
+        answer = j.get("message", {}).get("content", "").strip()
+    sources = [{"filename": h.get("filename", ""), "score": round(float(h.get("score", 0)), 3),
+                "collection": h.get("collection_name", "")} for h in hits]
+    return {"answer": answer, "sources": sources, "tokens": {"in": tin, "out": tout}}
+
+
+@app.post("/api/pst/summarize")
+async def pst_summarize(req: Request):
+    """Zusammenfassung einer Mail-Auswahl — LOKAL, Map-Reduce bei vielen Mails."""
+    body = await req.json()
+    d, store = _pst_load(str(body.get("store_id", "")))
+    mids = body.get("mids")
+    sel = set(mids) if mids else None
+    model = await _local_model(body.get("model"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Zusammenfassung läuft ausschließlich lokal.")
+    mails = [m for m in store.get("mails", []) if (sel is None or m.get("mid") in sel)]
+    if not mails:
+        raise HTTPException(status_code=400, detail="Keine Mails ausgewählt")
+    blocks = [(f"Von: {m.get('sender','')} | Datum: {(m.get('date','') or '')[:10]}\n"
+               f"Betreff: {m.get('subject','')}\n{(m.get('body','') or '')[:1500]}") for m in mails]
+    sys_p = ("Fasse die folgenden E-Mails sachlich auf Deutsch zusammen: zentrale Themen, "
+             "Beteiligte, offene Punkte/To-dos. Erfinde nichts, nutze kurze Stichpunkte.")
+    num_ctx = _profile_num_ctx()
+    budget = max(2000, int(num_ctx * 3.2))
+    tin = tout = 0
+    async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+        async def _run(text: str):
+            r = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": sys_p}, {"role": "user", "content": text}],
+                "options": {"num_ctx": num_ctx}, "keep_alive": KEEP_ALIVE,
+            })
+            r.raise_for_status()
+            jj = r.json()
+            a, b = _llm_tok(jj)
+            return jj.get("message", {}).get("content", "").strip(), a, b
+        # Map: Blöcke bis Budget bündeln
+        groups, cur, cur_len = [], [], 0
+        for blk in blocks:
+            if cur and cur_len + len(blk) > budget:
+                groups.append("\n\n===\n\n".join(cur)); cur, cur_len = [], 0
+            cur.append(blk); cur_len += len(blk)
+        if cur:
+            groups.append("\n\n===\n\n".join(cur))
+        partials = []
+        for g in groups:
+            txt, a, b = await _run(g); tin += a; tout += b; partials.append(txt)
+        # Reduce
+        if len(partials) <= 1:
+            summary = partials[0] if partials else ""
+        else:
+            txt, a, b = await _run("Fasse diese Teil-Zusammenfassungen zu EINER prägnanten "
+                                   "Gesamtzusammenfassung zusammen:\n\n" + "\n\n---\n\n".join(partials))
+            tin += a; tout += b; summary = txt
+    return {"summary": summary, "count": len(mails), "tokens": {"in": tin, "out": tout}}
+
+
+_PST_COMMAND_SYSTEM = (
+    "Du steuerst die Anzeige eines E-Mail-Wissensgraphen. Gib EINE JSON-Direktive zurück und setze "
+    "NUR Felder, die die Anweisung wirklich nennt. Trigger → Feld: "
+    "'Netz'/'wer mit wem'/'Kommunikation' → mode='net'; 'Themen-Nähe'/'verwandt'/'ähnlich' → mode='sim'; "
+    "'Konnektor'/'nach Konnektoren' → mode='conn'; ein genannter Konnektorname aus der Liste → connector "
+    "(EXAKT so schreiben); 'nur …'/'verbunden'/'isolierte ausblenden' → only_connected=true; "
+    "'mit Anhang' → has_attachment=true; Monats-/Zeitangaben → date_from und date_to (YYYY-MM-DD, "
+    "nutze den unten genannten Postfach-Zeitraum fuer das Jahr); "
+    "'zeige X'/'zentriere auf X'/'X mit Eltern/Kindern/Nachbarn' → focus='X' und hops (1 = direkte "
+    "Eltern/Kinder, 2-3 = weiter); ein reiner Suchbegriff → query. explain = EIN kurzer deutscher Satz. "
+    "Moegliche Felder: mode, connector, sender, query, date_from, date_to, has_attachment, "
+    "only_connected, focus, hops (1-3), explain. Beispiele: "
+    "'Synera mit Eltern und Kindern' => {'focus':'Synera','hops':1,'explain':'…'}; "
+    "'nur Konnektor Lebensversicherung als Netz' => {'mode':'net','connector':'Lebensversicherung','only_connected':true,'explain':'…'}; "
+    "'Mails im Dezember mit Anhang' => {'date_from':'2025-12-01','date_to':'2025-12-31','has_attachment':true,'explain':'…'}. "
+    "Antworte NUR mit JSON."
+)
+
+
+@app.post("/api/pst/command")
+async def pst_command(req: Request):
+    """Natürlichsprachiger Befehl → Anzeige-Direktive für den Postfach-Graphen.
+    AUSSCHLIESSLICH lokal (LLM über _local_model, sonst 503)."""
+    body = await req.json()
+    _, store = _pst_load(str(body.get("store_id", "")))
+    text = str(body.get("text", "")).strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Kein Befehl angegeben")
+    conns = [str(c).strip() for c in (body.get("connectors") or []) if str(c).strip()][:40]
+    model = await _local_model(body.get("model"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – der Graph-Befehl läuft ausschließlich lokal.")
+    # Zeitraum des Postfachs mitgeben (hilft dem Modell bei „Dezember" & Co.)
+    dates = sorted(d[:10] for d in (m.get("date", "") for m in store.get("mails", [])) if d[:10])
+    span = f"{dates[0]} bis {dates[-1]}" if dates else "unbekannt"
+    usr = (f"Postfach-Zeitraum: {span}.\nVerfügbare Konnektoren: {', '.join(conns) or '(keine)'}.\n\n"
+           f"Anweisung: {text}")
+    tin = tout = 0
+    async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "stream": False, "format": "json",
+            "messages": [{"role": "system", "content": _PST_COMMAND_SYSTEM},
+                         {"role": "user", "content": usr}],
+            "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+        j = resp.json()
+        tin, tout = _llm_tok(j)
+        raw = _parse_llm_json(j.get("message", {}).get("content", "")) or {}
+    # Direktive säubern (nur bekannte, plausible Felder)
+    out: dict = {}
+    if raw.get("mode") in ("conn", "sim", "net"):
+        out["mode"] = raw["mode"]
+    for k in ("connector", "sender", "query", "date_from", "date_to", "focus", "explain"):
+        v = raw.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()[:160]
+    if raw.get("only_connected") in (True, False):
+        out["only_connected"] = raw["only_connected"]
+    if raw.get("has_attachment") is True:
+        out["has_attachment"] = True
+    try:
+        out["hops"] = max(1, min(3, int(raw.get("hops") or 1)))
+    except Exception:
+        out["hops"] = 1
+    return {"directive": out, "tokens": {"in": tin, "out": tout}}
 
 
 # ── Morphologischer Kasten (Zwicky-Box) ─────────────────────────────────────────
@@ -6182,6 +6925,8 @@ async def save_profile(req: Request):
     # Mathe-Weiche: erkannte Matheaufgaben ans Mathe-Modell durchreichen, solange nur
     # das schwache Standardmodell aktiv ist (Standard: an).
     profile["math_autoroute"] = bool(body.get("math_autoroute", True))
+    # Recherche (Matrix + Recherche-Tab) zwingend lokal ausführen (Standard: aus)
+    profile["research_local_only"] = bool(body.get("research_local_only", False))
     # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
     profile["auto_compress"] = bool(body.get("auto_compress", False))
     try:
@@ -8740,6 +9485,125 @@ async def delete_code_program(prog_id: str):
         raise HTTPException(404, "Programm nicht gefunden")
     fp.unlink()
     return {"ok": True}
+
+
+def _safe_relpath(p: str) -> str:
+    """Relativen, sicheren Dateipfad erzwingen (kein Pfad-Traversal, kein absoluter Pfad,
+    Backslashes → Slash). Leere/auflösbare Segmente (., ..) werden verworfen."""
+    p = str(p or "").replace("\\", "/").strip().lstrip("/")
+    parts = [seg.strip() for seg in p.split("/") if seg.strip() and seg.strip() not in (".", "..")]
+    return "/".join(parts)[:200]
+
+
+_CODE_PROJECT_SYSTEM = (
+    "Du bist ein erfahrener Software-Architekt. Erzeuge zu einer Aufgabe eine sinnvolle, "
+    "kohärente MEHRDATEI-Projektstruktur. Wähle eine übliche Aufteilung (Einstiegspunkt, "
+    "Module/Pakete, ggf. Tests, README, ggf. Konfig/Abhängigkeiten). Gib JEDE Datei mit "
+    "RELATIVEM Pfad (Schrägstriche als Trenner, KEIN führender Slash, kein „..“, keine "
+    "absoluten Pfade) und vollständigem, lauffähigem Inhalt aus. Halte das Projekt fokussiert: "
+    "höchstens {maxfiles} Dateien, jede Datei kompakt. Schreibe echten Code — KEINE Auslassungs-"
+    "Platzhalter wie „…“ oder „TODO Rest“. Kommentare/Texte auf Deutsch. "
+    'Antworte NUR mit JSON: {"files":[{"path":"ordner/datei.ext","content":"<voller Inhalt>"}],'
+    '"note":"1–2 Sätze, was die Struktur enthält"}.'
+)
+
+
+@app.post("/api/code/project")
+async def code_project(req: Request):
+    """Erzeugt zu einer Aufgabe eine Mehrdatei-Projektstruktur (Dateibaum + Inhalte)
+    als JSON. Optional mit Coding-Agent (Persona/`example_code`) und Sprache/Stack.
+    Nicht direkt ausführbar — Anzeige als Baum im Code-Tab, Download als ZIP."""
+    body = await req.json()
+    prompt = str(body.get("prompt", "")).strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Keine Aufgabe angegeben")
+    language = str(body.get("language", "") or "").strip()[:60]
+    agent_id = str(body.get("agent_id", "")).strip()
+    try:
+        max_files = int(body.get("max_files", 10))
+    except Exception:
+        max_files = 10
+    max_files = max(2, min(16, max_files))
+    model = _pick_model(body.get("model"), _model_for("coding"))
+    num_ctx = _profile_num_ctx()
+
+    agent = _agent_def_by_id(agent_id)
+    persona = str(agent.get("system_prompt", "")).strip()
+    example_code = str(agent.get("example_code", "")).strip()
+
+    sys_parts = [_CODE_PROJECT_SYSTEM.format(maxfiles=max_files)]
+    if persona:
+        sys_parts.append("Rolle/Vorgaben des gewählten Agenten:\n" + persona)
+    if example_code:
+        sys_parts.append("Orientiere dich an Stil/Struktur dieses Beispielcodes:\n```\n"
+                         + example_code[:3000] + "\n```")
+    if language:
+        sys_parts.append(f"Sprache/Stack: {language}.")
+    system = "\n\n".join(sys_parts)
+
+    usr = f"Aufgabe:\n{prompt}\n\nLiefere höchstens {max_files} Dateien."
+
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False, "format": "json",
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": usr}],
+                "options": {"num_ctx": num_ctx, "temperature": 0.2}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _jc = resp.json()
+        tin, tout = _llm_tok(_jc)
+        data = _parse_llm_json(_jc.get("message", {}).get("content", "")) or {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Projekt-Erzeugung fehlgeschlagen: {e}")
+
+    files, seen = [], set()
+    for f in (data.get("files") or []):
+        path = _safe_relpath((f or {}).get("path", ""))
+        content = (f or {}).get("content", "")
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False, indent=2)
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        files.append({"path": path, "content": content})
+        if len(files) >= max_files:
+            break
+    note = str(data.get("note", "")).strip()[:600]
+    return {"files": files, "note": note, "tokens": {"in": tin, "out": tout}}
+
+
+@app.post("/api/code/project-zip")
+async def code_project_zip(req: Request):
+    """Packt eine (im Code-Tab erzeugte/bearbeitete) Projektstruktur in ein ZIP zum
+    Download. Pfade werden serverseitig auf sichere relative Pfade reduziert."""
+    import io, zipfile, re as _re
+    body = await req.json()
+    files = body.get("files") or []
+    if not isinstance(files, list) or not files:
+        raise HTTPException(status_code=400, detail="Keine Dateien übergeben")
+    zipname = _re.sub(r"[^\w\-]+", "_", str(body.get("zipname", "")).strip()) or "projekt"
+    buf = io.BytesIO()
+    seen: set[str] = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, f in enumerate(files):
+            path = _safe_relpath((f or {}).get("path", "")) or f"datei_{i + 1}.txt"
+            base, n = path, 2
+            while path in seen:
+                if "." in base.rsplit("/", 1)[-1]:
+                    stem, ext = base.rsplit(".", 1)
+                    path = f"{stem}_{n}.{ext}"
+                else:
+                    path = f"{base}_{n}"
+                n += 1
+            seen.add(path)
+            zf.writestr(path, str((f or {}).get("content", "")))
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zipname}.zip"'},
+    )
 
 
 @app.post("/api/code/run-python")

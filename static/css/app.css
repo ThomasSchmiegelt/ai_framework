@@ -2552,10 +2552,59 @@ html, body {
   flex-wrap: wrap;
 }
 
-#matrix-table-wrap {
+/* Split-Container: links Tabelle, rechts Wissensgraph, dazwischen ein Splitter. */
+#matrix-split {
   flex: 1;
+  display: flex;
+  min-height: 0;           /* erlaubt den Kindern, zu schrumpfen statt zu überlaufen */
+  overflow: hidden;
+}
+
+#matrix-table-wrap {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: auto;          /* horizontal + vertikal scrollbar bei vielen Spalten */
   padding: 10px;
+}
+
+/* Vertikaler Splitter zwischen Tabelle und Graph (nur sichtbar, wenn Graph offen) */
+#matrix-splitter {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--border);
+  display: none;
+}
+#matrix-splitter:hover { background: var(--accent); }
+
+#matrix-graph-pane {
+  flex: 0 0 45%;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  min-height: 0;
+}
+
+#matrix-graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+#matrix-graph {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-input);
+}
+
+/* Aktiv geschalteter Toolbar-Button (Graph offen / Verbindungsmodus) */
+.export-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 #matrix-table {
@@ -2599,6 +2648,9 @@ html, body {
   line-height: 1.5;
   white-space: pre-wrap;
   min-height: 60px;
+  max-height: 220px;       /* zu lange Zellen scrollen statt zu überlaufen */
+  overflow: auto;
+  position: relative;      /* Anker für den ⤢-Knopf */
   cursor: pointer;
 }
 
@@ -2609,6 +2661,60 @@ html, body {
 
 .matrix-cell-result.done { color: var(--text); }
 
+/* Markdown-Tabellen in Zellen: kompakt + horizontal scrollbar (überschreibt die
+   breiten #matrix-table td-Regeln, sonst sprengen verschachtelte Tabellen die Zelle) */
+.matrix-cell-result table {
+  display: block; width: max-content; max-width: 100%;
+  overflow-x: auto; border-collapse: collapse; font-size: 11px; margin: 2px 0;
+}
+#matrix-table .matrix-cell-result th,
+#matrix-table .matrix-cell-result td {
+  min-width: 0; max-width: none; vertical-align: top;
+  border: 1px solid var(--border); padding: 2px 5px; white-space: nowrap;
+}
+
+/* ⤢-Knopf zum Vergrößern (bei Hover sichtbar) */
+.cell-expand {
+  position: absolute; top: 4px; right: 4px; z-index: 2;
+  background: var(--bg-hover); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 4px;
+  font-size: 11px; line-height: 1; padding: 2px 5px; cursor: pointer;
+  opacity: 0; transition: opacity .12s;
+}
+.matrix-cell-result:hover .cell-expand,
+.cell-expand:focus { opacity: 1; }
+.cell-expand:hover { background: var(--accent); color: #fff; }
+
+/* Vollansicht einer Zelle (Modal) */
+#matrix-cell-modal {
+  position: fixed; inset: 0; z-index: 1000; display: none;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(0, 0, 0, .55);
+}
+#matrix-cell-modal-box {
+  display: flex; flex-direction: column;
+  width: min(900px, 92vw); max-height: 86vh;
+  background: var(--bg-sidebar); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+}
+#matrix-cell-modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#matrix-cell-modal-title { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+#matrix-cell-modal-close {
+  background: transparent; border: none; color: var(--text-dim);
+  font-size: 16px; line-height: 1; cursor: pointer;
+}
+#matrix-cell-modal-close:hover { color: var(--text); }
+#matrix-cell-modal-body { padding: 14px 16px; overflow: auto; font-size: 13.5px; line-height: 1.6; }
+#matrix-cell-modal-body table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+#matrix-cell-modal-body th, #matrix-cell-modal-body td {
+  border: 1px solid var(--border); padding: 5px 9px; text-align: left; vertical-align: top;
+}
+#matrix-cell-modal-body th { background: var(--bg-hover); }
+
 .matrix-header-cell-wrap {
   display: flex;
   align-items: center;
@@ -2617,11 +2723,11 @@ html, body {
 }
 
 .btn-del-matrix-col {
-  background: none; border: none; color: var(--text-muted);
-  cursor: pointer; font-size: 12px; padding: 2px;
-  flex-shrink: 0;
+  background: var(--bg-hover); border: 1px solid var(--border); color: var(--text-muted);
+  cursor: pointer; font-size: 13px; line-height: 1; padding: 3px 7px; border-radius: 4px;
+  flex-shrink: 0; transition: background .12s, color .12s, border-color .12s;
 }
-.btn-del-matrix-col:hover { color: #ef4444; }
+.btn-del-matrix-col:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
 
 /* Agenten-Auswahl je Spalte (im Spaltenkopf) */
 .matrix-col-agent {
@@ -2908,6 +3014,46 @@ html, body {
   white-space: pre; overflow: auto; tab-size: 2;
 }
 
+/* ── Projektstruktur (Code-Tab) ────────────────────────────────── */
+#cp-toolbar { flex-shrink: 0; padding: 10px 14px 6px; display: flex; flex-direction: column; gap: 6px; }
+#cp-prompt {
+  width: 100%; resize: vertical; min-height: 38px; font-size: 12.5px;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; box-sizing: border-box;
+}
+#cp-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+#cp-controls input[type=text], #cp-controls input[type=number] {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 3px 6px;
+}
+#cp-body { flex: 1; min-height: 0; display: flex; overflow: hidden; margin: 0 14px 14px; }
+#cp-tree {
+  flex: 0 0 32%; min-width: 140px; overflow: auto;
+  border: 1px solid var(--border); border-radius: 8px 0 0 8px; border-right: none;
+  background: var(--bg-input); padding: 4px 0;
+}
+.cp-row { font-size: 12.5px; padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-dir { color: var(--text-muted); font-weight: 600; }
+.cp-file-row { color: var(--text); cursor: pointer; border-radius: 4px; }
+.cp-file-row:hover { background: var(--bg-hover); }
+.cp-file-row.sel { background: var(--accent); color: #fff; }
+#cp-splitter { flex: 0 0 6px; cursor: col-resize; background: var(--border); }
+#cp-splitter:hover { background: var(--accent); }
+#cp-file {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 0 8px 8px 0; background: var(--bg-input); overflow: hidden;
+}
+#cp-file-bar {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg-hover);
+}
+#cp-content {
+  flex: 1; border: none; outline: none; resize: none; padding: 10px 12px;
+  background: transparent; color: var(--text);
+  font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.5;
+  white-space: pre; overflow: auto; tab-size: 2;
+}
+
 /* ── Code-IDE ──────────────────────────────────────────────────── */
 #ide-panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }
 #ide-panel.active { display: flex; }
@@ -3154,6 +3300,104 @@ li.CodeMirror-hint-active { background: var(--accent); color: #fff; }
   0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
   50%       { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
 }
+
+/* ══ Code-Workspace (ein Arbeitsbereich statt IDE/Projekt/JSON-Tabs) ══════════ */
+#cw-prompt-bar {
+  display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-sidebar);
+}
+#cw-prompt {
+  flex: 1; min-width: 0; resize: none; min-height: 34px; max-height: 90px;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 10px; font-size: 12.5px; font-family: var(--font);
+}
+#cw-prompt-bar #cw-agent { max-width: 170px; font-size: 12px; }
+#cw-send { font-weight: 600; }
+#cw-more { position: relative; }
+#cw-more > summary { list-style: none; cursor: pointer; user-select: none; }
+#cw-more > summary::-webkit-details-marker { display: none; }
+#cw-more-pop {
+  position: absolute; right: 0; top: 110%; z-index: 50; width: 230px;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+#cw-more-pop label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+#cw-more-pop .cw-more-sep { font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 6px; margin-top: 2px; }
+
+#cw-chat { flex-shrink: 0; max-height: 130px; overflow-y: auto; padding: 4px 12px; }
+#cw-chat:empty { display: none; }
+
+#cw-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+#cw-sidebar {
+  flex: 0 0 200px; min-width: 120px; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); background: var(--bg-sidebar); overflow: hidden;
+}
+#cw-file-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); align-items: center; }
+#cw-file-actions #cw-load { max-width: 100%; font-size: 11.5px; }
+#cw-tree { flex: 1; overflow: auto; padding: 4px 0; }
+.cw-row { font-size: 12.5px; padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-dir { color: var(--text-muted); font-weight: 600; }
+.cw-file-row { color: var(--text); cursor: pointer; border-radius: 4px; }
+.cw-file-row:hover { background: var(--bg-hover); }
+.cw-file-row.sel { background: var(--accent); color: #fff; }
+
+#cw-splitter { flex: 0 0 6px; cursor: col-resize; background: var(--border); }
+#cw-splitter:hover { background: var(--accent); }
+
+#cw-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+#cw-editor-bar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 5px 10px; background: var(--bg-sidebar); border-bottom: 1px solid var(--border);
+}
+#cw-name {
+  flex: 1; min-width: 0; background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 12px;
+  font-family: 'Consolas','Fira Code','Courier New',monospace;
+}
+#cw-editor-bar #cw-lang { max-width: 190px; font-size: 12px; }
+#cw-editor { flex: 1; resize: none; outline: none; border: none; min-height: 0;
+  background: var(--bg-sidebar); color: var(--text); padding: 10px 14px;
+  font-family: 'Consolas','Fira Code','Courier New',monospace; font-size: 12.5px; line-height: 1.55; tab-size: 2;
+}
+/* CodeMirror im Workspace: Größe + Theme (Token-Farben) wie in der früheren IDE */
+#cw-main .CodeMirror {
+  flex: 1; height: auto; min-height: 0;
+  background: var(--bg-sidebar); color: var(--text);
+  font-family: 'Consolas','Fira Code','Courier New',monospace; font-size: 12.5px; line-height: 1.55;
+}
+#cw-main .CodeMirror-gutters { background: var(--bg-sidebar); border: none; border-right: 1px solid var(--border); }
+#cw-main .CodeMirror-linenumber { color: var(--text-muted); }
+#cw-main .CodeMirror-cursor { border-left: 1.5px solid var(--accent); }
+#cw-main .CodeMirror-selected { background: var(--accent-dim); }
+#cw-main .CodeMirror-activeline-background { background: rgba(255,255,255,.04); }
+#cw-main .CodeMirror-matchingbracket { color: var(--accent); font-weight: 700; }
+#cw-main .cm-comment  { color: #7c8a99; font-style: italic; }
+#cw-main .cm-keyword  { color: #5aa9e6; }
+#cw-main .cm-atom, #cw-main .cm-number { color: #e6a55a; }
+#cw-main .cm-string, #cw-main .cm-string-2 { color: #8bd17c; }
+#cw-main .cm-def { color: #d3e8ff; }
+#cw-main .cm-variable { color: var(--text); }
+#cw-main .cm-variable-2 { color: #b6d6f5; }
+#cw-main .cm-property { color: #c3a6e6; }
+#cw-main .cm-operator { color: var(--text-dim); }
+
+#cw-splitter-v { flex: 0 0 6px; cursor: row-resize; background: var(--border); }
+#cw-splitter-v:hover { background: var(--accent); }
+#cw-output { flex: 0 0 42%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+#cw-output-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 4px 10px; background: var(--bg-sidebar); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#cw-preview { flex: 1; border: none; background: var(--bg-main); min-height: 0; }
+#cw-py-output { flex: 1; overflow: auto; background: var(--bg-main); padding: 10px 12px; min-height: 0; }
+#cw-py-output .ide-py-out { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; font-family: monospace; font-size: 12.5px; color: var(--text); line-height: 1.5; }
+#cw-py-output .ide-py-err { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; font-family: monospace; font-size: 12.5px; color: #ef4444; line-height: 1.5; }
+#cw-py-output .ide-py-img { display: block; max-width: 100%; height: auto; margin: 0 auto 10px; background: #fff; border: 1px solid var(--border); border-radius: 6px; }
+#cw-py-output .ide-py-run { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 13px; padding: 4px 0; }
+#cw-console { height: 80px; overflow-y: auto; background: var(--bg-sidebar); border-top: 1px solid var(--border); padding: 6px 12px; font-family: monospace; font-size: 11.5px; flex-shrink: 0; }
+#cw-repair { background: #ef4444; color: #fff; border: none; border-radius: 6px; padding: 3px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+#cw-repair:hover { background: #dc2626; }
 
 /* ── Diagnose-Logger ───────────────────────────────────────────── */
 #logs-panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }
@@ -3908,6 +4152,94 @@ select.ob-input option {
 .dir-analysis-title { background: var(--bg-input); padding: 8px 12px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); }
 .dir-analysis-body { padding: 10px 14px; font-size: 13.5px; line-height: 1.55; }
 #dir-actions { display: flex; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--border); }
+
+/* ── Postfach (📮 PST-Auswertung) ─────────────────────────────────────────── */
+#postfach-panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+#postfach-panel.active { display: flex; }
+#pf-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+#pf-path { flex: 1; min-width: 220px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; font-size: 13px; }
+#pf-path:focus, #pf-pass:focus, #pf-search:focus { outline: none; border-color: var(--accent); }
+#pf-pass, #pf-search { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; }
+#pf-timeline { display: none; gap: 3px; align-items: flex-end; padding: 6px 14px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.pf-tl-bar { display: flex; flex-direction: column; align-items: center; cursor: pointer; flex: 0 0 auto; opacity: .8; }
+.pf-tl-bar:hover, .pf-tl-bar.pf-tl-on { opacity: 1; }
+.pf-tl-bar span { width: 12px; background: var(--accent); border-radius: 2px 2px 0 0; }
+.pf-tl-bar.pf-tl-on span { background: #22c55e; }
+.pf-tl-bar label { font-size: 8.5px; color: var(--text-muted); cursor: pointer; transform: rotate(0); margin-top: 2px; }
+#pf-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+#pf-left { flex: 0 0 38%; min-width: 200px; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
+#pf-list { flex: 1; overflow-y: auto; padding: 4px 6px; }
+.pf-row { padding: 6px 8px; border-radius: 6px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.pf-row:hover { background: var(--bg-hover); }
+.pf-row-top { display: flex; gap: 8px; font-size: 11px; color: var(--text-muted); }
+.pf-row-sender { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-row-subj { font-size: 12.5px; color: var(--text); margin-top: 2px; }
+.pf-tag { display: inline-block; font-size: 10px; background: var(--accent-dim); color: var(--text-dim); border-radius: 8px; padding: 0 6px; margin: 2px 2px 0 0; }
+#pf-graph-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+#pf-graph { flex: 1; min-height: 0; }
+/* Modals (Konnektor-Editor + volle Mail) */
+.pf-modal { position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,.55); }
+.pf-modal-box { display: flex; flex-direction: column; width: min(820px, 92vw); max-height: 86vh; background: var(--bg-sidebar); color: var(--text); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.pf-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13.5px; }
+.pf-modal-x { background: transparent; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer; }
+.pf-modal-x:hover { color: var(--text); }
+.pf-modal-body { padding: 14px 16px; overflow: auto; font-size: 13px; }
+.pf-conn-item { display: flex; gap: 6px; margin-bottom: 6px; }
+.pf-conn-item input { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; font-size: 12.5px; }
+.pf-conn-name { flex: 0 0 180px; }
+.pf-conn-words { flex: 1; }
+.pf-conn-del { background: var(--bg-hover); border: 1px solid var(--border); color: var(--text-dim); border-radius: 5px; cursor: pointer; }
+.pf-conn-del:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
+.pf-hdr { border-collapse: collapse; margin-bottom: 8px; }
+.pf-hdr th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 2px 10px 2px 0; vertical-align: top; white-space: nowrap; }
+.pf-hdr td { padding: 2px 0; }
+.pf-mail-tags { margin: 6px 0; }
+.pf-att, .pf-att-sum { margin: 8px 0; font-size: 12.5px; }
+.pf-att ul { margin: 4px 0 0 18px; }
+.pf-mail-text { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 14px; line-height: 1.65; margin-top: 10px; background: var(--bg-input); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); }
+
+/* Postfach-Ausbau: Auswahl, Filter, Graph-Modi, Statistik, Fragen */
+.pf-row { display: flex; align-items: flex-start; gap: 6px; }
+.pf-row-main { flex: 1; min-width: 0; }
+.pf-sel { margin-top: 4px; flex: 0 0 auto; cursor: pointer; }
+/* Alle neuen Postfach-Formularelemente ans dunkle Theme angleichen (sonst browser-weiß) */
+#postfach-panel { accent-color: var(--accent); }
+.pf-filters input, .pf-filters select, #pf-conn-filter,
+#pf-ask-bar input, #pf-ask-bar select, #pf-cmd-bar input,
+#pf-rag-modal input[type="text"], #pf-rag-modal select {
+  background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 9px; font-size: 11.5px; color-scheme: dark;
+}
+.pf-filters input:focus, .pf-filters select:focus, #pf-conn-filter:focus,
+#pf-ask-bar input:focus, #pf-ask-bar select:focus, #pf-cmd-bar input:focus,
+#pf-rag-modal input:focus, #pf-rag-modal select:focus { outline: none; border-color: var(--accent); }
+#btn-pf-options.on, #btn-pf-chat.on { background: var(--bg-hover); border-color: var(--accent); color: var(--text); }
+#postfach-panel select option { background: var(--bg-sidebar); color: var(--text); }
+.pf-filters input[type="checkbox"], #pf-rag-modal input[type="checkbox"], #pf-rag-modal input[type="radio"] { width: auto; }
+.pf-mode-btn { background: var(--bg-input); color: var(--text-dim); border: 1px solid var(--border); border-radius: 7px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; }
+.pf-mode-btn:hover { color: var(--text); }
+.pf-mode-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+#btn-pf-dup.on { background: #22c55e; color: #05240f; border-color: #22c55e; }
+.pf-spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: pf-rot 0.7s linear infinite; vertical-align: middle; }
+@keyframes pf-rot { to { transform: rotate(360deg); } }
+.pf-play { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+.pf-play.stale { animation: pf-pulse 1.2s ease-in-out infinite; }
+@keyframes pf-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.4); } }
+#pf-ask-answer { padding: 4px 14px 10px; max-height: 45vh; overflow: auto; resize: vertical; }
+#pf-ask-answer:empty { display: none; }
+.pf-ask-answer .pf-ask-txt { white-space: pre-wrap; font-size: 14px; line-height: 1.65; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 6px 0; }
+.pf-ask-answer details { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+#pf-stats { display: none; gap: 18px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.pf-stat-block { min-width: 220px; }
+.pf-stat-block h4 { margin: 0 0 6px; font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.pf-stat-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; margin: 2px 0; }
+.pf-stat-row > span:first-child { flex: 0 0 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-stat-bar { flex: 1; height: 8px; background: var(--bg-input); border-radius: 4px; overflow: hidden; }
+.pf-stat-bar i { display: block; height: 100%; background: var(--accent); }
+.pf-store-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--bg-input); }
+.pf-store-info { flex: 1; min-width: 0; }
+.pf-store-info > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Morphologischer Kasten (🧩) ───────────────────────────────────────────── */
 #morph-panel { display: none; flex-direction: column; height: 100%; overflow: hidden; }

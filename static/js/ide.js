@@ -70,6 +70,22 @@ const CodeIDE = (() => {
   const _console = () => document.getElementById('ide-console');
   const _nameEl  = () => document.getElementById('ide-name');
 
+  // Sprache aus dem Code erkennen (für Übernahme aus Chat / Assistent):
+  // Canvas-/JS-Marker → 'js', Python-Marker → 'py', sonst null (Auswahl behalten).
+  function _detectLang(code) {
+    if (!code) return null;
+    if (/ai_framework_thomas_run\s*\(|getContext\s*\(|canvas\.(width|height)|\bctx\b/.test(code)) return 'js';
+    if (/^\s*(import\s+\w|from\s+\w|def\s+\w|print\s*\()/m.test(code) || /\bplt\.|\bnp\.|\bsp\.|\bpd\./.test(code)) return 'py';
+    return null;
+  }
+  // gewünschte Sprache anwenden, falls erlaubt und abweichend
+  function _applyLang(lang, code) {
+    let l = null;
+    if (lang) l = /^(py|python)$/i.test(lang) ? 'py' : (/^(js|javascript|html)$/i.test(lang) ? 'js' : null);
+    if (!l) l = _detectLang(code);
+    if (l && l !== _lang && !(l === 'py' && window.AllowPythonExec === false)) _setLang(l, { silent: true });
+  }
+
   function _getCode() { return _cm ? _cm.getValue() : (_editor()?.value || ''); }
   function _setCode(c) {
     if (_cm) { _cm.setValue(c || ''); }
@@ -220,6 +236,7 @@ if (!_drawFn) { _resize(); }
     const frame = _preview();
     const cons  = _console();
     if (!frame) return;
+    _showPyOutput(false);   // Vorschau-iframe wieder einblenden (war evtl. von Python verdeckt)
     if (cons) cons.innerHTML = '';
     _lastErrors = [];
     document.getElementById('btn-ide-repair').style.display = 'none';
@@ -350,19 +367,40 @@ if (!_drawFn) { _resize(); }
   /* ── Dateiliste ──────────────────────────────────────────────── */
   async function _loadList() {
     const listEl = document.getElementById('ide-file-list-inline');
-    if (!listEl) return;
+    const sel    = document.getElementById('ide-load-select');
     try {
       const programs = await (await fetch('/api/code')).json();
-      listEl.innerHTML = '';
-      for (const p of programs) {
-        const item = document.createElement('span');
-        item.className = 'ide-file-chip' + (p.id === _currentId ? ' active' : '');
-        item.textContent = p.name;
-        item.title = p.name;
-        item.addEventListener('click', () => _openProgram(p.id));
-        listEl.appendChild(item);
+      if (listEl) {
+        listEl.innerHTML = '';
+        for (const p of programs) {
+          const item = document.createElement('span');
+          item.className = 'ide-file-chip' + (p.id === _currentId ? ' active' : '');
+          item.textContent = p.name;
+          item.title = p.name;
+          item.addEventListener('click', () => _openProgram(p.id));
+          listEl.appendChild(item);
+        }
+      }
+      if (sel) {
+        sel.innerHTML = `<option value="">📂 Gespeicherte laden… (${programs.length})</option>`
+          + programs.map(p => `<option value="${_esc(p.id)}"${p.id === _currentId ? ' selected' : ''}>${_esc(p.name)}</option>`).join('');
       }
     } catch (_) {}
+  }
+
+  // Aktuell geladenes Programm löschen (DELETE /api/code/{id}), dann Editor leeren.
+  async function _deleteCurrent() {
+    if (!_currentId) { showToast('Kein gespeichertes Programm geladen'); return; }
+    if (!confirm(`Programm „${_currentName}" wirklich löschen?`)) return;
+    try {
+      const resp = await fetch(`/api/code/${_currentId}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      showToast('✓ Gelöscht');
+      _clearDirty();
+      _new();   // Editor/Vorschau leeren + Liste neu laden
+    } catch (e) {
+      showToast('Löschen fehlgeschlagen: ' + e.message);
+    }
   }
 
   async function _openProgram(id) {
@@ -381,15 +419,17 @@ if (!_drawFn) { _resize(); }
   }
 
   /* ── Code aus dem Chat übernehmen (Programmier-Agent) ────────── */
-  function loadFromChat(code, name) {
+  function loadFromChat(code, name, lang) {
     if (!code) return;
     if (_dirty && !confirm('Ungespeicherte Änderungen in der IDE verwerfen und Chat-Code übernehmen?')) return;
     if (typeof switchTab === 'function') switchTab('ide');
+    _applyLang(lang, code);   // Sprache aus Codeblock/Heuristik → richtige Ausführ-Engine
     _currentId = null;
     _currentName = (name || 'Chat-Programm').trim();
     if (_nameEl()) _nameEl().value = _currentName;
     _setCode(code);
     _setDirty();
+    refresh();
     const c = _console(); if (c) c.innerHTML = '';
     _lastErrors = [];
     const repairBtn = document.getElementById('btn-ide-repair');
@@ -533,8 +573,12 @@ if (!_drawFn) { _resize(); }
       if (d.type === 'questions') {
         _renderClarify(wrap, d.questions, d.adaptive_role);
       } else {
-        if (d.code) { _setCode(d.code); _setDirty(); _run(); }
-        if (wrap) wrap.textContent = (d.adaptive_role ? `🧠 ${d.adaptive_role}\n` : '') + (d.note || '✓ Code erstellt');
+        if (d.code) {
+          _applyLang(d.language, d.code);   // Engine (JS-Canvas ⇄ Python) zum Code passend setzen
+          _setCode(d.code); _setDirty(); refresh(); _run();
+        }
+        if (wrap) wrap.textContent = (d.adaptive_role ? `🧠 ${d.adaptive_role}\n` : '')
+          + (d.note || '✓ Code erstellt') + (d.code ? '\n→ in den Editor übernommen und ausgeführt.' : '');
       }
     } catch (e) {
       if (wrap) wrap.textContent = '❌ ' + e.message;
@@ -694,6 +738,12 @@ if (!_drawFn) { _resize(); }
     document.getElementById('btn-ide-run')?.addEventListener('click', _run);
     document.getElementById('btn-ide-save')?.addEventListener('click', _save);
     document.getElementById('btn-ide-new')?.addEventListener('click', _new);
+    document.getElementById('ide-load-select')?.addEventListener('change', e => {
+      const id = e.target.value;
+      if (id) _openProgram(id);
+      e.target.value = '';   // Auswahl zurücksetzen, Bezeichnung „laden…" wieder zeigen
+    });
+    document.getElementById('btn-ide-delete')?.addEventListener('click', _deleteCurrent);
     document.getElementById('btn-ide-example-toleranz')?.addEventListener('click', () => _loadExample('toleranz'));
     document.getElementById('btn-ide-example-kurve')?.addEventListener('click',    () => _loadExample('kurve'));
     document.getElementById('btn-ide-example-py')?.addEventListener('click',       () => _loadExample('python'));

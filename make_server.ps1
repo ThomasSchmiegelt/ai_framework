@@ -87,8 +87,8 @@ Write-Step "Python venv für Server erstellen..."
 $pyCmdObj = Get-Command "python" -ErrorAction SilentlyContinue
 $pyCmd = if ($pyCmdObj) { $pyCmdObj.Source } else { "python" }
 & $pyCmd -m venv "$SERVER_DIR\venv"
-& "$SERVER_DIR\venv\Scripts\pip.exe" install --upgrade pip --quiet
-& "$SERVER_DIR\venv\Scripts\pip.exe" install -r "$SERVER_DIR\requirements.txt" --quiet
+& "$SERVER_DIR\venv\Scripts\pip.exe" install --upgrade pip setuptools wheel --quiet
+& "$SERVER_DIR\venv\Scripts\pip.exe" install -r "$SERVER_DIR\requirements.txt" --quiet --prefer-binary
 Write-OK "venv eingerichtet"
 
 # ── Datenverzeichnisse ─────────────────────────────────────────────────────────

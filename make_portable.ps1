@@ -117,12 +117,25 @@ Write-Step "pip in Embedded Python einrichten..."
 $getPipPath = "$env:TEMP\get-pip.py"
 Invoke-WebRequest -Uri $GETPIP_URL -OutFile $getPipPath -UseBasicParsing
 & "$pyDir\python.exe" $getPipPath --quiet
-Write-OK "pip installiert"
+# get-pip.py bringt NUR pip mit — nicht setuptools/wheel. Manche (reine-Python-)
+# Pakete (z. B. Abhängigkeiten von extract-msg) haben kein fertiges Wheel und werden
+# aus einer Source-Distribution gebaut; dafür braucht pip das Build-Backend
+# setuptools.build_meta. Fehlt es, bricht die Installation mit
+# "Cannot import 'setuptools.build_meta'" ab. Daher hier bereitstellen.
+& "$pyDir\python.exe" -m pip install --quiet --no-warn-script-location setuptools wheel
+if ($LASTEXITCODE -ne 0) { Write-Fail "setuptools/wheel konnten nicht installiert werden" }
+Write-OK "pip + setuptools/wheel installiert"
 
 # Pakete installieren
 Write-Step "Python-Pakete installieren (in Bundle)..."
+#  --prefer-binary       : vorhandene Wheels bevorzugen (kein unnötiger sdist-Build).
+#  --no-build-isolation  : nötige sdist-Builds (reine-Python-Pakete wie compressed-rtf,
+#                          red-black-tree-mod) nutzen das oben installierte setuptools/
+#                          wheel aus dem Haupt-Env. Im Embedded-Python funktioniert pips
+#                          Build-Isolation nicht zuverlässig (kein venv), sonst
+#                          "Cannot import 'setuptools.build_meta'".
 & "$pyDir\python.exe" -m pip install -r "$BUNDLE_DIR\app\requirements.txt" `
-    --quiet --no-warn-script-location
+    --quiet --no-warn-script-location --prefer-binary --no-build-isolation
 if ($LASTEXITCODE -ne 0) { Write-Fail "Paket-Installation fehlgeschlagen" }
 Write-OK "Pakete installiert"
 

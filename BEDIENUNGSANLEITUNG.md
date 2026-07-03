@@ -22,6 +22,7 @@
 11. [Mathe-Tab](#11-mathe-tab)
 - [Verzeichnis-Analyse-Tab](#11a-verzeichnis-analyse-tab)
 - [Morphologischer-Kasten-Tab](#11b-morphologischer-kasten-tab)
+- [Postfach-Tab (PST-/Mail-Auswertung)](#11c-postfach--pst-mail-auswertung)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
 13. [Matrix-Recherche](#13-matrix-recherche)
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
@@ -91,10 +92,11 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | 🧩 Morph-Kasten | Morphologischer Kasten (Zwicky-Box) mit KI *(optional)* |
 | ⚖️ Jury | Dokumente schreiben/bearbeiten und von einer Jury prüfen lassen *(optional)* |
 | 📧 Mail | Postfach (IMAP/POP3) read-only: filtern → bis zu 4 Aktionen (Beta) *(optional)* |
+| 📮 Postfach | PST-/Mail-Dateien einlesen & als Wissensgraph auswerten — nur lokal *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
 > **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Verzeichnis**,
-> **Morph-Kasten**, **Jury**, **Mail** und **Logs** können im Profil ausgeblendet werden
+> **Postfach**, **Morph-Kasten**, **Jury**, **Mail** und **Logs** können im Profil ausgeblendet werden
 > (→ [Abschnitt 18 – Tab-Sichtbarkeit](#18-nutzerprofil--projekte)).
 > Sie bleiben jederzeit wieder einschaltbar.
 
@@ -930,6 +932,71 @@ generieren**, **Ideen wischen** und **💬 Alternativen** ein (**↻** aktualisi
 > hinzufügen"**. Die **Wischen**-Ansicht ist auf Touch ausgelegt. Hinweis: Die echte Installation
 > verlangt **HTTPS** (oder `localhost`); über einfaches `http://…` läuft alles im Handy-Browser,
 > ist aber nicht installierbar (Details siehe Entwickler-Doku, Stichwort selbstsigniertes Zertifikat).
+
+---
+
+## 11c. Postfach — PST-/Mail-Auswertung
+
+Tab **📮 Postfach** — liest **E-Mail-Postfächer** ein und wertet sie als **Wissensgraph** aus.
+Arbeitet **ausschließlich lokal**: alle KI-Schritte (Anhang-Analyse, Ähnlichkeit, Fragen,
+Zusammenfassung, Graph-Befehl) laufen über ein **lokales** Modell (Ollama). Ohne lokales LLM
+sind diese Funktionen deaktiviert (klare 503-Meldung) — deine Mails verlassen den Rechner nie.
+
+**Formate:** `.pst` (Outlook), `.mbox`, `.eml`, `.msg`. Für `.pst` ist **kein Outlook nötig** —
+ein eingebauter, reiner-Python-Leser liest Unicode-PST direkt. PST-„Passwörter" sind technisch
+nur eine Prüfsumme (keine Verschlüsselung): der Inhalt ist auch ohne Passwort lesbar; die Eingabe
+im Passwortfeld wird nur **verifiziert** (Anzeige „🔓 korrekt" / „⚠ falsch").
+
+### Einlesen
+1. **Server-Pfad** zur Datei eingeben (z. B. `C:\Users\...\backup.pst`), bei Bedarf **Passwort**.
+2. **📥 Einlesen** → **Stufe 1**: Absender, Empfänger, Betreff, Datum, Inhalt aller Mails.
+3. Optional **🏷 Stufe 2: Anhänge & Tags** → liest **Anhänge** (Dokumente per Textauszug,
+   **Bilder direkt am lokalen Vision-Modell**, kein OCR) und vergibt **Themen-Schlagworte**.
+   Läuft über die aktuelle Auswahl/Filterung (markiert → gefiltert → alle).
+
+### Wissensgraph & Konnektoren
+Der Graph zeigt Mails als Blasen. **Klick auf eine Blase → ganze E-Mail**. Geordnet wird nach
+selbst definierten **Konnektoren** (**🔗 Konnektoren**) — benannte Wortgruppen, z. B. Konnektor
+*Lebensversicherung* = „Allianz, Continentale, CMI". Eine Mail hängt am Konnektor-Knoten, wenn
+eines der Wörter in Absender/Betreff/Inhalt (nach Stufe 2 auch im Anhang) vorkommt.
+
+**Drei Ansichten** (Modus-Umschalter in der Steuerzeile):
+- **🔗 Konnektoren** — nach deinen Wortgruppen (+ optional Absender-Domains/Themen-Tags als
+  Auto-Konnektoren).
+- **🧬 Themen-Nähe** — **Verwandtschaftsgrad**: inhaltlich ähnliche Mails werden per lokaler
+  Embeddings verbunden und farblich zu **Clustern** gruppiert; Schwellwert-Regler steuert die Dichte.
+- **👥 Netz** — **Kommunikationsnetz**: wer mit wem (Absender/Empfänger), Kantenstärke = Häufigkeit;
+  Klick auf eine Person filtert die Liste.
+
+### ▶ Graph anzeigen (Play) & Filter
+Damit die Bedienung auch bei großen Postfächern flüssig bleibt, wird der Graph **nicht live**,
+sondern nur per **▶ Graph anzeigen** neu aufgebaut. Änderst du Einstellungen, pulsiert der Knopf
+(„veraltet"). Liste, Zeitleiste und Suche bleiben sofort aktiv.
+
+- **Konnektor-Schnellfilter** (Dropdown „Konnektor: …") — nur Mails eines Konnektors.
+- **nur verbundene** — blendet isolierte Blasen (ohne Konnektor/Verbindung) aus.
+- **⚙ Filter** klappt die Detailfilter auf: Datum von/bis, Absender/Domain, Anhang-Typ (PDF/Bild/
+  Office), Themen-Tag, Ordner, „nur mit Anhang", **🔁 Duplikate** (Near-Duplikate). **Zeitleiste**
+  zum Eingrenzen nach Monat, **🔎 Suche** über alles.
+
+### 💬 Chat — fragen & steuern
+**💬 Chat** klappt zwei Eingaben auf (alles lokal):
+- **💬 Postfach fragen** — übernimm Mails per **📚 In RAG** in eine lokale Wissensdatenbank und
+  stelle dann Fragen dazu; die Antwort nennt **Quellen**.
+- **🗣 Graph-Befehl** — sag in Worten, was gezeigt werden soll, z. B. *„zeige Synera mit Eltern
+  und Kindern"* (zentriert auf passende Knoten samt Nachbarschaft), *„nur Konnektor
+  Lebensversicherung als Netz"* oder *„Mails im Dezember mit Anhang"*. Ein lokales Modell setzt
+  daraus Modus, Filter, Fokus und Nachbarschaftstiefe.
+
+### Auswerten, speichern, exportieren
+- **🧾 Zusammenfassen** — fasst die Auswahl lokal zusammen. **📊 Statistik** — Top-Absender,
+  Volumen pro Monat, Anhangsquote. **⬇ CSV / ⬇ JSON** — exportiert die gefilterten Mails.
+- **💾 Speichern** — sichert die aktuelle **Ansicht + Konnektoren** zum Postfach.
+- **📂 Gespeicherte** — bereits eingelesene Postfächer **wieder öffnen** — ohne die `.pst` erneut
+  zu parsen; die berechnete Themen-Nähe und deine gespeicherte Ansicht kommen mit zurück.
+
+> **Ein Arbeits-Spinner** oben rechts zeigt an, wenn eine Aktion (Einlesen, Analyse, Ähnlichkeit,
+> Frage, Graph-Befehl) läuft.
 
 ---
 

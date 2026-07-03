@@ -30,8 +30,8 @@ fi
 
 # Abhängigkeiten installieren
 echo "Installiere Python-Abhängigkeiten..."
-venv/bin/pip install --upgrade pip --quiet
-venv/bin/pip install -r requirements.txt --quiet
+venv/bin/pip install --upgrade pip setuptools wheel --quiet
+venv/bin/pip install -r requirements.txt --quiet --prefer-binary
 
 # Datenverzeichnisse anlegen (falls nicht vorhanden)
 for dir in data/uploads data/reports data/code data/plans data/dossiers data/profile_assets data/jury_docs; do
@@ -46,7 +46,7 @@ if [ -t 0 ]; then
   echo ""
   echo "=== Funktionsauswahl (optionale Tabs) ==="
   echo "Jeweils [j/N]. Diese Tabs sind beim Erststart sonst ausgeblendet."
-  OPT_TABS="rag:Wissensdatenbanken-(RAG) ide:Code-IDE mathe:Mathe medizin:Medizin mail:Mail logs:Logs diranalyse:Verzeichnis-Analyse morph:Morphologischer-Kasten jury:Jury"
+  OPT_TABS="rag:Wissensdatenbanken-(RAG) ide:Code-IDE mathe:Mathe medizin:Medizin mail:Mail logs:Logs diranalyse:Verzeichnis-Analyse postfach:Postfach-(PST/Mail,-nur-lokal) morph:Morphologischer-Kasten jury:Jury"
   HIDDEN=""
   for entry in $OPT_TABS; do
     tab="${entry%%:*}"; label="${entry#*:}"

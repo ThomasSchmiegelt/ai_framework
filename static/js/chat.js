@@ -705,12 +705,28 @@ const Chat = (() => {
       });
       // Kopier-Button für Code-Blöcke
       el.querySelectorAll('pre').forEach(pre => {
+        pre.style.position = 'relative';
+        const codeEl = pre.querySelector('code');
+        const codeText = () => codeEl?.textContent || pre.textContent;
+
+        // „In Code-Tab" — Codeblock ins Code-Tab übernehmen und ausführen.
+        // Sprache aus der highlight.js-Klasse (language-…) ableiten.
+        if (codeEl && typeof CodeIDE !== 'undefined' && CodeIDE.loadFromChat) {
+          const m = (codeEl.className || '').match(/language-([\w+-]+)/);
+          const lang = m ? m[1].toLowerCase() : '';
+          const ideBtn = document.createElement('button');
+          ideBtn.textContent = '▶ Code-Tab';
+          ideBtn.title = 'Code ins Code-Tab übernehmen und ausführen';
+          ideBtn.style.cssText = 'position:absolute;top:8px;right:74px;padding:3px 8px;font-size:11px;background:#234;color:#9cf;border:1px solid #46a;border-radius:4px;cursor:pointer';
+          ideBtn.addEventListener('click', () => CodeIDE.loadFromChat(codeText(), 'Chat-Code', lang));
+          pre.appendChild(ideBtn);
+        }
+
         const btn = document.createElement('button');
         btn.textContent = 'Kopieren';
         btn.style.cssText = 'position:absolute;top:8px;right:8px;padding:3px 8px;font-size:11px;background:#333;color:#aaa;border:1px solid #555;border-radius:4px;cursor:pointer';
-        pre.style.position = 'relative';
         btn.addEventListener('click', () => {
-          navigator.clipboard.writeText(pre.querySelector('code')?.textContent || pre.textContent);
+          navigator.clipboard.writeText(codeText());
           btn.textContent = '✓';
           setTimeout(() => { btn.textContent = 'Kopieren'; }, 1500);
         });

@@ -501,55 +501,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Planer
-  Planner.init();
+  // Modul-Initialisierung isoliert: ein Fehler in EINEM Modul darf die übrigen Tabs
+  // nicht mehr lahmlegen (früher hat z. B. ein Fehler im Code-Workspace verhindert,
+  // dass Mathe/Verzeichnis/Jury/… überhaupt verdrahtet wurden).
+  const _safeInit = (label, fn) => { try { fn(); } catch (e) { console.error('Init fehlgeschlagen:', label, e); } };
 
-  // Matrix-Recherche
-  MatrixResearch.init();
-
-  // Anfrage-Auswertung (RFQ)
-  if (typeof RFQ !== 'undefined') RFQ.init();
-
-  // Präsentations-Assistent
-  PresentationAssistant.init();
-
-  // Bebilderte Präsentation
-  IllustratedPresentation.init();
-
-  // WYSIWYG-Folieneditor
-  CanvasEditor.init();
-
-  // JSON-Editor
-  JsonEditor.init();
-
-  // Code-IDE
-  CodeIDE.init();
-
-  // Untertab-Umschalter im Code-Tab (IDE | JSON-Editor)
-  document.querySelectorAll('.code-subtab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const target = btn.dataset.subtab;
-      document.querySelectorAll('.code-subtab').forEach(b =>
-        b.classList.toggle('active', b.dataset.subtab === target));
-      document.querySelectorAll('.code-view').forEach(v =>
-        v.classList.toggle('active', v.id === `code-view-${target}`));
-      // CodeMirror muss neu vermessen, wenn der IDE-Unterview wieder sichtbar wird
-      if (target === 'ide' && typeof CodeIDE !== 'undefined' && CodeIDE.refresh) CodeIDE.refresh();
-    });
-  });
-
-  // Medizin-Tab initialisieren
-  if (typeof MedizinChat !== 'undefined') MedizinChat.init();
-
-  // Mathe-Tab initialisieren
-  if (typeof MatheChat !== 'undefined') MatheChat.init();
-
-  // Verzeichnis-Analyse + Morphologischer Kasten (optionale Tabs)
-  if (typeof DirAnalysis !== 'undefined') DirAnalysis.init();
-  if (typeof MorphBox !== 'undefined') MorphBox.init();
-
-  // Jury (Bewertungs-Gremien)
-  if (typeof Jury !== 'undefined') Jury.init();
+  _safeInit('Planner', () => Planner.init());
+  _safeInit('MatrixResearch', () => MatrixResearch.init());
+  _safeInit('RFQ', () => { if (typeof RFQ !== 'undefined') RFQ.init(); });
+  _safeInit('PresentationAssistant', () => PresentationAssistant.init());
+  _safeInit('IllustratedPresentation', () => IllustratedPresentation.init());
+  _safeInit('CanvasEditor', () => CanvasEditor.init());
+  _safeInit('CodeWorkspace', () => { if (typeof CodeWorkspace !== 'undefined') CodeWorkspace.init(); });
+  _safeInit('MedizinChat', () => { if (typeof MedizinChat !== 'undefined') MedizinChat.init(); });
+  _safeInit('MatheChat', () => { if (typeof MatheChat !== 'undefined') MatheChat.init(); });
+  _safeInit('DirAnalysis', () => { if (typeof DirAnalysis !== 'undefined') DirAnalysis.init(); });
+  _safeInit('MorphBox', () => { if (typeof MorphBox !== 'undefined') MorphBox.init(); });
+  _safeInit('Postfach', () => { if (typeof Postfach !== 'undefined') Postfach.init(); });
+  _safeInit('Jury', () => { if (typeof Jury !== 'undefined') Jury.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)
   (function wireGuide() {
@@ -580,7 +549,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   })();
 
   // Token-Zähler (Sitzung) — nach Profile.init(), damit der Preis verfügbar ist
-  if (typeof TokenMeter !== 'undefined') TokenMeter.init();
+  _safeInit('TokenMeter', () => { if (typeof TokenMeter !== 'undefined') TokenMeter.init(); });
 
   // Diagnose-Logger (als letztes, damit alle anderen Module bereits verdrahtet sind)
   await Logger.init();

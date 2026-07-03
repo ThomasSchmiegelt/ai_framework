@@ -29,6 +29,8 @@
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Mermaid.js für Ablauf-/Datenfluss-/Sequenzdiagramme -->
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <!-- Cytoscape.js (lokal/vendored, MIT) für den Wissensgraphen der Matrix-Recherche -->
+  <script src="/js/cytoscape.min.js"></script>
   <!-- KaTeX für mathematische Formeln (Formelzeichen) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
@@ -47,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260622" />
+  <link rel="stylesheet" href="/css/app.css?v=20260703save" />
 </head>
 <body>
 
@@ -141,6 +143,7 @@
       <button class="tab-btn" data-tab="medizin">🩺 Medizin</button>
       <button class="tab-btn" data-tab="mathe">🔢 Mathe</button>
       <button class="tab-btn" data-tab="diranalyse">📁 Verzeichnis</button>
+      <button class="tab-btn" data-tab="postfach">📮 Postfach</button>
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
       <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
     </div>
@@ -1038,17 +1041,40 @@
         <button id="btn-matrix-md-zip" class="export-btn" title="Jede Zelle als eigene thema_prompt.md, gesammelt als ZIP herunterladen">⬇ MD-ZIP (pro Zelle)</button>
         <button id="btn-matrix-import-csv" class="export-btn">⬆ CSV Import</button>
         <input type="file" id="matrix-csv-input" accept=".csv" style="display:none" />
+        <button id="btn-matrix-graph" class="export-btn" style="font-size:12px" title="Wissensgraph ein-/ausblenden: Zeilen als Knoten, Verknüpfungen per KI-Vorschlag und manuell editierbar">🕸 Graph</button>
+        <button id="btn-matrix-table-graph" class="export-btn" style="font-size:12px" title="2. Stufe: komplette bestehende Tabelle in einen Wissensgraphen überführen (öffnet den Graphen, schlägt Verknüpfungen über alle Zeilen vor) – ohne erneute Recherche">🕸 Tabelle → Graph</button>
         <button id="btn-matrix-clear" class="export-btn btn-danger-sm">✕ Leeren</button>
       </div>
-      <div style="padding:8px 12px 4px;font-size:13px;color:var(--text-dim);display:flex;justify-content:space-between;align-items:center">
-        <span>Spalte 1 = Themen/Firmen · Kopfzeile ab Spalte 2 = Suchprompt + Agent (pro Spalte wählbar, „ausführen"/„Kontext" schaltbar, ▶ Spalte = stufenweise) · Zellen per KI-Websuche · „🤝 Partner-Auswertung" richtet Firmen-Recherche → Ansprechpartner → Social → Kaltakquise-Mail ein</span>
-        <span id="matrix-autosave-label" style="font-size:11px;color:var(--text-muted);display:none">💾 Gespeichert</span>
+      <div style="padding:8px 12px 4px;font-size:13px;color:var(--text-dim);display:flex;gap:10px;justify-content:space-between;align-items:center">
+        <button id="btn-matrix-toolbar-toggle" class="export-btn" style="font-size:11px;padding:2px 8px;flex-shrink:0" title="Button-Leiste ein-/ausblenden (mehr Platz für Tabelle/Graph)">▴ Leiste</button>
+        <span style="flex:1;min-width:0">Spalte 1 = Themen/Firmen · Kopfzeile ab Spalte 2 = Suchprompt + Agent (pro Spalte wählbar, „ausführen"/„Kontext" schaltbar, ▶ Spalte = stufenweise) · Zellen per KI-Websuche · „🤝 Partner-Auswertung" richtet Firmen-Recherche → Ansprechpartner → Social → Kaltakquise-Mail ein · „🕸 Graph" = Wissensgraph (Zeilen als Knoten, Verknüpfungen per KI-Vorschlag + manuell)</span>
+        <span id="matrix-autosave-label" style="font-size:11px;color:var(--text-muted);display:none;flex-shrink:0">💾 Gespeichert</span>
       </div>
-      <div id="matrix-table-wrap">
-        <table id="matrix-table">
-          <thead><tr id="matrix-header-row"></tr></thead>
-          <tbody id="matrix-body"></tbody>
-        </table>
+      <div id="matrix-split">
+        <div id="matrix-table-wrap">
+          <table id="matrix-table">
+            <thead><tr id="matrix-header-row"></tr></thead>
+            <tbody id="matrix-body"></tbody>
+          </table>
+        </div>
+        <div id="matrix-splitter" title="Ziehen zum Verschieben"></div>
+        <div id="matrix-graph-pane" style="display:none">
+          <div id="matrix-graph-toolbar">
+            <button id="btn-graph-extract" class="export-btn" style="font-size:12px" title="KI liest je Zeile die recherchierten Infos und erkennt typisierte Merkmale (Ort, Tool, Tätigkeit …). Zeilen mit gleichem Merkmal hängen am selben farbigen Merkmal-Knoten und sind so verbunden.">🏷 Merkmale</button>
+            <button id="btn-graph-cats" class="export-btn" style="font-size:12px" title="Merkmals-Kategorien festlegen (je Kategorie eine Farbe)">⚙ Kategorien</button>
+            <button id="btn-graph-suggest" class="export-btn" style="font-size:12px" title="Optional: KI schlägt zusätzlich direkte Beziehungen zwischen den Zeilen vor (z. B. liefert an, Tochter von)">✨ Direkt-Kanten</button>
+            <button id="btn-graph-connect" class="export-btn" style="font-size:12px" title="Verbindungsmodus: zwei Knoten nacheinander anklicken, um eine Kante zu ziehen">🔗 Verbinden</button>
+            <button id="btn-graph-relayout" class="export-btn" style="font-size:12px" title="Knoten neu anordnen">⟳ Anordnen</button>
+            <button id="btn-graph-fit" class="export-btn" style="font-size:12px" title="Alles einpassen">⤢ Einpassen</button>
+            <button id="btn-graph-clear-edges" class="export-btn btn-danger-sm" style="font-size:12px" title="Alle manuellen Verknüpfungen löschen (Knoten/Merkmale bleiben)">✕ Kanten</button>
+            <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;margin-left:8px" title="Merkmal-Knoten (Hubs) anzeigen"><input type="checkbox" id="matrix-show-hubs" checked> Merkmale</label>
+            <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px" title="Nur Merkmale anzeigen, die von mindestens zwei Zeilen geteilt werden"><input type="checkbox" id="matrix-shared-only" checked> nur geteilte</label>
+            <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px" title="Nach „▶ Alle ausführen" automatisch den Wissensgraphen erzeugen"><input type="checkbox" id="matrix-auto-graph" checked> Auto</label>
+            <span id="matrix-graph-hint" style="font-size:11px;color:var(--text-muted);margin-left:auto"></span>
+          </div>
+          <div id="matrix-graph-legend" style="font-size:11px;color:var(--text-muted);padding:2px 8px"></div>
+          <div id="matrix-graph"></div>
+        </div>
       </div>
     </div>
 
@@ -1219,125 +1245,70 @@
       </div>
     </div>
 
-    <!-- ── Code-Panel (IDE + JSON-Editor als Untertabs) ─────────────────── -->
+    <!-- ── Code-Panel (ein Workspace: Chat + Dateien + Editor/Ausgabe) ────── -->
     <div id="ide-panel" class="panel">
 
-      <!-- Untertab-Leiste -->
-      <div id="code-subtabs">
-        <button class="code-subtab active" data-subtab="ide">💻 IDE</button>
-        <button class="code-subtab" data-subtab="json">🧩 JSON-Editor</button>
+      <!-- Prompt-Leiste (chat-first, aider-inspiriert) -->
+      <div id="cw-prompt-bar">
+        <textarea id="cw-prompt" rows="1" placeholder="Was soll das Programm tun? (Strg+Enter = Senden)  ·  z. B. „Balkendiagramm der Zugfestigkeit von 4 Stählen“"></textarea>
+        <select id="cw-agent" class="sidebar-select" title="Optionaler Coding-Agent"><option value="">— kein Agent —</option></select>
+        <button id="cw-send" class="export-btn">▶ Senden</button>
+        <button id="cw-project" class="export-btn" title="Ganze Mehrdatei-Projektstruktur erzeugen">🏗 Struktur</button>
+        <details id="cw-more"><summary class="export-btn" title="Weitere Optionen & Beispiele">⋯</summary>
+          <div id="cw-more-pop">
+            <label><input type="checkbox" id="cw-opt-clarify" checked> Rückfragen vor dem Coden</label>
+            <label><input type="checkbox" id="cw-opt-adaptive"> adaptive Experten-Rolle</label>
+            <div class="cw-more-sep">Beispiele einfügen</div>
+            <button class="export-btn" id="cw-ex-toleranz">📐 Toleranzanalyse</button>
+            <button class="export-btn" id="cw-ex-kurve">📈 Federkennlinie</button>
+            <button class="export-btn" id="cw-ex-py">🐍 Python-Plot</button>
+            <button class="export-btn" id="cw-ex-leer">📄 Leere Vorlage</button>
+          </div>
+        </details>
       </div>
 
-      <!-- ── Untertab: IDE ── -->
-      <div id="code-view-ide" class="code-view active">
+      <!-- kompakter KI-Verlauf -->
+      <div id="cw-chat"></div>
 
-      <!-- Obere Werkzeugleiste (für Entwickler) -->
-      <div id="ide-toolbar">
-        <button class="export-btn" id="btn-ide-new">＋ Neu</button>
-        <input type="text" id="ide-name" placeholder="Programmname…" autocomplete="off" />
-        <select id="ide-lang" class="sidebar-select" style="max-width:190px;font-size:12px" title="Sprache: JavaScript läuft als Canvas-Vorschau, Python wird serverseitig ausgeführt">
-          <option value="js">🟨 JavaScript (Canvas)</option>
-          <option value="py">🐍 Python</option>
-        </select>
-        <button class="export-btn" id="btn-ide-save">💾 Speichern</button>
-        <button class="export-btn ide-run-btn" id="btn-ide-run">▶ Ausführen</button>
-        <span class="ide-hint">Strg+Enter = Ausführen · Strg+S = Speichern</span>
-        <div id="ide-examples-group">
-          <span class="ide-hint">Beispiele:</span>
-          <button class="export-btn" id="btn-ide-example-toleranz">📐 Toleranzanalyse</button>
-          <button class="export-btn" id="btn-ide-example-kurve">📈 Federkennlinie</button>
-          <button class="export-btn" id="btn-ide-example-py">🐍 Python-Plot</button>
-          <button class="export-btn" id="btn-ide-example-leer">📄 Leere Vorlage</button>
-        </div>
-      </div>
-
-      <!-- Hauptbereich: KI-Assistent links + Vorschau rechts -->
-      <div id="ide-body">
-
-        <!-- Linke Spalte: KI-Assistent (oben, prominent) + Editor (unten, für Fortgeschrittene) -->
-        <div id="ide-left">
-
-          <!-- ── KI-Assistent ── HAUPTEINSTIEG FÜR TECHNIKER ── -->
-          <div id="ide-ai-panel">
-            <div id="ide-ai-header">
-              <span id="ide-ai-title">🤖 KI-Assistent — Was soll das Programm zeigen?</span>
-              <span id="ide-chat-status"></span>
-            </div>
-            <div id="ide-chat-history"></div>
-            <div id="ide-ai-controls" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:4px 8px;font-size:11.5px">
-              <label style="display:flex;align-items:center;gap:4px">Coding-Agent
-                <select id="ide-agent-select" class="sidebar-select" style="font-size:11.5px;max-width:180px"><option value="">— keiner —</option></select>
-              </label>
-              <label style="display:flex;align-items:center;gap:4px" title="Stellt vor dem Coden Rückfragen, bis genug Informationen vorliegen"><input type="checkbox" id="ide-clarify-toggle" checked /> Rückfragen</label>
-              <label style="display:flex;align-items:center;gap:4px" title="Analysiert die Begrifflichkeiten und wertet das Profil aus, um eine passende Experten-Rolle abzuleiten"><input type="checkbox" id="ide-adaptive-toggle" /> adaptiv</label>
-            </div>
-            <div id="ide-ai-input-area">
-              <textarea id="ide-chat-input"
-                placeholder="Beschreiben Sie was das Programm tun soll — die KI schreibt den Code automatisch.
-
-Beispiele:
-• Zeige ein Balkendiagramm mit Zugfestigkeit für 4 Stähle
-• Erstelle eine Toleranzanalyse für 3 Bauteile
-• Zeichne ein Kraft-Weg-Diagramm mit Federkennlinie
-• Ändere die Farben auf Blau und mache den Titel größer"></textarea>
-              <button id="btn-ide-chat-send">
-                <span id="btn-ide-send-icon">▶</span>
-                <span id="btn-ide-send-label">Code erstellen</span>
-              </button>
-            </div>
+      <!-- Hauptbereich: Dateien | Editor + Ausgabe -->
+      <div id="cw-body">
+        <div id="cw-sidebar">
+          <div id="cw-file-actions">
+            <button class="export-btn" id="cw-new" title="Neue Datei">＋</button>
+            <button class="export-btn" id="cw-save" title="Aktive Datei dauerhaft speichern">💾</button>
+            <select id="cw-load" class="sidebar-select" title="Gespeicherte Datei laden"><option value="">📂 Laden…</option></select>
+            <button class="export-btn btn-danger-sm" id="cw-del" title="Aktive Datei entfernen">🗑</button>
+            <button class="export-btn" id="cw-zip" title="Alle Dateien als ZIP herunterladen">⬇ ZIP</button>
           </div>
-
-          <!-- ── Code-Editor (für Fortgeschrittene / Anpassungen) ── -->
-          <div id="ide-editor-panel">
-            <div id="ide-editor-bar">
-              <span style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Code-Editor</span>
-              <div id="ide-file-list-inline"></div>
+          <div id="cw-tree"></div>
+        </div>
+        <div id="cw-splitter" title="Ziehen zum Verschieben"></div>
+        <div id="cw-main">
+          <div id="cw-editor-bar">
+            <input type="text" id="cw-name" placeholder="dateiname.js" autocomplete="off" />
+            <select id="cw-lang" class="sidebar-select" title="Sprache/Ausführ-Engine der aktiven Datei">
+              <option value="js">🟨 JavaScript (Canvas)</option>
+              <option value="py">🐍 Python</option>
+              <option value="json">🧩 JSON</option>
+            </select>
+            <span id="cw-json-actions" style="display:none">
+              <button class="export-btn" id="cw-json-validate" title="JSON prüfen">✓ Prüfen</button>
+              <button class="export-btn" id="cw-json-format" title="JSON formatieren">✨ Format</button>
+            </span>
+            <button class="export-btn ide-run-btn" id="cw-run" title="Aktive Datei ausführen (Strg+Enter)">▶ Ausführen</button>
+          </div>
+          <textarea id="cw-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"
+            placeholder="Code der aktiven Datei — oder oben die KI beschreiben lassen, was sie tun soll…"></textarea>
+          <div id="cw-splitter-v" title="Ziehen zum Verschieben"></div>
+          <div id="cw-output">
+            <div id="cw-output-bar">
+              <span style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Ausgabe</span>
+              <button id="cw-repair" class="export-btn" style="display:none">🔧 Fehler automatisch beheben</button>
             </div>
-            <textarea id="ide-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"
-              placeholder="Der KI-generierte Code erscheint hier automatisch und kann manuell angepasst werden…"></textarea>
+            <iframe id="cw-preview" sandbox="allow-scripts" title="Vorschau"></iframe>
+            <div id="cw-py-output" style="display:none"></div>
+            <div id="cw-console"></div>
           </div>
-        </div>
-
-        <!-- Ziehbarer Trenner: Breite Editor ↔ Vorschau (Doppelklick = zurücksetzen) -->
-        <div id="ide-splitter" title="Ziehen, um die Breite zu ändern (Doppelklick = zurücksetzen)"></div>
-
-        <!-- Rechte Spalte: Vorschau + Konsole -->
-        <div id="ide-right">
-          <div id="ide-preview-bar">
-            <span style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Vorschau</span>
-          </div>
-          <iframe id="ide-preview" sandbox="allow-scripts" title="Vorschau"></iframe>
-          <div id="ide-py-output" style="display:none"></div>
-          <div id="ide-console-bar">
-            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Meldungen</span>
-            <div style="display:flex;gap:6px;align-items:center">
-              <button id="btn-ide-repair" style="display:none">🔧 Fehler automatisch beheben</button>
-              <button onclick="document.getElementById('ide-console').innerHTML='';document.getElementById('btn-ide-repair').style.display='none'" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:11px">✕</button>
-            </div>
-          </div>
-          <div id="ide-console"></div>
-        </div>
-      </div>
-      </div><!-- /code-view-ide -->
-
-      <!-- ── Untertab: JSON-Editor ─────────────────────────────────────── -->
-      <div id="code-view-json" class="code-view">
-        <div id="json-toolbar">
-          <button id="btn-json-open" class="export-btn">📂 Datei öffnen</button>
-          <input type="file" id="json-file-input" accept=".json,application/json" style="display:none" />
-          <span id="json-filename" class="planner-muted">Keine Datei</span>
-          <button id="btn-json-format" class="export-btn">✨ Formatieren</button>
-          <button id="btn-json-validate" class="export-btn">✓ Prüfen</button>
-          <button id="btn-json-download" class="export-btn">💾 Herunterladen</button>
-          <span id="json-status" class="json-status"></span>
-        </div>
-        <div style="padding:6px 14px;font-size:12px;color:var(--text-dim)">
-          JSON-Dateien öffnen, prüfen und reparieren. Fehler werden mit Zeile/Spalte angezeigt. Die korrigierte Datei lädst du wieder herunter.
-        </div>
-        <div id="json-editor-wrap">
-          <pre id="json-gutter" aria-hidden="true"></pre>
-          <textarea id="json-editor-area" spellcheck="false"
-            placeholder='{ "beispiel": true }  …  öffne eine Datei oder füge JSON ein'></textarea>
         </div>
       </div>
 
@@ -1543,6 +1514,148 @@ Beispiele:
         <button id="btn-dir-save-rag" class="export-btn">📚 In Wissensdatenbank</button>
       </div>
     </div><!-- /diranalyse-panel -->
+
+    <!-- ── Postfach-Auswertung (PST/mbox/eml/msg) ────────────────────────── -->
+    <div id="postfach-panel" class="panel">
+      <div id="pf-toolbar">
+        <h2 style="font-size:16px;margin:0">📮 Postfach</h2>
+        <input type="text" id="pf-path" placeholder="Server-Pfad zur .pst / .mbox / .eml / .msg" />
+        <input type="password" id="pf-pass" placeholder="Passwort (falls geschützt)" autocomplete="off" style="max-width:180px" />
+        <button id="btn-pf-open" class="export-btn">📥 Einlesen</button>
+        <button id="btn-pf-stores" class="export-btn" title="Bereits eingelesene Postfächer wieder öffnen (ohne erneutes Parsen)">📂 Gespeicherte</button>
+        <button id="btn-pf-stage2" class="export-btn" title="Analysestufe 2: Anhänge lesen (Dokumente + Bilder per lokalem Modell) und Themen-Schlagworte vergeben">🏷 Stufe 2: Anhänge & Tags</button>
+        <button id="btn-pf-connectors" class="export-btn" title="Konnektoren definieren – benannte Wortgruppen, nach denen der Graph geordnet wird">🔗 Konnektoren</button>
+        <button id="btn-pf-save" class="export-btn" title="Aktuelle Ansicht + Konnektoren zu diesem Postfach speichern (kommt beim Wiederöffnen zurück)">💾 Speichern</button>
+        <button id="btn-pf-rag" class="export-btn" title="Markierte/gefilterte Mails in eine lokale Wissensdatenbank (RAG) übernehmen">📚 In RAG</button>
+        <button id="btn-pf-summarize" class="export-btn" title="Auswahl/gefilterte Mails lokal zusammenfassen">🧾 Zusammenfassen</button>
+        <button id="btn-pf-stats" class="export-btn" title="Statistik (Top-Absender, Volumen/Monat, Anhänge)">📊 Statistik</button>
+        <button id="btn-pf-export-csv" class="export-btn" title="Gefilterte Mails als CSV exportieren">⬇ CSV</button>
+        <button id="btn-pf-export-json" class="export-btn" title="Gefilterte Mails als JSON exportieren">⬇ JSON</button>
+        <button id="btn-pf-delete" class="export-btn btn-danger-sm" title="Eingelesenes Postfach verwerfen">✕</button>
+        <span id="pf-spin" class="pf-spin" style="display:none;margin-left:auto"></span>
+        <span id="pf-status" class="planner-muted" style="font-size:11.5px"></span>
+      </div>
+      <!-- Immer sichtbare, schlanke Steuerzeile (maximiert die Anzeige darunter) -->
+      <div class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="search" id="pf-search" placeholder="🔎 Suche…" style="flex:1;min-width:150px" />
+        <button id="btn-pf-graph-go" class="export-btn pf-play" title="Graph mit den aktuellen Einstellungen aufbauen/aktualisieren (nur hier läuft das aufwändige Layout)">▶ Graph anzeigen</button>
+        <span id="pf-graph-mode" style="display:inline-flex;gap:4px">
+          <button class="pf-mode-btn on" data-mode="conn" title="Nach selbst definierten Konnektoren ordnen">🔗</button>
+          <button class="pf-mode-btn" data-mode="sim" title="Themen-Nähe: inhaltlich ähnliche Mails verbinden & clustern (lokale Embeddings)">🧬</button>
+          <button class="pf-mode-btn" data-mode="net" title="Kommunikationsnetz: wer mit wem (Absender/Empfänger)">👥</button>
+        </span>
+        <select id="pf-conn-filter" style="font-size:11px;max-width:180px" title="Schnellfilter: nur Mails, die zu diesem Konnektor gehören"><option value="">Konnektor: alle</option></select>
+        <label style="font-size:11.5px;display:flex;align-items:center;gap:4px" title="Isolierte Knoten (ohne Konnektor/Verbindung) ausblenden"><input type="checkbox" id="pf-connected-only" /> nur verbundene</label>
+        <span id="pf-sim-controls" style="display:none;align-items:center;gap:6px">
+          <label style="font-size:11px">Schwelle <input type="range" id="pf-sim-threshold" min="50" max="95" value="60" style="vertical-align:middle" /></label>
+          <span id="pf-sim-val" style="font-size:11px;color:var(--text-muted)">0.60</span>
+          <button id="pf-sim-recompute" class="export-btn" title="Ähnlichkeit neu berechnen (lokal)">↻</button>
+        </span>
+        <button id="btn-pf-options" class="export-btn" title="Filter & Optionen ein-/ausblenden">⚙ Filter</button>
+        <button id="btn-pf-chat" class="export-btn" title="Chat: fragen & Graph per Befehl steuern">💬 Chat</button>
+      </div>
+      <!-- Einklappbare Optionen (Filter + Konnektor-Quellen) -->
+      <div id="pf-options" style="display:none">
+        <div class="dir-hint" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:11.5px;display:flex;align-items:center;gap:4px" title="Mails zu Konversationen bündeln (Betreff/Re:)"><input type="checkbox" id="pf-threads" /> Threads</label>
+          <label style="font-size:11.5px;display:flex;align-items:center;gap:4px" title="Absender-Domains als zusätzliche Konnektoren"><input type="checkbox" id="pf-sender-clusters" /> Absender-Cluster</label>
+          <label style="font-size:11.5px;display:flex;align-items:center;gap:4px" title="Themen-Tags (aus Stufe 2) als zusätzliche Konnektoren"><input type="checkbox" id="pf-tag-connectors" /> Themen-Tags</label>
+          <label style="font-size:11.5px;display:flex;align-items:center;gap:4px" title="Konnektor-Knoten (Hubs) anzeigen"><input type="checkbox" id="pf-show-hubs" checked /> Hubs</label>
+        </div>
+        <div class="dir-hint pf-filters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:11.5px;color:var(--text-muted)">Filter:</span>
+          <label style="font-size:11px">von <input type="date" id="pf-f-from" /></label>
+          <label style="font-size:11px">bis <input type="date" id="pf-f-to" /></label>
+          <select id="pf-f-sender" style="font-size:11px;max-width:170px"><option value="">Alle Absender</option></select>
+          <select id="pf-f-tag" style="font-size:11px;max-width:150px"><option value="">Alle Themen-Tags</option></select>
+          <select id="pf-f-folder" style="font-size:11px;max-width:140px"><option value="">Alle Ordner</option></select>
+          <select id="pf-f-atttype" style="font-size:11px" title="Anhang-Typ"><option value="">Anhang: alle</option><option value="pdf">PDF</option><option value="bild">Bild</option><option value="office">Office</option><option value="andere">andere</option></select>
+          <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pf-f-hasatt" /> nur mit Anhang</label>
+          <button id="btn-pf-dup" class="export-btn" title="Nur Near-Duplikate (sehr ähnliche Mails) zeigen – nutzt die Verwandtschaftsanalyse">🔁 Duplikate</button>
+          <button id="btn-pf-filter-reset" class="export-btn" title="Alle Filter zurücksetzen">↺ Zurücksetzen</button>
+        </div>
+      </div>
+      <!-- Einklappbarer Chat: Postfach fragen (RAG) + Graph-Befehl (steuert die Ansicht) -->
+      <div id="pf-chat-wrap" style="display:none">
+        <div id="pf-ask-bar" class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:11.5px;color:var(--text-muted)">💬 Postfach fragen:</span>
+          <input type="text" id="pf-ask-input" placeholder="Frage an die in RAG übernommenen Mails…" style="flex:1;min-width:200px" />
+          <select id="pf-ask-coll" style="font-size:11px;max-width:180px" title="Wissensdatenbank (lokal)"></select>
+          <button id="pf-ask-go" class="export-btn">Fragen</button>
+        </div>
+        <div id="pf-cmd-bar" class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:11.5px;color:var(--text-muted)">🗣 Graph-Befehl:</span>
+          <input type="text" id="pf-cmd-input" placeholder="z. B. „zeige Synera mit Eltern und Kindern" · „nur Konnektor Lebensversicherung als Netz" · „Mails im Dezember mit Anhang"…" style="flex:1;min-width:240px" />
+          <button id="pf-cmd-go" class="export-btn" title="Befehl lokal interpretieren und die Ansicht setzen">Ausführen</button>
+        </div>
+        <div id="pf-ask-answer" class="pf-ask-answer"></div>
+      </div>
+      <div id="pf-stats" style="display:none"></div>
+      <div id="pf-timeline" style="display:none"></div>
+      <div id="pf-body">
+        <div id="pf-left">
+          <div id="pf-count" class="planner-muted" style="font-size:11.5px;padding:2px 4px"></div>
+          <div id="pf-list"></div>
+        </div>
+        <div id="pf-splitter" class="pane-splitter" title="Ziehen zum Verschieben"></div>
+        <div id="pf-graph-wrap">
+          <div id="pf-graph-legend" style="font-size:11px;color:var(--text-muted);padding:2px 8px"></div>
+          <div id="pf-graph"></div>
+        </div>
+      </div>
+      <div id="pf-stores-modal" class="pf-modal" style="display:none">
+        <div class="pf-modal-box">
+          <div class="pf-modal-head"><strong>📂 Gespeicherte Postfächer</strong>
+            <button id="pf-stores-close" class="export-btn">✕</button></div>
+          <div class="pf-modal-body">
+            <p class="planner-muted" style="font-size:11.5px;margin:0 0 8px">Bereits eingelesene Postfächer — wieder öffnen ohne erneutes Parsen der Datei. Ähnlichkeit und gespeicherte Ansicht kommen mit.</p>
+            <div id="pf-stores-list"></div>
+          </div>
+        </div>
+      </div>
+      <div id="pf-rag-modal" class="pf-modal" style="display:none">
+        <div class="pf-modal-box">
+          <div class="pf-modal-head"><strong>📚 Mails in Wissensdatenbank (RAG) übernehmen</strong>
+            <button id="pf-rag-close" class="export-btn">✕</button></div>
+          <div class="pf-modal-body">
+            <p id="pf-rag-scope" class="planner-muted" style="font-size:12px;margin:0 0 8px"></p>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <input type="radio" name="pf-rag-mode" id="pf-rag-mode-new" checked /> Neue Sammlung anlegen:
+              <input type="text" id="pf-rag-name" style="flex:1" />
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+              <input type="radio" name="pf-rag-mode" id="pf-rag-mode-existing" /> Bestehende Sammlung:
+              <select id="pf-rag-existing" style="flex:1"></select>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;font-size:12px">
+              <input type="checkbox" id="pf-rag-att" checked /> Anhang-Texte (Stufe 2) mit übernehmen
+            </label>
+            <div style="text-align:right"><button id="pf-rag-go" class="export-btn">Übernehmen</button></div>
+            <p class="planner-muted" style="font-size:11px;margin:8px 0 0">Embeddings laufen lokal über Ollama – nichts verlässt den Rechner.</p>
+          </div>
+        </div>
+      </div>
+    </div><!-- /postfach-panel -->
+
+    <!-- Konnektor-Editor-Modal -->
+    <div id="pf-conn-modal" class="pf-modal" style="display:none">
+      <div class="pf-modal-box">
+        <div class="pf-modal-head"><span>🔗 Konnektoren</span><button id="pf-conn-close" class="pf-modal-x">✕</button></div>
+        <div class="pf-modal-body">
+          <p class="planner-muted" style="font-size:12px;margin:0 0 8px">Ein Konnektor bündelt Mails, die eines seiner Wörter enthalten (Absender/Betreff/Inhalt, in Stufe 2 auch Anhänge). Beispiel: <em>Lebensversicherung</em> = Allianz, Continentale, CMI. Ein Wort je Zeile oder mit Komma getrennt.</p>
+          <div id="pf-conn-list"></div>
+          <button id="pf-conn-add" class="export-btn" style="font-size:12px;margin-top:8px">＋ Konnektor</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Voll-Mail-Modal -->
+    <div id="pf-mail-modal" class="pf-modal" style="display:none">
+      <div class="pf-modal-box">
+        <div class="pf-modal-head"><span id="pf-mail-title"></span><button id="pf-mail-close" class="pf-modal-x">✕</button></div>
+        <div class="pf-modal-body" id="pf-mail-body"></div>
+      </div>
+    </div>
 
     <!-- ── Morphologischer-Kasten-Panel ─────────────────────────────────── -->
     <div id="morph-panel" class="panel">
@@ -1886,6 +1999,15 @@ Beispiele:
         <span class="planner-muted">— greift nur, solange im Chat das schwache Standardmodell
         (ministral-3:3b) aktiv ist; bei stärkerem Allgemein-Modell aus. Ziel ist die Rolle
         „Programmieren / Mathe" oben.</span>
+      </span>
+    </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-research-local" style="width:auto;margin-top:2px" />
+      <span>Recherche immer lokal ausführen
+        <span class="planner-muted">— Matrix-Recherche und der Recherche-Tab nutzen dann zwingend
+        ein lokales Modell (Ollama), auch wenn oben ein externes API-Modell zugewiesen ist. Sinnvoll,
+        wenn die API keine Websuche/Tools zulässt oder aus Datenschutzgründen. Ohne lokales Modell
+        ist die Recherche dann nicht verfügbar.</span>
       </span>
     </label>
 
@@ -2318,29 +2440,29 @@ Beispiele:
 <script src="/js/agents.js?v=20260611merge"></script>
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260622"></script>
-<script src="/js/chat.js?v=20260622"></script>
+<script src="/js/chat.js?v=20260626code1"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260622"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260622"></script>
+<script src="/js/profile.js?v=20260627pst1"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260622"></script>
-<script src="/js/matrix_research.js?v=20260622"></script>
+<script src="/js/matrix_research.js?v=20260626del1"></script>
 <script src="/js/rfq.js?v=20260622"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
-<script src="/js/json_editor.js?v=20260603"></script>
 <script src="/js/logger.js?v=20260603"></script>
-<script src="/js/ide.js?v=20260622"></script>
+<script src="/js/code_workspace.js?v=20260627pst1"></script>
 <script src="/js/onboarding.js?v=20260622"></script>
 <script src="/js/medizin.js?v=20260622"></script>
 <script src="/js/mathe.js?v=20260622"></script>
-<script src="/js/dir_analysis.js?v=20260613"></script>
+<script src="/js/dir_analysis.js?v=20260627local"></script>
+<script src="/js/postfach.js?v=20260703save"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260622"></script>
+<script src="/js/app.js?v=20260627pst1"></script>
 
 </body>
 </html>

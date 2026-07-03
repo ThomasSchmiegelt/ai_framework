@@ -29,6 +29,21 @@ reportlab>=4.1.0
 # Mail (IMAP/POP3, tools/mail.py) nutzt ausschließlich die Python-Standardbibliothek
 # (imaplib, poplib, email) — daher kein zusätzliches Paket nötig.
 
+# Postfach-Auswertung (Tab „📮 Postfach", tools/mailstore.py):
+#  - .mbox/.eml über die stdlib (mailbox/email) — kein Paket nötig.
+#  - .msg über extract-msg (BSD, MIT-kompatibel).
+extract-msg>=0.48
+#  - .pst: KEIN Zusatzpaket nötig — der eingebaute Reiner-Python-Leser tools/pst_pure.py
+#    (MIT, nur stdlib) liest Unicode-PST direkt. Reihenfolge der genutzten Reader:
+#      1. WINDOWS (optimal, falls vorhanden): installiertes Outlook per COM (pywin32,
+#         permissiv). Liest alle Ordner/Anhänge nativ. Bei Bedarf: pip install pywin32
+#      2. optional: libpff-python (LGPL, schwaches Copyleft) — unverändertes, dynamisch
+#         gezogenes Paket, bewusst zugelassene Ausnahme NUR für PST. Baut auf Windows selten
+#         per pip; Import in mailstore.py ist weich. Bei Bedarf: pip install libpff-python
+#      3. Fallback (immer verfügbar): tools/pst_pure.py — reiner Python, keine Fremdlib.
+# pywin32>=306        ; sys_platform == "win32"
+# libpff-python>=20231205
+
 # RAG (Wissenssammlungen): benötigt KEINE zusätzlichen pip-Pakete — die
 # Vektorsuche nutzt NumPy (oben), HTTP-Aufrufe httpx (oben) und die
 # Dokumentextraktion pypdf/python-docx/openpyxl (oben). Die Embeddings laufen

@@ -33,6 +33,8 @@ data/rfq/*
 data/capacity.json
 data/capacity_lists.json
 data/feedback.md
+# Postfach-Import (eingelesene PST/Mails + Anhänge = PRIVATE Daten, niemals versionieren)
+data/pst/
 
 # Selbstsignierte TLS-Zertifikate (privater Schlüssel!) — siehe scripts/gen_cert.*
 certs/

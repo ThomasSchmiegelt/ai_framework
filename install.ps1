@@ -151,8 +151,8 @@ $pipVenv = "$VENV_DIR\Scripts\pip.exe"
 # ── 4. Pakete installieren ─────────────────────────────────────────────────────
 
 Write-Step "Python-Pakete installieren..."
-& $pipVenv install --upgrade pip --quiet
-& $pipVenv install -r "$APP_DIR\requirements.txt" --quiet
+& $pipVenv install --upgrade pip setuptools wheel --quiet
+& $pipVenv install -r "$APP_DIR\requirements.txt" --quiet --prefer-binary
 if ($LASTEXITCODE -ne 0) { Write-Fail "Paket-Installation fehlgeschlagen" }
 Write-OK "Alle Pakete installiert"
 
@@ -193,6 +193,7 @@ Write-Host "  Jeweils [J/N]. Diese Tabs sind beim Erststart sonst ausgeblendet."
 $optTabs = [ordered]@{
     rag='Wissensdatenbanken (RAG)'; ide='Code-IDE'; mathe='Mathe'; medizin='Medizin';
     mail='Mail'; logs='Logs'; diranalyse='Verzeichnis-Analyse';
+    postfach='Postfach (PST-/Mail-Auswertung, nur lokal)';
     morph='Morphologischer Kasten'; jury='Jury'
 }
 $hidden = @()
