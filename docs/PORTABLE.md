@@ -10,6 +10,7 @@ AI_Framework_Thomas_Portable_YYYYMMDD\
 ├── python\           ← Embedded Python 3.12 (kein Install nötig)
 ├── ollama\
 │   ├── ollama.exe    ← Ollama Binary
+│   ├── lib\ollama\   ← Ollama-Laufzeit (ggml-Backends, CUDA/Vulkan-Runner) — PFLICHT bei neueren Ollama-Versionen
 │   └── models\       ← nur die Whitelist-Modelle (ministral-3:3b, qwen3.5:4b, medgemma:4b, nomic-embed-text)
 ├── start.bat         ← Starten
 └── README.md
@@ -70,9 +71,15 @@ Das Skript:
 1. Kopiert alle App-Dateien
 2. Lädt Python 3.12 Embeddable Package herunter (~25 MB)
 3. Installiert alle Python-Pakete ins Bundle
-4. Kopiert `ollama.exe` aus der lokalen Installation
+4. Kopiert `ollama.exe` **und die Ollama-Laufzeit `lib\ollama\`** (ggml-Backends,
+   CUDA-/Vulkan-Runner) aus der lokalen Installation — ohne `lib\` startet die
+   gebündelte Ollama bei neueren Versionen nicht. Das native AMD-Backend (ROCm,
+   ~1,2 GB) wird standardmäßig weggelassen (AMD/Intel läuft über Vulkan);
+   `make_portable.bat -FullRuntime` nimmt es mit.
 5. Kopiert die LLM-Modell-Dateien (~3–6 GB)
-6. Erstellt `start.bat` für das Bundle
+6. **Smoke-Test:** startet die gebündelte `ollama.exe` auf Testport 11599 und
+   prüft `/api/tags` — schlägt das fehl, bricht der Build ab (kein kaputtes Bundle)
+7. Erstellt `start.bat` für das Bundle
 
 > **Dauer:** 5–30 Minuten je nach Datenmenge und Speichergeschwindigkeit
 
@@ -136,7 +143,7 @@ Branding, `mail.json`, `mail_rules.json`), `app\config.json` (eigener Port 11500
 | Komponente | Methode |
 |---|---|
 | Python | Embedded Package (keine Systeminstallation) |
-| Ollama | Einzelne `.exe` Datei |
+| Ollama | `ollama.exe` + Laufzeit `lib\ollama\` (ggml/CUDA/Vulkan; ROCm nur mit `-FullRuntime`) |
 | Modelle | Lokale Kopie im `ollama\models\` Unterordner |
 | Daten | SQLite DB in `app\data\` |
 
@@ -162,7 +169,7 @@ OLLAMA_HOST   = 127.0.0.1:11500
 | Komponente | Größe (ca.) |
 |---|---|
 | App + Python + Pakete | ~500 MB |
-| ollama.exe | ~200 MB |
+| ollama.exe + Laufzeit `lib\` | ~1,9 GB (CPU+Vulkan+CUDA; +1,2 GB mit `-FullRuntime`/ROCm) |
 | ministral-3:3b | ~2 GB |
 | qwen3.5:4b | ~2,5 GB |
 | medgemma:4b (🩺 Medizin) | ~2,5 GB |
@@ -180,7 +187,7 @@ OLLAMA_HOST   = 127.0.0.1:11500
 
 | Problem | Lösung |
 |---|---|
-| `ollama.exe` startet nicht | Evtl. fehlen Visual C++ Redistributables — `winget install Microsoft.VCRedist.2015+.x64` |
+| `ollama.exe` startet nicht / Bundle-Ollama „wird nicht gefunden" | Häufigste Ursache: `ollama\lib\ollama\` fehlt im Bundle (ältere `make_portable.ps1`-Versionen kopierten nur die Exe). Bundle mit der aktuellen `make_portable.bat` neu erstellen — oder `lib\` aus `%LOCALAPPDATA%\Programs\Ollama\lib` manuell nach `<bundle>\ollama\lib` kopieren. Sonst: Visual C++ Redistributables — `winget install Microsoft.VCRedist.2015+.x64` |
 | RAG funktioniert nicht / „Modell nicht gefunden" | `nomic-embed-text` fehlt im Bundle. Im Bundle-Ordner: `set OLLAMA_HOST=127.0.0.1:11500` & `set OLLAMA_MODELS=%CD%\ollama\models`, dann `ollama\ollama.exe pull nomic-embed-text`. Beim Neu-Erstellen zieht `make_portable.ps1` das Modell jetzt automatisch nach. |
 | Modelle fehlen | Wie oben, aber `ollama\ollama.exe pull ministral-3:3b` |
 | App-Port 8780 belegt | In `app\config.json` `port` ändern und in `start.bat` anpassen |

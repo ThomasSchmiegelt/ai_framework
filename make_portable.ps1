@@ -15,7 +15,12 @@ param(
     # Bündelt WEDER die Ollama-Binary NOCH die Modelle und nutzt das bereits auf
     # dem Zielrechner installierte System-Ollama (Standard-Port 11434). Ergebnis:
     # ein deutlich kleineres Bundle, das ein vorhandenes Ollama voraussetzt.
-    [switch]$UseSystemOllama
+    [switch]$UseSystemOllama,
+
+    # Kopiert die KOMPLETTE Ollama-Laufzeit inkl. ROCm (natives AMD-Backend,
+    # ~1,2 GB extra). Ohne diesen Schalter wird ROCm weggelassen — AMD-/Intel-
+    # GPUs laufen dann über das mitkopierte Vulkan-Backend, NVIDIA über CUDA.
+    [switch]$FullRuntime
 )
 
 $ErrorActionPreference = "Stop"
@@ -161,10 +166,36 @@ $ollamaDir = "$BUNDLE_DIR\ollama"
 New-Item -ItemType Directory -Path $ollamaDir -Force | Out-Null
 Copy-Item $ollamaSrc "$ollamaDir\ollama.exe"
 
-# Weitere Ollama-DLLs im selben Verzeichnis mitkopieren
 $ollamaSrcDir = Split-Path $ollamaSrc -Parent
+
+# ÄLTERE Ollama-Versionen: Laufzeit-DLLs liegen direkt neben der Exe.
 Get-ChildItem $ollamaSrcDir -Filter "*.dll" -ErrorAction SilentlyContinue |
     Copy-Item -Destination $ollamaDir -ErrorAction SilentlyContinue
+
+# NEUERE Ollama-Versionen: die komplette Laufzeit (ggml-Backends, CUDA/ROCm/
+# Vulkan-Runner) liegt unter lib\ollama\... — OHNE dieses Verzeichnis startet
+# die gebündelte ollama.exe nicht bzw. kann kein Modell laden! ollama.exe sucht
+# lib\ relativ zur eigenen Exe, daher 1:1 als Unterverzeichnis mitkopieren.
+$libSrc = Join-Path $ollamaSrcDir "lib"
+if (Test-Path $libSrc) {
+    # ROCm (natives AMD-Backend) ist mit Abstand am größten (~1,2 GB) und wird
+    # ohne -FullRuntime weggelassen — AMD-/Intel-GPUs nutzt Ollama dann über das
+    # mitkopierte Vulkan-Backend, NVIDIA nativ über CUDA, sonst CPU.
+    $rcArgs = @($libSrc, "$ollamaDir\lib", "/E", "/NFL", "/NDL", "/NJH", "/NJS")
+    if (-not $FullRuntime) { $rcArgs += @("/XD", "rocm*") }
+    robocopy @rcArgs | Out-Null
+    if ($LASTEXITCODE -ge 8) { Write-Fail "Ollama-Laufzeit (lib\) konnte nicht kopiert werden" }
+    $libMB = [math]::Round(((Get-ChildItem "$ollamaDir\lib" -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
+    Write-OK "Ollama-Laufzeit kopiert: $ollamaDir\lib ($libMB MB$(if (-not $FullRuntime) { ', ohne ROCm' }))"
+}
+
+# Plausibilitätsprüfung: ohne ggml-Backend kann 'ollama serve' keine Modelle
+# laden — dann lieber hier hart abbrechen als ein kaputtes Bundle ausliefern.
+$hasNewRuntime = Test-Path "$ollamaDir\lib\ollama\ggml.dll"
+$hasOldRuntime = [bool](Get-ChildItem $ollamaDir -Filter "*.dll" -ErrorAction SilentlyContinue)
+if (-not ($hasNewRuntime -or $hasOldRuntime)) {
+    Write-Fail "Ollama-Laufzeit nicht gefunden (weder DLLs neben der Exe noch lib\ollama\ggml.dll in '$ollamaSrcDir'). Unbekanntes Ollama-Layout — bitte Ollama aktualisieren/neu installieren."
+}
 Write-OK "Ollama kopiert: $ollamaDir\ollama.exe"
 
 # ── 4. LLM-Modelle kopieren (nur die Whitelist) ────────────────────────────────
@@ -253,6 +284,39 @@ if (-not (Test-Path $modelsSrc)) {
     }
     if ($bundled.Count) { Write-OK ("Modelle im Bundle: " + ($bundled -join ', ')) }
     else { Write-Warn "Keine Modelle gebündelt — Bundle braucht beim ersten Start Internet." }
+}
+
+# ── 4b. Smoke-Test: startet die GEBÜNDELTE ollama.exe wirklich? ────────────────
+# Fängt kaputte Bundles direkt beim Bauen ab (z. B. fehlende lib\-Laufzeit),
+# statt erst auf dem Zielrechner. Läuft auf einem eigenen Testport.
+
+Write-Step "Smoke-Test: gebündeltes Ollama starten..."
+$testPort = 11599
+$proc = $null
+try {
+    $env:OLLAMA_HOST   = "127.0.0.1:$testPort"
+    $env:OLLAMA_MODELS = $modelsDest
+    $proc = Start-Process "$ollamaDir\ollama.exe" -ArgumentList "serve" -WindowStyle Hidden -PassThru
+    $ok = $false
+    foreach ($i in 1..15) {
+        Start-Sleep -Seconds 1
+        if ($proc.HasExited) { break }
+        try {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$testPort/api/tags" -UseBasicParsing -TimeoutSec 2
+            if ($resp.StatusCode -eq 200) { $ok = $true; break }
+        } catch {}
+    }
+    if ($ok) {
+        $tags = ($resp.Content | ConvertFrom-Json).models
+        Write-OK ("Gebündeltes Ollama läuft — sieht {0} Modell(e)" -f @($tags).Count)
+        if (-not @($tags).Count) { Write-Warn "Ollama startet, findet aber keine Modelle im Bundle-Verzeichnis!" }
+    } else {
+        Write-Fail "Gebündeltes Ollama startet NICHT (Test auf 127.0.0.1:$testPort). Bundle wäre unbrauchbar — Abbruch."
+    }
+} finally {
+    if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue
+    Remove-Item Env:OLLAMA_MODELS -ErrorAction SilentlyContinue
 }
 
 }  # Ende: Ollama-Binary + Modelle nur OHNE -UseSystemOllama bündeln
@@ -424,6 +488,9 @@ $(($MODELS | ForEach-Object { "- $_" }) -join "`n")
 ## Hinweise
 - Beim ersten Start kann es 10-30 Sekunden dauern bis Ollama bereit ist
 - Modelle werden aus dem ``ollama\models`` Unterverzeichnis geladen
+- GPU-Unterstützung: NVIDIA nativ (CUDA), AMD/Intel über Vulkan, sonst CPU.
+  Das native AMD-Backend (ROCm, ~1,2 GB) ist nur enthalten, wenn das Bundle
+  mit ``-FullRuntime`` erstellt wurde.
 - Das Bundle nutzt einen **eigenen Ollama-Port ($OLLAMA_PORT)**, damit es nicht
   mit einem evtl. bereits installierten Ollama (Port 11434) kollidiert
 - Falls Modelle fehlen, Pull gegen den Bundle-Port (in der ``start.bat``-Konsole):
