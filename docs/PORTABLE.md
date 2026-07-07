@@ -20,17 +20,27 @@ AI_Framework_Thomas_Portable_YYYYMMDD\
 
 ---
 
-## Zwei Bundle-Varianten
+## Drei Bundle-Varianten
 
-| Variante | Skript | Bündelt Ollama + Modelle? | Größe | Voraussetzung am Ziel |
-|---|---|---|---|---|
-| **A — Voll-Bundle** (Standard) | `make_portable.bat` | **Ja** (eigene `ollama.exe` + Modelle, eigener Port 11500) | ~5 GB | nichts |
-| **B — System-Ollama** | `make_portable_systemollama.bat` | **Nein** (nutzt installiertes Ollama, Port 11434) | ~0,5 GB | Ollama installiert + Modelle gezogen |
+| Variante | Skript | Bündelt Ollama? | Bündelt Modelle? | Größe | Voraussetzung am Ziel |
+|---|---|---|---|---|---|
+| **A — Voll-Bundle** (Standard) | `make_portable.bat` | **Ja** (eigene `ollama.exe` + Laufzeit, Port 11500) | **Ja** | ~9 GB | nichts |
+| **B — System-Ollama** | `make_portable_systemollama.bat` | Nein (nutzt installiertes Ollama, Port 11434) | Nein | ~0,5 GB | Ollama installiert + Modelle gezogen |
+| **C — Modelle beim Erststart** | `make_portable_nomodels.bat` | **Ja** (wie A) | Nein — `start.bat` lädt sie beim **ersten Start** von ollama.com | ~2,5 GB | einmalig Internet (~7 GB Download) |
 
 **Variante B** ist gedacht für Rechner, auf denen Ollama **bereits installiert** ist:
 das Bundle enthält dann nur App + Embedded-Python + Pakete (kein `ollama\`-Ordner,
 keine Modell-Blobs) und spricht das vorhandene System-Ollama auf dem Standard-Port
 **11434** an. `start.bat` startet das installierte Ollama bei Bedarf über den PATH.
+
+**Variante C** ist der Mittelweg für kleine USB-Sticks/Downloads: Ollama läuft wie
+bei A komplett aus dem Bundle (eigener Port 11500, eigenes Modellverzeichnis), nur
+die Modell-Blobs fehlen. Beim ersten Start prüft `start.bat` die Modell-Whitelist
+(`ollama list` gegen den Bundle-Port) und zieht Fehlendes per `ollama pull` nach —
+die Modelle landen dabei **im Bundle-Ordner** (`ollama\models`), das Bundle bleibt
+also portabel und läuft danach komplett offline. Ein abgebrochener Download wird
+beim nächsten Start fortgesetzt. (Derselbe Nachlade-Block steckt auch in Variante A
+als Selbstheilung, falls dort mal ein Modell fehlt.)
 Vor dem ersten Start die Modelle ziehen:
 
 ```

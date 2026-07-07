@@ -20,7 +20,12 @@ param(
     # Kopiert die KOMPLETTE Ollama-Laufzeit inkl. ROCm (natives AMD-Backend,
     # ~1,2 GB extra). Ohne diesen Schalter wird ROCm weggelassen — AMD-/Intel-
     # GPUs laufen dann über das mitkopierte Vulkan-Backend, NVIDIA über CUDA.
-    [switch]$FullRuntime
+    [switch]$FullRuntime,
+
+    # Bündelt Ollama-Binary + Laufzeit, aber KEINE Modelle (~2,5 GB statt ~9 GB).
+    # Die start.bat des Bundles lädt fehlende Modelle beim ERSTSTART automatisch
+    # von ollama.com nach (einmalig Internet auf dem Zielrechner nötig).
+    [switch]$NoModels
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +33,7 @@ $ErrorActionPreference = "Stop"
 $APP_DIR       = $PSScriptRoot
 $DATE_STAMP    = Get-Date -Format "yyyyMMdd"
 $BUNDLE_NAME   = if ($UseSystemOllama) { "AI_Framework_Thomas_Portable_SystemOllama_$DATE_STAMP" }
+                 elseif ($NoModels)    { "AI_Framework_Thomas_Portable_NoModels_$DATE_STAMP" }
                  else                  { "AI_Framework_Thomas_Portable_$DATE_STAMP" }
 # Basisverzeichnis: -OutDir falls angegeben, sonst Eltern-Ordner des Skripts.
 if ($OutDir) {
@@ -60,6 +66,10 @@ function Write-OK    { param($t) Write-Host "    [✓] $t" -ForegroundColor Gree
 function Write-Warn  { param($t) Write-Host "    [!] $t" -ForegroundColor Yellow }
 function Write-Fail  { param($t) Write-Host "`n[✗] $t" -ForegroundColor Red; Read-Host "Enter"; exit 1 }
 
+if ($UseSystemOllama -and $NoModels) {
+    Write-Fail "-UseSystemOllama und -NoModels schließen sich aus: die System-Ollama-Variante bündelt ohnehin keine Modelle."
+}
+
 Clear-Host
 Write-Host ""
 Write-Host "  ╔════════════════════════════════════════════╗" -ForegroundColor DarkCyan
@@ -68,6 +78,15 @@ Write-Host "  ╚═════════════════════
 Write-Host ""
 Write-Host "  Ausgabe: $BUNDLE_DIR" -ForegroundColor Gray
 Write-Host ""
+
+# Windows-Pfadlängen-Grenze (260 Zeichen): pip legt im Bundle sehr tiefe Pfade an
+# (z. B. python\Lib\site-packages\pip\_vendor\urllib3\contrib\emscripten\...).
+# Ist das Zielverzeichnis zu tief, bricht die Paket-Installation mit
+# "No such file or directory" ab. Früh warnen statt spät scheitern.
+if ($BUNDLE_DIR.Length -gt 100) {
+    Write-Warn "Zielpfad ist sehr lang ($($BUNDLE_DIR.Length) Zeichen) — pip kann an der Windows-260-Zeichen-Grenze scheitern."
+    Write-Warn "Empfehlung: kurzes -OutDir wählen (z. B. C:\Portable) oder Long Paths aktivieren."
+}
 
 # ── 1. App-Dateien kopieren ────────────────────────────────────────────────────
 
@@ -199,6 +218,18 @@ if (-not ($hasNewRuntime -or $hasOldRuntime)) {
 Write-OK "Ollama kopiert: $ollamaDir\ollama.exe"
 
 # ── 4. LLM-Modelle kopieren (nur die Whitelist) ────────────────────────────────
+# (Bei -NoModels übersprungen: die start.bat des Bundles lädt fehlende Modelle
+#  beim Erststart automatisch von ollama.com nach.)
+
+$modelsDest = "$ollamaDir\models"
+
+if ($NoModels) {
+
+New-Item -ItemType Directory -Path $modelsDest -Force | Out-Null
+Write-Step "NoModels-Modus: Modelle werden NICHT gebündelt."
+Write-OK "start.bat lädt beim Erststart nach: $($BUNDLE_MODELS -join ', ')"
+
+} else {
 
 Write-Step "LLM-Modelle kopieren (nur: $($BUNDLE_MODELS -join ', '))..."
 
@@ -211,7 +242,6 @@ if ($env:OLLAMA_MODELS -and (Test-Path $env:OLLAMA_MODELS)) {
 } else {
     $modelsSrc = "$env:USERPROFILE\.ollama\models"
 }
-$modelsDest = "$ollamaDir\models"
 
 # Kopiert genau EIN Modell (manifest + die referenzierten Blobs) ins Bundle.
 # Liefert $true bei Erfolg. Modellname im Format "name:tag" (tag-Default: latest).
@@ -286,6 +316,8 @@ if (-not (Test-Path $modelsSrc)) {
     else { Write-Warn "Keine Modelle gebündelt — Bundle braucht beim ersten Start Internet." }
 }
 
+}  # Ende: Modelle nur OHNE -NoModels kopieren
+
 # ── 4b. Smoke-Test: startet die GEBÜNDELTE ollama.exe wirklich? ────────────────
 # Fängt kaputte Bundles direkt beim Bauen ab (z. B. fehlende lib\-Laufzeit),
 # statt erst auf dem Zielrechner. Läuft auf einem eigenen Testport.
@@ -309,7 +341,10 @@ try {
     if ($ok) {
         $tags = ($resp.Content | ConvertFrom-Json).models
         Write-OK ("Gebündeltes Ollama läuft — sieht {0} Modell(e)" -f @($tags).Count)
-        if (-not @($tags).Count) { Write-Warn "Ollama startet, findet aber keine Modelle im Bundle-Verzeichnis!" }
+        if (-not @($tags).Count) {
+            if ($NoModels) { Write-OK "Keine Modelle im Bundle — wie vorgesehen (Erststart lädt nach)." }
+            else { Write-Warn "Ollama startet, findet aber keine Modelle im Bundle-Verzeichnis!" }
+        }
     } else {
         Write-Fail "Gebündeltes Ollama startet NICHT (Test auf 127.0.0.1:$testPort). Bundle wäre unbrauchbar — Abbruch."
     }
@@ -426,6 +461,17 @@ echo [!] Ollama antwortet nicht - Chat/RAG koennten fehlschlagen.
 
 :ollamaready
 
+:: Fehlende Modelle automatisch von ollama.com nachladen (einmalig, Internet
+:: noetig). Im Voll-Bundle sind alle Modelle enthalten -> nichts zu tun.
+:: In der NoModels-Variante laedt dieser Block beim ERSTSTART alle Modelle.
+for %%M in ($($BUNDLE_MODELS -join ' ')) do (
+    "%~dp0ollama\ollama.exe" list 2>nul | findstr /i /l /c:"%%M" >nul || (
+        echo [*] Lade Modell %%M von ollama.com herunter ^(einmalig^)...
+        "%~dp0ollama\ollama.exe" pull %%M
+        if errorlevel 1 echo [!] Konnte %%M nicht laden - Internetverbindung pruefen.
+    )
+)
+
 :: Browser nach kurzer Verzoegerung
 start /min "" cmd /c "timeout /t 3 >nul && start http://localhost:8780"
 
@@ -467,6 +513,35 @@ $(($MODELS | ForEach-Object { "  - ``ollama pull $_``" }) -join "`n")
 - ``start.bat`` startet das installierte Ollama bei Bedarf automatisch (über PATH)
 - Es wird das Standard-Modellverzeichnis des installierten Ollama genutzt
 - Fehlt ein Modell: ``ollama pull <name>`` in einer normalen Konsole
+
+## Bundle erstellt
+$(Get-Date -Format "yyyy-MM-dd HH:mm")
+"@
+} elseif ($NoModels) {
+    $readmeContent = @"
+# AI_Framework_Thomas Portable (Modelle beim Erststart)
+
+Diese Variante bündelt **Ollama komplett** (Binary + Laufzeit, eigener Port $OLLAMA_PORT),
+aber **keine Modelle** — dadurch ist das Bundle deutlich kleiner. ``start.bat`` lädt
+die Modelle beim **ersten Start automatisch** von ollama.com nach.
+
+## Verwendung
+Doppelklick auf ``start.bat``
+
+## Anforderungen
+- Windows 10/11 (64-bit), keine Installation, keine Admin-Rechte
+- **Beim ersten Start: Internetverbindung** (Modell-Download, einmalig ~7 GB):
+$(($BUNDLE_MODELS | ForEach-Object { "  - $_" }) -join "`n")
+- Danach läuft alles komplett offline
+
+## Hinweise
+- Der Erststart dauert je nach Internetgeschwindigkeit deutlich länger
+  (Modell-Download); Fortschritt ist im Konsolenfenster sichtbar
+- Die Modelle landen im Bundle-Ordner (``ollama\models``) — das Bundle bleibt
+  portabel und kann danach mitsamt Modellen weiterkopiert werden
+- Bricht der Download ab: ``start.bat`` einfach erneut starten (setzt fort)
+- GPU-Unterstützung: NVIDIA nativ (CUDA), AMD/Intel über Vulkan, sonst CPU
+  (ROCm nur, wenn mit ``-FullRuntime`` erstellt)
 
 ## Bundle erstellt
 $(Get-Date -Format "yyyy-MM-dd HH:mm")
