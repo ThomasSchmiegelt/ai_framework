@@ -328,7 +328,8 @@ $proc = $null
 try {
     $env:OLLAMA_HOST   = "127.0.0.1:$testPort"
     $env:OLLAMA_MODELS = $modelsDest
-    $proc = Start-Process "$ollamaDir\ollama.exe" -ArgumentList "serve" -WindowStyle Hidden -PassThru
+    $smokeLog = Join-Path $env:TEMP "aif_ollama_smoke.log"
+    $proc = Start-Process "$ollamaDir\ollama.exe" -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardError $smokeLog
     $ok = $false
     foreach ($i in 1..15) {
         Start-Sleep -Seconds 1
@@ -345,6 +346,16 @@ try {
             if ($NoModels) { Write-OK "Keine Modelle im Bundle — wie vorgesehen (Erststart lädt nach)." }
             else { Write-Warn "Ollama startet, findet aber keine Modelle im Bundle-Verzeichnis!" }
         }
+        # GPU-Erkennung aus dem Serve-Log melden (rein informativ — auf dem
+        # ZIELrechner entscheidet dessen GPU/Treiber; s. ollama\server.log dort).
+        try {
+            $gpuLine = Select-String -Path $smokeLog -Pattern 'inference compute' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($gpuLine -and $gpuLine.Line -match 'library=(\S+).*?description="([^"]+)"') {
+                Write-OK ("GPU auf DIESEM Rechner erkannt: {0} ({1})" -f $Matches[2], $Matches[1])
+            } elseif (Select-String -Path $smokeLog -Pattern 'no compatible GPUs|library=cpu' -Quiet -ErrorAction SilentlyContinue) {
+                Write-Warn "Auf diesem Rechner keine GPU erkannt — Bundle läuft hier auf CPU (Zielrechner kann abweichen)."
+            }
+        } catch {}
     } else {
         Write-Fail "Gebündeltes Ollama startet NICHT (Test auf 127.0.0.1:$testPort). Bundle wäre unbrauchbar — Abbruch."
     }
@@ -443,12 +454,19 @@ cd /d "%~dp0app"
 set OLLAMA_MODELS=%~dp0ollama\models
 set OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT
 
+:: GPU: NVIDIA laeuft ueber CUDA (aktueller NVIDIA-Treiber noetig), AMD/Intel-
+:: Grafikkarten ueber Vulkan (aktueller Grafiktreiber). Reine iGPUs (integrierte
+:: Intel-/AMD-Grafik) ignoriert Ollama standardmaessig -> zum Aktivieren die
+:: naechste Zeile einkommentieren (Doppelpunkte entfernen):
+:: set OLLAMA_IGPU_ENABLE=1
+:: Was erkannt wurde, steht nach dem Start in ollama\server.log ("inference compute").
+
 :: Antwortet unser Port schon? (z.B. start.bat zweimal gestartet) -> nicht neu starten
 "%~dp0python\python.exe" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$OLLAMA_PORT/api/tags', timeout=2)" >nul 2>&1
 if not errorlevel 1 goto ollamaready
 
-echo [*] Starte Ollama (eigener Port $OLLAMA_PORT)...
-start /min "" "%~dp0ollama\ollama.exe" serve
+echo [*] Starte Ollama (eigener Port $OLLAMA_PORT, Log: ollama\server.log)...
+start /min "" cmd /c ""%~dp0ollama\ollama.exe" serve > "%~dp0ollama\server.log" 2>&1"
 
 set /a _tries=0
 :waitollama
@@ -457,7 +475,7 @@ timeout /t 2 /nobreak >nul
 if not errorlevel 1 goto ollamaready
 set /a _tries+=1
 if %_tries% lss 15 goto waitollama
-echo [!] Ollama antwortet nicht - Chat/RAG koennten fehlschlagen.
+echo [!] Ollama antwortet nicht - Chat/RAG koennten fehlschlagen. Details: ollama\server.log
 
 :ollamaready
 
@@ -540,8 +558,17 @@ $(($BUNDLE_MODELS | ForEach-Object { "  - $_" }) -join "`n")
 - Die Modelle landen im Bundle-Ordner (``ollama\models``) — das Bundle bleibt
   portabel und kann danach mitsamt Modellen weiterkopiert werden
 - Bricht der Download ab: ``start.bat`` einfach erneut starten (setzt fort)
-- GPU-Unterstützung: NVIDIA nativ (CUDA), AMD/Intel über Vulkan, sonst CPU
-  (ROCm nur, wenn mit ``-FullRuntime`` erstellt)
+
+## GPU-Unterstützung (läuft es nur auf CPU?)
+- NVIDIA: nativ über CUDA — benötigt einen **aktuellen NVIDIA-Treiber**
+- AMD/Intel-Grafikkarten: über Vulkan — aktueller Grafiktreiber nötig
+  (natives AMD-ROCm nur, wenn das Bundle mit ``-FullRuntime`` erstellt wurde)
+- **Integrierte GPUs (Intel/AMD iGPU) ignoriert Ollama standardmäßig** — auf
+  solchen Rechnern läuft es bewusst auf CPU. Zum Ausprobieren in ``start.bat``
+  die Zeile ``:: set OLLAMA_IGPU_ENABLE=1`` einkommentieren.
+- Diagnose: ``ollama\server.log`` öffnen und nach ``inference compute`` suchen —
+  dort steht, welche GPU erkannt wurde (``library=CUDA``/``Vulkan``) oder ob
+  auf CPU gerechnet wird (``no compatible GPUs``).
 
 ## Bundle erstellt
 $(Get-Date -Format "yyyy-MM-dd HH:mm")
@@ -563,9 +590,12 @@ $(($MODELS | ForEach-Object { "- $_" }) -join "`n")
 ## Hinweise
 - Beim ersten Start kann es 10-30 Sekunden dauern bis Ollama bereit ist
 - Modelle werden aus dem ``ollama\models`` Unterverzeichnis geladen
-- GPU-Unterstützung: NVIDIA nativ (CUDA), AMD/Intel über Vulkan, sonst CPU.
-  Das native AMD-Backend (ROCm, ~1,2 GB) ist nur enthalten, wenn das Bundle
-  mit ``-FullRuntime`` erstellt wurde.
+- GPU-Unterstützung: NVIDIA nativ (CUDA, aktueller Treiber nötig), AMD/Intel
+  über Vulkan, sonst CPU. Das native AMD-Backend (ROCm, ~1,2 GB) ist nur
+  enthalten, wenn das Bundle mit ``-FullRuntime`` erstellt wurde.
+  **Integrierte GPUs (iGPU) ignoriert Ollama standardmäßig** → in ``start.bat``
+  die Zeile ``:: set OLLAMA_IGPU_ENABLE=1`` einkommentieren zum Ausprobieren.
+  Diagnose: ``ollama\server.log`` nach ``inference compute`` durchsuchen.
 - Das Bundle nutzt einen **eigenen Ollama-Port ($OLLAMA_PORT)**, damit es nicht
   mit einem evtl. bereits installierten Ollama (Port 11434) kollidiert
 - Falls Modelle fehlen, Pull gegen den Bundle-Port (in der ``start.bat``-Konsole):
