@@ -24,9 +24,11 @@ from ddgs import DDGS
 
 # Serialisiert alle ddgs-Aufrufe prozessweit + Mindestabstand (Sekunden) zwischen
 # zwei Suchen. Verhindert das „zu schnell an ddgs"-Problem bei externen APIs.
+# 5 s statt 3 s: schnelle API-Modelle (Recherche/Matrix) feuern Suchen sonst so
+# dicht, dass DuckDuckGo trotz Backoff dauerhaft blockt.
 _DDGS_LOCK = asyncio.Lock()
-_DDGS_MIN_INTERVAL = 3.0
-_DDGS_MAX_RETRIES = 3
+_DDGS_MIN_INTERVAL = 5.0
+_DDGS_MAX_RETRIES = 4
 _last_call_at = 0.0
 
 
@@ -60,7 +62,7 @@ async def _ddgs_call(kind: str, query: str, num_results: int) -> list[dict]:
                 last_err = e
                 _last_call_at = time.monotonic()
                 if _is_ratelimit(e) and attempt < _DDGS_MAX_RETRIES - 1:
-                    await asyncio.sleep(_DDGS_MIN_INTERVAL * (attempt + 2))  # 6 s, 9 s …
+                    await asyncio.sleep(_DDGS_MIN_INTERVAL * (attempt + 2))  # 10 s, 15 s, 20 s
                     continue
                 raise
         if last_err:

@@ -589,6 +589,24 @@ const Chat = (() => {
       bubble.appendChild(fileRow);
     }
 
+    // Antwort direkt als Markdown-Datei speicherbar (Roh-Markdown aus _rawMd;
+    // während des Streamings wird der jeweils aktuelle Stand gespeichert)
+    if (role === 'assistant') {
+      const saveBar = document.createElement('div');
+      saveBar.className = 'msg-save-bar';
+      const mdBtn = document.createElement('button');
+      mdBtn.textContent = '⬇ .md';
+      mdBtn.title = 'Diese Antwort als Markdown-Datei speichern';
+      mdBtn.addEventListener('click', () => {
+        const raw = (bubbleContent._rawMd || bubbleContent.textContent || '').trim();
+        if (!raw) { if (typeof showToast === 'function') showToast('Nichts zu speichern'); return; }
+        downloadTextFile(_saveName('antwort', 'md'), raw + '\n', 'text/markdown;charset=utf-8');
+        if (typeof showToast === 'function') showToast('✓ Antwort als MD gespeichert');
+      });
+      saveBar.appendChild(mdBtn);
+      bubble.appendChild(saveBar);
+    }
+
     row.appendChild(roleLabel);
     row.appendChild(bubble);
     container.appendChild(row);
@@ -680,7 +698,35 @@ const Chat = (() => {
     }
   }
 
+  // ── Direkt-Download von Text-Dateien (MD/CSV) ──────────────────────────────
+  function downloadTextFile(name, content, mime) {
+    const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function _saveName(prefix, ext) {
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return `${prefix}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.${ext}`;
+  }
+
+  // HTML-Tabelle → CSV (Excel-kompatibel: Semikolon-Trenner, Felder gequotet;
+  // der Aufrufer stellt das UTF-8-BOM voran, damit Excel Umlaute erkennt)
+  function tableToCsv(tbl) {
+    const esc = v => {
+      const s = (v || '').replace(/\s+/g, ' ').trim();
+      return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    return Array.from(tbl.rows)
+      .map(r => Array.from(r.cells).map(c => esc(c.textContent)).join(';'))
+      .join('\r\n');
+  }
+
   function renderMarkdown(el, text) {
+    el._rawMd = text;   // Roh-Markdown für „als .md speichern" aufheben
     if (typeof marked !== 'undefined') {
       _ensureMathExtension();
       el.innerHTML = marked.parse(text, { gfm: true, breaks: true });
@@ -731,6 +777,20 @@ const Chat = (() => {
           setTimeout(() => { btn.textContent = 'Kopieren'; }, 1500);
         });
         pre.appendChild(btn);
+      });
+      // Markdown-Tabellen: direkt als CSV speicherbar (Excel-kompatibel)
+      el.querySelectorAll('table').forEach(tbl => {
+        const bar = document.createElement('div');
+        bar.className = 'table-csv-bar';
+        const csvBtn = document.createElement('button');
+        csvBtn.textContent = '⬇ CSV';
+        csvBtn.title = 'Diese Tabelle als CSV-Datei speichern (Excel-kompatibel)';
+        csvBtn.addEventListener('click', () => {
+          downloadTextFile(_saveName('tabelle', 'csv'), '\uFEFF' + tableToCsv(tbl), 'text/csv;charset=utf-8');
+          if (typeof showToast === 'function') showToast('✓ Tabelle als CSV gespeichert');
+        });
+        bar.appendChild(csvBtn);
+        tbl.parentNode.insertBefore(bar, tbl);
       });
     } else {
       el.textContent = text;

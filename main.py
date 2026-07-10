@@ -391,6 +391,27 @@ async def _local_model(preferred: Optional[str] = None) -> Optional[str]:
     return installed[0]
 
 
+def _confidential_api_allowed() -> bool:
+    """Profil-Schalter: dürfen die vertraulichen Auswertungen (Verzeichnis-Analyse,
+    Postfach) auch API-Modelle nutzen? Standard: aus — Inhalte bleiben lokal."""
+    return bool(_load_profile().get("confidential_allow_api", False))
+
+
+async def _analysis_model(preferred: Optional[str] = None) -> Optional[str]:
+    """Modellwahl für vertrauliche Auswertungen (Verzeichnis-Analyse, Postfach).
+
+    Standard: zwingend lokal (wie :func:`_local_model`). Ist im Profil
+    ``confidential_allow_api`` gesetzt UND hat der Nutzer explizit ein
+    API-Modell (``provider::modell``) gewählt, wird dieses genutzt — die
+    Inhalte gehen dann an den externen Anbieter. Ohne explizite Remote-Wahl
+    bleibt es beim Lokal-Zwang; so schaltet der Haken allein noch nichts um."""
+    if _confidential_api_allowed():
+        m = (preferred or "").strip()
+        if m and m not in _MODEL_PLACEHOLDERS and _llm.is_remote(m):
+            return m
+    return await _local_model(preferred)
+
+
 # ── Automatische Mathe-Weiche ────────────────────────────────────────────────
 # Wunsch: Solange im Chat nur das schwache Standardmodell (ministral-3:3b) aktiv
 # ist, sollen erkannte Matheaufgaben automatisch an das (stärkere) Mathe-Modell
@@ -5744,11 +5765,12 @@ async def dir_scan(req: Request):
     base = _dir_resolve_base(body.get("path", ""))
     anonymize = True   # Anonymisierung von Personendaten ist PFLICHT (nicht abschaltbar)
     use_llm_ner = bool(body.get("llm_ner", False))   # zusätzlicher NER-Pass (langsamer)
-    # Verzeichnis-Analyse läuft AUSSCHLIESSLICH lokal (Datenschutz): remote-Modelle
-    # werden ignoriert; ist gar kein lokales LLM da, ist die Funktion nicht verfügbar.
-    model = await _local_model(body.get("model"))
+    # Verzeichnis-Analyse läuft standardmäßig AUSSCHLIESSLICH lokal (Datenschutz).
+    # Nur mit Profil-Schalter „API-Modelle für vertrauliche Auswertungen“ UND
+    # explizit gewähltem Remote-Modell geht sie an einen externen Anbieter.
+    model = await _analysis_model(body.get("model"))
     if not model:
-        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Verzeichnis-Analyse benötigt ein lokales Modell (Ollama).")
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Verzeichnis-Analyse benötigt ein lokales Modell (Ollama). Alternativ im Profil „API-Modelle für vertrauliche Auswertungen“ aktivieren und ein API-Modell wählen.")
 
     files = _dir_walk(base)
     text_files = [f for f in files
@@ -5838,11 +5860,10 @@ async def dir_analyze_file(req: Request):
         raise HTTPException(status_code=400, detail="file_rel fehlt")
     target = _dir_safe_child(base, file_rel)
     use_llm_ner = bool(body.get("llm_ner", False))
-    # Verzeichnis-Analyse läuft AUSSCHLIESSLICH lokal (Datenschutz): remote-Modelle
-    # werden ignoriert; ist gar kein lokales LLM da, ist die Funktion nicht verfügbar.
-    model = await _local_model(body.get("model"))
+    # Standard: lokal (Datenschutz); API-Modell nur über Profil-Schalter + explizite Wahl.
+    model = await _analysis_model(body.get("model"))
     if not model:
-        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Verzeichnis-Analyse benötigt ein lokales Modell (Ollama).")
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Verzeichnis-Analyse benötigt ein lokales Modell (Ollama). Alternativ im Profil „API-Modelle für vertrauliche Auswertungen“ aktivieren und ein API-Modell wählen.")
 
     try:
         if target.stat().st_size > 25_000_000:
@@ -6120,9 +6141,9 @@ async def pst_analyze(req: Request):
     mids = body.get("mids")
     want_tags = bool(body.get("tags", True))
 
-    model = await _local_model(body.get("model"))
+    model = await _analysis_model(body.get("model"))
     if not model:
-        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Postfach-Analyse benötigt ein lokales Modell (Ollama).")
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Postfach-Analyse benötigt ein lokales Modell (Ollama). Alternativ im Profil „API-Modelle für vertrauliche Auswertungen“ aktivieren und ein API-Modell wählen.")
 
     targets = [m for m in store.get("mails", []) if (not mids or m.get("mid") in set(mids))]
     budget = max(1200, int(_profile_num_ctx() * 3.5 * 0.6))
@@ -6315,9 +6336,9 @@ async def pst_ask(req: Request):
         raise HTTPException(status_code=400, detail="Keine Frage angegeben")
     if not cid:
         raise HTTPException(status_code=400, detail="Keine Wissensdatenbank gewählt – Mails erst per RAG-Übernahme einlesen.")
-    model = await _local_model(body.get("model"))
+    model = await _analysis_model(body.get("model"))
     if not model:
-        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – Postfach-Fragen laufen ausschließlich lokal.")
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – Postfach-Fragen laufen standardmäßig lokal (Profil-Schalter „API-Modelle für vertrauliche Auswertungen“ erlaubt API-Modelle).")
     hits = await query_collections([cid], question, top_k_cap=8)
     context = "\n\n---\n\n".join(f"[{h.get('filename','')}]\n{h.get('text','')}" for h in hits)
     sys_p = ("Beantworte die Frage NUR anhand des bereitgestellten E-Mail-Kontexts. Wenn die "
@@ -6347,9 +6368,9 @@ async def pst_summarize(req: Request):
     d, store = _pst_load(str(body.get("store_id", "")))
     mids = body.get("mids")
     sel = set(mids) if mids else None
-    model = await _local_model(body.get("model"))
+    model = await _analysis_model(body.get("model"))
     if not model:
-        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Zusammenfassung läuft ausschließlich lokal.")
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Zusammenfassung läuft standardmäßig lokal (Profil-Schalter „API-Modelle für vertrauliche Auswertungen“ erlaubt API-Modelle).")
     mails = [m for m in store.get("mails", []) if (sel is None or m.get("mid") in sel)]
     if not mails:
         raise HTTPException(status_code=400, detail="Keine Mails ausgewählt")
@@ -6421,9 +6442,9 @@ async def pst_command(req: Request):
     if not text:
         raise HTTPException(status_code=400, detail="Kein Befehl angegeben")
     conns = [str(c).strip() for c in (body.get("connectors") or []) if str(c).strip()][:40]
-    model = await _local_model(body.get("model"))
+    model = await _analysis_model(body.get("model"))
     if not model:
-        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – der Graph-Befehl läuft ausschließlich lokal.")
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – der Graph-Befehl läuft standardmäßig lokal (Profil-Schalter „API-Modelle für vertrauliche Auswertungen“ erlaubt API-Modelle).")
     # Zeitraum des Postfachs mitgeben (hilft dem Modell bei „Dezember" & Co.)
     dates = sorted(d[:10] for d in (m.get("date", "") for m in store.get("mails", [])) if d[:10])
     span = f"{dates[0]} bis {dates[-1]}" if dates else "unbekannt"
@@ -6927,6 +6948,9 @@ async def save_profile(req: Request):
     profile["math_autoroute"] = bool(body.get("math_autoroute", True))
     # Recherche (Matrix + Recherche-Tab) zwingend lokal ausführen (Standard: aus)
     profile["research_local_only"] = bool(body.get("research_local_only", False))
+    # Vertrauliche Auswertungen (Verzeichnis-Analyse, Postfach) dürfen API-Modelle
+    # nutzen, wenn explizit eines gewählt ist (Standard: aus — alles bleibt lokal)
+    profile["confidential_allow_api"] = bool(body.get("confidential_allow_api", False))
     # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
     profile["auto_compress"] = bool(body.get("auto_compress", False))
     try:

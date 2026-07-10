@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260703save" />
+  <link rel="stylesheet" href="/css/app.css?v=20260710csvmd" />
 </head>
 <body>
 
@@ -225,6 +225,9 @@
             <button class="tool-toggle" id="btn-export-docx" title="Chat als Word exportieren">
               📝 DOCX
             </button>
+            <button class="tool-toggle" id="btn-export-md" title="Chat als Markdown-Datei (.md) speichern">
+              📄 MD
+            </button>
             <button class="tool-toggle" id="btn-chat-to-doc" title="Chat (komprimiert) als Quellmaterial in den Dokumentengenerator übernehmen – z. B. um eine Besprechung zu planen">
               → 📄 Doku
             </button>
@@ -259,6 +262,7 @@
         <button class="export-btn" id="btn-export-pdf">📑 PDF</button>
         <button class="export-btn" id="btn-export-latex">𝐓 LaTeX</button>
         <button class="export-btn" id="btn-export-xlsx">📋 XLSX</button>
+        <button class="export-btn" id="btn-export-csv" title="Tabelle als CSV-Datei speichern (Excel-kompatibel)">📄 CSV</button>
       </div>
 
       <div id="canvas-area" style="position:relative">
@@ -2010,6 +2014,16 @@
         ist die Recherche dann nicht verfügbar.</span>
       </span>
     </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-confidential-api" style="width:auto;margin-top:2px" />
+      <span>API-Modelle für vertrauliche Auswertungen erlauben
+        <span class="planner-muted">— Verzeichnis-Analyse und Postfach dürfen dann ein explizit
+        gewähltes API-Modell nutzen (statt zwingend lokal). ⚠ Achtung: Datei- und Mail-Inhalte
+        gehen dabei an den externen Anbieter! Standard: aus — alles bleibt auf diesem Rechner.
+        Semantische Funktionen (Themen-Nähe, RAG-Übernahme) brauchen weiterhin das lokale
+        Embedding-Modell.</span>
+      </span>
+    </label>
 
     <div id="provider-section">
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
@@ -2440,13 +2454,13 @@
 <script src="/js/agents.js?v=20260611merge"></script>
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260622"></script>
-<script src="/js/chat.js?v=20260626code1"></script>
+<script src="/js/chat.js?v=20260710csvmd"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260622"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260627pst1"></script>
+<script src="/js/profile.js?v=20260710capi"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260622"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
@@ -2462,7 +2476,7 @@
 <script src="/js/postfach.js?v=20260703save"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260627pst1"></script>
+<script src="/js/app.js?v=20260710csvmd"></script>
 
 </body>
 </html>

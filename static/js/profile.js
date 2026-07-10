@@ -154,6 +154,8 @@ const Profile = (() => {
     if (mathRouteEl) mathRouteEl.checked = _data.math_autoroute !== false;  // Standard: an
     const researchLocalEl = document.getElementById('profile-research-local');
     if (researchLocalEl) researchLocalEl.checked = !!_data.research_local_only;  // Standard: aus
+    const confApiEl = document.getElementById('profile-confidential-api');
+    if (confApiEl) confApiEl.checked = !!_data.confidential_allow_api;  // Standard: aus
     _fillModelSelects();
     _loadProviders();
     _refreshPreviews();
@@ -238,6 +240,7 @@ const Profile = (() => {
       currency:                (document.getElementById('profile-currency')?.value || '€').trim() || '€',
       math_autoroute: document.getElementById('profile-math-autoroute')?.checked !== false,
       research_local_only: !!document.getElementById('profile-research-local')?.checked,
+      confidential_allow_api: !!document.getElementById('profile-confidential-api')?.checked,
       model_general:  document.getElementById('profile-model-general')?.value || '',
       model_coding:   document.getElementById('profile-model-coding')?.value || '',
       model_science:  document.getElementById('profile-model-science')?.value || '',

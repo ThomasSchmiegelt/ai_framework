@@ -490,6 +490,19 @@ html, body {
   padding: 4px 0;
 }
 
+/* „⬇ .md" an Assistenten-Antworten & „⬇ CSV" an Markdown-Tabellen:
+   dezent, erst beim Überfahren der Nachricht voll sichtbar */
+.msg-save-bar { margin-top: 4px; text-align: right; opacity: .35; transition: opacity .15s; }
+.msg-bubble:hover .msg-save-bar { opacity: 1; }
+.table-csv-bar { text-align: right; margin: 2px 0; opacity: .35; transition: opacity .15s; }
+.msg-bubble:hover .table-csv-bar, .table-csv-bar:hover { opacity: 1; }
+.msg-save-bar button, .table-csv-bar button {
+  padding: 2px 8px; font-size: 11px; cursor: pointer;
+  background: var(--bg-secondary, #222); color: var(--text-muted, #aaa);
+  border: 1px solid var(--border, #555); border-radius: 4px;
+}
+.msg-save-bar button:hover, .table-csv-bar button:hover { color: var(--text, #eee); }
+
 .msg-role {
   font-size: 12px;
   color: var(--text-muted);

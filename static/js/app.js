@@ -174,6 +174,50 @@ async function exportChat(format) {
   }
 }
 
+// Gemeinsamer Text-Download (MD/CSV) ohne Server-Roundtrip
+function downloadTextBlob(name, content, mime) {
+  const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Ganzen Chat als Markdown-Datei speichern (nutzt das von chat.js an den Bubbles
+// hinterlegte Roh-Markdown _rawMd; Fallback: sichtbarer Text)
+function exportChatMd() {
+  const rows = document.querySelectorAll('.message-row');
+  const parts = [];
+  rows.forEach(row => {
+    const role = row.classList.contains('user') ? 'Du' : 'Assistent';
+    const c = row.querySelector('.bubble-content');
+    const raw = ((c && (c._rawMd || c.textContent)) || '').trim();
+    if (raw) parts.push(`## ${role}\n\n${raw}`);
+  });
+  if (!parts.length) { showToast('Kein Chat-Inhalt vorhanden'); return; }
+  const title = (document.querySelector('.conv-item.active .conv-title')?.textContent || 'Chat').trim();
+  downloadTextBlob('chat_export.md', `# ${title}\n\n` + parts.join('\n\n---\n\n') + '\n', 'text/markdown;charset=utf-8');
+  showToast('✓ Chat als MD gespeichert');
+}
+
+// Canvas-Tabelle (create_spreadsheet) als CSV speichern — Excel-kompatibel:
+// Semikolon-Trenner, Felder gequotet, UTF-8-BOM für Umlaute
+function exportCanvasCsv() {
+  const data = CanvasRenderer.getCurrentData();
+  if (!data || data.type !== 'spreadsheet' || !(data.headers || data.rows)) {
+    showToast('Keine Tabelle im Canvas — CSV-Export gilt für Tabellen'); return;
+  }
+  const esc = v => {
+    const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [];
+  if (data.headers) lines.push(data.headers.map(esc).join(';'));
+  (data.rows || []).forEach(r => lines.push((r || []).map(esc).join(';')));
+  downloadTextBlob('tabelle.csv', '\uFEFF' + lines.join('\r\n'), 'text/csv;charset=utf-8');
+  showToast('✓ Tabelle als CSV gespeichert');
+}
+
 // Chat (komprimiert) als Quellmaterial in den Dokumentengenerator übernehmen
 function chatToDocGen() {
   const rows = document.querySelectorAll('.message-row');
@@ -392,6 +436,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-export-latex')?.addEventListener('click', () => exportCanvas('latex'));
   document.getElementById('btn-export-xlsx').addEventListener('click', () => exportCanvas('xlsx'));
   document.getElementById('btn-export-docx').addEventListener('click', () => exportChat('docx'));
+  document.getElementById('btn-export-md')?.addEventListener('click', () => exportChatMd());
+  document.getElementById('btn-export-csv')?.addEventListener('click', () => exportCanvasCsv());
   document.getElementById('btn-chat-to-doc')?.addEventListener('click', chatToDocGen);
 
   // Modal
