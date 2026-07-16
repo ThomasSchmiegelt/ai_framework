@@ -35,6 +35,10 @@ data/capacity_lists.json
 data/feedback.md
 # Postfach-Import (eingelesene PST/Mails + Anhänge = PRIVATE Daten, niemals versionieren)
 data/pst/
+# Angebote/Rechnungen/Patente (echte Kunden-/Finanz-/Recherchedaten = PRIVAT, niemals versionieren)
+data/angebote/
+data/rechnungen/
+data/patente/
 
 # Selbstsignierte TLS-Zertifikate (privater Schlüssel!) — siehe scripts/gen_cert.*
 certs/

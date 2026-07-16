@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260710csvmd" />
+  <link rel="stylesheet" href="/css/app.css?v=20260714b" />
 </head>
 <body>
 
@@ -144,6 +144,9 @@
       <button class="tab-btn" data-tab="mathe">🔢 Mathe</button>
       <button class="tab-btn" data-tab="diranalyse">📁 Verzeichnis</button>
       <button class="tab-btn" data-tab="postfach">📮 Postfach</button>
+      <button class="tab-btn" data-tab="patente">⚖️ Patente</button>
+      <button class="tab-btn" data-tab="rechnung">🧾 Angebot / Rechnung</button>
+      <button class="tab-btn" data-tab="zeugnis">📜 Zeugnisse</button>
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
       <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
     </div>
@@ -799,10 +802,27 @@
         <button id="btn-new-plan" class="export-btn">＋ Neuer Plan</button>
         <input type="text" id="planner-plan-name" placeholder="Planname…" style="flex:1;max-width:200px" class="sidebar-select" />
         <button id="btn-save-plan" class="export-btn">💾 Speichern</button>
-        <button id="btn-delete-plan" class="export-btn btn-danger-sm" style="display:none">🗑</button>
-        <button id="btn-plan-export-csv" class="export-btn" style="font-size:12px">⬇ CSV</button>
-        <button id="btn-plan-import-csv" class="export-btn" style="font-size:12px">⬆ CSV</button>
+        <details class="planner-menu" id="planner-plan-menu">
+          <summary class="export-btn planner-menu-btn" style="font-size:12px" title="Weitere Plan-Aktionen">⋯</summary>
+          <div class="planner-menu-panel">
+            <button id="btn-plan-export-csv" class="export-btn">⬇ CSV exportieren</button>
+            <button id="btn-plan-import-csv" class="export-btn">⬆ CSV importieren</button>
+            <button id="btn-delete-plan" class="export-btn btn-danger-sm" style="display:none">🗑 Plan löschen</button>
+          </div>
+        </details>
         <input type="file" id="plan-csv-input" accept=".csv" style="display:none" />
+      </div>
+
+      <!-- Angebots-/Rechnungs-Workflow: Projektstatus -->
+      <div id="planner-status-bar" class="planner-status-bar" style="display:none">
+        <span class="planner-status-text">Projekt: <strong id="ps-proj-name">—</strong></span>
+        <span class="planner-status-badge" id="ps-status">—</span>
+        <button id="ps-link-project" class="export-btn" style="font-size:12px;display:none">🔗 Projekt anlegen &amp; verknüpfen</button>
+        <span id="ps-link-wrap" style="display:none">
+          <button id="ps-release-angebot" class="export-btn" style="font-size:12px">▶ Für Angebot freigeben</button>
+          <button id="ps-release-rechnung" class="export-btn" style="font-size:12px">▶ Für Rechnung freigeben</button>
+          <button id="ps-goto-angebot" class="export-btn" style="font-size:12px;display:none">→ Angebot schreiben</button>
+        </span>
       </div>
 
       <!-- Projektkontext + KI-Aktionen (einklappbar, um Platz zu sparen) -->
@@ -877,12 +897,17 @@
             <span>Aufgabenliste</span>
             <button id="btn-add-task" class="export-btn" style="font-size:12px">＋ Aufgabe</button>
             <button id="btn-recalc-cpm" class="export-btn" style="font-size:12px">⚙️ CPM</button>
-            <button id="btn-beautify" class="export-btn" style="font-size:12px" title="Verknüpfungen säubern, nach Ablaufreihenfolge sortieren und Netzplan neu zeichnen">✨ Mach schön</button>
-            <button id="btn-insert-between" class="export-btn" style="font-size:12px" title="Neuen Vorgang zwischen zwei Aufgaben einfügen – KI schlägt passende Tätigkeiten vor">➕ Dazwischen</button>
-            <button id="btn-schedule" class="export-btn" style="font-size:12px" title="Kapazität & Zukauf: Auslastung je Rolle (Make-or-Buy), Partner/BCC und Bestellplan mit Lieferzeiten">📅 Kapazität &amp; Zukauf</button>
-            <button id="btn-from-list" class="export-btn" style="font-size:12px" title="Aus einer einfachen Aufgabenliste (Anfrage/Ausschreibung) einen strukturierten Projektplan generieren">📋 Aus Liste</button>
-            <button id="btn-auto-structure" class="export-btn" style="font-size:12px" title="Bestehende Aufgaben automatisch strukturieren: Phasen, fachliche Abhängigkeiten und Ressourcen-Entzerrung (Vorschau vor dem Anwenden)">🔗 Auto-Strukturieren</button>
-            <button id="btn-research-all" class="export-btn" style="font-size:12px" title="Alle noch nicht recherchierten Tätigkeiten wissenschaftlich recherchieren → Dossiers ins Plan-RAG">🔬 Alle recherchieren</button>
+            <details class="planner-menu" id="planner-tools-menu">
+              <summary class="export-btn planner-menu-btn" style="font-size:12px" title="Weitere Werkzeuge zum Plan">⋯ Werkzeuge</summary>
+              <div class="planner-menu-panel">
+                <button id="btn-beautify" class="export-btn" title="Verknüpfungen säubern, nach Ablaufreihenfolge sortieren und Netzplan neu zeichnen">✨ Mach schön</button>
+                <button id="btn-insert-between" class="export-btn" title="Neuen Vorgang zwischen zwei Aufgaben einfügen – KI schlägt passende Tätigkeiten vor">➕ Dazwischen</button>
+                <button id="btn-schedule" class="export-btn" title="Kapazität & Zukauf: Auslastung je Rolle (Make-or-Buy), Partner/BCC und Bestellplan mit Lieferzeiten">📅 Kapazität &amp; Zukauf</button>
+                <button id="btn-from-list" class="export-btn" title="Aus einer einfachen Aufgabenliste (Anfrage/Ausschreibung) einen strukturierten Projektplan generieren">📋 Aus Liste</button>
+                <button id="btn-auto-structure" class="export-btn" title="Bestehende Aufgaben automatisch strukturieren: Phasen, fachliche Abhängigkeiten und Ressourcen-Entzerrung (Vorschau vor dem Anwenden)">🔗 Auto-Strukturieren</button>
+                <button id="btn-research-all" class="export-btn" title="Alle noch nicht recherchierten Tätigkeiten wissenschaftlich recherchieren → Dossiers ins Plan-RAG">🔬 Alle recherchieren</button>
+              </div>
+            </details>
             <button id="btn-research-stop" class="export-btn" style="font-size:12px;display:none">⏹ Stop</button>
             <progress id="planner-research-bar" max="100" value="0" style="display:none;width:140px;height:10px;vertical-align:middle"></progress>
             <span id="planner-research-progress" class="planner-muted" style="font-size:11px"></span>
@@ -1378,12 +1403,41 @@
             </div>
           </div>
 
+          <!-- Falldokumente: fließen mit Volltext in den Analyseprompt (Gutachten, Überweisung, Attest, Befund) -->
+          <div class="medizin-ctrl-group">
+            <label class="medizin-ctrl-label">Falldokumente (für die Analyse)</label>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button id="btn-medizin-casedoc" class="export-btn" title="Ein oder mehrere Dokumente (Gutachten, Überweisung, Attest, Befund) einlesen — der Volltext fließt in den Analyseprompt">📄 Dokument</button>
+              <button id="btn-medizin-casedoc-folder" class="export-btn" title="Einen ganzen Ordner einlesen — alle enthaltenen Dokumente fließen in den Analyseprompt">📁 Ordner</button>
+              <input type="file" id="medizin-casedoc-file-input" multiple accept=".pdf,.docx,.doc,.txt,.md,.rtf,.csv,.xlsx,.xls" style="display:none" />
+              <input type="file" id="medizin-casedoc-folder-input" webkitdirectory directory multiple style="display:none" />
+            </div>
+          </div>
+
           <!-- Aktions-Buttons -->
           <div style="display:flex;gap:6px;align-self:flex-end;align-items:center">
             <button id="btn-medizin-expert" class="export-btn active" title="Experten-Pipeline: Anfrage wird von zwei Modellen bearbeitet (Aufbereitung → MedGemma-Analyse → Rückfragen → Einschätzung)">🔬 Experten-Pipeline</button>
+            <button id="btn-medizin-patient-toggle" class="export-btn" title="Strukturierte Patientendaten erfassen (fließen in die Analyse)">🧑 Patientendaten</button>
             <button id="btn-medizin-quick-toggle" class="export-btn">💡 Schnellstart</button>
             <button id="btn-medizin-clear" class="export-btn" title="Gesprächsverlauf leeren">🗑 Leeren</button>
           </div>
+        </div>
+
+        <!-- Falldokumente-Liste (Chips, per JS befüllt) -->
+        <div id="medizin-casedocs" style="display:none"></div>
+
+        <!-- Patientendaten-Formular (ausklappbar) -->
+        <div id="medizin-patient-form" style="display:none">
+          <div class="medizin-patient-grid">
+            <label>Name<input type="text" id="medizin-pat-name" placeholder="optional" autocomplete="off" /></label>
+            <label>Geburtsdatum / Alter<input type="text" id="medizin-pat-birthdate" placeholder="z. B. 1980-05-12 oder 44 J." autocomplete="off" /></label>
+            <label>Geschlecht<input type="text" id="medizin-pat-sex" placeholder="m / w / d" autocomplete="off" /></label>
+            <label>Anliegen / Verdachtsdiagnose<input type="text" id="medizin-pat-concern" placeholder="z. B. anhaltender Reizhusten" autocomplete="off" /></label>
+            <label>Vorerkrankungen<input type="text" id="medizin-pat-history" placeholder="z. B. Asthma, Hypertonie" autocomplete="off" /></label>
+            <label>Dauermedikation<input type="text" id="medizin-pat-medication" placeholder="z. B. Ramipril 5 mg" autocomplete="off" /></label>
+            <label>Allergien<input type="text" id="medizin-pat-allergies" placeholder="z. B. Penicillin" autocomplete="off" /></label>
+          </div>
+          <div class="medizin-patient-hint">Diese Angaben werden bei jeder Analyse mitgeschickt. Fehlende Angaben fragt der Assistent bei Bedarf nach.</div>
         </div>
 
         <!-- Schnellstart-Prompts (ausklappbar) -->
@@ -1640,6 +1694,331 @@
         </div>
       </div>
     </div><!-- /postfach-panel -->
+
+    <div id="patente-panel" class="panel">
+      <div id="pat-toolbar">
+        <h2 style="font-size:16px;margin:0">⚖️ Patente</h2>
+        <select id="pat-project" style="min-width:160px"><option value="">— Projekt wählen —</option></select>
+        <input type="text" id="pat-new-project" placeholder="Neues Projekt…" style="max-width:160px" />
+        <button id="btn-pat-create" class="export-btn">➕ Anlegen</button>
+        <button id="btn-pat-delete" class="export-btn btn-danger-sm" title="Projekt löschen">✕</button>
+        <span id="pat-spin" class="pf-spin" style="display:none;margin-left:auto"></span>
+        <span id="pat-status" class="planner-muted" style="font-size:11.5px"></span>
+      </div>
+
+      <div id="pat-subtabs">
+        <button class="pat-subtab active" data-subtab="import">🔍 Import</button>
+        <button class="pat-subtab" data-subtab="akte">📂 Akte</button>
+        <button class="pat-subtab" data-subtab="chat">💬 Chat</button>
+        <button class="pat-subtab" data-subtab="analyse">🤖 Analyse</button>
+        <button class="pat-subtab" data-subtab="gespeichert">💾 Gespeichert</button>
+        <button class="pat-subtab" data-subtab="graph">🕸 Graph</button>
+      </div>
+
+      <div id="pat-body">
+
+        <div class="pat-section active" data-subtab="import">
+          <div class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="pat-import-id" placeholder="Exakte Nummer (z. B. US10000000B2)" style="min-width:220px" />
+            <button id="btn-pat-lookup" class="export-btn">🚀 Abrufen</button>
+          </div>
+          <div class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="pat-search-term" placeholder="Suchbegriff / Stichwort" style="min-width:180px" />
+            <input type="text" id="pat-search-assignee" placeholder="Rechteinhaber" style="min-width:150px" />
+            <input type="text" id="pat-search-country" placeholder="Land (z. B. DE, US)" style="max-width:120px" />
+            <label style="font-size:11.5px;display:flex;align-items:center;gap:4px">Anzahl <input type="number" id="pat-search-max" value="20" min="1" max="50" style="width:60px" /></label>
+            <button id="btn-pat-search" class="export-btn">🔎 Suchen</button>
+          </div>
+          <div id="pat-search-results" class="pat-search-results"></div>
+          <div class="dir-hint" style="flex-direction:column;align-items:stretch;gap:6px">
+            <span class="planner-muted" style="font-size:11.5px">Massenverarbeitung: Patentnummern (eine je Zeile oder Komma-getrennt)</span>
+            <textarea id="pat-csv-text" rows="3" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button id="btn-pat-csv-read" class="export-btn">👁 Patente lesen</button>
+              <button id="btn-pat-csv-import" class="export-btn">⚙️ Stapelverarbeitung starten</button>
+            </div>
+            <div id="pat-read-list" class="pat-read-list"></div>
+          </div>
+          <div class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span class="planner-muted" style="font-size:11.5px">Bestehende Akte einlesen (JSON-Export):</span>
+            <input type="file" id="pat-json-file" accept="application/json" />
+          </div>
+          <div class="dir-hint" style="flex-direction:column;align-items:stretch;gap:6px">
+            <span class="planner-muted" style="font-size:11.5px">Bestehende Fallakten aus dem alten Streamlit-Tool importieren (einmalig):</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="pat-migrate-src" placeholder="Quellpfad, z. B. ~/ai-project/patente/patent_projects" style="flex:1;min-width:260px" />
+              <button id="btn-pat-migrate" class="export-btn">📥 Akten importieren</button>
+            </div>
+            <div id="pat-migrate-log" class="pat-migrate-log"></div>
+          </div>
+        </div>
+
+        <div class="pat-section" data-subtab="akte">
+          <div class="dir-hint" style="display:flex;gap:8px;align-items:center">
+            <button id="btn-pat-export-json" class="export-btn">📥 Export JSON</button>
+            <button id="btn-pat-export-csv" class="export-btn">📊 Export CSV</button>
+          </div>
+          <div id="pat-akte-table"></div>
+          <div id="pat-detail"></div>
+        </div>
+
+        <div class="pat-section" data-subtab="chat">
+          <p class="planner-muted" style="font-size:11.5px">💡 Die Suche ist auf dieses Projekt beschränkt (Framework-RAG, lokale Embeddings).</p>
+          <div class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="text" id="pat-ask-input" placeholder="Ihre Frage zur Akte…" style="flex:1;min-width:220px" />
+            <button id="btn-pat-ask" class="export-btn">Fragen</button>
+          </div>
+          <div id="pat-ask-answer" class="pat-ask-answer"></div>
+        </div>
+
+        <div class="pat-section" data-subtab="analyse">
+          <p class="planner-muted" style="font-size:11.5px">Dokumente für die 7-Stufen-Experten-Pipeline auswählen (Technik → Recht → Umgehung → Innovation → Entwurf → Kritik → Moderator).</p>
+          <div id="pat-analyse-select" class="pat-check-list"></div>
+          <div><button id="btn-pat-analyze" class="export-btn">🧠 Experten-Runde starten</button></div>
+          <div id="pat-analyse-result" class="pat-analyse-result"></div>
+        </div>
+
+        <div class="pat-section" data-subtab="gespeichert">
+          <div id="pat-analyses-list"></div>
+        </div>
+
+        <div class="pat-section" data-subtab="graph">
+          <div class="dir-hint" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:11.5px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pat-graph-ipc" checked /> IPC-Klassen</label>
+            <label style="font-size:11.5px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pat-graph-rh" checked /> Rechteinhaber</label>
+            <label style="font-size:11.5px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pat-graph-zitate" checked /> Zitierte Dokumente</label>
+            <select id="pat-graph-focus" style="font-size:11px;max-width:200px"><option value="Alle">Alle Rechteinhaber</option></select>
+            <button id="btn-pat-graph" class="export-btn pf-play">▶ Graph anzeigen</button>
+          </div>
+          <div id="patente-graph" class="pat-graph-canvas"></div>
+        </div>
+
+      </div>
+
+      <!-- Patent-Lese-Modal (Volltext vor der Verarbeitung ansehen) -->
+      <div id="pat-preview-modal" class="pat-modal" style="display:none">
+        <div class="pat-modal-box">
+          <button id="pat-preview-close" class="pat-modal-close">✕</button>
+          <div id="pat-preview-body"></div>
+        </div>
+      </div>
+    </div><!-- /patente-panel -->
+
+    <!-- ── Rechnungen-Panel ────────────────────────────────────────────── -->
+    <div id="rechnung-panel" class="panel">
+      <div class="rz-head">
+        <h2>🧾 Angebot / Rechnung</h2>
+        <span class="planner-muted" id="rz-status"></span>
+        <span id="rz-spin" class="rz-spin" style="display:none">⏳</span>
+      </div>
+      <div class="rz-subtabs">
+        <button class="rz-subtab active" data-panel="rechnung" data-sub="neu">➕ Neu</button>
+        <button class="rz-subtab" data-panel="rechnung" data-sub="verlauf">📁 Verlauf</button>
+        <button class="rz-subtab" data-panel="rechnung" data-sub="profil">🏢 Firmenprofil</button>
+      </div>
+
+      <div class="rz-section active" data-panel="rechnung" data-sub="neu">
+        <div class="rz-doctype" id="rz-doctype">
+          <button type="button" id="rz-dt-angebot" data-type="angebot">📄 Angebot</button>
+          <button type="button" id="rz-dt-rechnung" data-type="rechnung" class="active">🧾 Rechnung</button>
+        </div>
+
+        <div class="rz-card rz-only-angebot" id="rz-card-fromplan">
+          <h3>📥 Aus Projekt / Plan übernehmen</h3>
+          <p class="planner-muted" style="font-size:11.5px">Für ein Angebot freigegebenes Projekt wählen — die Vorgänge des Plans werden nach Bereich zu Positionen zusammengefasst.</p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="rz-sel-project" style="min-width:260px"></select>
+            <button id="rz-load-plan" class="export-btn">📥 Positionen aus Plan laden</button>
+            <button id="rz-proj-refresh" class="export-btn" title="Projektliste aktualisieren">🔄</button>
+          </div>
+        </div>
+
+        <div class="rz-card rz-only-rechnung" id="rz-card-fromangebot">
+          <h3>📥 Aus Angebot übernehmen</h3>
+          <p class="planner-muted" style="font-size:11.5px">Angebot als Basis laden. Abweichungen (Ist ≠ vereinbart) je Position „gesondert ausweisen" oder „verstecken".</p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="rz-sel-angebot" style="min-width:260px"></select>
+            <button id="rz-load-angebot" class="export-btn">📥 Angebot laden</button>
+            <button id="rz-ang-refresh" class="export-btn" title="Angebotsliste aktualisieren">🔄</button>
+          </div>
+          <div id="rz-baseline-info" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
+        </div>
+
+        <div class="rz-card">
+          <h3>🔧 Vorgang zerlegen (optional)</h3>
+          <p class="planner-muted" style="font-size:11.5px">Beschreibe den Auftrag/Vorgang — das KI-Modell zerlegt ihn in Einzelpositionen nach den gewählten Leistungskategorien.</p>
+          <textarea id="rz-vorgang" rows="2" placeholder="z. B. Entwicklung einer Sondervorrichtung zum Fügen von Blechteilen für Kunde X, inkl. Beschaffung der Normteile"></textarea>
+          <div class="rz-cat-chips" id="rz-cat-chips"></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+            <input id="rz-cat-add" placeholder="Kategorie hinzufügen…" style="max-width:200px" />
+            <label class="rz-field" style="flex-direction:row;align-items:center;gap:5px">Stundensatz (netto €/Std)
+              <input id="rz-satz" type="number" min="0" step="5" style="width:90px" />
+            </label>
+            <button id="rz-breakdown" class="export-btn" style="margin-left:auto">🔧 In Einzelvorgänge zerlegen</button>
+          </div>
+        </div>
+        <div class="rz-card">
+          <h3>Freitext (optional)</h3>
+          <p class="planner-muted" style="font-size:11.5px"><span id="rz-freetext-hint">Rechnung frei beschreiben</span> — das KI-Modell (idealerweise dein API-Modell) zerlegt den Text in Positionen. Beträge rechnet der Server exakt.</p>
+          <textarea id="rz-freetext" rows="2" placeholder="z. B. 3 Tage Ingenieurberatung à 800 €, 1,5 Std Nacharbeit à 95,50 €, Fahrtkosten pauschal 120 €"></textarea>
+          <button id="rz-parse" class="export-btn">✨ In Positionen zerlegen</button>
+        </div>
+
+        <div class="rz-card">
+          <h3>Kunde</h3>
+          <div class="rz-grid">
+            <input id="rz-k-name" placeholder="Name / Firma" />
+            <input id="rz-k-zusatz" placeholder="Zusatz (z. B. z. Hd.)" />
+            <input id="rz-k-strasse" placeholder="Straße & Nr." />
+            <input id="rz-k-plzort" placeholder="PLZ Ort" />
+            <input id="rz-k-land" placeholder="Land (optional)" />
+            <input id="rz-k-kdnr" placeholder="Kundennummer (optional)" />
+          </div>
+        </div>
+
+        <div class="rz-card">
+          <h3 id="rz-daten-title">Rechnungsdaten</h3>
+          <div class="rz-grid">
+            <label class="rz-field"><span id="rz-lbl-nummer">Rechnungsnummer</span> <input id="rz-nummer" /></label>
+            <label class="rz-field"><span id="rz-lbl-datum">Rechnungsdatum</span> <input id="rz-datum" type="date" /></label>
+            <label class="rz-field"><span id="rz-lbl-leistung">Leistungszeitraum</span> <input id="rz-leistung" placeholder="z. B. Juni 2026" /></label>
+            <label class="rz-field">USt-Satz
+              <select id="rz-ust"><option value="19">19 %</option><option value="7">7 %</option><option value="0">0 %</option></select>
+            </label>
+            <label class="rz-field rz-only-rechnung">Zahlungsziel (Tage) <input id="rz-ziel" type="number" value="14" min="0" max="90" /></label>
+            <label class="rz-field rz-only-angebot">Gültigkeit (Tage) <input id="rz-gueltig" type="number" value="30" min="1" max="365" /></label>
+            <label class="rz-field rz-check"><input id="rz-klein" type="checkbox" /> Kleinunternehmer §19 (keine USt)</label>
+          </div>
+          <label class="rz-field" style="display:block;margin-top:8px">Einleitungssatz (optional)
+            <input id="rz-einleitung" placeholder="z. B. für die erbrachten Leistungen berechne ich wie folgt:" />
+          </label>
+        </div>
+
+        <div class="rz-card">
+          <h3>Positionen</h3>
+          <table class="rz-pos-table" id="rz-pos-table">
+            <thead><tr><th>Menge</th><th>Einheit</th><th>Beschreibung</th><th>Einzelpreis&nbsp;(netto)</th><th class="rz-abw-col">Abw. z. Angebot</th><th></th></tr></thead>
+            <tbody id="rz-pos-body"></tbody>
+          </table>
+          <button id="rz-pos-add" class="export-btn">➕ Position</button>
+          <div id="rz-live-total" class="rz-total"></div>
+        </div>
+
+        <label class="rz-field" style="display:block">Hinweis / Fußtext (optional)
+          <input id="rz-hinweis" placeholder="z. B. Vielen Dank für Ihren Auftrag." />
+        </label>
+
+        <div class="rz-actions">
+          <button id="rz-create" class="export-btn primary">🧾 Rechnung erstellen</button>
+          <span id="rz-result" class="rz-result"></span>
+        </div>
+        <div id="rz-download" class="rz-download" style="display:none">
+          <a id="rz-dl-pdf" class="export-btn" target="_blank">📄 PDF</a>
+          <a id="rz-dl-docx" class="export-btn" target="_blank">📝 DOCX</a>
+        </div>
+      </div>
+
+      <div class="rz-section" data-panel="rechnung" data-sub="verlauf">
+        <button id="rz-refresh" class="export-btn">🔄 Aktualisieren</button>
+        <div id="rz-history"></div>
+      </div>
+
+      <div class="rz-section" data-panel="rechnung" data-sub="profil">
+        <p class="planner-muted" style="font-size:11.5px">Absender- und Steuerdaten werden auf jeder Rechnung als Pflichtangaben (§14 UStG) verwendet.</p>
+        <div class="rz-grid">
+          <input id="fp-firma" placeholder="Firma / Name" />
+          <input id="fp-inhaber" placeholder="Inhaber / Vertreter" />
+          <input id="fp-strasse" placeholder="Straße & Nr." />
+          <input id="fp-plzort" placeholder="PLZ Ort" />
+          <input id="fp-ustid" placeholder="USt-IdNr." />
+          <input id="fp-steuernr" placeholder="Steuernummer" />
+          <input id="fp-email" placeholder="E-Mail" />
+          <input id="fp-telefon" placeholder="Telefon" />
+          <input id="fp-iban" placeholder="IBAN" />
+          <input id="fp-bic" placeholder="BIC" />
+          <input id="fp-bank" placeholder="Bank" />
+          <input id="fp-prefix" placeholder="Rechnungsnummer-Präfix (z. B. 2026-)" />
+          <input id="fp-angebot-prefix" placeholder="Angebotsnummer-Präfix (z. B. AN-2026-)" />
+        </div>
+        <label class="rz-field rz-check" style="margin-top:8px"><input id="fp-klein" type="checkbox" /> Standardmäßig Kleinunternehmer §19</label>
+        <div class="rz-actions"><button id="fp-save" class="export-btn primary">💾 Firmenprofil speichern</button></div>
+      </div>
+    </div><!-- /rechnung-panel -->
+
+    <!-- ── Zeugnisse-Panel ─────────────────────────────────────────────── -->
+    <div id="zeugnis-panel" class="panel">
+      <div class="rz-head">
+        <h2>📜 Arbeitszeugnisse</h2>
+        <span class="planner-muted" id="zg-status"></span>
+        <span id="zg-spin" class="rz-spin" style="display:none">⏳</span>
+      </div>
+      <div class="rz-subtabs">
+        <button class="rz-subtab active" data-panel="zeugnis" data-sub="neu">➕ Neues Zeugnis</button>
+        <button class="rz-subtab" data-panel="zeugnis" data-sub="verlauf">📁 Verlauf</button>
+      </div>
+
+      <div class="rz-section active" data-panel="zeugnis" data-sub="neu">
+        <p class="planner-muted" style="font-size:11.5px">Qualifiziertes Zeugnis in üblicher, codierter Zeugnissprache passend zur Gesamtnote. Empfohlen: dein API-Modell für saubere Formulierungen.</p>
+        <div class="rz-card">
+          <h3>Angaben</h3>
+          <div class="rz-grid">
+            <input id="zg-arbeitgeber" placeholder="Arbeitgeber (leer = Firmenprofil)" />
+            <input id="zg-name" placeholder="Name der/des Beschäftigten" />
+            <label class="rz-field">Geschlecht
+              <select id="zg-geschlecht"><option value="männlich">männlich</option><option value="weiblich">weiblich</option><option value="divers">divers</option></select>
+            </label>
+            <input id="zg-position" placeholder="Position / Funktion" />
+            <input id="zg-abteilung" placeholder="Abteilung (optional)" />
+            <label class="rz-field">Gesamtnote
+              <select id="zg-note">
+                <option value="1">1 – sehr gut</option>
+                <option value="2" selected>2 – gut</option>
+                <option value="3">3 – befriedigend</option>
+                <option value="4">4 – ausreichend</option>
+                <option value="5">5 – mangelhaft</option>
+              </select>
+            </label>
+            <label class="rz-field">Eintritt <input id="zg-eintritt" type="date" /></label>
+            <label class="rz-field">Austritt <input id="zg-austritt" type="date" /></label>
+            <input id="zg-beendigung" placeholder="Beendigungsgrund (z. B. auf eigenen Wunsch)" />
+            <input id="zg-fuehrung" placeholder="Führungsverantwortung (optional)" />
+          </div>
+          <label class="rz-field" style="display:block;margin-top:8px">Aufgaben / Verantwortungsbereiche (eine je Zeile)
+            <textarea id="zg-aufgaben" rows="3" placeholder="Backend-Entwicklung&#10;Code-Reviews&#10;Mentoring"></textarea>
+          </label>
+          <label class="rz-field" style="display:block">Besondere Stärken / Erfolge (optional)
+            <input id="zg-staerken" placeholder="z. B. hohe Eigeninitiative, Projekt X erfolgreich geleitet" />
+          </label>
+        </div>
+        <div class="rz-card">
+          <h3>Ausstellung</h3>
+          <div class="rz-grid">
+            <input id="zg-ort" placeholder="Ort" />
+            <label class="rz-field">Ausstellungsdatum <input id="zg-datum" type="date" /></label>
+            <input id="zg-unterzeichner" placeholder="Unterzeichner (Name, Funktion)" />
+          </div>
+        </div>
+
+        <div class="rz-actions">
+          <button id="zg-generate" class="export-btn primary">📜 Zeugnis erzeugen</button>
+        </div>
+
+        <div id="zg-output-wrap" style="display:none">
+          <h3>Ergebnis <span class="planner-muted" style="font-size:11px">— frei bearbeitbar</span></h3>
+          <textarea id="zg-output" rows="16"></textarea>
+          <div class="rz-actions">
+            <button id="zg-save" class="export-btn">💾 Änderungen speichern</button>
+            <a id="zg-dl-pdf" class="export-btn" target="_blank">📄 PDF</a>
+            <a id="zg-dl-docx" class="export-btn" target="_blank">📝 DOCX</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="rz-section" data-panel="zeugnis" data-sub="verlauf">
+        <button id="zg-refresh" class="export-btn">🔄 Aktualisieren</button>
+        <div id="zg-history"></div>
+      </div>
+    </div><!-- /zeugnis-panel -->
 
     <!-- Konnektor-Editor-Modal -->
     <div id="pf-conn-modal" class="pf-modal" style="display:none">
@@ -2453,8 +2832,8 @@
 <script src="/js/canvas_editor.js?v=20260603"></script>
 <script src="/js/agents.js?v=20260611merge"></script>
 <script src="/js/jury.js?v=20260622"></script>
-<script src="/js/clarify.js?v=20260622"></script>
-<script src="/js/chat.js?v=20260710csvmd"></script>
+<script src="/js/clarify.js?v=20260714"></script>
+<script src="/js/chat.js?v=20260714clarify"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260622"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
@@ -2462,7 +2841,7 @@
 <script src="/js/mail.js?v=20260604"></script>
 <script src="/js/profile.js?v=20260710capi"></script>
 <script src="/js/projects.js?v=20260603"></script>
-<script src="/js/planner.js?v=20260622"></script>
+<script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
 <script src="/js/rfq.js?v=20260622"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
@@ -2470,10 +2849,13 @@
 <script src="/js/logger.js?v=20260603"></script>
 <script src="/js/code_workspace.js?v=20260627pst1"></script>
 <script src="/js/onboarding.js?v=20260622"></script>
-<script src="/js/medizin.js?v=20260622"></script>
+<script src="/js/medizin.js?v=20260711docs2"></script>
 <script src="/js/mathe.js?v=20260622"></script>
 <script src="/js/dir_analysis.js?v=20260627local"></script>
 <script src="/js/postfach.js?v=20260703save"></script>
+<script src="/js/patente.js?v=20260712read"></script>
+<script src="/js/rechnung.js?v=20260714"></script>
+<script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/app.js?v=20260710csvmd"></script>

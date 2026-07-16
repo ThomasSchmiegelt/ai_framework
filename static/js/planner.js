@@ -4,6 +4,7 @@ const Planner = (() => {
 
   /* ── Zustand ──────────────────────────────────────────────────────── */
   let _planId   = null;
+  let _projectId = '';      // verknüpftes Projekt (Angebots-/Rechnungs-Workflow)
   let _tasks    = [];       // { id, name, duration, predecessors[], successors[], resources, resource_list[], notes }
   let _desc     = '';       // Projektbeschreibung & Ziel
   let _systemPrompt = '';   // abgeleiteter Projekt-Agent (System-Prompt)
@@ -741,6 +742,7 @@ const Planner = (() => {
       const resp = await fetch(`/api/plans/${id}`);
       const plan = await resp.json();
       _planId = plan.id;
+      _projectId = plan.project_id || '';
       _tasks  = plan.tasks || [];
       _desc   = plan.description || '';
       _systemPrompt = plan.system_prompt || '';
@@ -765,9 +767,84 @@ const Planner = (() => {
       if (status) { status.textContent = _systemPrompt ? '✓ Projekt-Agent geladen' : ''; status.title = _systemPrompt; }
       document.getElementById('btn-delete-plan').style.display = '';
       _recalcAndRender();
+      _renderStatusBar();
     } catch (e) {
       showToast('Plan konnte nicht geladen werden');
     }
+  }
+
+  /* ── Angebots-/Rechnungs-Workflow: Projekt-Statusleiste ──────────────── */
+  async function _renderStatusBar() {
+    const bar = document.getElementById('planner-status-bar');
+    if (!bar) return;
+    if (!_planId) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    const nameEl = document.getElementById('ps-proj-name');
+    const statusEl = document.getElementById('ps-status');
+    const linkBtn = document.getElementById('ps-link-project');
+    const linkWrap = document.getElementById('ps-link-wrap');
+    const goto = document.getElementById('ps-goto-angebot');
+    if (!_projectId) {
+      if (nameEl) nameEl.textContent = '(nicht verknüpft)';
+      if (statusEl) statusEl.style.display = 'none';
+      if (linkWrap) linkWrap.style.display = 'none';
+      if (linkBtn) linkBtn.style.display = '';
+      return;
+    }
+    if (linkBtn) linkBtn.style.display = 'none';
+    if (linkWrap) linkWrap.style.display = '';
+    if (statusEl) statusEl.style.display = '';
+    try {
+      const projects = await fetch('/api/projects').then(r => r.json());
+      const p = (Array.isArray(projects) ? projects : []).find(x => x.id === _projectId);
+      if (!p) { if (nameEl) nameEl.textContent = '(Projekt entfernt)'; if (statusEl) statusEl.textContent = ''; return; }
+      if (nameEl) nameEl.textContent = p.name || _projectId;
+      if (statusEl) { statusEl.textContent = p.status_label || p.status || ''; statusEl.dataset.status = p.status || ''; }
+      if (goto) goto.style.display = (p.status === 'angebot_frei' || p.status === 'angebot') ? '' : 'none';
+      // Nur den jeweils nächsten sinnvollen Freigabe-Schritt zeigen (weniger Buttons)
+      const st = p.status || 'planung';
+      const relA = document.getElementById('ps-release-angebot');
+      const relR = document.getElementById('ps-release-rechnung');
+      if (relA) relA.style.display = (st === 'planung' || st === '') ? '' : 'none';
+      if (relR) relR.style.display = (st === 'angebot_frei' || st === 'angebot') ? '' : 'none';
+    } catch (_) {}
+  }
+
+  async function _linkProject() {
+    if (!(await _ensureSaved())) { showToast('Plan konnte nicht gespeichert werden'); return; }
+    const name = document.getElementById('planner-plan-name').value.trim() || 'Projekt';
+    try {
+      const p = await fetch('/api/projects', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, plan_id: _planId }),
+      }).then(r => r.json());
+      _projectId = p.id;
+      await fetch(`/api/plans/${_planId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: _projectId }),
+      });
+      showToast('🔗 Projekt angelegt & verknüpft');
+      _renderStatusBar();
+    } catch (e) { showToast('Projekt konnte nicht angelegt werden'); }
+  }
+
+  async function _releaseProject(status) {
+    if (!(await _ensureSaved())) { showToast('Plan konnte nicht gespeichert werden'); return; }
+    if (!_projectId) { await _linkProject(); if (!_projectId) return; }
+    try {
+      await fetch(`/api/projects/${_projectId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, plan_id: _planId }),
+      });
+      showToast(status === 'angebot_frei' ? '▶ Für Angebot freigegeben' : '▶ Für Rechnung freigegeben');
+      _renderStatusBar();
+    } catch (e) { showToast('Statuswechsel fehlgeschlagen'); }
+  }
+
+  function _gotoAngebot() {
+    if (!_projectId) { showToast('Erst Projekt verknüpfen & für Angebot freigeben'); return; }
+    if (typeof Rechnung !== 'undefined' && Rechnung.openForPlan) Rechnung.openForPlan(_projectId);
+    else showToast('Angebot/Rechnung-Tab nicht verfügbar');
   }
 
   /* ── Plan speichern ──────────────────────────────────────────────── */
@@ -797,6 +874,7 @@ const Planner = (() => {
       await _loadPlanList();
       document.getElementById('planner-plan-select').value = _planId;
       showToast('Plan gespeichert');
+      _renderStatusBar();
     } catch (e) {
       showToast('Fehler beim Speichern');
     }
@@ -2698,8 +2776,9 @@ const Planner = (() => {
 
     // Neuer Plan
     document.getElementById('btn-new-plan')?.addEventListener('click', () => {
-      _planId = null; _tasks = []; _cpm = {}; _layout = {};
+      _planId = null; _projectId = ''; _tasks = []; _cpm = {}; _layout = {};
       _desc = ''; _systemPrompt = ''; _catalog = []; _resMode = 'free'; _startDate = ''; _endDate = ''; _workdays = false;
+      _renderStatusBar();
       document.getElementById('planner-plan-name').value = 'Neuer Plan';
       document.getElementById('planner-plan-select').value = '';
       const sd0 = document.getElementById('planner-start-date'); if (sd0) sd0.value = '';
@@ -2715,15 +2794,22 @@ const Planner = (() => {
     // Plan speichern
     document.getElementById('btn-save-plan')?.addEventListener('click', _savePlan);
 
+    // Angebots-/Rechnungs-Workflow: Statusleiste
+    document.getElementById('ps-link-project')?.addEventListener('click', _linkProject);
+    document.getElementById('ps-release-angebot')?.addEventListener('click', () => _releaseProject('angebot_frei'));
+    document.getElementById('ps-release-rechnung')?.addEventListener('click', () => _releaseProject('rechnung_frei'));
+    document.getElementById('ps-goto-angebot')?.addEventListener('click', _gotoAngebot);
+
     // Plan löschen
     document.getElementById('btn-delete-plan')?.addEventListener('click', async () => {
       if (!_planId || !confirm('Plan löschen?')) return;
       await fetch(`/api/plans/${_planId}`, { method: 'DELETE' });
-      _planId = null; _tasks = []; _cpm = {}; _layout = {};
+      _planId = null; _projectId = ''; _tasks = []; _cpm = {}; _layout = {};
       document.getElementById('planner-plan-name').value = '';
       document.getElementById('btn-delete-plan').style.display = 'none';
       await _loadPlanList();
       _recalcAndRender();
+      _renderStatusBar();
     });
 
     // Plan-Selektor
@@ -2829,6 +2915,16 @@ const Planner = (() => {
         try { localStorage.setItem('planner-setup-open', setup.open ? '1' : '0'); } catch (_) {}
       });
     }
+
+    // „⋯ Werkzeuge“-Menü: nach Klick auf eine Aktion schließen; Klick außerhalb schließt
+    document.querySelectorAll('.planner-menu').forEach(menu => {
+      menu.querySelector('.planner-menu-panel')?.addEventListener('click', () => { menu.open = false; });
+    });
+    document.addEventListener('click', e => {
+      document.querySelectorAll('.planner-menu[open]').forEach(menu => {
+        if (!menu.contains(e.target)) menu.open = false;
+      });
+    });
 
     // Ressourcen-Katalog: Modus, Import, Export
     document.getElementById('planner-res-mode')?.addEventListener('change', e => { _resMode = e.target.value; });

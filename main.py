@@ -11,6 +11,7 @@ import re
 import sys
 import time
 import uuid
+from datetime import date, datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -83,6 +84,11 @@ JURIES_DIR = DATA_DIR / "juries"   # gespeicherte Bewertungs-Jurys (Gruppen von 
 JURY_DOCS_DIR = DATA_DIR / "jury_docs"   # im Jury-Tab erstellte/geprüfte Dokumente
 RFQ_DIR = DATA_DIR / "rfq"   # Anfrage-Auswertung: Job-Zwischenstände (resume-fähig)
 PST_DIR = DATA_DIR / "pst"   # Postfach-Auswertung: geparste Mailstores (+ Anhänge, lokal)
+PATENTE_DIR = DATA_DIR / "patente"   # Patent-Recherche: Fallakten je Projekt (+ Analysen)
+FIRMENPROFIL_FILE = DATA_DIR / "firmenprofil.json"   # Absender-/Steuerdaten für Rechnungen
+RECHNUNGEN_DIR = DATA_DIR / "rechnungen"   # erstellte Rechnungen (JSON-Datensatz je Nummer)
+ANGEBOTE_DIR = DATA_DIR / "angebote"   # erstellte Angebote (JSON-Datensatz je Nummer)
+ZEUGNISSE_DIR = DATA_DIR / "zeugnisse"   # erzeugte Arbeitszeugnisse (JSON-Datensatz)
 CAPACITY_FILE = DATA_DIR / "capacity.json"   # globale Kapazitätsliste (tab-übergreifend)
 BILDER_DIR = Path(__file__).parent / "bilder"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
@@ -95,7 +101,7 @@ FEEDBACK_FILE = DATA_DIR / "feedback.md"
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, PROFILE_ASSETS_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, PROFILE_ASSETS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -693,6 +699,41 @@ def _load_projects() -> list:
         except Exception:
             pass
     return []
+
+
+def _save_projects(projects: list) -> None:
+    PROJECTS_FILE.write_text(
+        json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# Projekt-Status im Angebots-/Rechnungs-Workflow (Planer ↔ Angebot/Rechnung).
+_PROJECT_STATUS_LABELS = {
+    "planung": "In Planung",
+    "angebot_frei": "Für Angebot freigegeben",
+    "angebot": "Angebot erstellt / in Bearbeitung",
+    "rechnung_frei": "Für Rechnung freigegeben",
+    "abgerechnet": "Abgerechnet",
+}
+
+
+def _update_project_fields(pid: str, **fields) -> Optional[dict]:
+    """Setzt Felder eines Projekts (nur nicht-``None``-Werte) und speichert.
+    Gibt das aktualisierte Projekt zurück (oder ``None``, wenn unbekannt)."""
+    if not pid:
+        return None
+    projects = _load_projects()
+    hit = None
+    for p in projects:
+        if p.get("id") == pid:
+            for k, v in fields.items():
+                if v is not None:
+                    p[k] = v
+            p["updated_at"] = time.time()
+            hit = p
+            break
+    if hit is not None:
+        _save_projects(projects)
+    return hit
 
 app = FastAPI(title="AI_Framework_Thomas")
 app.add_middleware(
@@ -1543,6 +1584,26 @@ _CLARIFY_DOMAIN_HINT = {
 }
 
 
+def _normalize_clarify_questions(raw_qs, n: int) -> list:
+    """Validiert/normalisiert eine rohe LLM-Frageliste zu ``[{question,type,options}]``.
+    Auswahltyp ohne ≥2 Optionen wird zu Freitext. Kappt auf ``n`` Fragen."""
+    questions = []
+    for q in (raw_qs or [])[:n]:
+        if not isinstance(q, dict):
+            continue
+        text = str(q.get("question") or "").strip()
+        if not text:
+            continue
+        qtype = str(q.get("type") or "text").strip().lower()
+        if qtype not in ("text", "single", "multi"):
+            qtype = "text"
+        opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()][:6]
+        if qtype in ("single", "multi") and len(opts) < 2:
+            qtype, opts = "text", []
+        questions.append({"question": text, "type": qtype, "options": opts})
+    return questions
+
+
 @app.post("/api/clarify")
 async def clarify(request: ClarifyRequest):
     """Liefert gezielte Rückfragen (Eingabemaske) zu einer Aufgabe – oder eine leere
@@ -1584,22 +1645,73 @@ async def clarify(request: ClarifyRequest):
         raise HTTPException(502, f"Rückfragen konnten nicht erzeugt werden: {e}")
 
     raw_qs = data.get("questions") if isinstance(data, dict) else None
-    questions = []
-    for q in (raw_qs or [])[:n]:
-        if not isinstance(q, dict):
-            continue
-        text = str(q.get("question") or "").strip()
-        if not text:
-            continue
-        qtype = str(q.get("type") or "text").strip().lower()
-        if qtype not in ("text", "single", "multi"):
-            qtype = "text"
-        opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()][:6]
-        # Auswahltyp ohne Optionen → als Freitext behandeln
-        if qtype in ("single", "multi") and len(opts) < 2:
-            qtype, opts = "text", []
-        questions.append({"question": text, "type": qtype, "options": opts})
+    questions = _normalize_clarify_questions(raw_qs, n)
 
+    return {
+        "type": "questions" if questions else "none",
+        "questions": questions,
+        "tokens": {"in": _ti, "out": _to},
+    }
+
+
+class ClarifyStructureRequest(BaseModel):
+    questions_text: str            # die vom Modell im Chat gestellten Rückfragen (Freitext)
+    task: Optional[str] = ""       # ursprüngliche Aufgabe (für Kontext/sinnvolle Optionen)
+    domain: Optional[str] = "chat"
+    model: Optional[str] = None
+    max_questions: int = 8
+
+
+@app.post("/api/clarify/structure")
+async def clarify_structure(request: ClarifyStructureRequest):
+    """Wandelt bereits im Chat gestellte Rückfragen (Freitext des Modells) in eine
+    strukturierte Eingabemaske um: je Frage ``{question, type, options}`` mit
+    Vorauswahl (single/multi) oder Freitext. Erfindet keine neuen Themen – bildet
+    nur die vorhandenen Fragen ab. Robust gegen LLM-Geplapper (JSON-Extraktion)."""
+    qtext = (request.questions_text or "").strip()
+    if not qtext:
+        raise HTTPException(400, "Keine Rückfragen übergeben")
+    _model = _pick_model(request.model)
+    n = max(1, min(int(request.max_questions or 8), 12))
+    hint = _CLARIFY_DOMAIN_HINT.get((request.domain or "chat").lower(), _CLARIFY_DOMAIN_HINT["chat"])
+    task = (request.task or "").strip()
+
+    user = (
+        f"Fachgebiet: {hint}.\n"
+        + (f"Ursprüngliche Aufgabe des Nutzers: \"{task}\"\n" if task else "")
+        + "Das KI-Modell hat dem Nutzer folgende Rückfragen gestellt (Freitext):\n"
+        f"\"\"\"\n{qtext}\n\"\"\"\n\n"
+        "Wandle GENAU diese Rückfragen in eine ausfüllbare Maske um – erfinde keine neuen "
+        f"Themen, fasse eng Zusammengehöriges zu je einer Frage zusammen (max. {n}).\n"
+        "Jede Frage ist ein Objekt: {\"question\": \"…\", \"type\": \"text\"|\"single\"|\"multi\", \"options\": [\"…\"]}.\n"
+        "- Nenne die Frage im Text kurz und klar.\n"
+        "- Wenn die Rückfrage konkrete Alternativen aufzählt (z. B. „LED, Glühlampe, OLED?“): "
+        "type \"single\" (bzw. \"multi\", falls mehrere zugleich möglich) und diese Alternativen als options.\n"
+        "- Ergänze bei Auswahlfragen sinnvolle, gängige Optionen, falls im Text nur Beispiele stehen.\n"
+        "- Offene Fragen ohne Alternativen: type \"text\", options leer.\n"
+        "Antworte NUR mit JSON: {\"questions\": [ {\"question\":\"…\",\"type\":\"single\",\"options\":[\"A\",\"B\"]} ]}"
+    )
+    payload = {
+        "model": _model, "think": False, "format": "json", "stream": False,
+        "keep_alive": KEEP_ALIVE,
+        "messages": [
+            {"role": "system", "content": "Du strukturierst gestellte Rückfragen in eine ausfüllbare Maske. Antworte ausschließlich mit gültigem JSON."},
+            {"role": "user", "content": user},
+        ],
+    }
+    _ti = _to = 0
+    try:
+        async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, payload)
+            resp.raise_for_status()
+            _j = resp.json()
+        _ti, _to = _llm_tok(_j)
+        data = _parse_llm_json(_j.get("message", {}).get("content", "")) or {}
+    except Exception as e:
+        raise HTTPException(502, f"Rückfragen konnten nicht strukturiert werden: {e}")
+
+    raw_qs = data.get("questions") if isinstance(data, dict) else None
+    questions = _normalize_clarify_questions(raw_qs, n)
     return {
         "type": "questions" if questions else "none",
         "questions": questions,
@@ -6481,6 +6593,561 @@ async def pst_command(req: Request):
     return {"directive": out, "tokens": {"in": tin, "out": tout}}
 
 
+# ── Patent-Recherche (Kanzlei Patent-Werkzeug) ───────────────────────────────────
+# Portiert aus dem eigenständigen Streamlit-Tool ~/ai-project/patente: Google-
+# Patents-Scraping (keine offizielle API, ToS-Risiko wie im Original) in
+# projektbezogene Fallakten (data/patente/<projekt>/patente.json), semantische
+# Suche über die Framework-eigene RAG-Engine (tools/rag.py, kein ChromaDB), eine
+# 7-stufige Analyse-Pipeline (Technik/Recht/Umgehung/Innovation/Entwurf/Kritik/
+# Moderator, tools/patente.run_pipeline) und ein Wissensgraph (Cytoscape.js im
+# Frontend, kein pyvis/Backend-HTML). Modellwahl frei (wie Chat-Tab, _pick_model)
+# — bewusst KEIN _analysis_model-Zwang; nur die RAG-Embeddings selbst laufen wie
+# überall im Framework lokal (_local_llm_available-Gate).
+
+
+def _pat_safe_name(name: str) -> str:
+    safe = "".join(c for c in str(name or "") if c.isalnum() or c in (" ", "_", "-")).strip()
+    if not safe:
+        raise HTTPException(status_code=400, detail="Ungültiger Projektname")
+    return safe
+
+
+def _pat_project_dir(name: str) -> Path:
+    d = PATENTE_DIR / _pat_safe_name(name)
+    if not d.exists():
+        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
+    return d
+
+
+def _pat_load(name: str) -> list:
+    from tools import patente as _patente
+    return _patente.load_project(_pat_project_dir(name) / "patente.json")
+
+
+def _pat_meta(d: Path) -> dict:
+    p = d / "meta.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _pat_save_meta(d: Path, meta: dict):
+    (d / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def _pat_rag_collection_for(name: str) -> dict:
+    """Get-or-create die projektgebundene RAG-Collection (analog pst_to_rag)."""
+    from tools.rag import tier_config
+    d = _pat_project_dir(name)
+    meta = _pat_meta(d)
+    cid = meta.get("rag_collection_id")
+    if cid:
+        coll = await _db.rag_get_collection(cid)
+        if coll:
+            return coll
+    tc = tier_config("regler")
+    coll = {
+        "id": f"rag_{uuid.uuid4().hex[:12]}", "name": f"Patente: {name}",
+        "embed_model": EMBED_MODEL, "tier": "regler",
+        "chunk_size": tc["chunk_size"], "chunk_overlap": tc["chunk_overlap"],
+        "top_k": tc["top_k"], "embed_gpu": False, "clean": True,
+        "char_limit": tc["char_limit"], "strictness": "ausgewogen",
+        "created_at": time.time(),
+    }
+    await _db.rag_create_collection(coll)
+    meta["rag_collection_id"] = coll["id"]
+    _pat_save_meta(d, meta)
+    return coll
+
+
+async def _pat_index_patent(coll: dict, patent: dict):
+    from tools.rag import ingest_file
+    pid = patent.get("patent_id")
+    if not pid:
+        return
+    text = (f"Titel: {patent.get('title','')}\n"
+            f"Zusammenfassung: {patent.get('abstract','')}\n"
+            f"Ansprüche: {(patent.get('claims') or '')[:4000]}\n"
+            f"IPC-Klassen: {', '.join(patent.get('ipc_klassen') or [])}\n"
+            f"Rechteinhaber: {', '.join(patent.get('rechteinhaber') or [])}")
+    await _db.rag_delete_document(pid)
+    try:
+        await ingest_file(coll, text, patent.get("title") or pid, pid)
+    except Exception:
+        pass
+
+
+async def _pat_index_analysis(coll: dict, doc_id: str, md_text: str, title: str):
+    from tools.rag import ingest_file
+    await _db.rag_delete_document(doc_id)
+    try:
+        await ingest_file(coll, md_text, title, doc_id)
+    except Exception:
+        pass
+
+
+@app.get("/api/patente/projects")
+async def patente_projects():
+    if not PATENTE_DIR.exists():
+        return {"projects": []}
+    out = []
+    for d in sorted(PATENTE_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        items = _pat_load(d.name) if (d / "patente.json").exists() else []
+        meta = _pat_meta(d)
+        out.append({"name": d.name, "count": len(items), "has_rag": bool(meta.get("rag_collection_id"))})
+    return {"projects": out}
+
+
+class PatProjectCreate(BaseModel):
+    name: str
+
+
+@app.post("/api/patente/projects")
+async def patente_project_create(body: PatProjectCreate):
+    safe = _pat_safe_name(body.name)
+    d = PATENTE_DIR / safe
+    d.mkdir(parents=True, exist_ok=True)
+    if not (d / "patente.json").exists():
+        (d / "patente.json").write_text("[]", encoding="utf-8")
+    (d / "analysen").mkdir(exist_ok=True)
+    return {"name": safe}
+
+
+@app.delete("/api/patente/projects/{name}")
+async def patente_project_delete(name: str):
+    import shutil
+    d = _pat_project_dir(name)
+    meta = _pat_meta(d)
+    cid = meta.get("rag_collection_id")
+    if cid:
+        try:
+            await _db.rag_delete_collection(cid)
+        except Exception:
+            pass
+    shutil.rmtree(d, ignore_errors=True)
+    return {"ok": True}
+
+
+@app.get("/api/patente/projects/{name}")
+async def patente_project_get(name: str):
+    return {"patente": _pat_load(name)}
+
+
+class PatLookup(BaseModel):
+    patent_id: str
+
+
+@app.post("/api/patente/projects/{name}/import/lookup")
+async def patente_import_lookup(name: str, body: PatLookup):
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    pid = str(body.patent_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="Keine Patentnummer angegeben")
+    async with httpx.AsyncClient() as client:
+        details = await _patente.fetch_patent_details(client, pid)
+    if "error" in details:
+        raise HTTPException(status_code=502, detail=f"Scraping fehlgeschlagen: {details['error']}")
+    items = _patente.save_project(d / "patente.json", [details])
+    if await _local_llm_available():
+        coll = await _pat_rag_collection_for(name)
+        await _pat_index_patent(coll, details)
+    return {"patent": details, "count": len(items)}
+
+
+class PatSearch(BaseModel):
+    term: str = ""
+    assignee: str = ""
+    country: str = ""
+    max_results: int = 20
+
+
+@app.post("/api/patente/search")
+async def patente_search(body: PatSearch):
+    from tools import patente as _patente
+    async with httpx.AsyncClient() as client:
+        results = await _patente.search_patents(
+            client, body.term, body.assignee, body.country,
+            max(1, min(int(body.max_results or 20), 50)))
+    return {"results": results}
+
+
+class PatPreview(BaseModel):
+    patent_id: str
+
+
+@app.post("/api/patente/preview")
+async def patente_preview(body: PatPreview):
+    """Volltext eines Patents (Abstract/Ansprüche/IPC/Zitate) scrapen, ohne es in
+    eine Fallakte zu speichern — zum Lesen vor der Stapelverarbeitung."""
+    from tools import patente as _patente
+    pid = (body.patent_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="Keine Patentnummer angegeben.")
+    async with httpx.AsyncClient() as client:
+        details = await _patente.fetch_patent_details(client, pid)
+    if "error" in details:
+        raise HTTPException(status_code=502, detail=f"Abruf fehlgeschlagen: {details['error']}")
+    return details
+
+
+class PatImportCsv(BaseModel):
+    numbers: list[str]
+
+
+@app.post("/api/patente/projects/{name}/import/csv")
+async def patente_import_csv(name: str, body: PatImportCsv):
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    coll = await _pat_rag_collection_for(name) if await _local_llm_available() else None
+    imported, failed = [], []
+    async with httpx.AsyncClient() as client:
+        for raw in body.numbers[:500]:
+            n = str(raw).strip()
+            if not n:
+                continue
+            details = await _patente.fetch_patent_details(client, n)
+            if "error" in details:
+                failed.append(n)
+                continue
+            _patente.save_project(d / "patente.json", [details])
+            if coll:
+                await _pat_index_patent(coll, details)
+            imported.append(details["patent_id"])
+    return {"imported": imported, "failed": failed}
+
+
+class PatImportJson(BaseModel):
+    items: list
+
+
+@app.post("/api/patente/projects/{name}/import/json")
+async def patente_import_json(name: str, body: PatImportJson):
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    valid = [it for it in body.items if isinstance(it, dict) and it.get("patent_id")]
+    if not valid:
+        raise HTTPException(status_code=400, detail="Keine gültigen Patent-Datensätze im Import")
+    items = _patente.save_project(d / "patente.json", valid)
+    if await _local_llm_available():
+        coll = await _pat_rag_collection_for(name)
+        for it in valid:
+            await _pat_index_patent(coll, it)
+    return {"imported": len(valid), "count": len(items)}
+
+
+class PatImportCitations(BaseModel):
+    patent_id: str
+
+
+@app.post("/api/patente/projects/{name}/import/citations")
+async def patente_import_citations(name: str, body: PatImportCitations):
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    bestand = _pat_load(name)
+    quelle = next((p for p in bestand if p.get("patent_id") == body.patent_id), None)
+    if not quelle:
+        raise HTTPException(status_code=404, detail="Patent nicht in der Akte gefunden")
+    vorhandene = {p.get("patent_id") for p in bestand}
+    zu_laden = [z for z in (quelle.get("zitate") or []) if z not in vorhandene]
+    coll = await _pat_rag_collection_for(name) if await _local_llm_available() else None
+    neu, failed = [], []
+    async with httpx.AsyncClient() as client:
+        for n in zu_laden[:200]:
+            details = await _patente.fetch_patent_details(client, n)
+            if "error" in details:
+                failed.append(n)
+                continue
+            _patente.save_project(d / "patente.json", [details])
+            if coll:
+                await _pat_index_patent(coll, details)
+            neu.append(details)
+    return {"imported": neu, "failed": failed}
+
+
+@app.get("/api/patente/projects/{name}/export.json")
+async def patente_export_json(name: str):
+    items = _pat_load(name)
+    data = json.dumps(items, indent=2, ensure_ascii=False)
+    return Response(content=data, media_type="application/json",
+                     headers={"Content-Disposition": f'attachment; filename="{_pat_safe_name(name)}_akte.json"'})
+
+
+@app.get("/api/patente/projects/{name}/export.csv")
+async def patente_export_csv(name: str):
+    import csv
+    import io
+    items = _pat_load(name)
+    buf = io.StringIO()
+    fields = ["patent_id", "title", "ipc_klassen", "rechteinhaber", "zitate", "url", "scraped_at"]
+    w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    w.writeheader()
+    for it in items:
+        row = dict(it)
+        for k in ("ipc_klassen", "rechteinhaber", "zitate"):
+            if isinstance(row.get(k), list):
+                row[k] = ", ".join(row[k])
+        w.writerow(row)
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                     headers={"Content-Disposition": f'attachment; filename="{_pat_safe_name(name)}_akte.csv"'})
+
+
+class PatAnalyze(BaseModel):
+    patent_ids: list[str]
+    model: Optional[str] = None
+    neben_model: Optional[str] = None
+
+
+@app.post("/api/patente/projects/{name}/analyze")
+async def patente_analyze(name: str, body: PatAnalyze):
+    return StreamingResponse(
+        _patente_analyze_generator(name, body),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _patente_analyze_generator(name: str, body: PatAnalyze):
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    bestand = _pat_load(name)
+    ids = [i for i in (body.patent_ids or []) if i]
+    idset = set(ids)
+    gewaehlt = [p for p in bestand if p.get("patent_id") in idset]
+    if not gewaehlt:
+        yield _sse({"type": "error", "message": "Keine gültigen Patente ausgewählt"})
+        return
+
+    if len(gewaehlt) == 1:
+        p = gewaehlt[0]
+        analyse_text = f"Patent {p['patent_id']}: {p.get('title','')}\n{p.get('abstract','')}\n{p.get('claims','')}"
+        analyse_typ = "Einzelnes_Dokument"
+    elif len(gewaehlt) == 2:
+        d1, d2 = gewaehlt
+        analyse_text = (
+            f"DOKUMENT 1 ({d1['patent_id']}): {d1.get('abstract','')}\nAnsprüche: {d1.get('claims','')}\n\n"
+            f"DOKUMENT 2 ({d2['patent_id']}): {d2.get('abstract','')}\nAnsprüche: {d2.get('claims','')}")
+        analyse_typ = "Vergleich_zweier_Dokumente"
+    else:
+        analyse_text = "\n\n".join(
+            f"Patent {p['patent_id']}: {p.get('abstract','')}\nAnspruch 1: {(p.get('claims') or '')[:500]}"
+            for p in gewaehlt)
+        analyse_typ = "Mehrfachauswahl"
+
+    model = _pick_model(body.model, _model_for("general"))
+    neben_model = _pick_model(body.neben_model, model) if body.neben_model else model
+    tok = {"in": 0, "out": 0}
+    queue: asyncio.Queue = asyncio.Queue()
+    SENTINEL = object()
+
+    async def _call(mdl: str, system: str, user: str) -> str:
+        async with _model_session(mdl), httpx.AsyncClient(timeout=400) as client:
+            resp = await _llm.chat(client, {
+                "model": mdl, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": user}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            j = resp.json()
+            a, b = _llm_tok(j)
+            tok["in"] += a
+            tok["out"] += b
+            return j.get("message", {}).get("content", "") or ""
+
+    async def chat_haupt(system: str, user: str) -> str:
+        return await _call(model, system, user)
+
+    async def chat_neben(system: str, user: str) -> str:
+        return await _call(neben_model, system, user)
+
+    def on_progress(msg: str):
+        queue.put_nowait(msg)
+
+    async def _run():
+        try:
+            erg = await _patente.run_pipeline(chat_haupt, chat_neben, analyse_text, on_progress=on_progress)
+            queue.put_nowait(("__result__", erg))
+        except Exception as e:
+            queue.put_nowait(("__error__", str(e)))
+        finally:
+            queue.put_nowait(SENTINEL)
+
+    task = asyncio.create_task(_run())
+    ergebnisse = None
+    error = None
+    while True:
+        item = await queue.get()
+        if item is SENTINEL:
+            break
+        if isinstance(item, tuple) and item[0] == "__result__":
+            ergebnisse = item[1]
+        elif isinstance(item, tuple) and item[0] == "__error__":
+            error = item[1]
+        else:
+            yield _sse({"type": "progress", "message": item})
+    await task
+
+    if error or ergebnisse is None:
+        yield _sse({"type": "error", "message": f"Pipeline-Fehler: {error or 'unbekannt'}"})
+        return
+
+    base = _patente.save_analysis(d / "analysen", analyse_typ, ids, ergebnisse)
+    if await _local_llm_available():
+        coll = await _pat_rag_collection_for(name)
+        md_path = d / "analysen" / f"{base}.md"
+        md_text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+        await _pat_index_analysis(coll, f"analyse_{base}", md_text, f"Analyse {base}")
+
+    yield _sse({"type": "done", "ergebnisse": ergebnisse, "datei_name": f"{base}.json", "tokens": tok})
+
+
+@app.get("/api/patente/projects/{name}/analyses")
+async def patente_analyses(name: str):
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    return {"analysen": _patente.load_analyses(d / "analysen")}
+
+
+@app.get("/api/patente/projects/{name}/analyses/{file_name}")
+async def patente_analysis_get(name: str, file_name: str):
+    d = _pat_project_dir(name)
+    p = d / "analysen" / Path(file_name).name
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Analyse nicht gefunden")
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+@app.get("/api/patente/projects/{name}/analyses/{file_name}/markdown")
+async def patente_analysis_markdown(name: str, file_name: str):
+    d = _pat_project_dir(name)
+    safe = Path(file_name).name
+    p = (d / "analysen" / safe).with_suffix(".md")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Markdown nicht gefunden")
+    return Response(content=p.read_text(encoding="utf-8"), media_type="text/markdown",
+                     headers={"Content-Disposition": f'attachment; filename="{p.name}"'})
+
+
+@app.delete("/api/patente/projects/{name}/analyses/{file_name}")
+async def patente_analysis_delete(name: str, file_name: str):
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    ok = _patente.delete_analysis(d / "analysen", file_name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Analyse nicht gefunden")
+    return {"ok": True}
+
+
+class PatAsk(BaseModel):
+    question: str
+    model: Optional[str] = None
+
+
+@app.post("/api/patente/projects/{name}/ask")
+async def patente_ask(name: str, body: PatAsk):
+    from tools.rag import query_collections
+    d = _pat_project_dir(name)
+    meta = _pat_meta(d)
+    cid = meta.get("rag_collection_id")
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Keine Frage angegeben")
+    if not cid:
+        raise HTTPException(status_code=400, detail="Noch keine Dokumente indiziert – zuerst Patente importieren")
+    hits = await query_collections([cid], question, top_k_cap=8)
+    if not hits:
+        return {"answer": "Keine relevanten Textstellen in der Akte gefunden.", "sources": []}
+    context = "\n\n---\n\n".join(f"[{h.get('filename','')}]\n{h.get('text','')}" for h in hits)
+    model = _pick_model(body.model, _model_for("general"))
+    async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "stream": False,
+            "messages": [
+                {"role": "system", "content": "Beantworte die Frage sachlich auf Basis des Kontextes. Verweise auf Dokumentnummern/-titel."},
+                {"role": "user", "content": f"KONTEXT:\n{context}\n\nFRAGE: {question}"},
+            ],
+            "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+        j = resp.json()
+        tin, tout = _llm_tok(j)
+        answer = j.get("message", {}).get("content", "") or ""
+    return {"answer": answer,
+            "sources": [{"filename": h.get("filename", ""), "score": h.get("score")} for h in hits],
+            "tokens": {"in": tin, "out": tout}}
+
+
+class PatGraph(BaseModel):
+    show_ipc: bool = True
+    show_assignee: bool = True
+    show_citations: bool = True
+    focus_assignee: Optional[str] = None
+
+
+@app.post("/api/patente/projects/{name}/graph")
+async def patente_graph(name: str, body: PatGraph):
+    from tools import patente as _patente
+    items = _pat_load(name)
+    nodes, edges = _patente.build_graph_data(
+        items, body.show_ipc, body.show_assignee, body.show_citations, body.focus_assignee)
+    return {"nodes": nodes, "edges": edges}
+
+
+class PatMigrate(BaseModel):
+    source_dir: str
+
+
+@app.post("/api/patente/migrate")
+async def patente_migrate(body: PatMigrate):
+    return StreamingResponse(
+        _patente_migrate_generator(body),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _patente_migrate_generator(body: PatMigrate):
+    from tools import patente as _patente
+    src = Path(str(body.source_dir or "").strip()).expanduser()
+    if not src.exists():
+        yield _sse({"type": "error", "message": f"Quellverzeichnis nicht gefunden: {src}"})
+        return
+    PATENTE_DIR.mkdir(parents=True, exist_ok=True)
+    migrated, skipped = _patente.migrate_legacy_projects(src, PATENTE_DIR)
+    yield _sse({"type": "copied", "migrated": migrated, "skipped": skipped})
+
+    local_ok = await _local_llm_available()
+    for proj in migrated:
+        items = _pat_load(proj)
+        yield _sse({"type": "project_start", "project": proj, "count": len(items)})
+        if not local_ok:
+            continue
+        try:
+            coll = await _pat_rag_collection_for(proj)
+            for i, p in enumerate(items):
+                await _pat_index_patent(coll, p)
+                if i % 25 == 0:
+                    yield _sse({"type": "progress", "project": proj, "indexed": i + 1, "total": len(items)})
+            for a in _patente.load_analyses(PATENTE_DIR / proj / "analysen"):
+                fname = a.get("datei_name", "")
+                base = fname[:-5] if fname.endswith(".json") else fname
+                md_path = PATENTE_DIR / proj / "analysen" / f"{base}.md"
+                if md_path.exists():
+                    await _pat_index_analysis(
+                        coll, f"analyse_{base}", md_path.read_text(encoding="utf-8"), f"Analyse {base}")
+            yield _sse({"type": "project_done", "project": proj})
+        except Exception as e:
+            yield _sse({"type": "project_error", "project": proj, "message": str(e)})
+
+    yield _sse({"type": "done", "migrated": migrated, "skipped": skipped})
+
+
 # ── Morphologischer Kasten (Zwicky-Box) ─────────────────────────────────────────
 # KI-gestütztes Ideenfindungs-Raster: Parameter (Zeilen) × Ausprägungen (Werte).
 # Eine Lösung = je Parameter eine Ausprägung. Die KI generiert Parameter/
@@ -6819,6 +7486,619 @@ async def morph_training_delete(problem: str = ""):
     return {"ok": True}
 
 
+# ── Rechnungen & Arbeitszeugnisse ─────────────────────────────────────────────
+# Zwei Dokument-Tabs. Rechnungsbeträge werden deterministisch berechnet
+# (tools/dokumente.py, Decimal) — nie vom LLM. Das LLM (frei wählbar, ideal ein
+# DSGVO-konformes API-Modell) hilft nur beim Strukturieren von Freitext-Rechnungen
+# und beim Formulieren der Zeugnistexte. Ausgabe als PDF (to_pdf) und DOCX.
+
+def _load_firmenprofil() -> dict:
+    try:
+        if FIRMENPROFIL_FILE.exists():
+            return json.loads(FIRMENPROFIL_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_firmenprofil(data: dict) -> None:
+    FIRMENPROFIL_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+
+
+_RECHNUNG_NR_RE = re.compile(r"^[A-Za-z0-9._\-]{1,40}$")
+
+
+# ── Beleg-Nummernkreise (Rechnung & Angebot teilen dieselbe Zähler-Logik) ─────
+
+def _doc_peek_number(counter_path: Path, pref: str, start: int) -> str:
+    """Nächste Belegnummer für einen Zähler, ohne ihn zu erhöhen."""
+    last = 0
+    try:
+        c = json.loads(counter_path.read_text(encoding="utf-8"))
+        if c.get("prefix") == pref:
+            last = int(c.get("last") or 0)
+    except Exception:
+        last = 0
+    seq = max(last + 1, int(start or 1))
+    return f"{pref}{seq:04d}"
+
+
+def _doc_commit_number(counter_path: Path, pref: str, nr: str) -> None:
+    """Zähler auf die Sequenz von ``nr`` hochsetzen (nach dem Speichern)."""
+    m = re.search(r"(\d+)\s*$", nr)
+    seq = int(m.group(1)) if m else 0
+    counter_path.write_text(
+        json.dumps({"prefix": pref, "last": seq}, ensure_ascii=False),
+        encoding="utf-8")
+
+
+def _rechnung_counter_path() -> Path:
+    return RECHNUNGEN_DIR / "_counter.json"
+
+
+def _rechnung_prefix() -> str:
+    """Präfix für die Rechnungsnummer (Profil ‚rechnung_prefix' oder ‚JAHR-')."""
+    pref = str(_load_firmenprofil().get("rechnung_prefix") or "").strip()
+    return pref if pref else f"{date.today().year}-"
+
+
+def _peek_rechnungsnummer() -> str:
+    start = int(_load_firmenprofil().get("rechnung_start") or 1)
+    return _doc_peek_number(_rechnung_counter_path(), _rechnung_prefix(), start)
+
+
+def _commit_rechnungsnummer(nr: str) -> None:
+    _doc_commit_number(_rechnung_counter_path(), _rechnung_prefix(), nr)
+
+
+def _rechnung_path(nr: str) -> Path:
+    if not _RECHNUNG_NR_RE.match(nr or ""):
+        raise HTTPException(status_code=400, detail="Ungültige Rechnungsnummer.")
+    return RECHNUNGEN_DIR / f"{nr}.json"
+
+
+def _load_rechnung(nr: str) -> dict:
+    fp = _rechnung_path(nr)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Rechnung nicht gefunden.")
+    return json.loads(fp.read_text(encoding="utf-8"))
+
+
+def _angebot_counter_path() -> Path:
+    return ANGEBOTE_DIR / "_counter.json"
+
+
+def _angebot_prefix() -> str:
+    """Präfix für die Angebotsnummer (Profil ‚angebot_prefix' oder ‚AN-JAHR-')."""
+    pref = str(_load_firmenprofil().get("angebot_prefix") or "").strip()
+    return pref if pref else f"AN-{date.today().year}-"
+
+
+def _peek_angebotsnummer() -> str:
+    start = int(_load_firmenprofil().get("angebot_start") or 1)
+    return _doc_peek_number(_angebot_counter_path(), _angebot_prefix(), start)
+
+
+def _commit_angebotsnummer(nr: str) -> None:
+    _doc_commit_number(_angebot_counter_path(), _angebot_prefix(), nr)
+
+
+def _angebot_path(nr: str) -> Path:
+    if not _RECHNUNG_NR_RE.match(nr or ""):
+        raise HTTPException(status_code=400, detail="Ungültige Angebotsnummer.")
+    return ANGEBOTE_DIR / f"{nr}.json"
+
+
+def _load_angebot(nr: str) -> dict:
+    fp = _angebot_path(nr)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Angebot nicht gefunden.")
+    return json.loads(fp.read_text(encoding="utf-8"))
+
+
+@app.get("/api/firmenprofil")
+async def get_firmenprofil():
+    return _load_firmenprofil()
+
+
+@app.post("/api/firmenprofil")
+async def save_firmenprofil(req: Request):
+    data = await req.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Ungültiges Profil.")
+    _save_firmenprofil(data)
+    return {"ok": True}
+
+
+@app.get("/api/rechnung/next-number")
+async def rechnung_next_number():
+    return {"nummer": _peek_rechnungsnummer()}
+
+
+_RECHNUNG_PARSE_SYSTEM = (
+    "Du extrahierst aus einer freien Rechnungsbeschreibung strukturierte "
+    "Rechnungspositionen. Antworte NUR mit JSON dieser Form:\n"
+    '{"positionen":[{"menge":<Zahl>,"einheit":"<Std|Tag|Stk|pauschal|…>",'
+    '"beschreibung":"<Text>","einzelpreis":<Netto-Einzelpreis als Zahl>}],'
+    '"leistungsdatum":"<optional>","einleitung":"<optionaler Einleitungssatz>"}\n'
+    "Einzelpreise sind Nettopreise. Rechne nichts aus (keine Summen). Wenn eine "
+    "Menge fehlt, nimm 1. Keine Erklärungen, kein Fließtext."
+)
+
+
+@app.post("/api/rechnung/parse")
+async def rechnung_parse(req: Request):
+    """Freitext („3 Tage Beratung à 800 €, Fahrtkosten 120 €") → Positionen (JSON)."""
+    body = await req.json()
+    text = str(body.get("text", "")).strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Kein Text übergeben.")
+    model = _pick_model(body.get("model"), _model_for("general"))
+    tok_in = tok_out = 0
+    data = None
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "stream": False, "format": "json", "think": False,
+                "messages": [
+                    {"role": "system", "content": _RECHNUNG_PARSE_SYSTEM},
+                    {"role": "user", "content": text},
+                ],
+                "options": {"temperature": 0.1},
+            })
+            resp.raise_for_status()
+            j = resp.json()
+            ti, to = _llm_tok(j)
+            tok_in += ti; tok_out += to
+            data = _parse_llm_json(j.get("message", {}).get("content", ""))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analyse fehlgeschlagen: {e}")
+    if not data or not isinstance(data.get("positionen"), list):
+        raise HTTPException(status_code=422, detail="Keine Positionen erkannt.")
+    return {"positionen": data.get("positionen", []),
+            "leistungsdatum": data.get("leistungsdatum", ""),
+            "einleitung": data.get("einleitung", ""),
+            "tokens": {"in": tok_in, "out": tok_out}}
+
+
+_RECHNUNG_BREAKDOWN_SYSTEM = (
+    "Du zerlegst einen beschriebenen Vorgang/Auftrag in einzelne Rechnungspositionen "
+    "nach Leistungskategorien (z. B. Beschaffung, Planung, Konstruktion, Recherche, "
+    "Fremdleistungen, Fertigung/Montage, Inbetriebnahme, Dokumentation, "
+    "Projektmanagement). Nutze bevorzugt die vorgegebenen Kategorien und nur die, die "
+    "wirklich zum Vorgang passen. Antworte NUR mit JSON:\n"
+    '{"positionen":[{"menge":<Zahl>,"einheit":"<Std|Tag|Stk|pauschal>",'
+    '"beschreibung":"<Kategorie>: <konkrete Tätigkeit im Vorgang>",'
+    '"einzelpreis":<Netto-Einzelpreis als Zahl>}]}\n'
+    "Regeln: menge = geschätzter Aufwand (Stunden, außer bei pauschal/Fremdleistungen). "
+    "einzelpreis ist netto; bei zeitbasierten Positionen der genannte Stundensatz. "
+    "Beschreibung immer mit der Kategorie beginnen. Rechne KEINE Summen. Keine Erklärungen."
+)
+
+
+@app.post("/api/rechnung/breakdown")
+async def rechnung_breakdown(req: Request):
+    """Zerlegt einen Vorgang in Einzelpositionen nach Leistungskategorien."""
+    from tools import dokumente as _dok
+    body = await req.json()
+    vorgang = str(body.get("vorgang", "")).strip()
+    if not vorgang:
+        raise HTTPException(status_code=400, detail="Kein Vorgang beschrieben.")
+    kategorien = body.get("kategorien") or _dok.RECHNUNG_KATEGORIEN
+    kategorien = [str(k).strip() for k in kategorien if str(k).strip()]
+    try:
+        stundensatz = float(body.get("stundensatz") or 0) or 0.0
+    except (TypeError, ValueError):
+        stundensatz = 0.0
+    model = _pick_model(body.get("model"), _model_for("general"))
+
+    user = (f"Vorgang: {vorgang}\n"
+            f"Zu verwendende Kategorien: {', '.join(kategorien)}\n"
+            + (f"Stundensatz (netto, €/Std): {stundensatz:g}\n" if stundensatz else ""))
+    tok_in = tok_out = 0
+    data = None
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=240) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "stream": False, "format": "json", "think": False,
+                "messages": [
+                    {"role": "system", "content": _RECHNUNG_BREAKDOWN_SYSTEM},
+                    {"role": "user", "content": user},
+                ],
+                "options": {"temperature": 0.3},
+            })
+            resp.raise_for_status()
+            j = resp.json()
+            ti, to = _llm_tok(j)
+            tok_in += ti; tok_out += to
+            data = _parse_llm_json(j.get("message", {}).get("content", ""))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Zerlegung fehlgeschlagen: {e}")
+    if not data or not isinstance(data.get("positionen"), list):
+        raise HTTPException(status_code=422, detail="Keine Positionen erzeugt.")
+    positionen = data["positionen"]
+    # Stundensatz deterministisch auf zeitbasierte Positionen anwenden
+    if stundensatz:
+        for p in positionen:
+            einheit = str(p.get("einheit", "")).strip().lower()
+            if einheit.startswith(("std", "stunde", "h")):
+                p["einzelpreis"] = stundensatz
+    return {"positionen": positionen, "tokens": {"in": tok_in, "out": tok_out}}
+
+
+@app.post("/api/rechnung/create")
+async def rechnung_create(req: Request):
+    """Rechnung berechnen, Nummer vergeben und als Datensatz speichern."""
+    from tools import dokumente as _dok
+    body = await req.json()
+    positionen = body.get("positionen") or []
+    if not positionen:
+        raise HTTPException(status_code=400, detail="Mindestens eine Position nötig.")
+    profile = _load_firmenprofil()
+    nr = str(body.get("nummer") or "").strip() or _peek_rechnungsnummer()
+    if not _RECHNUNG_NR_RE.match(nr):
+        raise HTTPException(status_code=400, detail="Ungültige Rechnungsnummer.")
+
+    inv = {
+        "nummer": nr,
+        "datum": body.get("datum") or date.today().isoformat(),
+        "leistungsdatum": body.get("leistungsdatum", ""),
+        "kunde": body.get("kunde") or {},
+        "positionen": positionen,
+        "ust_satz": body.get("ust_satz", profile.get("ust_satz", 19)),
+        "kleinunternehmer": bool(body.get("kleinunternehmer",
+                                          profile.get("kleinunternehmer", False))),
+        "zahlungsziel_tage": body.get("zahlungsziel_tage", 14),
+        "einleitung": body.get("einleitung", ""),
+        "hinweis": body.get("hinweis", ""),
+        # Workflow-Verknüpfung (optional)
+        "project_id": str(body.get("project_id") or "").strip(),
+        "angebot_nr": str(body.get("angebot_nr") or "").strip(),
+        "abweichungen": body.get("abweichungen") or [],
+        "erstellt_am": datetime.now().isoformat(),
+    }
+    computed = _dok.compute_invoice(inv)
+    # Datensatz (Decimal → String für JSON)
+    record = json.loads(json.dumps(inv, default=str))
+    record["summe_netto"] = str(computed["summe_netto"])
+    record["ust_betrag"] = str(computed["ust_betrag"])
+    record["summe_brutto"] = str(computed["summe_brutto"])
+    _rechnung_path(nr).write_text(
+        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not body.get("nummer"):
+        _commit_rechnungsnummer(nr)
+    # Projekt auf „abgerechnet" setzen + Rechnungsnummer hinterlegen
+    if inv["project_id"]:
+        _update_project_fields(inv["project_id"], status="abgerechnet", rechnung_nr=nr)
+    return {
+        "nummer": nr,
+        "summe_netto": _dok.fmt_eur(computed["summe_netto"]),
+        "ust_betrag": _dok.fmt_eur(computed["ust_betrag"]),
+        "summe_brutto": _dok.fmt_eur(computed["summe_brutto"]),
+    }
+
+
+@app.get("/api/rechnung/list")
+async def rechnung_list():
+    from tools import dokumente as _dok
+    out = []
+    for fp in sorted(RECHNUNGEN_DIR.glob("*.json"), reverse=True):
+        if fp.name.startswith("_"):
+            continue
+        try:
+            r = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        out.append({
+            "nummer": r.get("nummer", fp.stem),
+            "datum": r.get("datum", ""),
+            "kunde": (r.get("kunde") or {}).get("name", ""),
+            "brutto": _dok.fmt_eur(_dok._money(r.get("summe_brutto", 0))),
+        })
+    return {"rechnungen": out}
+
+
+@app.delete("/api/rechnung/{nr}")
+async def rechnung_delete(nr: str):
+    fp = _rechnung_path(nr)
+    if fp.exists():
+        fp.unlink()
+    return {"ok": True}
+
+
+@app.get("/api/rechnung/{nr}/pdf")
+async def rechnung_pdf(nr: str):
+    from tools import dokumente as _dok
+    from tools.export import to_pdf
+    r = _load_rechnung(nr)
+    md = _dok.invoice_markdown(r, _load_firmenprofil())
+    data = {"title": f"Rechnung {r.get('nummer', '')}".strip(), "content": md,
+            "_profile": _load_profile()}
+    try:
+        fp = await asyncio.to_thread(to_pdf, data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF-Export fehlgeschlagen: {e}")
+    return FileResponse(fp, filename=f"Rechnung_{nr}.pdf", media_type="application/pdf")
+
+
+@app.get("/api/rechnung/{nr}/docx")
+async def rechnung_docx(nr: str):
+    from tools import dokumente as _dok
+    r = _load_rechnung(nr)
+    try:
+        fp = await asyncio.to_thread(_dok.invoice_docx, r, _load_firmenprofil())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DOCX-Export fehlgeschlagen: {e}")
+    return FileResponse(
+        fp, filename=f"Rechnung_{nr}.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+# ── Angebote (teilt Renderer/Berechnung mit Rechnungen, eigener Nummernkreis) ──
+
+@app.get("/api/angebot/next-number")
+async def angebot_next_number():
+    return {"nummer": _peek_angebotsnummer()}
+
+
+@app.post("/api/angebot/from-plan")
+async def angebot_from_plan(req: Request):
+    """Erzeugt Angebotspositionen aus einem Plan (nach Bereich gruppiert).
+    Speichert nichts, ruft kein LLM auf — reine Kostenaggregation."""
+    from tools import dokumente as _dok
+    body = await req.json()
+    plan_id = str(body.get("plan_id") or "").strip()
+    project_id = str(body.get("project_id") or "").strip()
+    # Plan über plan_id oder über die Projektverknüpfung finden
+    plan = None
+    if plan_id:
+        fp = _plan_path_by_id(plan_id)
+        if fp and fp.exists():
+            plan = json.loads(fp.read_text(encoding="utf-8"))
+    if plan is None and project_id:
+        for f in PLANS_DIR.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if (data.get("project_id") or "") == project_id:
+                plan = data
+                break
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Kein Plan gefunden.")
+    positionen = _dok.plan_to_positions(plan)
+    if not positionen:
+        raise HTTPException(status_code=422,
+                            detail="Plan enthält keine bepreisten Vorgänge.")
+    # Projektdaten für die Vorbelegung
+    projekt = None
+    pid = project_id or str(plan.get("project_id") or "").strip()
+    if pid:
+        for p in _load_projects():
+            if p.get("id") == pid:
+                projekt = p
+                break
+    return {
+        "positionen": positionen,
+        "plan_id": plan.get("id", ""),
+        "plan_name": plan.get("name", ""),
+        "project_id": pid,
+        "projekt": projekt,
+    }
+
+
+@app.post("/api/angebot/create")
+async def angebot_create(req: Request):
+    """Angebot berechnen, Nummer vergeben und als Datensatz speichern."""
+    from tools import dokumente as _dok
+    body = await req.json()
+    positionen = body.get("positionen") or []
+    if not positionen:
+        raise HTTPException(status_code=400, detail="Mindestens eine Position nötig.")
+    profile = _load_firmenprofil()
+    nr = str(body.get("nummer") or "").strip() or _peek_angebotsnummer()
+    if not _RECHNUNG_NR_RE.match(nr):
+        raise HTTPException(status_code=400, detail="Ungültige Angebotsnummer.")
+
+    ang = {
+        "nummer": nr,
+        "datum": body.get("datum") or date.today().isoformat(),
+        "leistungsdatum": body.get("leistungsdatum", ""),
+        "gueltig_bis": body.get("gueltig_bis", ""),
+        "gueltig_tage": body.get("gueltig_tage", 30),
+        "kunde": body.get("kunde") or {},
+        "positionen": positionen,
+        "ust_satz": body.get("ust_satz", profile.get("ust_satz", 19)),
+        "kleinunternehmer": bool(body.get("kleinunternehmer",
+                                          profile.get("kleinunternehmer", False))),
+        "einleitung": body.get("einleitung", ""),
+        "hinweis": body.get("hinweis", ""),
+        "project_id": str(body.get("project_id") or "").strip(),
+        "plan_id": str(body.get("plan_id") or "").strip(),
+        "erstellt_am": datetime.now().isoformat(),
+    }
+    computed = _dok.compute_invoice(ang)
+    record = json.loads(json.dumps(ang, default=str))
+    record["summe_netto"] = str(computed["summe_netto"])
+    record["ust_betrag"] = str(computed["ust_betrag"])
+    record["summe_brutto"] = str(computed["summe_brutto"])
+    _angebot_path(nr).write_text(
+        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not body.get("nummer"):
+        _commit_angebotsnummer(nr)
+    # Projekt auf „angebot" setzen + Angebotsnummer hinterlegen
+    if ang["project_id"]:
+        _update_project_fields(ang["project_id"], status="angebot", angebot_nr=nr,
+                               plan_id=ang["plan_id"] or None)
+    return {
+        "nummer": nr,
+        "summe_netto": _dok.fmt_eur(computed["summe_netto"]),
+        "ust_betrag": _dok.fmt_eur(computed["ust_betrag"]),
+        "summe_brutto": _dok.fmt_eur(computed["summe_brutto"]),
+    }
+
+
+@app.get("/api/angebot/list")
+async def angebot_list():
+    from tools import dokumente as _dok
+    out = []
+    for fp in sorted(ANGEBOTE_DIR.glob("*.json"), reverse=True):
+        if fp.name.startswith("_"):
+            continue
+        try:
+            a = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        out.append({
+            "nummer": a.get("nummer", fp.stem),
+            "datum": a.get("datum", ""),
+            "kunde": (a.get("kunde") or {}).get("name", ""),
+            "brutto": _dok.fmt_eur(_dok._money(a.get("summe_brutto", 0))),
+            "project_id": a.get("project_id", ""),
+        })
+    return {"angebote": out}
+
+
+@app.get("/api/angebot/{nr}")
+async def angebot_get(nr: str):
+    return _load_angebot(nr)
+
+
+@app.delete("/api/angebot/{nr}")
+async def angebot_delete(nr: str):
+    fp = _angebot_path(nr)
+    if fp.exists():
+        fp.unlink()
+    return {"ok": True}
+
+
+@app.get("/api/angebot/{nr}/pdf")
+async def angebot_pdf(nr: str):
+    from tools import dokumente as _dok
+    from tools.export import to_pdf
+    a = _load_angebot(nr)
+    md = _dok.invoice_markdown(a, _load_firmenprofil(), typ="angebot")
+    data = {"title": f"Angebot {a.get('nummer', '')}".strip(), "content": md,
+            "_profile": _load_profile()}
+    try:
+        fp = await asyncio.to_thread(to_pdf, data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF-Export fehlgeschlagen: {e}")
+    return FileResponse(fp, filename=f"Angebot_{nr}.pdf", media_type="application/pdf")
+
+
+@app.get("/api/angebot/{nr}/docx")
+async def angebot_docx(nr: str):
+    from tools import dokumente as _dok
+    a = _load_angebot(nr)
+    try:
+        fp = await asyncio.to_thread(_dok.invoice_docx, a, _load_firmenprofil(), "angebot")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DOCX-Export fehlgeschlagen: {e}")
+    return FileResponse(
+        fp, filename=f"Angebot_{nr}.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+@app.post("/api/zeugnis/generate")
+async def zeugnis_generate(req: Request):
+    """Qualifiziertes Arbeitszeugnis (codierte Zeugnissprache) via LLM erzeugen."""
+    from tools import dokumente as _dok
+    body = await req.json()
+    meta = body.get("meta") or body
+    if not (meta.get("name") and meta.get("position")):
+        raise HTTPException(status_code=400, detail="Name und Position sind nötig.")
+    # Arbeitgeber aus Firmenprofil vorbelegen, falls nicht angegeben
+    if not meta.get("arbeitgeber"):
+        prof = _load_firmenprofil()
+        meta["arbeitgeber"] = prof.get("firma") or prof.get("inhaber") or ""
+    model = _pick_model(body.get("model"), _model_for("general"))
+    system = _dok.zeugnis_system_prompt()
+    user = _dok.zeugnis_user_prompt(meta)
+    tok_in = tok_out = 0
+    text = ""
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "stream": False, "think": False,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "options": {"temperature": 0.4},
+            })
+            resp.raise_for_status()
+            j = resp.json()
+            ti, to = _llm_tok(j)
+            tok_in += ti; tok_out += to
+            text = j.get("message", {}).get("content", "").strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erzeugung fehlgeschlagen: {e}")
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Kein Zeugnistext erzeugt.")
+    # Datensatz speichern
+    zid = f"{datetime.now():%Y%m%d_%H%M%S}_{_to_slug(meta.get('name', 'zeugnis'))[:24]}"
+    (ZEUGNISSE_DIR / f"{zid}.json").write_text(
+        json.dumps({"id": zid, "meta": meta, "text": text,
+                    "erstellt_am": datetime.now().isoformat()},
+                   ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"id": zid, "text": text, "note": _dok.NOTEN[_dok.note_key(meta.get("note"))]["label"],
+            "tokens": {"in": tok_in, "out": tok_out}}
+
+
+@app.post("/api/zeugnis/{zid}/save")
+async def zeugnis_save(zid: str, req: Request):
+    """Bearbeiteten Zeugnistext zurückspeichern."""
+    if not re.match(r"^[A-Za-z0-9._\-]{1,80}$", zid):
+        raise HTTPException(status_code=400, detail="Ungültige ID.")
+    fp = ZEUGNISSE_DIR / f"{zid}.json"
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Zeugnis nicht gefunden.")
+    body = await req.json()
+    rec = json.loads(fp.read_text(encoding="utf-8"))
+    rec["text"] = str(body.get("text", rec.get("text", "")))
+    rec["bearbeitet_am"] = datetime.now().isoformat()
+    fp.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.get("/api/zeugnis/list")
+async def zeugnis_list():
+    out = []
+    for fp in sorted(ZEUGNISSE_DIR.glob("*.json"), reverse=True):
+        try:
+            r = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        meta = r.get("meta") or {}
+        out.append({"id": r.get("id", fp.stem), "name": meta.get("name", ""),
+                    "position": meta.get("position", ""),
+                    "erstellt_am": r.get("erstellt_am", "")})
+    return {"zeugnisse": out}
+
+
+@app.get("/api/zeugnis/{zid}")
+async def zeugnis_get(zid: str):
+    if not re.match(r"^[A-Za-z0-9._\-]{1,80}$", zid):
+        raise HTTPException(status_code=400, detail="Ungültige ID.")
+    fp = ZEUGNISSE_DIR / f"{zid}.json"
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Zeugnis nicht gefunden.")
+    return json.loads(fp.read_text(encoding="utf-8"))
+
+
+@app.delete("/api/zeugnis/{zid}")
+async def zeugnis_delete(zid: str):
+    if not re.match(r"^[A-Za-z0-9._\-]{1,80}$", zid):
+        raise HTTPException(status_code=400, detail="Ungültige ID.")
+    fp = ZEUGNISSE_DIR / f"{zid}.json"
+    if fp.exists():
+        fp.unlink()
+    return {"ok": True}
+
+
 # ── Export-API ────────────────────────────────────────────────────────────────
 
 
@@ -6995,7 +8275,18 @@ async def save_profile(req: Request):
 
 @app.get("/api/projects")
 async def list_projects():
-    return _load_projects()
+    # Liste (rückwärtskompatibel) — pro Projekt Status + Label ergänzt.
+    projects = _load_projects()
+    for p in projects:
+        st = p.get("status") or "planung"
+        p["status"] = st
+        p["status_label"] = _PROJECT_STATUS_LABELS.get(st, st)
+    return projects
+
+
+@app.get("/api/project-status-labels")
+async def project_status_labels():
+    return _PROJECT_STATUS_LABELS
 
 
 @app.post("/api/projects")
@@ -7007,10 +8298,12 @@ async def create_project(req: Request):
         "name": str(body.get("name", "Neues Projekt")).strip(),
         "number": str(body.get("number", "")).strip(),
         "description": str(body.get("description", "")).strip(),
+        "status": "planung",
+        "plan_id": str(body.get("plan_id", "")).strip(),
         "created_at": time.time(),
     }
     projects.append(project)
-    PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_projects(projects)
     return project
 
 
@@ -7018,14 +8311,30 @@ async def create_project(req: Request):
 async def update_project(pid: str, req: Request):
     body = await req.json()
     projects = _load_projects()
+    hit = None
     for p in projects:
         if p["id"] == pid:
-            p["name"] = str(body.get("name", p["name"])).strip()
-            p["number"] = str(body.get("number", p.get("number", ""))).strip()
-            p["description"] = str(body.get("description", p.get("description", ""))).strip()
+            # Stammdaten nur überschreiben, wenn im Body enthalten
+            if "name" in body:
+                p["name"] = str(body.get("name") or p.get("name", "")).strip()
+            if "number" in body:
+                p["number"] = str(body.get("number") or "").strip()
+            if "description" in body:
+                p["description"] = str(body.get("description") or "").strip()
+            # Workflow-Felder (nur bei Vorhandensein)
+            for k in ("status", "plan_id", "angebot_nr", "rechnung_nr"):
+                if k in body:
+                    p[k] = str(body.get(k) or "").strip()
+            if body.get("status") and body["status"] not in _PROJECT_STATUS_LABELS:
+                raise HTTPException(status_code=400, detail="Unbekannter Projektstatus.")
+            p["updated_at"] = time.time()
+            hit = p
             break
-    PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True}
+    if hit is None:
+        raise HTTPException(status_code=404, detail="Projekt nicht gefunden.")
+    _save_projects(projects)
+    hit["status_label"] = _PROJECT_STATUS_LABELS.get(hit.get("status") or "planung", "")
+    return {"ok": True, "project": hit}
 
 
 @app.delete("/api/projects/{pid}")
@@ -10256,6 +11565,76 @@ def _med_transcript(messages: list) -> str:
     return "\n".join(lines)
 
 
+# Falldokumente (Gutachten, Überweisung, Attest, Befunde) fließen mit ihrem
+# VOLLTEXT in den Analyseprompt — anders als der (kürzere) RAG-Auszug. Pro
+# Dokument gedeckelt, damit der Kontext nicht überläuft.
+_MED_DOC_CHARS = 8000
+
+# Strukturierte Patientenstammdaten (Formular im Medizin-Tab). Reihenfolge =
+# Anzeige im Kontextblock.
+_MED_PATIENT_FIELDS = [
+    ("name", "Name"),
+    ("birthdate", "Geburtsdatum/Alter"),
+    ("sex", "Geschlecht"),
+    ("concern", "Anliegen/Verdachtsdiagnose"),
+    ("history", "Vorerkrankungen"),
+    ("medication", "Dauermedikation"),
+    ("allergies", "Allergien"),
+]
+
+
+def _med_patient_block(patient: dict) -> str:
+    if not isinstance(patient, dict):
+        return ""
+    lines = []
+    for key, label in _MED_PATIENT_FIELDS:
+        val = str(patient.get(key, "") or "").strip()
+        if val:
+            lines.append(f"- {label}: {val}")
+    return "Patientenstammdaten (vom Nutzer angegeben):\n" + "\n".join(lines) if lines else ""
+
+
+def _med_documents_block(documents: list) -> str:
+    if not documents:
+        return ""
+    parts = []
+    for d in documents:
+        if not isinstance(d, dict):
+            continue
+        txt = str(d.get("text", "") or "").strip()
+        if not txt or txt.startswith("[Lesefehler") or txt.startswith("[Kann Datei"):
+            continue
+        name = str(d.get("filename", "") or "Dokument").strip()
+        parts.append(f"Dokument „{name}“:\n{txt[:_MED_DOC_CHARS]}")
+    return "\n\n".join(parts)
+
+
+def _med_case_context(patient: dict, documents: list) -> str:
+    """Baut den zusätzlichen Fallkontext aus Patientenstammdaten + Falldokumenten."""
+    blocks = [b for b in (_med_patient_block(patient), _med_documents_block(documents)) if b]
+    return "\n\n".join(blocks)
+
+
+@app.post("/api/medizin/extract")
+async def medizin_extract(file: UploadFile = File(...)):
+    """Extrahiert den Volltext eines hochgeladenen Falldokuments (Gutachten,
+    Überweisung, Attest, Befund) für den Analyseprompt der Medizin-Pipeline.
+    Rein lokale Textextraktion (tools/files.extract), kein LLM-Aufruf. Bilder
+    werden nicht per OCR gelesen — sie gehören in den Chat-Anhang (Vision-Modell)."""
+    data = await file.read()
+    is_image = _is_image(Path(file.filename or ""))
+    tmp = UPLOADS_DIR / f"medext_{uuid.uuid4().hex[:8]}_{file.filename}"
+    tmp.write_bytes(data)
+    try:
+        text = await asyncio.to_thread(_extract_text, tmp)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    return {"filename": file.filename, "text": text, "is_image": is_image, "chars": len(text or "")}
+
+
 @app.post("/api/medizin/consult")
 async def medizin_consult(req: Request):
     """Eine Stufe der Medizin-Konsultation (siehe Beschreibung oben). Streamt
@@ -10263,6 +11642,8 @@ async def medizin_consult(req: Request):
     body = await req.json()
     messages = body.get("messages") or []
     rag_collections = body.get("rag_collections") or []
+    documents = body.get("documents") or []
+    patient = body.get("patient") or {}
     try:
         rnd = int(body.get("round", 0))
     except Exception:
@@ -10272,6 +11653,7 @@ async def medizin_consult(req: Request):
     model_medical = _pick_model(body.get("model_medical"), _model_for("medical"))
 
     transcript = _med_transcript(messages)
+    case_ctx = _med_case_context(patient, documents)
     latest = ""
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -10279,23 +11661,28 @@ async def medizin_consult(req: Request):
             break
 
     async def _stream():
-        if not transcript:
+        if not transcript and not case_ctx:
             yield _sse({"type": "error", "content": "Keine Eingabe erhalten."})
             return
 
         # ── Stage 1: Ministral strukturiert die Anfrage medizinisch ──────────
         yield _sse({"type": "stage", "stage": "refine", "status": "start",
                      "label": f"{model_general} strukturiert die Anfrage…"})
+        refine_user = f"Gesprächsverlauf:\n{transcript}" if transcript else ""
+        if case_ctx:
+            refine_user = (f"{case_ctx}\n\n{refine_user}" if refine_user else case_ctx)
         try:
             async with _model_session(model_general), httpx.AsyncClient(timeout=120) as client:
                 refined = await _med_call(
                     client, model_general,
                     ("Du bereitest Patientenanfragen für einen medizinischen Fachkollegen auf. "
-                     "Formuliere aus dem Gesprächsverlauf eine sachliche, strukturierte medizinische "
-                     "Falldarstellung in Stichpunkten (Anliegen, bekannte Angaben wie Alter/Geschlecht/"
-                     "Symptome/Dauer/Vorerkrankungen/Medikamente, soweit genannt). Erfinde nichts, "
-                     "ergänze keine nicht genannten Fakten. Nur die Falldarstellung, kein Vorwort."),
-                    f"Gesprächsverlauf:\n{transcript}",
+                     "Formuliere aus dem Gesprächsverlauf UND den beigefügten Patientenstammdaten/"
+                     "Falldokumenten (z. B. Überweisung, Gutachten, Attest, Befund) eine sachliche, "
+                     "strukturierte medizinische Falldarstellung in Stichpunkten (Anliegen, bekannte "
+                     "Angaben wie Alter/Geschlecht/Symptome/Dauer/Vorerkrankungen/Medikamente, soweit "
+                     "genannt; nenne relevante Inhalte der Dokumente). Erfinde nichts, ergänze keine "
+                     "nicht genannten Fakten. Nur die Falldarstellung, kein Vorwort."),
+                    refine_user,
                 )
         except Exception as e:
             yield _sse({"type": "error", "content": f"Aufbereitung fehlgeschlagen: {e}"})
@@ -10318,11 +11705,13 @@ async def medizin_consult(req: Request):
                     analysis = await _med_call(
                         client, model_medical,
                         ("Du bist ein erfahrener Mediziner. Prüfe, ob für eine fundierte erste "
-                         "Einschätzung wesentliche Angaben fehlen (z. B. Alter, Geschlecht, Dauer/"
-                         "Verlauf, Schweregrad, Begleitsymptome, Vorerkrankungen, Medikamente, "
-                         "Allergien). Wenn alles Wesentliche vorhanden ist, antworte mit GENAU dem "
-                         "Wort VOLLSTAENDIG. Andernfalls beginne mit FEHLT: und liste danach in "
-                         "kurzen Stichpunkten (max. 4) nur die wirklich fehlenden Angaben."),
+                         "Einschätzung wesentliche Angaben fehlen — sowohl Patientendaten (Alter, "
+                         "Geschlecht, Dauer/Verlauf, Schweregrad, Begleitsymptome, Vorerkrankungen, "
+                         "Medikamente, Allergien) ALS AUCH relevante Unterlagen (z. B. Überweisung, "
+                         "ärztliches Attest, Befunde, Laborwerte), falls sie für die Beurteilung nötig "
+                         "wären. Wenn alles Wesentliche vorhanden ist, antworte mit GENAU dem Wort "
+                         "VOLLSTAENDIG. Andernfalls beginne mit FEHLT: und liste danach in kurzen "
+                         "Stichpunkten (max. 4) nur die wirklich fehlenden Angaben bzw. Unterlagen."),
                         analyze_user,
                     )
             except Exception as e:
@@ -10342,7 +11731,10 @@ async def medizin_consult(req: Request):
                             ("Du sprichst freundlich und verständlich mit einem Patienten (kein "
                              "Fachjargon). Formuliere eine kurze, klare Rückfrage auf Deutsch, die "
                              "den Patienten genau um die unten genannten fehlenden Angaben bittet. "
-                             "Bündele sie in 1–3 einfachen Fragen. Nur die Rückfrage, kein Vorwort."),
+                             "Bündele sie in 1–3 einfachen Fragen. Wenn Unterlagen fehlen (z. B. "
+                             "Überweisung, ärztliches Attest, Befund, Laborwerte), weise am Ende in "
+                             "einem kurzen Satz freundlich darauf hin, dass diese auch direkt als "
+                             "Dokument angehängt werden können. Nur die Rückfrage, kein Vorwort."),
                             f"Ursprüngliches Anliegen:\n{latest}\n\nFehlende Angaben:\n{analysis}",
                         )
                 except Exception as e:
@@ -10359,6 +11751,8 @@ async def medizin_consult(req: Request):
         yield _sse({"type": "stage", "stage": "final", "status": "start",
                      "label": f"{model_medical} erstellt die Einschätzung…"})
         final_user = f"Strukturierte Falldarstellung:\n{refined}\n\nVollständiger Verlauf:\n{transcript}"
+        if case_ctx:
+            final_user += f"\n\nOriginal-Fallunterlagen (Volltext):\n{case_ctx}"
         if rag_ctx:
             final_user += f"\n\nPatientenakte (Auszug):\n{rag_ctx}"
         try:

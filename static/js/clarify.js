@@ -58,6 +58,52 @@ const Clarify = (() => {
     });
   }
 
+  // Variante: strukturiert BEREITS gestellte Rückfragen (Freitext des Modells) in
+  // dieselbe Maske. Reicht die zusammengetragenen Antworten als Anhang zur Aufgabe
+  // zurück, damit der Aufrufer die Aufgabe vervollständigen kann.
+  //   const res = await Clarify.askFromText({ questionsText, task, domain, model, mount });
+  async function askFromText(opts) {
+    const questionsText = (opts.questionsText || '').trim();
+    const task   = (opts.task || '').trim();
+    const domain = opts.domain || 'chat';
+    const model  = opts.model || undefined;
+    const mount  = opts.mount;
+    if (!questionsText) return null;
+
+    if (mount) mount.innerHTML = '<em>⏳ bereite strukturierte Rückfragen vor…</em>';
+
+    let data;
+    try {
+      const r = await fetch('/api/clarify/structure', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questions_text: questionsText, task, domain, model }),
+      });
+      data = await r.json();
+      if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+    } catch (e) {
+      if (mount) mount.innerHTML = '<em>⚠ Konnte keine Maske erzeugen – bitte im Chat frei antworten.</em>';
+      return null;
+    }
+
+    const tokens = data.tokens || null;
+    const questions = (data.type === 'questions' && Array.isArray(data.questions)) ? data.questions : [];
+    if (!questions.length) {
+      if (mount) mount.innerHTML = '<em>Keine strukturierbaren Rückfragen erkannt.</em>';
+      return { compiled: '', augmentedTask: task, answered: false, tokens, noQuestions: true };
+    }
+
+    return await new Promise(resolve => {
+      _renderForm(mount, questions, (compiled, answered) => {
+        resolve({
+          compiled: (answered && compiled) ? compiled : '',
+          augmentedTask: (answered && compiled)
+            ? (task ? `${task}\n\n${compiled}` : compiled) : task,
+          answered, tokens,
+        });
+      });
+    });
+  }
+
   // Rendert die Eingabemaske in `mount` und ruft `done(compiledText, answered)`.
   function _renderForm(mount, questions, done) {
     if (!mount) { done('', false); return; }
@@ -163,5 +209,5 @@ const Clarify = (() => {
     mount.innerHTML = html;
   }
 
-  return { ask };
+  return { ask, askFromText };
 })();

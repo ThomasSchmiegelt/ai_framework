@@ -26,7 +26,8 @@ const TAB_MODEL_ROLE = {
   chat: 'general', agents: 'general', recherche: 'science', rag: 'general',
   docgen: 'general', medizin: 'medical', mathe: 'science', ide: 'coding',
   planner: 'general', matrix: 'general', diranalyse: 'general',
-  morph: 'general', jury: 'general',
+  morph: 'general', jury: 'general', patente: 'general',
+  rechnung: 'general', zeugnis: 'general',
 };
 let _activeModelName = '';
 
@@ -564,6 +565,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('DirAnalysis', () => { if (typeof DirAnalysis !== 'undefined') DirAnalysis.init(); });
   _safeInit('MorphBox', () => { if (typeof MorphBox !== 'undefined') MorphBox.init(); });
   _safeInit('Postfach', () => { if (typeof Postfach !== 'undefined') Postfach.init(); });
+  _safeInit('Patente', () => { if (typeof Patente !== 'undefined') Patente.init(); });
+  _safeInit('Rechnung', () => { if (typeof Rechnung !== 'undefined') Rechnung.init(); });
+  _safeInit('Zeugnis', () => { if (typeof Zeugnis !== 'undefined') Zeugnis.init(); });
   _safeInit('Jury', () => { if (typeof Jury !== 'undefined') Jury.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)

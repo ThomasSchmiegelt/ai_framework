@@ -37,6 +37,12 @@ Or use the scripts: `start.bat` / `start_server.bat` (Windows), `scripts/start.s
 
 Ollama must run separately on `http://localhost:11434` with at least one `config.json` model pulled. For RAG, pull the embedding model once: `ollama pull nomic-embed-text`. Browser: <http://localhost:8780>.
 
+## Testing / Diagnostics
+
+There is **no automated test suite or linter configured** (no pytest, no ruff/flake8 config) — verify changes by running the app and exercising the affected tab/endpoint manually. Two manual smoke-test scripts exist for backend-only checks (both auto-detect dev vs. portable-bundle layout):
+- `python3 test_chat.py [appdir]` — hits `/api/chat` directly (bypassing the frontend), once without tools and once with tools, printing raw SSE frames. Requires the app already running.
+- `diagnose.bat` (Windows) — collects OS/Python/package/port/Ollama status into `diagnose_report.txt`.
+
 ## Key Configuration
 
 `config.json` controls allowed models, default model, `embed_model` (RAG embeddings, default `nomic-embed-text`), Ollama URL, port/host, and installer flags (`hidden_tabs_default`, `enable_api`, `allow_python_exec`). **No environment variables** — everything is read from this file at startup. `allow_python_exec` (default `true`) gates server-side Python execution in the Code tab (`POST /api/code/run-python`); `make_server` defaults it to `false` (runs arbitrary code on the host).

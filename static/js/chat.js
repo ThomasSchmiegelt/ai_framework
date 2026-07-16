@@ -284,6 +284,9 @@ const Chat = (() => {
 
     messages.push({ role: 'assistant', content: fullText });
 
+    // Stellt die Antwort selbst Rückfragen? → Angebot einer strukturierten Maske.
+    _maybeOfferClarify(assistantRow, fullText);
+
     abortController = null;
     isStreaming = false;
     setBtnSendState(true);
@@ -1462,6 +1465,80 @@ const Chat = (() => {
     if (!res) return;
     if (res.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(res.tokens, 'Rückfragen');
     // Augmentierte Aufgabe über den normalen Weg senden (Antwort streamt darunter)
+    const input = document.getElementById('message-input');
+    input.value = res.augmentedTask;
+    autoResizeTextarea(input);
+    sendMessage();
+  }
+
+  // ── Spontane Rückfragen des Modells → strukturierte Maske anbieten ────────────
+  // Stellt die Antwort selbst Rückfragen (statt die Aufgabe zu lösen), bieten wir
+  // einen Knopf an, der die Fragen in eine ausfüllbare Maske (Vorauswahl + Freitext)
+  // umwandelt; nach dem Beantworten wird die Aufgabe automatisch vervollständigt.
+  const _CLARIFY_CUE_RE = /r[üu]ckfrage|pr[äa]zisier|gezielte fragen|einige fragen|folgende (fragen|angaben|informationen|punkte)|ben[öo]tige (ich )?noch|br[äa]uchte (ich )?noch/i;
+
+  function _countQuestionLines(text) {
+    // „?“-Zeilen zählen, Code-Blöcke ausklammern (dort sind ? kein Signal).
+    const stripped = String(text || '').replace(/```[\s\S]*?```/g, '').replace(/`[^`]*`/g, '');
+    let count = 0;
+    for (const line of stripped.split('\n')) {
+      const t = line.trim().replace(/[)\]"'*_>\s]+$/, '');
+      if (t.endsWith('?') && t.length > 6) count++;
+    }
+    return count;
+  }
+
+  function _looksLikeClarifyingQuestions(text) {
+    if (!text || text.length < 20) return false;
+    const qLines = _countQuestionLines(text);
+    return qLines >= 2 || (_CLARIFY_CUE_RE.test(text) && qLines >= 1);
+  }
+
+  function _lastUserTask() {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return (messages[i].content || '').trim();
+    }
+    return '';
+  }
+
+  // Fügt der Antwort einen „📋 Strukturiert beantworten“-Knopf hinzu, wenn sie
+  // wie eine Rückfragen-Liste aussieht.
+  function _maybeOfferClarify(row, fullText) {
+    if (!row || typeof Clarify === 'undefined' || !Clarify.askFromText) return;
+    if (!_looksLikeClarifyingQuestions(fullText)) return;
+    const saveBar = row.querySelector('.msg-save-bar');
+    if (!saveBar || saveBar.querySelector('.clarify-offer-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'clarify-offer-btn';
+    btn.textContent = '📋 Strukturiert beantworten';
+    btn.title = 'Diese Rückfragen als Auswahl-/Eingabemaske ausfüllen und die Aufgabe abschließen';
+    btn.addEventListener('click', () => _runClarifyOffer(row, fullText, btn));
+    saveBar.appendChild(btn);
+    saveBar.classList.add('clarify-present');   // Bar nicht abdunkeln (Call-to-Action)
+  }
+
+  async function _runClarifyOffer(row, questionsText, btn) {
+    if (isStreaming) { showToast('Bitte warten, bis die Antwort fertig ist'); return; }
+    btn.disabled = true;
+    // Maske unterhalb der Antwort einhängen
+    let mount = row.querySelector('.clarify-mount');
+    if (!mount) {
+      mount = document.createElement('div');
+      mount.className = 'clarify-mount';
+      (row.querySelector('.msg-bubble') || row).appendChild(mount);
+    }
+    const task = _lastUserTask();
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    let res;
+    try {
+      res = await Clarify.askFromText({ questionsText, task, domain: 'chat', model, mount });
+    } catch (_) { res = null; }
+    if (res && res.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(res.tokens, 'Rückfragen');
+    if (!res || res.noQuestions) { btn.disabled = false; return; }
+    btn.remove();                                   // Knopf verbraucht
+    if (!res.answered || !res.augmentedTask) return; // „Ohne Rückfragen“ → nichts senden
+    // Beantwortete Aufgabe über den normalen Weg senden (Antwort streamt darunter)
     const input = document.getElementById('message-input');
     input.value = res.augmentedTask;
     autoResizeTextarea(input);
