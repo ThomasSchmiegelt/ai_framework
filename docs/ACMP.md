@@ -131,7 +131,105 @@ Fassung unter `<Installation>\_update_backup\` ab.
 
 ---
 
-## 7. MSI-Variante
+## 7. Erstinbetriebnahme auf Windows (Abnahmetest)
+
+> Diese Dateien sind auf einem Linux-Rechner entstanden; `update.bat` und
+> `make_acmp.ps1` konnten dort **nicht ausgeführt** werden. Der folgende
+> Ablauf prüft sie einmal vollständig durch. Rechne mit ein bis zwei
+> Kleinigkeiten — die üblichen Stolperstellen stehen unter 7.5.
+
+### 7.1 Testumgebung aufsetzen
+
+Nichts Produktives anfassen. Zwei Ordner genügen:
+
+```powershell
+# Kopie einer funktionierenden Installation als Testziel
+robocopy "C:\Programme\AI_Framework" "C:\Temp\aifw_ziel" /E /XD ollama models
+
+# Paket der neuen Version bauen
+cd <Quellordner der neuen Version>
+.\make_acmp.ps1 -Version 1.4.1 -Zip
+```
+
+**Erwartung:** Das Skript meldet Version, Paketpfad, Größe und
+„Enthaelt KEIN Ollama, KEINE Modelle, KEIN venv, KEINE Nutzerdaten."
+Bricht es mit *„Paket enthaelt unerlaubte Bestandteile"* ab, hat die
+Positivliste zu viel eingesammelt — genau dafür ist die Prüfung da.
+
+### 7.2 Silent-Update testen
+
+```powershell
+cd _acmp\AI_Framework_1.4.1
+.\update.bat "C:\Temp\aifw_ziel" /S /LOG:"C:\Temp\aifw_update.log"
+echo "Exit-Code: $LASTEXITCODE"
+```
+
+Prüfliste:
+
+| Prüfpunkt | Erwartung |
+|---|---|
+| Exit-Code | `0` |
+| Rückfragen / `pause` | **keine** — das Skript läuft durch |
+| `C:\Temp\aifw_update.log` | enthält alle Schritte `[1/4]`…`[4/4]` |
+| `C:\Temp\aifw_ziel\VERSION` | `1.4.1` |
+| `C:\Temp\aifw_ziel\config.json` | **unverändert** (Zeitstempel vergleichen) |
+| `C:\Temp\aifw_ziel\data\` | **unverändert** |
+| `C:\Temp\aifw_ziel\_update_backup\` | enthält die vorherige Fassung |
+| Registry | `HKLM\SOFTWARE\AI_Framework_Thomas\Version` = `1.4.1` |
+
+Registry prüfen (PowerShell als Administrator):
+
+```powershell
+Get-ItemProperty "HKLM:\SOFTWARE\AI_Framework_Thomas"
+```
+
+> Läuft das Update **ohne** Adminrechte, schlägt nur der Registry-Eintrag fehl;
+> das Update selbst gilt weiterhin als erfolgreich und die Datei `VERSION` bleibt
+> als Erkennungsquelle. ACMP läuft üblicherweise als SYSTEM — dort greift die
+> Registry.
+
+### 7.3 Fehlerfälle prüfen (die Exit-Codes müssen stimmen)
+
+```powershell
+.\update.bat "C:\Temp\gibtsnicht" /S          # erwartet: 3  (Ziel ungueltig)
+cd C:\Temp\aifw_ziel; .\update.bat "C:\Temp\aifw_ziel" /S   # erwartet: 5  (Quelle=Ziel)
+```
+
+Nur so ist sichergestellt, dass ACMP einen Fehlschlag auch als Fehlschlag meldet
+und nicht stillschweigend „erfolgreich" bucht.
+
+### 7.4 Rollback prüfen
+
+```powershell
+robocopy "C:\Temp\aifw_ziel\_update_backup" "C:\Temp\aifw_ziel" /E
+```
+
+Danach muss die App wieder in der alten Fassung starten.
+
+### 7.5 Erfahrungsgemäße Stolperstellen
+
+| Symptom | Ursache / Abhilfe |
+|---|---|
+| Skript bricht sofort ab, Fenster schließt sich | Pfad mit Leerzeichen ohne Anführungszeichen. Immer `"C:\Pfad mit Leer"` schreiben. |
+| `Der Befehl "robocopy" ist entweder falsch geschrieben…` | Nur auf sehr alten/abgespeckten Systemen. Dann `xcopy` verwenden oder Windows-Feature nachrüsten. |
+| Exit-Code `1` obwohl alles kopiert wurde | Robocopy-Codes ≥ 8 sind Fehler, 0–7 sind Erfolg. Das Skript wertet bereits `if errorlevel 8` — bei abweichendem Verhalten Log prüfen. |
+| Log bleibt leer | Kein Schreibrecht im Zielordner. `/LOG:` auf `%TEMP%` legen. |
+| Umlaute im Log zerschossen | Kosmetik (Codepage 850 vs. UTF-8). Skripttexte sind bewusst umlautfrei gehalten; falls doch, `chcp 65001` voranstellen. |
+| Pakete werden nicht aktualisiert | Kein `venv`/`python` gefunden → Log `[4/4]`. Pfad prüfen oder `/NOPIP` setzen und Laufzeitpaket separat verteilen. |
+
+### 7.6 Danach: Version für die Auslieferung setzen
+
+```powershell
+.\make_acmp.ps1 -Version 1.4.1 -Zip
+```
+
+`-Version` schreibt die Nummer in `VERSION` **und** baut das Paket. Damit sind
+Datei, Registry und ACMP-Erkennung automatisch konsistent — die Version muss an
+**keiner** weiteren Stelle gepflegt werden (`config.json` ist nur noch Rückfall).
+
+---
+
+## 8. MSI-Variante
 
 Ein WiX-Projekt für ein echtes MSI liegt unter `packaging/wix/`. Es paketiert
 **nur den Programmcode** (dieselbe Trennung wie oben) und muss auf einem

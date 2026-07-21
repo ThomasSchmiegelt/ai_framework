@@ -392,8 +392,13 @@ Dokumente verlassen den Rechner nicht.
      *kreativ* = darf mit eigenem Wissen ergänzen; *korrekt* = antwortet ausschließlich
      aus den gefundenen Auszügen.
    Unter jedem Regler steht, was die aktuelle Stellung konkret bedeutet.
-4. **Dokumente bereinigen** an-/ausschalten (empfohlen: an, siehe unten).
-5. **📚 Wissensdatenbank anlegen** klicken.
+4. **Bereinigungsstufe** wählen — *Standard* oder *Strikt* (siehe
+   [Dokumentbereinigung](#dokumentbereinigung)). Im Zweifel *Standard*.
+5. **Embedding-Modell** wählen — Standard ist das lokale `nomic-embed-text`
+   (läuft auf der CPU, nichts verlässt den Rechner). Alternativ ein API-Modell,
+   falls Anbieter hinterlegt sind (siehe [Embedding-Modell wählen](#embedding-modell-wählen)).
+6. **Dokumente bereinigen** an-/ausschalten (empfohlen: an, siehe unten).
+7. **📚 Wissensdatenbank anlegen** klicken.
 
 > **Hinweis (kleine Grafikkarte):** Die Embeddings laufen immer **auf der CPU**, damit
 > sie das Chat-Modell nicht aus den 6 GB VRAM verdrängen. Der Regler *gründlich* erhöht
@@ -443,14 +448,83 @@ Sammlung eingebettet und steht künftig als Wissen zur Verfügung. Mit der Optio
 ### Dokumentbereinigung
 
 Mit aktivierter Option **Bereinigen** wird der extrahierte Text vor dem Chunking
-geglättet: Silbentrennung am Zeilenende wird aufgehoben (`Maschi-/nenbau` →
-`Maschinenbau`), umbrochene Zeilen werden zu Absätzen zusammengefügt, reine
-Seitenzahl-Zeilen und Steuerzeichen entfernt, Mehrfach-Leerzeichen reduziert. Das
-verbessert die Trefferqualität spürbar.
+geglättet. Es gibt **zwei Stufen**, wählbar beim Anlegen der Sammlung.
+
+#### Stufe „Standard" (Voreinstellung)
+
+Vereinheitlicht den Text, **ohne Inhalt zu verlieren**:
+
+- **Unicode-Normalisierung (NFKC)** — vereinheitlicht optisch gleiche, technisch
+  verschiedene Zeichen; löst u. a. PDF-Ligaturen auf.
+- **Typografische Sonderzeichen → einfache Zeichen:** alle Gedankenstrich-Varianten
+  (`‐ ‑ ‒ – — ― −`) → `-`, typografische Anführungszeichen (`„ " " ‚ ' »`) → `"`
+  bzw. `'`, Auslassungszeichen `…` → `...`.
+- **Leerzeichen-Varianten → normales Leerzeichen:** geschütztes, schmales,
+  Ziffern-, ideographisches Leerzeichen usw.
+- **Unsichtbare Steuerzeichen entfernt:** weiche Trennzeichen, Zero-Width-Zeichen,
+  Wortverbinder, Richtungssteuerung. *Gerade weiche Trennzeichen aus PDFs sind
+  tückisch — im Editor unsichtbar, zerlegen sie aber Wörter für die Suche.*
+- **Silbentrennung aufgehoben:** `Maschi-/nenbau` → `Maschinenbau`.
+- **Seitenzahlen entfernt** — reine Zahlenzeilen und Marken der Form `12/144`.
+- Umbrochene Zeilen zu Absätzen zusammengefügt, Mehrfach-Leerzeichen reduziert.
+
+#### Stufe „Strikt"
+
+Alles aus *Standard*, **zusätzlich** (und dabei bewusst verlustbehaftet):
+
+- **Markdown-Zeichen entfernt:** `#`/`##`/`###`, `**fett**`, `__…__`, Backticks,
+  Aufzählungszeichen am Zeilenanfang. Aus `## Artikel 1 Gegenstand` wird
+  `Artikel 1 Gegenstand`.
+- **Links reduziert:** `[Kommission](https://…)` → `Kommission`; nackte Adressen
+  (`http://…`, `https://…`, `www.…`) werden entfernt.
+- **Wiederkehrende Kopf- und Fußzeilen entfernt** — z. B. „Amtsblatt der
+  Europäischen Union", „DE ABl. L vom 12.7.2024", „ELI: http://…".
+
+> **Wann „Strikt"?** Für **Behörden-, Gesetzes- und Normendokumente**, deren
+> PDF-Layout auf jeder Seite Kopf-/Fußzeilen, Seitenmarken und Amtsblatt-Bausteine
+> wiederholt. Diese Wiederholungen verwässern sonst die Suche, weil sie in fast
+> jedem Chunk auftauchen. Für normale Handbücher, Angebote oder bewusst in
+> Markdown gepflegte Texte ist *Standard* die bessere Wahl — dort ist die
+> Struktur (Überschriften, Links) ja Information.
+
+**Wie die Kopfzeilen-Erkennung arbeitet:** Es sind **keine** festen Textbausteine
+hinterlegt — das würde nur bei der EU funktionieren. Stattdessen gilt eine Zeile
+als Kopf-/Fußzeile, wenn sie *drei Bedingungen zugleich* erfüllt: sie kommt
+**mindestens 4×** vor, in **gleichmäßigen Abständen** (Seitenköpfe wiederholen
+sich alle n Zeilen) und sie ist **kurz (≤ 60 Zeichen)**. Ein inhaltlicher Satz,
+der zufällig mehrfach vorkommt, wird dadurch **nicht** gelöscht. Das Verfahren
+greift so auch bei anderen Ämtern, Sprachen und Dokumentarten.
 
 > **Vorab prüfen:** Mit `python scripts/clean_documents.py <Datei-oder-Ordner>` kannst
 > du das Bereinigungsergebnis als `*.clean.txt` ansehen, bevor du hochlädst
 > (vorher `set PYTHONIOENCODING=utf-8`).
+
+> **Wenn ein Dokument gar nicht verarbeitet wird:** Zuerst Stufe *Strikt*
+> versuchen. Hilft das nicht, das PDF vorab als reine `.txt` speichern (UTF-8,
+> ohne BOM) und diese hochladen — die Bereinigung greift auch dort.
+
+### Embedding-Modell wählen
+
+Das **Embedding-Modell** wandelt Text in Zahlenvektoren um; darüber findet die
+Suche passende Stellen. Beim Anlegen einer Sammlung wählbar:
+
+- **Lokal (Voreinstellung, `nomic-embed-text`)** — läuft über Ollama auf der
+  **CPU**, damit es das Chat-Modell nicht aus dem VRAM verdrängt. Die
+  Dokumentinhalte **verlassen den Rechner nicht**.
+- **API-Modell** — falls unter *Profil → Externe KI-Anbieter* ein Anbieter
+  hinterlegt ist. Oft schneller und treffsicherer bei großen Sammlungen.
+  ⚠ **Die Dokumenttexte werden dabei an den Anbieter gesendet.** Für vertrauliche
+  Unterlagen ungeeignet.
+
+> **Wichtig:** Das Modell gehört **dauerhaft zur Sammlung**. Vektoren
+> verschiedener Modelle sind nicht miteinander vergleichbar. Ein Wechsel bedeutet
+> deshalb: neue Sammlung anlegen und die Dokumente erneut einlesen. Umgekehrt
+> unproblematisch: Du kannst beliebig viele Sammlungen mit **unterschiedlichen**
+> Modellen parallel betreiben und gemeinsam abfragen — jede wird korrekt mit
+> ihrem eigenen Modell durchsucht.
+
+In der Sammlungsliste steht das verwendete Modell hinter 🖥 (lokal) bzw.
+🌐 (API), daneben die Bereinigungsstufe.
 
 ### Im Chat nutzen
 
@@ -1495,6 +1569,40 @@ API-Anbieter** einbinden (z. B. **OpenRouter**, OpenAI, Groq, Together):
 > - **Remote-Aufrufe verlassen deinen Rechner** (Daten gehen an den Anbieter) und
 >   belegen **kein** lokales VRAM — die Ein-Modell-Beschränkung gilt nur für lokale
 >   Ollama-Modelle.
+
+### 🌐 Web-Recherche immer lokal (im Profil)
+
+Manche API-Anbieter **unterbinden web- bzw. werkzeuggestützte Recherche** oder
+liefern dabei Fehler. Für diesen Fall gibt es zwei Mechanismen — einen, den du
+einschaltest, und einen, der immer greift.
+
+**1. Der Schalter „Web-Recherche immer lokal ausführen"**
+
+Ist er aktiv, laufen **alle** web-gestützten Aufgaben zwingend auf einem lokalen
+Ollama-Modell, auch wenn den Rollen ein API-Modell zugewiesen ist:
+
+- Recherche-Tab (🔎)
+- Matrix-Recherche
+- erweiterte Suche im Chat (`/such`)
+- Deepdive **mit** Websuche
+- Patent-Analyse
+
+Sinnvoll, wenn deine API keine Websuche zulässt — oder aus Datenschutzgründen,
+weil Suchanfragen und Fundstellen dann den Rechner nicht verlassen.
+
+> Ohne installiertes lokales Modell ist die Recherche bei aktivem Schalter
+> **nicht verfügbar** (Fehlermeldung statt stiller Umleitung).
+
+**2. Der automatische Rückfall (immer aktiv, unabhängig vom Schalter)**
+
+Scheitert eine Recherche am API-Modell — Anbieter nicht erreichbar, Web-/Tool-Nutzung
+gesperrt, keine verwertbare Antwort — wird sie **einmalig automatisch lokal
+wiederholt**. Du siehst dann einen Hinweis wie:
+
+> *API-Modell lieferte keine Suchbegriffe – lokal wiederholt (gemma4:26b).*
+
+Das ist ein **reiner Rückfall**: Bevorzugt bleibt immer das gewählte Modell, lokal
+wird nur nachgesetzt, wenn es sonst gar kein Ergebnis gäbe.
 
 ### 🔢 Token-Zähler & Preis (im Profil)
 
