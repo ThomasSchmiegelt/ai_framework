@@ -57,6 +57,12 @@ certs/
 # data/agents/  bleibt eingecheckt; nur der Seeding-Marker ist Laufzeit-State:
 data/agents/.seeded
 
+# Persoenlicher Starter (nur lokal, enthaelt eine Sitzungs-ID)
+restart.sh
+
+# Laufzeit-Logs beliebiger Instanzen
+*.log
+
 # Laufzeit-/Dev-Artefakte
 /server.log
 /_test_*.py
