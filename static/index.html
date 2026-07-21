@@ -462,6 +462,22 @@
           </div>
         </div>
 
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px">
+          <div>
+            <label style="font-size:12px;display:block;margin-bottom:4px">Bereinigungsstufe</label>
+            <select id="rag-clean-level" style="width:100%">
+              <option value="standard" selected>Standard – Unicode/Typografie, unsichtbare Zeichen</option>
+              <option value="strikt">Strikt – zusätzlich Markdown, Links, Kopf-/Fußzeilen</option>
+            </select>
+            <div id="rag-clean-level-hint" class="planner-muted" style="font-size:11px;margin-top:4px"></div>
+          </div>
+          <div>
+            <label style="font-size:12px;display:block;margin-bottom:4px">Embedding-Modell</label>
+            <select id="rag-embed-select" style="width:100%"></select>
+            <div id="rag-embed-hint" class="planner-muted" style="font-size:11px;margin-top:4px"></div>
+          </div>
+        </div>
+
         <div style="display:flex;gap:14px;align-items:center;margin-top:8px">
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
             <input type="checkbox" id="rag-clean" checked /> Dokumente bereinigen
@@ -2835,7 +2851,7 @@
 <script src="/js/clarify.js?v=20260714"></script>
 <script src="/js/chat.js?v=20260714clarify"></script>
 <script src="/js/research.js?v=20260603"></script>
-<script src="/js/rag.js?v=20260622"></script>
+<script src="/js/rag.js?v=20260721"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>

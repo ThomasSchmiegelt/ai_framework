@@ -67,6 +67,57 @@ const RAG = (() => {
       const data = await (await fetch('/api/rag/tiers')).json();
       document.getElementById('rag-embed-model').textContent = data.embed_model || '?';
     } catch (e) { /* ignore */ }
+    _loadEmbedChoices();
+  }
+
+  // Auswahlliste der Embeddingmodelle (lokal + API) für neue Sammlungen.
+  // Das Modell gehört dauerhaft zur Sammlung: Vektoren verschiedener Modelle sind
+  // nicht vergleichbar, ein Wechsel erfordert Neuindizierung.
+  async function _loadEmbedChoices() {
+    const sel = document.getElementById('rag-embed-select');
+    if (!sel) return;
+    let data;
+    try {
+      data = await (await fetch('/api/rag/embed-models')).json();
+    } catch (e) { return; }
+    sel.innerHTML = '';
+    const opt = (val, label) => {
+      const o = document.createElement('option');
+      o.value = val; o.textContent = label; sel.appendChild(o);
+    };
+    opt('', `Standard (lokal): ${data.default || 'nomic-embed-text'}`);
+    (data.local || []).forEach(m => {
+      if (m.name !== data.default) opt(m.name, `lokal: ${m.name}`);
+    });
+    (data.remote || []).forEach(m => opt(m.name, `API · ${m.provider}: ${m.name.split('::')[1] || m.name}`));
+    sel.onchange = _embedHint;
+    _embedHint();
+  }
+
+  function _embedHint() {
+    const sel = document.getElementById('rag-embed-select');
+    const hint = document.getElementById('rag-embed-hint');
+    if (!sel || !hint) return;
+    const v = sel.value;
+    if (v && v.includes('::')) {
+      hint.innerHTML = '⚠ Dokumenttexte gehen zum Einbetten an den externen Anbieter. ' +
+                       'Das Modell bleibt fest mit dieser Sammlung verbunden.';
+      hint.style.color = 'var(--warn, #d08b2c)';
+    } else {
+      hint.textContent = 'Läuft lokal über Ollama (CPU), nichts verlässt den Rechner.';
+      hint.style.color = '';
+    }
+  }
+
+  function _cleanLevelHint() {
+    const sel = document.getElementById('rag-clean-level');
+    const hint = document.getElementById('rag-clean-level-hint');
+    if (!sel || !hint) return;
+    hint.textContent = sel.value === 'strikt'
+      ? 'Für Behörden-/Gesetzes-PDFs: entfernt zusätzlich Markdown-Zeichen, Links/URLs '
+        + 'und wiederkehrende Kopf-/Fußzeilen. Verlustbehaftet.'
+      : 'Vereinheitlicht Unicode (NFKC), typografische Zeichen und entfernt unsichtbare '
+        + 'Steuerzeichen sowie Seitenzahlen. Struktur bleibt erhalten.';
   }
 
   async function loadCollections() {
@@ -194,7 +245,12 @@ const RAG = (() => {
           <strong>📚 ${escHtml(c.name)}</strong>
           <span class="planner-muted" style="font-size:11.5px">
             🔎 ${escHtml(c.tier)} · ✍ ${escHtml(c.strictness || 'ausgewogen')} · top-k ${c.top_k}
-            · max ${c.char_limit} Z. · ${c.clean ? 'bereinigt' : 'roh'} · ${c.n_docs} Dok / ${c.n_chunks} Chunks
+            · max ${c.char_limit} Z.
+            · ${c.clean ? 'bereinigt: ' + escHtml(c.clean_level || 'standard') : 'roh'}
+            · ${(c.embed_model || '').includes('::')
+                 ? '🌐 ' + escHtml((c.embed_model || '').split('::')[1])
+                 : '🖥 ' + escHtml(c.embed_model || '')}
+            · ${c.n_docs} Dok / ${c.n_chunks} Chunks
           </span>
         </div>
         <details class="rag-docs" style="margin:8px 0 6px"${docs.length && docs.length <= 4 ? ' open' : ''}>
@@ -332,6 +388,8 @@ const RAG = (() => {
       char_limit: sp.char_limit,
       strictness: _strict(),
       clean: document.getElementById('rag-clean').checked,
+      clean_level: (document.getElementById('rag-clean-level') || {}).value || 'standard',
+      embed_model: (document.getElementById('rag-embed-select') || {}).value || null,
     };
     try {
       const r = await fetch('/api/rag/collections', {
@@ -608,6 +666,8 @@ const RAG = (() => {
 
   function init() {
     _loadEmbedModel();
+    document.getElementById('rag-clean-level')?.addEventListener('change', _cleanLevelHint);
+    _cleanLevelHint();
     _updateSliderLabels();
     _initSplitter();
     loadCollections();

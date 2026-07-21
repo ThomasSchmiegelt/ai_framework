@@ -1868,12 +1868,31 @@ class RagCollectionCreate(BaseModel):
     char_limit: Optional[int] = None
     strictness: str = "ausgewogen"   # kreativ | ausgewogen | korrekt
     clean: bool = True
+    clean_level: str = "standard"    # standard | strikt
+    embed_model: Optional[str] = None  # None = lokales Standardmodell (config.json)
 
 
 @app.get("/api/rag/tiers")
 async def rag_tiers():
     from tools.rag import TIERS, DEFAULT_TIER
     return {"tiers": TIERS, "default": DEFAULT_TIER, "embed_model": EMBED_MODEL}
+
+
+@app.get("/api/rag/embed-models")
+async def rag_embed_models():
+    """Wählbare Embeddingmodelle für neue Sammlungen: lokal installierte
+    Ollama-Modelle plus alle konfigurierten API-Modelle.
+
+    Die Zuordnung gilt dauerhaft pro Sammlung — Vektoren unterschiedlicher
+    Modelle sind nicht vergleichbar (andere Dimension/Semantik). Ein Wechsel
+    erfordert Neuindizierung; das Frontend weist darauf hin."""
+    local = [{"name": m, "remote": False, "provider": "Ollama (lokal)"}
+             for m in await _installed_local_models()]
+    try:
+        remote = await _llm.list_remote_models()
+    except Exception:
+        remote = []
+    return {"default": EMBED_MODEL, "local": local, "remote": remote}
 
 
 @app.get("/api/rag/collections")
@@ -1889,16 +1908,27 @@ async def rag_create_collection(body: RagCollectionCreate):
         raise HTTPException(status_code=400, detail="Name fehlt")
     tc = tier_config(body.tier)
     strictness = body.strictness if body.strictness in ("kreativ", "ausgewogen", "korrekt") else "ausgewogen"
+    clean_level = body.clean_level if body.clean_level in ("standard", "strikt") else "standard"
+    # Embeddingmodell: lokal (Ollama) oder extern („anbieter::modell"). Die Wahl gilt
+    # dauerhaft für diese Sammlung — Vektoren verschiedener Modelle sind nicht
+    # vergleichbar, ein Wechsel erfordert Neuindizierung.
+    embed_model = (body.embed_model or "").strip() or EMBED_MODEL
+    if _llm.is_remote(embed_model):
+        provider, _real = _llm.resolve(embed_model)
+        if provider is None:
+            raise HTTPException(status_code=400,
+                                detail=f"Unbekannter API-Anbieter für Embeddingmodell '{embed_model}'.")
     coll = {
         "id": f"rag_{uuid.uuid4().hex[:12]}",
         "name": name,
-        "embed_model": EMBED_MODEL,
+        "embed_model": embed_model,
         "tier": (body.tier or "regler").strip()[:24],   # freies Anzeige-Label (Regler-Stufe)
         "chunk_size": int(body.chunk_size or tc["chunk_size"]),
         "chunk_overlap": int(body.chunk_overlap if body.chunk_overlap is not None else tc["chunk_overlap"]),
         "top_k": int(body.top_k or tc["top_k"]),
         "embed_gpu": False,   # auf kleinen Karten immer CPU (verdrängt das Chat-Modell nicht)
         "clean": bool(body.clean),
+        "clean_level": clean_level,
         "char_limit": int(body.char_limit or tc["char_limit"]),
         "strictness": strictness,
         "created_at": time.time(),

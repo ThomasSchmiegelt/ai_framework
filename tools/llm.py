@@ -273,6 +273,40 @@ async def list_remote_models() -> list:
     return out
 
 
+async def embed(texts: list, model: str, timeout: float = 600.0) -> list:
+    """Erzeugt Embeddings über einen externen OpenAI-kompatiblen Anbieter.
+
+    ``model`` ist ein präfigierter Remote-Name (``<provider_id>::<modell>``).
+    Rückgabe: Liste von Vektoren in der Reihenfolge der Eingabetexte — also
+    dieselbe Form wie ``tools.rag.embed`` sie von Ollama erhält.
+    """
+    provider, real_model = resolve(model)
+    if provider is None:
+        raise RuntimeError(f"Kein externer Anbieter für Embedding-Modell '{model}' gefunden.")
+    if not texts:
+        return []
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            f"{_base(provider)}/embeddings",
+            headers=_remote_headers(provider),
+            json={"model": real_model, "input": texts},
+        )
+    if resp.status_code >= 400:
+        data = _safe_json(resp)
+        msg = (data.get("error") or {}).get("message") if isinstance(data.get("error"), dict) else data.get("error")
+        raise RuntimeError(
+            f"Embedding-Anbieter '{provider.get('name', provider.get('id'))}' meldet "
+            f"HTTP {resp.status_code}: {msg or str(data)[:200]}")
+    data = resp.json()
+    items = data.get("data") or []
+    # Reihenfolge über 'index' absichern (manche Anbieter liefern unsortiert)
+    try:
+        items = sorted(items, key=lambda d: int(d.get("index", 0)))
+    except Exception:
+        pass
+    return [it.get("embedding") for it in items if it.get("embedding") is not None]
+
+
 async def fetch_provider_models(provider: dict, timeout: float = 15.0) -> list:
     """Holt die Modell-Liste eines Anbieters (GET {base}/models). Für „Verbindung
     testen" / automatisches Befüllen. Gibt eine Liste von Modellnamen zurück."""

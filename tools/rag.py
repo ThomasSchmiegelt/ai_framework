@@ -20,6 +20,7 @@ import httpx
 import numpy as np
 
 import db as _db
+from tools import llm as _llm
 
 # Konfiguration aus config.json (gleiche Quelle wie main.py)
 _CONFIG = {}
@@ -49,39 +50,164 @@ def tier_config(tier: str) -> dict:
 
 # ── Bereinigung ───────────────────────────────────────────────────────────────
 
-def clean_text(text: str) -> str:
+# Bereinigungsstufen einer Sammlung (Spalte ``clean_level``):
+#   "standard" – verlustfreie Vereinheitlichung (Unicode, Typografie, unsichtbare
+#                Zeichen, Silbentrennung, Seitenzahlen). Struktur bleibt erhalten.
+#   "strikt"   – zusätzlich verlustbehaftet: Markdown-Zeichen, Links/URLs und
+#                wiederkehrende Kopf-/Fußzeilen (Amtsblatt-Layout) fliegen raus.
+#                Für Behörden-/Gesetzes-PDFs, die einfache Parser sonst stören.
+CLEAN_LEVELS = ("standard", "strikt")
+DEFAULT_CLEAN_LEVEL = "standard"
+
+# Typografische Sonderzeichen -> einfache ASCII-Entsprechung. NFKC allein deckt das
+# nicht ab (Gedankenstriche und typografische Anfuehrungszeichen bleiben dort
+# unveraendert), darum die explizite Tabelle. Bewusst als \u-Escapes notiert, damit
+# diese Quelldatei selbst frei von unsichtbaren/mehrdeutigen Zeichen bleibt.
+_CHAR_MAP = {
+    # Leerzeichen-Varianten -> normales Leerzeichen
+    "\u00a0": " ",  # geschuetztes Leerzeichen (NBSP)
+    "\u202f": " ",  # schmales geschuetztes Leerzeichen
+    "\u2007": " ",  # Ziffernleerzeichen
+    "\u2002": " ",  # En-Space
+    "\u2003": " ",  # Em-Space
+    "\u2008": " ",  # Interpunktions-Leerzeichen
+    "\u2009": " ",  # schmales Leerzeichen
+    "\u200a": " ",  # Haarspatium
+    "\u3000": " ",  # ideographisches Leerzeichen
+    # Strich-Varianten -> einfacher Bindestrich
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
+    # Apostroph-Varianten -> gerades Apostroph
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u2032": "'",
+    # Anfuehrungszeichen-Varianten -> gerades Anfuehrungszeichen
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"', "\u2033": '"', "\u00ab": '"', "\u00bb": '"',
+    # Auslassungszeichen
+    "\u2026": "...",
+}
+_CHAR_TABLE = str.maketrans(_CHAR_MAP)
+
+# Seitenmarke der Form "12/144" bzw. "12 / 144" (EU-Amtsblatt und aehnliche Layouts)
+_RE_PAGE_OF = re.compile(r"^\s*\d{1,4}\s*/\s*\d{1,4}\s*$")
+# Reine Seitenzahl-Zeile (ggf. mit Strichen drumherum; Gedankenstriche sind zu
+# diesem Zeitpunkt bereits auf "-" vereinheitlicht)
+_RE_PAGE_NUM = re.compile(r"^[-\s]*\d{1,4}[-\s]*$")
+
+# Markdown-Bestandteile (nur Stufe "strikt")
+_RE_MD_IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_RE_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_RE_MD_FENCE = re.compile(r"^\s*(?:```|~~~)")
+_RE_MD_HEAD = re.compile(r"^\s{0,3}#{1,6}\s*")
+_RE_MD_BULLET = re.compile(r"^\s{0,4}[-*+]\s+")
+_RE_MD_BOLD = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
+_RE_MD_CODE = re.compile(r"`+([^`]+)`+")
+_RE_URL = re.compile(r"https?://\S+|www\.\S+")
+
+
+def _strip_markdown(text: str) -> str:
+    """Entfernt Markdown-Auszeichnung und Links, behaelt den sichtbaren Text."""
+    text = _RE_MD_IMAGE.sub(r"\1", text)
+    text = _RE_MD_LINK.sub(r"\1", text)
+    text = _RE_MD_BOLD.sub(r"\2", text)
+    text = _RE_MD_CODE.sub(r"\1", text)
+    out = []
+    for line in text.split("\n"):
+        if _RE_MD_FENCE.match(line):
+            continue
+        line = _RE_MD_HEAD.sub("", line)
+        line = _RE_MD_BULLET.sub("", line)
+        out.append(line)
+    return _RE_URL.sub("", "\n".join(out))
+
+
+def _drop_boilerplate(lines: list, min_count: int = 4, max_len: int = 60,
+                      max_cv: float = 0.35) -> list:
+    """Entfernt wiederkehrende Kopf-/Fusszeilen (Amtsblatt-Layout, ELI-Adressen ...).
+
+    Statistisch statt fest verdrahtet, damit es auch bei anderen Aemtern und
+    Sprachen greift. Haeufigkeit allein waere aber zu grob - ein mehrfach
+    vorkommender Inhaltssatz wuerde mitgeloescht. Zusaetzliches Kriterium ist
+    darum die *Regelmaessigkeit*: echte Seitenkoepfe/-fuesse wiederholen sich in
+    nahezu konstantem Zeilenabstand (eine Seite = konstant viele Zeilen), waehrend
+    inhaltliche Wiederholungen unregelmaessig verteilt sind. Verworfen wird nur,
+    was oft *und* regelmaessig auftritt (Variationskoeffizient der Abstaende
+    <= ``max_cv``) *und* kurz ist (``max_len``) - Seitenkoepfe sind typischerweise
+    deutlich kuerzer als ein Inhaltssatz, was ganze Saetze zusaetzlich schuetzt.
+    """
+    positions = {}
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s and len(s) <= max_len:
+            positions.setdefault(s, []).append(i)
+
+    drop = set()
+    for s, pos in positions.items():
+        if len(pos) < min_count:
+            continue
+        gaps = [b - a for a, b in zip(pos, pos[1:])]
+        mean = sum(gaps) / len(gaps)
+        if mean <= 0:
+            continue
+        var = sum((g - mean) ** 2 for g in gaps) / len(gaps)
+        if (var ** 0.5) / mean <= max_cv:   # gleichmaessige Abstaende -> Kopf-/Fusszeile
+            drop.add(s)
+
+    if not drop:
+        return lines
+    return ["" if line.strip() in drop else line for line in lines]
+
+
+def clean_text(text: str, level: str = DEFAULT_CLEAN_LEVEL) -> str:
     """Bereinigt extrahierten Dokumenttext vor dem Chunking.
 
-    - normalisiert Unicode/Whitespace, entfernt Steuerzeichen
-    - hebt Silbentrennung am Zeilenende auf (z. B. ``Maschi-\\nnenbau`` → ``Maschinenbau``)
-    - fügt innerhalb von Absätzen umgebrochene Zeilen zusammen
-    - entfernt Zeilen, die nur aus einer Seitenzahl bestehen
-    - reduziert mehrfache Leerzeilen auf eine
+    Stufe ``standard`` (verlustfrei):
+    - Unicode-Normalisierung NFKC (vereinheitlicht u. a. PDF-Ligaturen)
+    - typografische Sonderzeichen -> ASCII (Gedankenstriche, Anfuehrungszeichen, Ellipse)
+    - entfernt unsichtbare Steuer-/Formatzeichen (weiche Trennzeichen, Zero-Width,
+      Richtungssteuerung) - ausser ``\\n`` und ``\\t``
+    - hebt Silbentrennung am Zeilenende auf (``Maschi-\\nnenbau`` -> ``Maschinenbau``)
+    - entfernt reine Seitenzahl-Zeilen und Seitenmarken der Form ``12/144``
+    - fuegt innerhalb von Absaetzen umgebrochene Zeilen zusammen, reduziert Leerzeilen
+
+    Stufe ``strikt`` zusaetzlich (verlustbehaftet):
+    - entfernt Markdown-Auszeichnung (``#``, ``**``, ``__``, Backticks, Aufzaehlungszeichen)
+    - reduziert Links ``[Text](URL)`` auf ``Text`` und entfernt nackte URLs
+    - entfernt wiederkehrende Kopf-/Fusszeilen (siehe :func:`_drop_boilerplate`)
     """
     if not text:
         return ""
-    text = unicodedata.normalize("NFC", text)
-    # Steuerzeichen raus (außer \n und \t)
-    text = "".join(ch for ch in text if ch == "\n" or ch == "\t" or unicodedata.category(ch)[0] != "C")
+    strict = str(level or "").lower() == "strikt"
+
+    # 1) Unicode vereinheitlichen, typografische Zeichen ersetzen
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_CHAR_TABLE)
+    # 2) unsichtbare Steuer-/Formatzeichen raus (ausser \n und \t)
+    text = "".join(ch for ch in text if ch in "\n\t" or unicodedata.category(ch)[0] != "C")
     text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
-    # Silbentrennung am Zeilenende aufheben
+
+    # 3) Markdown/Links (nur strikt) - zeilenbasiert, daher vor dem Zusammenzug
+    if strict:
+        text = _strip_markdown(text)
+
+    # 4) Silbentrennung am Zeilenende aufheben
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
 
+    lines = text.split("\n")
+    if strict:
+        lines = _drop_boilerplate(lines)
+
     out_lines = []
-    for line in text.split("\n"):
+    for line in lines:
         s = line.strip()
-        if re.fullmatch(r"[-–—\s]*\d{1,4}[-–—\s]*", s):  # reine Seitenzahl-Zeile
+        if _RE_PAGE_NUM.match(s) or _RE_PAGE_OF.match(s):  # Seitenzahl / "12/144"
             out_lines.append("")
             continue
-        s = re.sub(r"[  ]{2,}", " ", s)  # Mehrfach-Leerzeichen
-        out_lines.append(s)
+        out_lines.append(re.sub(r" {2,}", " ", s))
     text = "\n".join(out_lines)
 
-    # Innerhalb von Absätzen umgebrochene Zeilen verbinden (Einzelumbruch → Leerzeichen,
-    # Doppelumbruch = Absatzgrenze bleibt erhalten)
+    # 5) Innerhalb von Absaetzen umgebrochene Zeilen verbinden (Einzelumbruch ->
+    # Leerzeichen, Doppelumbruch = Absatzgrenze bleibt erhalten)
     text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ ]{2,}", " ", text)
+    text = re.sub(r" {2,}", " ", text)
     return text.strip()
 
 
@@ -118,11 +244,18 @@ def chunk_text(text: str, size: int, overlap: int) -> list:
 # ── Embeddings (Ollama) ─────────────────────────────────────────────────────
 
 async def embed(texts: list, model: str = None, gpu: bool = False) -> list:
-    """Erzeugt Embeddings über Ollama. ``gpu=False`` erzwingt CPU (num_gpu=0),
-    damit das Embeddingmodell das Chat-Modell nicht aus dem VRAM verdrängt."""
+    """Erzeugt Embeddings für ``texts``.
+
+    Lokale Modelle laufen über Ollama; ``gpu=False`` erzwingt dort CPU
+    (``num_gpu=0``), damit das Embeddingmodell das Chat-Modell nicht aus dem VRAM
+    verdrängt. Präfigierte Modellnamen (``<anbieter>::<modell>``) werden an den
+    externen OpenAI-kompatiblen Anbieter weitergereicht — ``gpu`` ist dort ohne
+    Bedeutung. So kann eine Sammlung wahlweise lokal oder per API embedden."""
     if not texts:
         return []
     model = model or EMBED_MODEL
+    if _llm.is_remote(model):
+        return await _llm.embed(texts, model)
     payload = {"model": model, "input": texts}
     if not gpu:
         payload["options"] = {"num_gpu": 0}
@@ -148,7 +281,7 @@ async def ingest_file(collection: dict, text: str, filename: str, doc_id: str) -
     """Bereinigt (falls aktiviert), chunkt, embeddet und speichert ein Dokument.
     Gibt die Anzahl gespeicherter Chunks zurück."""
     if collection.get("clean"):
-        text = clean_text(text)
+        text = clean_text(text, collection.get("clean_level") or DEFAULT_CLEAN_LEVEL)
     else:
         text = (text or "").strip()
     chunks = chunk_text(text, collection["chunk_size"], collection["chunk_overlap"])
@@ -156,9 +289,11 @@ async def ingest_file(collection: dict, text: str, filename: str, doc_id: str) -
         return 0
     vecs = await embed(chunks, collection["embed_model"], bool(collection.get("embed_gpu")))
     if len(vecs) != len(chunks):
+        _m = collection["embed_model"]
+        _hint = ("Liefert der API-Anbieter für dieses Modell wirklich Embeddings?"
+                 if _llm.is_remote(_m) else f"Ist das Modell '{_m}' in Ollama vorhanden?")
         raise RuntimeError(
-            f"Embedding-Anzahl ({len(vecs)}) passt nicht zu Chunks ({len(chunks)}). "
-            f"Ist das Modell '{collection['embed_model']}' in Ollama vorhanden?"
+            f"Embedding-Anzahl ({len(vecs)}) passt nicht zu Chunks ({len(chunks)}). {_hint}"
         )
     blobs = [_to_blob(v) for v in vecs]
     await _db.rag_add_document(doc_id, collection["id"], filename, chunks, blobs)
