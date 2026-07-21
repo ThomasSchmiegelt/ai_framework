@@ -3570,3 +3570,203 @@ select.ob-input option {
   display: flex; align-items: center; justify-content: center; transition: filter .12s;
 }
 .btn-mathe-send:hover { filter: brightness(1.12); }
+
+/* ═══ Portiert: Patente-Tab (⚖️) ═══ */
+#patente-panel.active { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+/* ── Patente (⚖️ Patent-Recherche) ─────────────────────────────────────────── */
+#pat-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+/* Formularfelder folgen sonst dem Browser-Standard (weiß) statt dem Theme — hier
+   wie bei Postfach explizit auf --bg-input/--text/--border gesetzt. */
+#patente-panel input[type="text"],
+#patente-panel input[type="search"],
+#patente-panel input[type="password"],
+#patente-panel textarea,
+#patente-panel select {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 11px; font-size: 13px; font-family: inherit;
+}
+#patente-panel textarea { font-family: 'Consolas', 'Courier New', monospace; font-size: 12.5px; }
+#patente-panel input::placeholder, #patente-panel textarea::placeholder { color: var(--text-muted); }
+#patente-panel input:focus, #patente-panel textarea:focus, #patente-panel select:focus {
+  outline: none; border-color: var(--accent);
+}
+#patente-panel select { cursor: pointer; }
+#patente-panel input[type="file"] { color: var(--text-muted); font-size: 12px; }
+#pat-subtabs {
+  display: flex; gap: 6px; flex-shrink: 0;
+  padding: 8px 14px 0; border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}
+.pat-subtab {
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-muted); cursor: pointer; font-size: 13px; font-weight: 600;
+  padding: 6px 12px 8px; border-radius: 6px 6px 0 0;
+}
+.pat-subtab:hover { color: var(--text); }
+.pat-subtab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+#pat-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; }
+.pat-section { display: none; flex-direction: column; gap: 10px; }
+.pat-section.active { display: flex; }
+
+.pat-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pat-table th, .pat-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.pat-row { cursor: pointer; }
+.pat-row:hover { background: var(--bg-hover); }
+.pat-detail-box { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); font-size: 13px; }
+.pat-detail-box h3 { margin: 0 0 8px; font-size: 15px; }
+.pat-detail-box p { margin: 6px 0; }
+
+.pat-search-results { display: flex; flex-direction: column; gap: 6px; }
+.pat-search-bar { display: flex; align-items: center; gap: 8px; padding: 2px 2px 4px; }
+.pat-search-hit { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; }
+.pat-search-hit .pat-add-hit { margin-left: auto; }
+
+.pat-read-list { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+.pat-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000; align-items: center; justify-content: center; padding: 20px; }
+.pat-modal-box { position: relative; background: var(--bg-panel, var(--bg-input)); border: 1px solid var(--border); border-radius: 10px; max-width: 760px; width: 100%; max-height: 84vh; overflow: auto; padding: 20px 22px; font-size: 13px; line-height: 1.5; }
+.pat-modal-box h3 { margin: 0 0 10px; font-size: 16px; }
+.pat-modal-box p { margin: 8px 0; }
+.pat-modal-close { position: absolute; top: 10px; right: 12px; background: transparent; border: none; color: var(--text); font-size: 18px; cursor: pointer; line-height: 1; }
+
+.pat-migrate-log { max-height: 160px; overflow: auto; font-size: 11.5px; font-family: 'Consolas','Courier New',monospace; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+
+.pat-check-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); }
+.pat-check-row { font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+
+.pat-analyse-result { display: flex; flex-direction: column; gap: 10px; }
+.pat-stage { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg-input); }
+.pat-stage h4 { margin: 0 0 6px; font-size: 13px; }
+.pat-stage div { font-size: 12.5px; white-space: pre-wrap; }
+.pat-badge { display: inline-block; font-size: 11.5px; padding: 3px 8px; border-radius: 999px; margin-bottom: 4px; }
+.pat-badge.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
+.pat-badge.warn { background: rgba(245,158,11,0.15); color: #f59e0b; }
+
+.pat-analysis-item { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg-input); }
+.pat-analysis-item summary { cursor: pointer; font-size: 12.5px; font-weight: 600; }
+.pat-analysis-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+.pat-ask-answer { font-size: 13px; white-space: pre-wrap; }
+
+.pat-graph-canvas { flex: 1; min-height: 420px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); }
+
+
+/* ═══ Portiert: Medizin Falldokumente + Patientendaten ═══ */
+#medizin-casedocs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.medizin-casedoc-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-hover); border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 8px 4px 9px; font-size: 12px; max-width: 260px;
+}
+.medizin-casedoc-chip .medizin-casedoc-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; color: var(--text);
+}
+.medizin-casedoc-meta { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.medizin-casedoc-chip button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 0 1px; }
+.medizin-casedoc-chip button:hover { color: var(--text); }
+
+.medizin-patient-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px; margin: 6px 0; padding: 10px;
+  background: var(--bg-hover); border: 1px solid var(--border); border-radius: 8px;
+}
+.medizin-patient-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-muted); }
+.medizin-patient-grid input {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 8px; font-size: 13px;
+}
+.medizin-patient-grid input:focus { outline: none; border-color: var(--accent); }
+.medizin-patient-hint { grid-column: 1 / -1; font-size: 11px; color: var(--text-muted); margin: 0; }
+
+/* ── Rechnungen & Zeugnisse (rz-*) ─────────────────────────────────────── */
+#rechnung-panel.panel.active, #zeugnis-panel.panel.active { overflow-y: auto; padding: 14px 18px; gap: 12px; }
+.rz-head { display: flex; align-items: center; gap: 12px; }
+.rz-head h2 { margin: 0; font-size: 17px; }
+.rz-spin { font-size: 14px; }
+.rz-subtabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin: 4px 0 10px; flex-wrap: wrap; }
+.rz-subtab { background: transparent; border: none; color: var(--text-muted, #9aa); font-size: 13px; padding: 7px 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+.rz-subtab.active { color: var(--text); border-bottom-color: var(--accent, #4A90D9); font-weight: 600; }
+.rz-section { display: none; flex-direction: column; gap: 12px; }
+.rz-section.active { display: flex; }
+.rz-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg-input); }
+.rz-card h3 { margin: 0 0 8px; font-size: 13.5px; }
+.rz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.rz-grid input, .rz-field input, .rz-field select, .rz-field textarea,
+#rechnung-panel textarea, #zeugnis-panel textarea, #zeugnis-panel input, #zeugnis-panel select {
+  width: 100%; box-sizing: border-box; padding: 7px 9px; font-size: 13px;
+  background: var(--bg-main); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+}
+.rz-field { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--text-muted, #9aa); }
+.rz-check { flex-direction: row; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); }
+.rz-check input { width: auto; }
+.rz-pos-table, .rz-hist { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.rz-pos-table th, .rz-hist th { text-align: left; font-size: 11px; color: var(--text-muted, #9aa); padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.rz-pos-table td, .rz-hist td { padding: 3px 6px; }
+.rz-pos-table input { width: 100%; box-sizing: border-box; padding: 5px 7px; font-size: 12.5px; background: var(--bg-main); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+.rz-pos-table td:nth-child(1) { width: 80px; } .rz-pos-table td:nth-child(2) { width: 90px; }
+.rz-pos-table td:nth-child(4) { width: 130px; } .rz-pos-table td:nth-child(5) { width: 40px; }
+.rz-p-del { background: transparent; border: none; cursor: pointer; font-size: 14px; }
+.rz-total { margin-top: 8px; font-size: 13px; text-align: right; }
+.rz-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rz-result { font-size: 13px; }
+.rz-download { display: flex; gap: 8px; }
+.export-btn.primary { background: var(--accent, #4A90D9); color: #fff; border-color: var(--accent, #4A90D9); }
+.rz-hist td { border-bottom: 1px solid var(--border); }
+.rz-hist-act { display: flex; gap: 6px; }
+#zg-output { width: 100%; box-sizing: border-box; min-height: 260px; font-size: 13px; line-height: 1.5; }
+.rz-cat-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rz-chip { font-size: 12px; padding: 4px 11px; border-radius: 999px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-main); color: var(--text-muted, #9aa); }
+.rz-chip.on { background: var(--accent, #4A90D9); color: #fff; border-color: var(--accent, #4A90D9); }
+
+/* ── Angebot/Rechnung: Dokumenttyp-Umschalter + Abweichungen ───────────────── */
+.rz-doctype { display: inline-flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+.rz-doctype button { background: transparent; border: none; color: var(--text-muted, #9aa); font-size: 13px; padding: 8px 18px; cursor: pointer; }
+.rz-doctype button.active { background: var(--accent, #4A90D9); color: #fff; font-weight: 600; }
+#rechnung-panel.rz-mode-angebot .rz-only-rechnung { display: none !important; }
+#rechnung-panel.rz-mode-rechnung .rz-only-angebot { display: none !important; }
+.rz-pos-table:not(.has-baseline) .rz-abw-col { display: none; }
+.rz-abw { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; }
+.rz-delta { font-weight: 600; }
+.rz-delta.up { color: #d98a4a; }
+.rz-delta.down { color: #4a90d9; }
+.rz-abw-toggle { font-size: 11px; padding: 2px 8px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--bg-main); color: var(--text); }
+
+/* ── Planer: Projekt-Statusleiste (Angebots-/Rechnungs-Workflow) ───────────── */
+.planner-status-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 12px; margin: 0 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); font-size: 12.5px; }
+.planner-status-text { color: var(--text-muted, #9aa); }
+.planner-status-badge { font-size: 11.5px; padding: 3px 10px; border-radius: 999px; background: var(--accent, #4A90D9); color: #fff; font-weight: 600; }
+
+/* Dynamische Rückfragen: Eingabemaske mit Text-/Auswahlfeldern */
+.clarify-form, .clarify-summary { display: flex; flex-direction: column; gap: 9px; }
+.clarify-intro { font-weight: 600; font-size: 13px; }
+.clarify-q { display: flex; flex-direction: column; gap: 5px; }
+.clarify-q-text { font-size: 13px; }
+.clarify-opts { display: flex; flex-direction: column; gap: 4px; }
+.clarify-opt { display: flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; color: var(--text); }
+.clarify-opt input[type="radio"], .clarify-opt input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+.clarify-other-text { flex: 1; min-width: 120px; font-size: 12px; padding: 3px 6px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+.clarify-text { width: 100%; box-sizing: border-box; font-size: 12.5px; padding: 6px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
+.clarify-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.clarify-summary ul { margin: 2px 0 0; padding-left: 18px; font-size: 12.5px; }
+.clarify-summary li { margin: 2px 0; }
+/* „Strukturiert beantworten“-Angebot unter Rückfragen-Antworten */
+.clarify-bar { margin-top: 6px; text-align: right; }
+.clarify-offer-btn { padding: 3px 10px; font-size: 12px; cursor: pointer; font-weight: 600; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 5px; }
+.clarify-offer-btn:hover { background: var(--accent-dim, rgba(59,118,186,0.15)); }
+.clarify-offer-btn:disabled { opacity: .5; cursor: default; }
+.clarify-mount { margin-top: 10px; text-align: left; }
+.clarify-mount:empty { display: none; }
+
+/* Planer: „⋯ Werkzeuge“-Menü (entlastet die Aufgabenleiste) */
+.planner-menu { position: relative; display: inline-block; }
+.planner-menu > summary { list-style: none; cursor: pointer; user-select: none; }
+.planner-menu > summary::-webkit-details-marker { display: none; }
+.planner-menu > summary::marker { content: ""; }
+.planner-menu[open] > summary.planner-menu-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+.planner-menu-panel {
+  position: absolute; top: 100%; left: 0; z-index: 60; margin-top: 4px;
+  display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 200px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+.planner-menu-panel .export-btn { width: 100%; text-align: left; font-size: 12px; }

@@ -28,3 +28,6 @@ matplotlib>=3.8.0
 # Dokumentextraktion pypdf/python-docx/openpyxl (oben). Die Embeddings laufen
 # über ein kleines Ollama-Modell (config.json: "embed_model", Standard
 # nomic-embed-text) — einmalig ziehen mit:  ollama pull nomic-embed-text
+
+# HTML-Parsing für Patent-Scraping (Patente-Tab), MIT, nutzt stdlib html.parser
+beautifulsoup4>=4.12.0

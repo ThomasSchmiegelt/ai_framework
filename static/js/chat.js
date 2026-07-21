@@ -214,6 +214,9 @@ const Chat = (() => {
 
     messages.push({ role: 'assistant', content: fullText });
 
+    // Stellt die Antwort selbst Rückfragen? → strukturierte Maske anbieten.
+    _maybeOfferClarify(assistantRow, fullText);
+
     abortController = null;
     isStreaming = false;
     setBtnSendState(true);
@@ -483,6 +486,77 @@ const Chat = (() => {
 
     row.querySelector('.bubble-content').style.display = 'block';
     return row;
+  }
+
+  // ── Spontane Rückfragen des Modells → strukturierte Maske anbieten ────────────
+  // Stellt die Antwort selbst Rückfragen (statt die Aufgabe zu lösen), bieten wir
+  // einen Knopf an, der die Fragen in eine ausfüllbare Maske (Vorauswahl + Freitext)
+  // umwandelt; nach dem Beantworten wird die ursprüngliche Aufgabe vervollständigt.
+  const _CLARIFY_CUE_RE = /r[üu]ckfrage|pr[äa]zisier|gezielte fragen|einige fragen|folgende (fragen|angaben|informationen|punkte)|ben[öo]tige (ich )?noch|br[äa]uchte (ich )?noch/i;
+
+  function _countQuestionLines(text) {
+    const stripped = String(text || '').replace(/```[\s\S]*?```/g, '').replace(/`[^`]*`/g, '');
+    let count = 0;
+    for (const line of stripped.split('\n')) {
+      const t = line.trim().replace(/[)\]"'*_>\s]+$/, '');
+      if (t.endsWith('?') && t.length > 6) count++;
+    }
+    return count;
+  }
+
+  function _looksLikeClarifyingQuestions(text) {
+    if (!text || text.length < 20) return false;
+    const qLines = _countQuestionLines(text);
+    return qLines >= 2 || (_CLARIFY_CUE_RE.test(text) && qLines >= 1);
+  }
+
+  function _lastUserTask() {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return (messages[i].content || '').trim();
+    }
+    return '';
+  }
+
+  function _maybeOfferClarify(row, fullText) {
+    if (!row || typeof Clarify === 'undefined' || !Clarify.askFromText) return;
+    if (!_looksLikeClarifyingQuestions(fullText)) return;
+    const bubble = row.querySelector('.msg-bubble');
+    if (!bubble || bubble.querySelector('.clarify-offer-btn')) return;
+    const bar = document.createElement('div');
+    bar.className = 'clarify-bar';
+    const btn = document.createElement('button');
+    btn.className = 'clarify-offer-btn';
+    btn.textContent = '📋 Strukturiert beantworten';
+    btn.title = 'Diese Rückfragen als Auswahl-/Eingabemaske ausfüllen und die Aufgabe abschließen';
+    btn.addEventListener('click', () => _runClarifyOffer(row, fullText, btn));
+    bar.appendChild(btn);
+    bubble.appendChild(bar);
+  }
+
+  async function _runClarifyOffer(row, questionsText, btn) {
+    if (isStreaming) { showToast('Bitte warten, bis die Antwort fertig ist'); return; }
+    btn.disabled = true;
+    let mount = row.querySelector('.clarify-mount');
+    if (!mount) {
+      mount = document.createElement('div');
+      mount.className = 'clarify-mount';
+      (row.querySelector('.msg-bubble') || row).appendChild(mount);
+    }
+    const task = _lastUserTask();
+    const model = (document.getElementById('model-select') || {}).value || undefined;
+    let res;
+    try {
+      res = await Clarify.askFromText({ questionsText, task, domain: 'chat', model, mount });
+    } catch (_) { res = null; }
+    if (res && res.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(res.tokens, 'Rückfragen');
+    if (!res || res.noQuestions) { btn.disabled = false; return; }
+    const clarBar = btn.closest('.clarify-bar');
+    if (clarBar) clarBar.remove(); else btn.remove();
+    if (!res.answered || !res.augmentedTask) return;
+    const input = document.getElementById('message-input');
+    input.value = res.augmentedTask;
+    autoResizeTextarea(input);
+    sendMessage();
   }
 
   // KaTeX als marked-Extension registrieren: Formeln werden beim Parsen gerendert,

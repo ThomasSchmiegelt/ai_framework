@@ -113,6 +113,11 @@ async def init():
             await db.execute("ALTER TABLE rag_collections ADD COLUMN server_path TEXT")
         except Exception:
             pass
+        try:
+            await db.execute(
+                "ALTER TABLE rag_collections ADD COLUMN clean_level TEXT NOT NULL DEFAULT 'standard'")
+        except Exception:
+            pass
         await db.commit()
 
 
@@ -316,14 +321,15 @@ async def rag_create_collection(coll: dict):
         await db.execute(
             """INSERT INTO rag_collections
                (id, name, embed_model, tier, chunk_size, chunk_overlap, top_k,
-                embed_gpu, clean, char_limit, strictness, server_path, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                embed_gpu, clean, char_limit, strictness, server_path, clean_level, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 coll["id"], coll["name"], coll["embed_model"], coll["tier"],
                 coll["chunk_size"], coll["chunk_overlap"], coll["top_k"],
                 1 if coll.get("embed_gpu") else 0, 1 if coll.get("clean", True) else 0,
                 int(coll.get("char_limit", 3000)), coll.get("strictness", "ausgewogen"),
                 coll.get("server_path") or None,
+                coll.get("clean_level") or "standard",
                 coll.get("created_at") or time.time(),
             ),
         )
@@ -507,14 +513,15 @@ async def rag_import_collection(coll: dict, documents: list):
         await db.execute(
             """INSERT INTO rag_collections
                (id, name, embed_model, tier, chunk_size, chunk_overlap, top_k,
-                embed_gpu, clean, char_limit, strictness, server_path, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                embed_gpu, clean, char_limit, strictness, server_path, clean_level, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 coll["id"], coll["name"], coll["embed_model"], coll["tier"],
                 coll["chunk_size"], coll["chunk_overlap"], coll["top_k"],
                 1 if coll.get("embed_gpu") else 0, 1 if coll.get("clean", True) else 0,
                 int(coll.get("char_limit", 3000)), coll.get("strictness", "ausgewogen"),
                 coll.get("server_path") or None,
+                coll.get("clean_level") or "standard",
                 coll.get("created_at") or time.time(),
             ),
         )

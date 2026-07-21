@@ -7,6 +7,7 @@ const MedizinChat = (() => {
   let _history      = [];    // Gesprächsverlauf [{role, content, files?}]
   let _expertMode   = true;  // 2-Modell-Pipeline (Ministral ↔ MedGemma) aktiv?
   let _round        = 0;     // aktuelle Rückfrage-Runde (0 = neue Konsultation)
+  let _caseDocs     = [];    // Falldokumente (Volltext) für den Analyseprompt [{filename, text, chars}]
 
   // ── Modell ──────────────────────────────────────────────────────────────
 
@@ -379,11 +380,75 @@ const MedizinChat = (() => {
     }
   }
 
+  // ── Falldokumente (Gutachten/Überweisung/Attest/Befund → Analyseprompt) ────
+  const _CASE_EXTS = ['pdf','docx','doc','txt','md','rtf','csv','xlsx','xls'];
+  function _extFromName(n) { const m = /\.([a-z0-9]+)$/i.exec(n || ''); return m ? m[1].toLowerCase() : ''; }
+
+  async function _extractCaseDoc(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch('/api/medizin/extract', { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+  }
+
+  async function _addCaseFiles(fileList) {
+    const files = Array.from(fileList || []).filter(f => _CASE_EXTS.includes(_extFromName(f.name)));
+    if (!files.length) { _showToast('Keine unterstützten Dokumente (PDF/DOCX/TXT/…) gefunden'); return; }
+    for (const file of files) {
+      if (_caseDocs.length >= 40) break;
+      _showToast(`⏳ „${file.name}" wird gelesen…`);
+      try {
+        const info = await _extractCaseDoc(file);
+        const t = info.text || '';
+        _caseDocs.push({ filename: info.filename || file.name, text: t, chars: info.chars || t.length });
+        _renderCaseDocs();
+      } catch (e) { _showToast(`Fehler bei „${file.name}": ${e.message}`); }
+    }
+    _showToast(`✓ ${_caseDocs.length} Falldokument(e) bereit für die Analyse`);
+  }
+
+  function _renderCaseDocs() {
+    const box = document.getElementById('medizin-casedocs');
+    if (!box) return;
+    if (!_caseDocs.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = 'flex';
+    box.innerHTML = '';
+    _caseDocs.forEach((d, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'medizin-casedoc-chip';
+      const kchars = d.chars > 0 ? Math.max(1, Math.round(d.chars / 1000)) : 0;
+      chip.innerHTML = `<span class="medizin-file-icon">📄</span><span class="medizin-casedoc-name">${escHtml(d.filename)}</span>`
+        + `<span class="medizin-casedoc-meta">${kchars}k Zeichen</span><button data-idx="${i}" title="Entfernen">✕</button>`;
+      chip.querySelector('button').addEventListener('click', e => {
+        _caseDocs.splice(Number(e.target.dataset.idx), 1);
+        _renderCaseDocs();
+      });
+      box.appendChild(chip);
+    });
+  }
+
+  const _PATIENT_FIELDS = ['name','birthdate','sex','concern','history','medication','allergies'];
+  function _readPatient() {
+    const p = {};
+    for (const f of _PATIENT_FIELDS) {
+      const v = (document.getElementById('medizin-pat-' + f)?.value || '').trim();
+      if (v) p[f] = v;
+    }
+    return p;
+  }
+  function _clearPatientForm() {
+    for (const f of _PATIENT_FIELDS) { const el = document.getElementById('medizin-pat-' + f); if (el) el.value = ''; }
+  }
+
   async function _sendPipeline() {
     if (_streaming) return;
     const input = document.getElementById('medizin-input');
     const text  = (input?.value || '').trim();
-    if (!text) return;
+    const patient = _readPatient();
+    const hasCase = _caseDocs.length > 0 || Object.keys(patient).length > 0;
+    if (!text && !hasCase) return;
+    const displayText = text || `📄 Analyse von ${_caseDocs.length} Falldokument(en)`;
 
     const ragSel = document.getElementById('medizin-rag-select')?.value || '';
     const modelMedical = document.getElementById('medizin-model-select')?.value || '';
@@ -391,8 +456,8 @@ const MedizinChat = (() => {
       ? Profile.modelFor('general') : '';
 
     // Nutzer-Nachricht (sauber) in Verlauf + UI
-    _history.push({ role: 'user', content: text });
-    _appendMsg('user', text);
+    _history.push({ role: 'user', content: text || displayText });
+    _appendMsg('user', displayText);
     if (input) { input.value = ''; if (typeof autoResizeTextarea === 'function') autoResizeTextarea(input); }
 
     // Pipeline-Container mit Zwischenschritt-Bereich + Ergebnis-Bereich
@@ -417,6 +482,8 @@ const MedizinChat = (() => {
       rag_collections: ragSel ? [ragSel] : [],
       model_general:   modelGeneral,
       model_medical:   modelMedical,
+      documents:       _caseDocs.map(d => ({ filename: d.filename, text: d.text })),
+      patient,
     };
 
     let finalText = '', questionText = '', isQuestion = false, nextRound = _round;
@@ -542,6 +609,9 @@ const MedizinChat = (() => {
   function clearHistory() {
     _history = [];
     _round = 0;
+    _caseDocs = [];
+    _renderCaseDocs();
+    _clearPatientForm();
     const inp = document.getElementById('medizin-input');
     if (inp) inp.placeholder = 'Medizinische Frage eingeben… (Shift+Enter = Zeilenumbruch)';
     const box = document.getElementById('medizin-messages');
@@ -606,6 +676,22 @@ const MedizinChat = (() => {
     chatFileInput?.addEventListener('change', async () => {
       for (const file of chatFileInput.files) await _attachChatFile(file);
       chatFileInput.value = '';
+    });
+
+    // Falldokumente (Volltext → Analyseprompt): einzelne Dateien oder ganzer Ordner
+    const caseFileInput   = document.getElementById('medizin-casedoc-file-input');
+    const caseFolderInput = document.getElementById('medizin-casedoc-folder-input');
+    document.getElementById('btn-medizin-casedoc')?.addEventListener('click', () => caseFileInput?.click());
+    document.getElementById('btn-medizin-casedoc-folder')?.addEventListener('click', () => caseFolderInput?.click());
+    caseFileInput?.addEventListener('change', async () => { await _addCaseFiles(caseFileInput.files); caseFileInput.value = ''; });
+    caseFolderInput?.addEventListener('change', async () => { await _addCaseFiles(caseFolderInput.files); caseFolderInput.value = ''; });
+    // Patientendaten-Formular ein-/ausblenden
+    document.getElementById('btn-medizin-patient-toggle')?.addEventListener('click', () => {
+      const form = document.getElementById('medizin-patient-form');
+      if (!form) return;
+      const open = form.style.display !== 'none';
+      form.style.display = open ? 'none' : 'block';
+      document.getElementById('btn-medizin-patient-toggle').classList.toggle('active', !open);
     });
 
     // Drag & Drop auf Eingabebereich

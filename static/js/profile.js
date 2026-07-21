@@ -111,7 +111,10 @@ const Profile = (() => {
     document.getElementById('profile-compress-idle').value = _data.compress_idle_min || 10;
     const replayEl = document.getElementById('profile-replay-intro');
     if (replayEl) replayEl.checked = !!_data.replay_intro;
+    const researchLocalEl = document.getElementById('profile-research-local');
+    if (researchLocalEl) researchLocalEl.checked = !!_data.research_local_only;  // Standard: aus
     _fillModelSelects();
+    _loadProviders();
     _refreshPreviews();
     // Tab-Sichtbarkeit: ein Häkchen kann mehrere Tabs steuern (data-tabs="ide,mathe").
     // Angehakt = alle zugehörigen Tabs sichtbar (keiner ausgeblendet).
@@ -200,6 +203,7 @@ const Profile = (() => {
       // Profil gespeichert ⇒ als eingerichtet markieren; Einleitung nur auf Wunsch erneut
       onboarding_done: true,
       replay_intro: !!document.getElementById('profile-replay-intro')?.checked,
+      research_local_only: !!document.getElementById('profile-research-local')?.checked,
     };
     try {
       const resp = await fetch('/api/profile', {
@@ -218,8 +222,73 @@ const Profile = (() => {
     }
   }
 
+  /* ── Externe KI-Anbieter (API) ─────────────────────────────────────── */
+  function _provStatus(t) { const el = document.getElementById('provider-status'); if (el) el.textContent = t || ''; }
+
+  async function _loadProviders() {
+    const host = document.getElementById('provider-list');
+    if (!host) return;
+    try {
+      const resp = await fetch('/api/providers');
+      const list = await resp.json();
+      if (!Array.isArray(list) || !list.length) { host.innerHTML = '<span class="planner-muted" style="font-size:11.5px">Noch kein Anbieter konfiguriert.</span>'; return; }
+      host.innerHTML = list.map(p => `<div style="display:flex;align-items:center;gap:8px;font-size:12px">
+        <strong>${(p.name||'')}</strong>
+        <span class="planner-muted">${(p.models||[]).length} Modell(e)${p.has_key ? ' · 🔑' : ''}</span>
+        <button class="btn-sidebar-action prov-del" data-id="${p.id}" style="margin-left:auto;padding:2px 8px">🗑️</button>
+      </div>`).join('');
+      host.querySelectorAll('.prov-del').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Anbieter löschen?')) return;
+        await fetch('/api/providers/' + encodeURIComponent(b.dataset.id), { method: 'DELETE' });
+        _loadProviders(); _fillModelSelects();
+      }));
+    } catch (_) { host.innerHTML = ''; }
+  }
+
+  function _provBody() {
+    const models = (document.getElementById('provider-models')?.value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    return {
+      name: document.getElementById('provider-name')?.value || '',
+      base_url: document.getElementById('provider-baseurl')?.value || '',
+      api_key: document.getElementById('provider-key')?.value || '',
+      models,
+    };
+  }
+
+  async function _testProvider() {
+    const b = _provBody();
+    if (!b.base_url) { _provStatus('Bitte Base-URL angeben.'); return; }
+    _provStatus('⏳ Teste Verbindung…');
+    try {
+      const resp = await fetch('/api/providers/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      const d = await resp.json();
+      if (d.ok) _provStatus(`✓ Verbindung ok — ${(d.models || []).length} Modell(e) gefunden.`);
+      else _provStatus('✗ ' + (d.error || 'Fehler'));
+    } catch (e) { _provStatus('✗ ' + e.message); }
+  }
+
+  async function _saveProvider() {
+    const b = _provBody();
+    if (!b.name || !b.base_url) { _provStatus('Name und Base-URL erforderlich.'); return; }
+    _provStatus('⏳ Speichere…');
+    try {
+      const resp = await fetch('/api/providers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || ('HTTP ' + resp.status)); }
+      document.getElementById('provider-name').value = '';
+      document.getElementById('provider-baseurl').value = '';
+      document.getElementById('provider-key').value = '';
+      document.getElementById('provider-models').value = '';
+      _provStatus('✓ Anbieter gespeichert.');
+      await _loadProviders();
+      await _fillModelSelects();
+    } catch (e) { _provStatus('✗ ' + e.message); }
+  }
+
   function init() {
     document.getElementById('btn-profile').addEventListener('click', openModal);
+    document.getElementById('provider-test')?.addEventListener('click', _testProvider);
+    document.getElementById('provider-save')?.addEventListener('click', _saveProvider);
     document.getElementById('btn-profile-close').addEventListener('click', closeModal);
     document.getElementById('btn-profile-save').addEventListener('click', save);
     document.getElementById('profile-modal-overlay').addEventListener('click', e => {

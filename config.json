@@ -4,7 +4,7 @@
   "default_model": "ministral-3:3b",
   "embed_model": "nomic-embed-text",
   "ollama_base": "http://localhost:11434",
-  "port": 8780,
+  "port": 8781,
   "host": "127.0.0.1",
-  "data_dir": "data"
+  "data_dir": "/home/thomas/Daten_AI_Framework"
 }

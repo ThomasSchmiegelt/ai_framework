@@ -15,7 +15,7 @@ source venv/bin/activate
 export PYTHONUTF8=1
 
 HOST="${AI_HOST:-127.0.0.1}"
-PORT="${AI_PORT:-8780}"
+PORT="${AI_PORT:-8781}"
 
 echo "AI Framework Thomas startet auf http://${HOST}:${PORT}"
 exec uvicorn main:app --host "$HOST" --port "$PORT"

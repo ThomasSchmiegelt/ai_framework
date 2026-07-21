@@ -480,6 +480,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Mathe-Tab initialisieren
   if (typeof MatheChat !== 'undefined') MatheChat.init();
 
+  // Patente-Tab initialisieren
+  if (typeof Patente !== 'undefined') Patente.init();
+
+  // Rechnungen- & Zeugnisse-Tabs initialisieren
+  if (typeof Rechnung !== 'undefined') Rechnung.init();
+  if (typeof Zeugnis !== 'undefined') Zeugnis.init();
+
   // Diagnose-Logger (als letztes, damit alle anderen Module bereits verdrahtet sind)
   await Logger.init();
 
