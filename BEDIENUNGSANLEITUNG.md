@@ -1692,15 +1692,55 @@ werden diese projekt-eigenen Agenten **mitgelöscht** (Nachfrage nennt die Anzah
 
 ## 20. Backup & Wiederherstellung
 
-- **💾 Backup** (Sidebar) lädt **alle Nutzerdaten** als ZIP herunter: Profil
-  (inkl. Modell-Rollen und Tab-Sichtbarkeit), Projekte, Gespräche, Pläne, Agenten
-  (inkl. Favoriten), gespeicherte IDE-Programme, die **Branding-Bilder**
-  (Logo/Deckblatt/Kopfzeile) sowie die **RAG-Wissensdatenbanken** (inkl. Dokumente
-  und Embeddings).
-- **📥 Restore** stellt aus einem Backup-ZIP wieder her: Profil und Branding-Bilder
-  werden überschrieben; bereits vorhandene Pläne, Agenten und Wissensdatenbanken
-  werden übersprungen (keine Duplikate); Gespräche erhalten neue IDs. Der Bestätigungs-
-  hinweis zeigt, wie viel je Kategorie wiederhergestellt wurde.
+Zu finden im **Profil-Modal** unter **💾 Alle Daten sichern & wiederherstellen**
+(die Knöpfe **💾 Backup** / **📥 Restore** in der Seitenleiste nutzen dieselbe
+Funktion mit Standardumfang).
+
+### Was immer gesichert wird
+
+Alles in **einer ZIP-Datei**:
+
+| Bereich | Inhalt |
+|---|---|
+| Profil & Branding | Profil inkl. Modell-Rollen und Tab-Sichtbarkeit, Logo, Deckblatt, Kopfzeile |
+| Arbeit | Gespräche, Projekte, Pläne, Agenten (inkl. Favoriten), Jurys, Jury-Dokumente, Code-Programme |
+| Wissen | RAG-Wissensdatenbanken **inkl. Dokumente und Embeddings** |
+| Geschäft | Angebote, Rechnungen, Zeugnisse, Patente, Anfragen (RFQ), Morph-Kasten, Firmenprofil |
+| Sonstiges | Ressourcen-/Kapazitätslisten, Mail-Konfiguration, Feedback |
+
+### Was du zuschalten kannst
+
+Drei Dinge sind **standardmäßig aus**, weil sie groß oder vertraulich sind:
+
+- **Hochgeladene Dateien, Berichte, Dossiers** — macht die Sicherung vollständig,
+  kann aber einige hundert MB groß werden.
+- **Postfach-Archive** — die eingelesenen Mails samt Anhängen. ⚠ Kann mehrere GB
+  groß werden und enthält vollständige private Korrespondenz.
+- **API-Zugangsdaten** — ⚠ deine API-Schlüssel liegen dann **im Klartext** in der
+  ZIP-Datei. Nur für den Umzug auf einen anderen Rechner sinnvoll; die Datei
+  danach nicht weitergeben. Vor dem Export kommt eine Rückfrage.
+
+Im Archiv liegt eine `backup_info.json`, die festhält, was enthalten ist — so
+siehst du später, ob eine Sicherung vollständig war.
+
+### Wiederherstellen
+
+Zwei Betriebsarten:
+
+- **Zusammenführen** (Standard, empfohlen) — Vorhandenes bleibt unangetastet, nur
+  Fehlendes wird ergänzt. Bereits vorhandene Pläne, Agenten und Wissensdatenbanken
+  werden übersprungen, es entstehen keine Duplikate. Damit kannst du ein Backup
+  gefahrlos in eine bereits genutzte Installation einspielen.
+- **Vorhandenes ersetzen** — ⚠ gleichnamige Dateien werden mit dem Stand aus dem
+  Archiv überschrieben. Das lässt sich nicht rückgängig machen; es kommt eine
+  Rückfrage.
+
+Gespräche erhalten beim Import neue IDs. Nach dem Import steht direkt im Profil,
+was je Bereich übernommen wurde.
+
+> **Umzug auf einen neuen Rechner:** Alle drei Häkchen setzen, exportieren, auf
+> dem Zielrechner „Vorhandenes ersetzen" wählen. Danach die ZIP-Datei löschen —
+> sie enthält dann deine API-Schlüssel.
 
 ---
 
