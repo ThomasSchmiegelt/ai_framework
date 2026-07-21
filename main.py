@@ -7054,7 +7054,10 @@ async def _patente_analyze_generator(name: str, body: PatAnalyze):
     # „Web-Recherche lokal" biegt ein API-Modell auf ein lokales um.
     model, _m_err = await _research_model(body.model, _model_for("general"))
     if _m_err:
-        raise HTTPException(status_code=503, detail=_m_err)
+        # Läuft bereits als SSE-Stream: Fehler als Frame melden, nicht als
+        # HTTPException (die käme hier nie beim Client an).
+        yield _sse({"type": "error", "message": _m_err})
+        return
     neben_model = _pick_model(body.neben_model, model) if body.neben_model else model
     if _research_local_only() and _llm.is_remote(neben_model):
         neben_model = model
