@@ -50,9 +50,23 @@ KEEP_ALIVE: str = str(_CONFIG.get("model_keep_alive", "30m"))
 # Python-Ausführung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-/
 # Servermodus ggf. abschalten (config.json: "allow_python_exec": false).
 ALLOW_PYTHON_EXEC: bool = bool(_CONFIG.get("allow_python_exec", True))
-# Versionsnummer des Frameworks (in config.json überschreibbar). Wird über
-# /api/profile ans Frontend gespiegelt und im Profil-Modal angezeigt.
-APP_VERSION: str = str(_CONFIG.get("version") or "1.4.0")
+# Versionsnummer des Frameworks. Quelle ist die Datei VERSION im Programmordner:
+# sie gehört zum Programmcode und wird vom Updater mitgetauscht, während
+# config.json bewusst unberührt bleibt (Nutzerkonfiguration). Stünde die Version
+# nur in config.json, bliebe sie nach jedem Update auf dem alten Stand — und die
+# Software-Verteilung (ACMP) könnte die installierte Version nicht erkennen.
+# Reihenfolge: VERSION-Datei → config.json → fest verdrahteter Wert.
+def _read_version() -> str:
+    try:
+        v = (Path(__file__).parent / "VERSION").read_text(encoding="utf-8").strip()
+        if v:
+            return v.splitlines()[0].strip()
+    except Exception:
+        pass
+    return str(_CONFIG.get("version") or "1.4.0")
+
+
+APP_VERSION: str = _read_version()
 
 
 # Platzhalter-Werte aus den Frontend-Selektoren (kein echtes Modell)

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AI_Framework_Thomas - MSI-Definition (WiX Toolset v3)
+
+  Paketiert AUSSCHLIESSLICH den Programmcode. Ollama, Modelle, Python/venv und
+  die Nutzerdaten unter data\ sind bewusst NICHT enthalten und werden ueber
+  eigene ACMP-Pakete verteilt (siehe docs\ACMP.md).
+
+  Die Dateiliste wird nicht von Hand gepflegt, sondern mit heat.exe aus dem
+  fertigen Paketordner geerntet (build.ps1 erzeugt AppFiles.wxs).
+
+  WICHTIG - Nutzerdaten beim Deinstallieren:
+  Es werden nur die vom MSI installierten Dateien entfernt. data\ und
+  config.json entstehen erst zur Laufzeit, gehoeren nicht zum Paket und
+  bleiben daher bei einer Deinstallation erhalten.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <Product Id="*"
+           Name="AI Framework Thomas"
+           Language="1031"
+           Version="$(var.ProductVersion)"
+           Manufacturer="Thomas Schmiegelt"
+           UpgradeCode="DB8422D3-0898-452A-ADEE-29E3BED5EFEA">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Manufacturer="Thomas Schmiegelt"
+             Description="AI Framework Thomas - Programmpaket"
+             Comments="Enthaelt nur den Programmcode, kein Ollama und keine Modelle." />
+
+    <!-- Aeltere Fassung sauber ersetzen, Downgrade verhindern -->
+    <MajorUpgrade DowngradeErrorMessage="Es ist bereits eine neuere Version von [ProductName] installiert." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Zielverzeichnis: %ProgramFiles%\AI_Framework, ueberschreibbar per
+         msiexec /i paket.msi INSTALLFOLDER="D:\Apps\AI_Framework" -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="AI_Framework" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="AppShortcutDir" Name="AI Framework" />
+      </Directory>
+    </Directory>
+
+    <!-- Versionsangaben fuer die Erkennung durch die Softwareverteilung.
+         Gleiche Quelle wie beim update.bat-Weg, damit ACMP unabhaengig vom
+         gewaehlten Verteilweg denselben Schluessel abfragen kann. -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="RegistryVersion" Guid="*">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\AI_Framework_Thomas">
+          <RegistryValue Name="Version"     Type="string" Value="$(var.ProductVersion)" KeyPath="yes" />
+          <RegistryValue Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" />
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="AppShortcutDir">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartAppShortcut"
+                  Name="AI Framework starten"
+                  Target="[INSTALLFOLDER]start.bat"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveAppShortcutDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="SOFTWARE\AI_Framework_Thomas"
+                       Name="Shortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="ProductFeature" Title="AI Framework Thomas" Level="1"
+             Description="Programmcode, Oberflaeche und Werkzeuge.">
+      <!-- AppFiles.wxs wird von build.ps1 mit heat.exe erzeugt -->
+      <ComponentGroupRef Id="AppFilesGroup" />
+      <ComponentRef Id="RegistryVersion" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+  </Product>
+</Wix>

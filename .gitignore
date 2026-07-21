@@ -67,6 +67,13 @@ data/agents/.seeded
 # Lokale Projekt-Snapshots/Backups (manuell erstellte ZIPs, nicht versionieren)
 consoc*.zip
 
+# Build-Ausgaben der Paketierung (ACMP-Updatepaket, MSI)
+/_acmp/
+/_update.log
+packaging/wix/out/
+packaging/wix/payload/
+packaging/wix/AppFiles.wxs
+
 # Betriebssystem / Editor
 Thumbs.db
 .DS_Store
