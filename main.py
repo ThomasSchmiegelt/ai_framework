@@ -463,10 +463,74 @@ def _math_autoroute_enabled() -> bool:
 
 
 def _research_local_only() -> bool:
-    """Profil-Schalter: Recherche (Matrix-Recherche + Recherche-Tab) zwingend lokal,
-    auch wenn die zugewiesene Rolle ein externes API-Modell ist (Datenschutz /
-    API-Beschränkungen)."""
+    """Profil-Schalter: web-gestützte Recherche zwingend lokal, auch wenn die
+    zugewiesene Rolle ein externes API-Modell ist (Datenschutz / API-Beschränkungen).
+
+    Gilt für Recherche-Tab, Matrix-Recherche, erweiterte Suche (``/such``),
+    Deepdive und die Patent-Analyse."""
     return bool(_load_profile().get("research_local_only", False))
+
+
+async def _research_model(preferred: Optional[str] = None,
+                          fallback: Optional[str] = None) -> tuple:
+    """Modellwahl für web-gestützte Recherche.
+
+    Ist der Profil-Schalter „Web-Recherche lokal" gesetzt und das gewählte Modell
+    extern, wird auf ein lokales Modell umgebogen. Rückgabe ``(modell, fehler)`` —
+    ``fehler`` ist gesetzt, wenn umgebogen werden müsste, aber kein lokales LLM
+    installiert ist."""
+    m = _pick_model(preferred, fallback or _model_for("science"))
+    if _research_local_only() and _llm.is_remote(m):
+        loc = await _local_model(m)
+        if not loc:
+            return None, ('Kein lokales LLM verfügbar – „Web-Recherche lokal" ist '
+                          'im Profil aktiv.')
+        return loc, None
+    return m, None
+
+
+async def _research_fallback_model(model: str) -> Optional[str]:
+    """Ersatzmodell, wenn ein API-Modell die Web-Recherche verweigert oder scheitert.
+
+    Manche Anbieter unterbinden Web-/Tool-Nutzung oder liefern dabei Fehler. In dem
+    Fall wird die Recherche einmalig lokal wiederholt. Für bereits lokale Modelle
+    gibt es nichts zu tun (``None``) — ein zweiter Versuch brächte dasselbe
+    Ergebnis."""
+    if not model or not _llm.is_remote(model):
+        return None
+    return await _local_model(None)
+
+
+async def _research_llm_json(model: str, system: str, prompt: str,
+                             timeout: float = 120.0) -> tuple:
+    """Ein JSON-Aufruf für Recherchezwecke — mit automatischem Rückfall auf ein
+    lokales Modell, falls das API-Modell scheitert oder unbrauchbar antwortet
+    (manche Anbieter unterbinden web-/toolgestützte Recherche).
+
+    Rückgabe ``(daten, tokens_in, tokens_out, benutztes_modell)``; ``daten`` ist
+    ``{}``, wenn auch der lokale Versuch nichts Verwertbares liefert."""
+    attempts = [model]
+    fb = await _research_fallback_model(model)
+    if fb and fb != model:
+        attempts.append(fb)
+    for m in attempts:
+        try:
+            async with _model_session(m), httpx.AsyncClient(timeout=timeout) as client:
+                resp = await _llm.chat(client, {
+                    "model": m, "think": False, "format": "json",
+                    "messages": [{"role": "system", "content": system},
+                                 {"role": "user", "content": prompt}],
+                    "stream": False, "keep_alive": KEEP_ALIVE,
+                })
+                resp.raise_for_status()
+                j = resp.json()
+            ti, to = _llm_tok(j)
+            data = _parse_llm_json(j.get("message", {}).get("content", "")) or {}
+            if data:
+                return data, ti, to, m
+        except Exception:
+            pass   # nächster Versuch (lokaler Rückfall)
+    return {}, 0, 0, model
 
 
 def _profile_num_ctx() -> int:
@@ -1355,14 +1419,11 @@ async def _research_generator(request: ResearchRequest):
 
     # Recherche ist immer wissenschaftlich → Wissenschafts-Modell (sofern nicht
     # explizit ein gültiges Modell angefordert wurde).
-    _r_model = _pick_model(request.model, _model_for("science"))
-    # Profil-Schalter „Recherche lokal": externes Modell auf ein lokales umbiegen.
-    if _research_local_only() and _llm.is_remote(_r_model):
-        _loc = await _local_model(_r_model)
-        if not _loc:
-            yield _sse({"type": "error", "message": "Kein lokales LLM verfügbar – „Recherche lokal“ ist im Profil aktiv."})
-            return
-        _r_model = _loc
+    # Profil-Schalter „Web-Recherche lokal": externes Modell auf ein lokales umbiegen.
+    _r_model, _r_err = await _research_model(request.model)
+    if _r_err:
+        yield _sse({"type": "error", "message": _r_err})
+        return
 
     yield _sse({"type": "research_start", "topic": request.topic, "aspects": aspects})
     tasks = [search_with_sources(f"{request.topic} {aspect}", 5) for aspect in aspects]
@@ -1461,7 +1522,11 @@ async def _search_expand_generator(request: SearchExpandRequest):
         yield _sse({"type": "error", "message": "Kein Suchbegriff angegeben"})
         return
 
-    _model = _pick_model(request.model, _model_for("science"))
+    # Profil-Schalter „Web-Recherche lokal" beachten
+    _model, _m_err = await _research_model(request.model)
+    if _m_err:
+        yield _sse({"type": "error", "message": _m_err})
+        return
     n = max(3, min(int(request.count or 6), 12))
     _ti = _to = 0
 
@@ -1475,23 +1540,17 @@ async def _search_expand_generator(request: SearchExpandRequest):
         f"suchtauglich (2–5 Wörter), keine Dopplungen.\n"
         f"Antworte NUR mit JSON: {{\"terms\":[\"…\",\"…\"]}}"
     )
-    try:
-        async with _model_session(_model), httpx.AsyncClient(timeout=120) as client:
-            resp = await _llm.chat(client, {
-                "model": _model, "think": False, "format": "json",
-                "messages": [
-                    {"role": "system", "content": "Du bist ein Recherche-Assistent für Suchbegriffe. Antworte ausschließlich mit gültigem JSON."},
-                    {"role": "user", "content": term_prompt},
-                ],
-                "stream": False, "keep_alive": KEEP_ALIVE,
-            })
-            resp.raise_for_status()
-            _j = resp.json()
-        a, b = _llm_tok(_j); _ti += a; _to += b
-        data = _parse_llm_json(_j.get("message", {}).get("content", "")) or {}
-        terms = [str(t).strip() for t in (data.get("terms") or []) if str(t).strip()]
-    except Exception:
-        terms = []
+    # Bei einem API-Modell, das keine Recherche zulässt, fällt der Helfer auf ein
+    # lokales Modell zurück (reiner Rückfall — bevorzugt bleibt das gewählte Modell).
+    data, a, b, _used = await _research_llm_json(
+        _model,
+        "Du bist ein Recherche-Assistent für Suchbegriffe. Antworte ausschließlich mit gültigem JSON.",
+        term_prompt)
+    _ti += a; _to += b
+    terms = [str(t).strip() for t in (data.get("terms") or []) if str(t).strip()]
+    if _used != _model:
+        yield _sse({"type": "notice",
+                    "message": f"API-Modell lieferte keine Suchbegriffe – lokal wiederholt ({_used})."})
 
     # Original zuerst, dann Alternativen; doppelte (case-insensitiv) entfernen
     ordered, seen = [], set()
@@ -1823,7 +1882,15 @@ async def _deepdive_answer(model: str, question: str, web: bool, rag_collections
 
 
 async def _deepdive_generator(request: DeepDiveRequest):
-    model = _pick_model(request.model, _model_for("general"))
+    # Mit Websuche zählt der Deepdive als web-gestützte Recherche → Profil-Schalter
+    # „Web-Recherche lokal" beachten; ohne Websuche bleibt die normale Modellwahl.
+    if request.web_search:
+        model, _m_err = await _research_model(request.model, _model_for("general"))
+        if _m_err:
+            yield _sse({"type": "error", "message": _m_err})
+            return
+    else:
+        model = _pick_model(request.model, _model_for("general"))
     count = max(1, min(int(request.count or 5), 20))   # Sicherheitsgrenze
     context = (request.last_answer or request.topic or "").strip()
     if not context:
@@ -2560,7 +2627,7 @@ async def _chat_generator(request: ChatRequest):
     if request.science and _research_local_only() and _llm.is_remote(model):
         _loc = await _local_model(model)
         if not _loc:
-            yield _sse({"type": "error", "message": "Kein lokales LLM verfügbar – „Recherche lokal“ ist im Profil aktiv."})
+            yield _sse({"type": "error", "message": "Kein lokales LLM verfügbar – „Web-Recherche lokal“ ist im Profil aktiv."})
             return
         model = _loc
 
@@ -6969,8 +7036,14 @@ async def _patente_analyze_generator(name: str, body: PatAnalyze):
             for p in gewaehlt)
         analyse_typ = "Mehrfachauswahl"
 
-    model = _pick_model(body.model, _model_for("general"))
+    # Patentrecherche zählt zur web-gestützten Recherche: Profil-Schalter
+    # „Web-Recherche lokal" biegt ein API-Modell auf ein lokales um.
+    model, _m_err = await _research_model(body.model, _model_for("general"))
+    if _m_err:
+        raise HTTPException(status_code=503, detail=_m_err)
     neben_model = _pick_model(body.neben_model, model) if body.neben_model else model
+    if _research_local_only() and _llm.is_remote(neben_model):
+        neben_model = model
     tok = {"in": 0, "out": 0}
     queue: asyncio.Queue = asyncio.Queue()
     SENTINEL = object()

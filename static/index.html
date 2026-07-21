@@ -2402,11 +2402,14 @@
     </label>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
       <input type="checkbox" id="profile-research-local" style="width:auto;margin-top:2px" />
-      <span>Recherche immer lokal ausführen
-        <span class="planner-muted">— Matrix-Recherche und der Recherche-Tab nutzen dann zwingend
-        ein lokales Modell (Ollama), auch wenn oben ein externes API-Modell zugewiesen ist. Sinnvoll,
-        wenn die API keine Websuche/Tools zulässt oder aus Datenschutzgründen. Ohne lokales Modell
-        ist die Recherche dann nicht verfügbar.</span>
+      <span>Web-Recherche immer lokal ausführen
+        <span class="planner-muted">— Recherche-Tab, Matrix-Recherche, erweiterte Suche (/such),
+        Deepdive mit Websuche und die Patent-Analyse nutzen dann zwingend ein lokales Modell
+        (Ollama), auch wenn oben ein externes API-Modell zugewiesen ist. Sinnvoll, wenn die API
+        keine Websuche/Tools zulässt oder aus Datenschutzgründen. Ohne lokales Modell ist die
+        Recherche dann nicht verfügbar.<br>
+        Unabhängig davon gilt: Scheitert eine Recherche am API-Modell, wird sie
+        automatisch einmal lokal wiederholt (reiner Rückfall).</span>
       </span>
     </label>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
