@@ -10358,9 +10358,65 @@ async def plan_strategy(req: PlanStrategyRequest):
 from datetime import datetime as _dt
 
 
+# ── Sicherung: welche Daten gehören in ein Backup ───────────────────────────
+# Bewusst als Listen statt verstreuter Einzelzeilen: Beim Hinzufügen eines neuen
+# Tabs muss genau hier ein Eintrag ergänzt werden, sonst fehlt er im Backup.
+# (Genau das war der Grund, warum das Backup zwischenzeitlich unvollständig war.)
+
+# Immer enthalten – klein und textbasiert:
+def _backup_dirs_always() -> list:
+    return [
+        (ANGEBOTE_DIR, "angebote"), (RECHNUNGEN_DIR, "rechnungen"),
+        (ZEUGNISSE_DIR, "zeugnisse"), (PATENTE_DIR, "patente"),
+        (RFQ_DIR, "rfq"), (MORPH_TRAIN_DIR, "morph_training"),
+    ]
+
+
+def _backup_files_always() -> list:
+    return [
+        (FIRMENPROFIL_FILE, "firmenprofil.json"),
+        (MAIL_CONFIG_FILE, "mail.json"),
+        (MAIL_RULES_FILE, "mail_rules.json"),
+        (FEEDBACK_FILE, "feedback.md"),
+    ]
+
+
+# Optional – können groß werden:
+def _backup_dirs_bulk() -> list:
+    return [(UPLOADS_DIR, "uploads"), (REPORTS_DIR, "reports"),
+            (DOSSIERS_DIR, "dossiers")]
+
+
+def _zip_tree(zf, base: Path, prefix: str) -> int:
+    """Legt einen kompletten Verzeichnisbaum ins ZIP (rekursiv, relative Pfade).
+
+    Rekursiv, weil z. B. ``patente/`` und ``pst/`` je Projekt bzw. Postfach
+    Unterordner anlegen. Gibt die Anzahl geschriebener Dateien zurück."""
+    if not base.exists():
+        return 0
+    n = 0
+    for fp in sorted(base.rglob("*")):
+        if fp.is_file():
+            zf.write(fp, f"{prefix}/{fp.relative_to(base).as_posix()}")
+            n += 1
+    return n
+
+
 @app.get("/api/backup")
-async def create_backup():
-    """Exportiert alle Nutzerdaten als ZIP-Archiv."""
+async def create_backup(uploads: bool = False, pst: bool = False,
+                        secrets: bool = False):
+    """Exportiert die Nutzerdaten als ZIP-Archiv.
+
+    Immer enthalten: Profil, Projekte, Gespräche, Pläne, Agenten, Jurys, Code,
+    RAG (inkl. Embeddings), Ressourcenlisten, Branding sowie die Geschäftsdaten
+    (Angebote, Rechnungen, Zeugnisse, Patente, Anfragen, Morph-Kasten,
+    Firmenprofil, Mail-Konfiguration, Feedback).
+
+    Zuschaltbar, weil groß bzw. vertraulich:
+    - ``uploads``  hochgeladene Dateien, Berichte, Dossiers
+    - ``pst``      eingelesene Postfächer samt Anhängen (kann sehr groß werden)
+    - ``secrets``  API-Zugangsdaten im Klartext (nur für einen Rechnerumzug)
+    """
     import io, zipfile
 
     buf = io.BytesIO()
@@ -10429,6 +10485,37 @@ async def create_backup():
         except Exception:
             pass
 
+        # Geschäftsdaten und übrige Einzeldateien (immer)
+        for _dir, _prefix in _backup_dirs_always():
+            _zip_tree(zf, _dir, _prefix)
+        for _fp, _name in _backup_files_always():
+            if _fp.exists():
+                zf.write(_fp, _name)
+
+        # Zuschaltbar: Uploads/Berichte/Dossiers
+        if uploads:
+            for _dir, _prefix in _backup_dirs_bulk():
+                _zip_tree(zf, _dir, _prefix)
+
+        # Zuschaltbar: Postfach-Archive (private Korrespondenz, oft sehr groß)
+        if pst:
+            _zip_tree(zf, PST_DIR, "pst")
+
+        # Zuschaltbar: API-Zugangsdaten. Standardmäßig NICHT enthalten, da die
+        # Schlüssel sonst im Klartext in einer weitergebbaren Datei landen.
+        if secrets and API_PROVIDERS_FILE.exists():
+            zf.write(API_PROVIDERS_FILE, "api_providers.json")
+
+        # Kennzeichnung des Archivinhalts – der Restore und der Nutzer sehen so,
+        # was drin ist (und was bewusst fehlt).
+        zf.writestr("backup_info.json", json.dumps({
+            "created": _dt.now().isoformat(timespec="seconds"),
+            "app_version": APP_VERSION,
+            "includes_uploads": bool(uploads),
+            "includes_pst": bool(pst),
+            "includes_secrets": bool(secrets),
+        }, ensure_ascii=False, indent=2))
+
     buf.seek(0)
     filename = f"ai_framework_thomas_backup_{today}.zip"
     from fastapi.responses import StreamingResponse as _SR
@@ -10440,8 +10527,12 @@ async def create_backup():
 
 
 @app.post("/api/restore")
-async def restore_backup(file: UploadFile = File(...)):
-    """Importiert alle Nutzerdaten aus einem ZIP-Backup."""
+async def restore_backup(file: UploadFile = File(...), replace: bool = False):
+    """Importiert alle Nutzerdaten aus einem ZIP-Backup.
+
+    ``replace=False`` (Standard) führt zusammen: Vorhandenes bleibt unangetastet,
+    nur Fehlendes wird ergänzt. ``replace=True`` überschreibt gleichnamige
+    Dateien mit dem Stand aus dem Archiv."""
     import io, zipfile
 
     content = await file.read()
@@ -10641,6 +10732,54 @@ async def restore_backup(file: UploadFile = File(...)):
                         stats["rag_collections"] += 1
                 except Exception as e:
                     stats["errors"].append(f"rag/collections.json: {e}")
+
+            # ── Geschäftsdaten, Uploads, Postfach, Zugangsdaten ──────────────
+            # Dateibasierte Bereiche generisch zurückspielen. ``replace=False``
+            # (Standard) lässt vorhandene Dateien unangetastet und ergänzt nur
+            # Fehlendes — so kann ein Backup gefahrlos in eine bereits genutzte
+            # Installation eingespielt werden.
+            _targets = (_backup_dirs_always() + _backup_dirs_bulk()
+                        + [(PST_DIR, "pst")])
+            for _dir, _prefix in _targets:
+                cnt = 0
+                for name in names:
+                    if not name.startswith(f"{_prefix}/") or name.endswith("/"):
+                        continue
+                    # _safe_relpath verwirft ".." und führende Slashes → kein
+                    # Ausbrechen aus dem Zielordner durch manipulierte Archive.
+                    rel = _safe_relpath(name[len(_prefix) + 1:])
+                    if not rel:
+                        continue
+                    dest = _dir / rel
+                    try:
+                        if dest.exists() and not replace:
+                            continue
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        dest.write_bytes(zf.read(name))
+                        cnt += 1
+                    except Exception as e:
+                        stats["errors"].append(f"{name}: {e}")
+                if cnt:
+                    stats[_prefix] = cnt
+
+            # Einzeldateien (Firmenprofil, Mail-Konfiguration, Feedback)
+            for _fp, _name in _backup_files_always():
+                if _name in names and (replace or not _fp.exists()):
+                    try:
+                        _fp.parent.mkdir(parents=True, exist_ok=True)
+                        _fp.write_bytes(zf.read(_name))
+                        stats[_name] = True
+                    except Exception as e:
+                        stats["errors"].append(f"{_name}: {e}")
+
+            # API-Zugangsdaten nur, wenn im Archiv vorhanden. Bewusst immer
+            # überschreibend: wer sie mitsichert, will sie beim Umzug auch haben.
+            if "api_providers.json" in names:
+                try:
+                    API_PROVIDERS_FILE.write_bytes(zf.read("api_providers.json"))
+                    stats["api_providers"] = True
+                except Exception as e:
+                    stats["errors"].append(f"api_providers.json: {e}")
 
     except zipfile.BadZipFile:
         raise HTTPException(400, "Ungültige ZIP-Datei")

@@ -2538,6 +2538,58 @@
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <h4 style="margin-bottom:8px">💾 Alle Daten sichern &amp; wiederherstellen</h4>
+    <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
+      Sichert Profil, Gespräche, Agenten, Wissensdatenbanken (RAG inkl. Embeddings),
+      Pläne, Jurys, Projekte, Code sowie Angebote, Rechnungen, Zeugnisse, Patente,
+      Anfragen, Morph-Kasten und das Firmenprofil — als eine ZIP-Datei.
+    </p>
+
+    <div class="form-group" style="margin-bottom:12px">
+      <button id="btn-profile-export" class="export-btn primary" style="margin-bottom:8px">
+        ⬇ Alles exportieren
+      </button>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-top:2px">
+        <span class="planner-muted" style="font-size:11.5px">Zusätzlich einschließen:</span>
+        <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="exp-uploads" style="width:auto;margin-top:2px" />
+          <span>Hochgeladene Dateien, Berichte, Dossiers
+            <span class="planner-muted">— macht die Sicherung vollständig, kann aber einige hundert MB groß werden.</span></span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="exp-pst" style="width:auto;margin-top:2px" />
+          <span>Postfach-Archive (Mails samt Anhängen)
+            <span class="planner-muted">— ⚠ kann mehrere GB groß werden und enthält vollständige private Korrespondenz.</span></span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="exp-secrets" style="width:auto;margin-top:2px" />
+          <span>API-Zugangsdaten
+            <span class="planner-muted">— ⚠ Ihre API-Schlüssel liegen dann im Klartext in der ZIP-Datei. Nur für den Umzug auf einen anderen Rechner sinnvoll; die Datei danach nicht weitergeben.</span></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <button id="btn-profile-import" class="export-btn" style="margin-bottom:8px">
+        ⬆ Daten wiederherstellen…
+      </button>
+      <input type="file" id="profile-import-input" accept=".zip" style="display:none" />
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;cursor:pointer">
+          <input type="radio" name="imp-mode" value="merge" checked style="width:auto;margin-top:2px" />
+          <span>Zusammenführen
+            <span class="planner-muted">— Vorhandenes bleibt unangetastet, nur Fehlendes wird ergänzt. Empfohlen.</span></span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;cursor:pointer">
+          <input type="radio" name="imp-mode" value="replace" style="width:auto;margin-top:2px" />
+          <span>Vorhandenes ersetzen
+            <span class="planner-muted">— ⚠ gleichnamige Dateien werden mit dem Stand aus dem Archiv überschrieben.</span></span>
+        </label>
+      </div>
+      <div id="profile-import-result" class="planner-muted" style="font-size:11.5px;margin-top:8px"></div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
     <h4 style="margin-bottom:8px">📑 Sichtbare Tabs</h4>
     <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
       Diese Tabs sind optional und können ausgeblendet werden.
@@ -2877,7 +2929,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260710csvmd"></script>
+<script src="/js/app.js?v=20260721c"></script>
 
 </body>
 </html>

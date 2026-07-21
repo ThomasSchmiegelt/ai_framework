@@ -548,6 +548,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // ── Export/Import im Profil ───────────────────────────────────────────────
+  // Gleicher Endpunkt wie die Knöpfe in der Seitenleiste, aber mit wählbarem
+  // Umfang: Uploads, Postfach-Archive und API-Schlüssel sind groß bzw.
+  // vertraulich und darum standardmäßig NICHT enthalten.
+  document.getElementById('btn-profile-export')?.addEventListener('click', () => {
+    const q = new URLSearchParams();
+    if (document.getElementById('exp-uploads')?.checked) q.set('uploads', '1');
+    if (document.getElementById('exp-pst')?.checked)     q.set('pst', '1');
+    if (document.getElementById('exp-secrets')?.checked) q.set('secrets', '1');
+    if (q.get('secrets') &&
+        !confirm('Die ZIP-Datei enthält dann deine API-Schlüssel im Klartext.\n\n'
+               + 'Nur für den Umzug auf einen anderen Rechner gedacht — die Datei '
+               + 'danach nicht weitergeben.\n\nTrotzdem exportieren?')) return;
+    showToast('Export wird erstellt… bei großem Umfang kann das dauern.', 5000);
+    const a = document.createElement('a');
+    a.href = '/api/backup' + (q.toString() ? `?${q}` : '');
+    a.download = '';
+    a.click();
+  });
+
+  const _impInput = document.getElementById('profile-import-input');
+  document.getElementById('btn-profile-import')?.addEventListener('click', () => _impInput?.click());
+  _impInput?.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    const mode = document.querySelector('input[name="imp-mode"]:checked')?.value || 'merge';
+    if (mode === 'replace' &&
+        !confirm('„Vorhandenes ersetzen" überschreibt gleichnamige Dateien mit dem '
+               + 'Stand aus dem Archiv. Das lässt sich nicht rückgängig machen.\n\nFortfahren?')) return;
+    const out = document.getElementById('profile-import-result');
+    if (out) out.textContent = '⏳ Wiederherstellung läuft…';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const resp = await fetch(`/api/restore?replace=${mode === 'replace' ? '1' : '0'}`,
+                               { method: 'POST', body: fd });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const s = await resp.json();
+      // Alle Zähler/Merker aus der Antwort anzeigen — so sieht man auch die
+      // neuen Bereiche (angebote, rechnungen, …), ohne sie hier zu pflegen.
+      const parts = Object.entries(s)
+        .filter(([k, v]) => k !== 'errors' && v)
+        .map(([k, v]) => (v === true ? `✓ ${k}` : `✓ ${v} ${k}`));
+      if (s.errors?.length) parts.push(`⚠ ${s.errors.length} Fehler`);
+      if (out) out.textContent = parts.join(' · ') || 'Nichts zu übernehmen.';
+      showToast('Wiederherstellung abgeschlossen', 4000);
+      if (typeof Chat !== 'undefined' && Chat.loadConversationList) { try { await Chat.loadConversationList(); } catch (_) {} }
+      if (typeof Projects !== 'undefined' && Projects.load) { try { await Projects.load(); } catch (_) {} }
+      if (typeof Profile !== 'undefined' && Profile.load) { try { await Profile.load(); } catch (_) {} }
+      if (typeof AgentManager !== 'undefined' && AgentManager.load) { try { await AgentManager.load(); } catch (_) {} }
+      if (typeof RAG !== 'undefined' && RAG.loadCollections) { try { await RAG.loadCollections(); } catch (_) {} }
+    } catch (err) {
+      if (out) out.textContent = '⚠ Fehlgeschlagen: ' + err.message;
+      showToast('Wiederherstellung fehlgeschlagen: ' + err.message);
+    }
+  });
+
   // Modul-Initialisierung isoliert: ein Fehler in EINEM Modul darf die übrigen Tabs
   // nicht mehr lahmlegen (früher hat z. B. ein Fehler im Code-Workspace verhindert,
   // dass Mathe/Verzeichnis/Jury/… überhaupt verdrahtet wurden).
