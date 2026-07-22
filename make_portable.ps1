@@ -91,22 +91,45 @@ if ($BUNDLE_DIR.Length -gt 100) {
 # ── 1. App-Dateien kopieren ────────────────────────────────────────────────────
 
 Write-Step "App-Dateien kopieren..."
-$excludes = @("venv", "__pycache__", ".git", "*.pyc", "data\*.db",
-              "AI_Framework_Thomas_Portable*", "AI_Framework_Thomas_Server*", $BUNDLE_NAME)
 
 if (Test-Path $BUNDLE_DIR) {
-    Remove-Item $BUNDLE_DIR -Recurse -Force
+    # Ein zuvor gebautes Bundle im selben Zielordner koennte noch LAUFEN: dessen
+    # start.bat startet die gebuendelte ollama.exe, und der Smoke-Test weiter unten
+    # ebenfalls. Eine laufende ollama.exe sperrt ihre Datei -> Remove-Item braeche mit
+    # "Zugriff verweigert" ab. Darum gezielt jede ollama.exe stoppen, deren
+    # Programmdatei INNERHALB dieses Bundles liegt (das System-Ollama bleibt unberuehrt).
+    Get-CimInstance Win32_Process -Filter "Name='ollama.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($BUNDLE_DIR, [System.StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object {
+            Write-Warn "Stoppe laufende Ollama-Instanz aus dem alten Bundle (PID $($_.ProcessId))..."
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    Start-Sleep -Milliseconds 500
+    try {
+        Remove-Item $BUNDLE_DIR -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Fail ("Bestehendes Bundle konnte nicht geloescht werden:`n    $BUNDLE_DIR`n" +
+                    "    Ursache: $($_.Exception.Message)`n" +
+                    "    Meist laeuft noch eine ollama.exe aus einem frueheren Bundle und sperrt die Datei.`n" +
+                    "    -> Alle Bundle-Fenster schliessen bzw. die ollama.exe beenden (Task-Manager)`n" +
+                    "       und erneut ausfuehren - oder mit -OutDir einen anderen Zielordner waehlen.")
+    }
 }
 New-Item -ItemType Directory -Path $BUNDLE_DIR | Out-Null
 
-# Robocopy: App-Dateien ohne venv und temporäre Ordner
+# Robocopy: App-Dateien ohne venv, temporäre Ordner UND ohne die Laufzeit-Daten.
+# WICHTIG: Das komplette "data\" des Baurechners wird ausgeschlossen — es enthaelt
+# PRIVATE Nutzerdaten (SQLite-DB mit Gespraechen/RAG, user_profile.json, sowie
+# conversations\, pst\, angebote\, rechnungen\, zeugnisse\, uploads\ ...). Ein
+# portables Bundle darf davon NICHTS mitliefern. Die leere Verzeichnisstruktur und
+# die mitgelieferten Default-Agenten baut Abschnitt 5 danach frisch auf.
 $robocopyArgs = @(
     $APP_DIR, "$BUNDLE_DIR\app",
-    "/E", "/XD", "venv", "__pycache__", ".git", ".claude", "AI_Framework_Thomas_Portable*", "AI_Framework_Thomas_Server*",
-    "/XF", "*.pyc", "server.log", "mail.json", "api_providers.json", "/NFL", "/NDL", "/NJH", "/NJS"
+    "/E", "/XD", "venv", "__pycache__", ".git", ".claude", "$APP_DIR\data", "AI_Framework_Thomas_Portable*", "AI_Framework_Thomas_Server*",
+    "/XF", "*.pyc", "server.log", "/NFL", "/NDL", "/NJH", "/NJS"
 )
 robocopy @robocopyArgs | Out-Null
-Write-OK "App kopiert nach $BUNDLE_DIR\app"
+Write-OK "App kopiert nach $BUNDLE_DIR\app (ohne Laufzeit-data\)"
 
 # ── 2. Python Embeddable ───────────────────────────────────────────────────────
 
@@ -140,13 +163,17 @@ if ($pthFile) {
 Write-Step "pip in Embedded Python einrichten..."
 $getPipPath = "$env:TEMP\get-pip.py"
 Invoke-WebRequest -Uri $GETPIP_URL -OutFile $getPipPath -UseBasicParsing
-& "$pyDir\python.exe" $getPipPath --quiet
+# --no-cache-dir: der globale pip-Cache (%LOCALAPPDATA%\pip\cache) kann Wheels aus
+# einem frueheren ELEVATED Lauf enthalten, die fuer den nicht-elevierten Bundle-Bau
+# unlesbar sind (OSError: Permission denied). Das Embedded-Python braucht den
+# globalen Cache ohnehin nicht.
+& "$pyDir\python.exe" $getPipPath --quiet --no-cache-dir
 # get-pip.py bringt NUR pip mit — nicht setuptools/wheel. Manche (reine-Python-)
 # Pakete (z. B. Abhängigkeiten von extract-msg) haben kein fertiges Wheel und werden
 # aus einer Source-Distribution gebaut; dafür braucht pip das Build-Backend
 # setuptools.build_meta. Fehlt es, bricht die Installation mit
 # "Cannot import 'setuptools.build_meta'" ab. Daher hier bereitstellen.
-& "$pyDir\python.exe" -m pip install --quiet --no-warn-script-location setuptools wheel
+& "$pyDir\python.exe" -m pip install --quiet --no-warn-script-location --no-cache-dir setuptools wheel
 if ($LASTEXITCODE -ne 0) { Write-Fail "setuptools/wheel konnten nicht installiert werden" }
 Write-OK "pip + setuptools/wheel installiert"
 
@@ -159,7 +186,7 @@ Write-Step "Python-Pakete installieren (in Bundle)..."
 #                          Build-Isolation nicht zuverlässig (kein venv), sonst
 #                          "Cannot import 'setuptools.build_meta'".
 & "$pyDir\python.exe" -m pip install -r "$BUNDLE_DIR\app\requirements.txt" `
-    --quiet --no-warn-script-location --prefer-binary --no-build-isolation
+    --quiet --no-warn-script-location --prefer-binary --no-build-isolation --no-cache-dir
 if ($LASTEXITCODE -ne 0) { Write-Fail "Paket-Installation fehlgeschlagen" }
 Write-OK "Pakete installiert"
 
@@ -323,7 +350,19 @@ if (-not (Test-Path $modelsSrc)) {
 # statt erst auf dem Zielrechner. Läuft auf einem eigenen Testport.
 
 Write-Step "Smoke-Test: gebündeltes Ollama starten..."
-$testPort = 11599
+# Testport dynamisch waehlen (freien Port vom OS geben lassen) statt fest 11599.
+# Ein fest verdrahteter Port kann durch eine ZURUECKGEBLIEBENE ollama.exe eines
+# frueheren (evtl. abgebrochenen) Laufs belegt sein -> der neue Serve-Prozess
+# scheitert dann mit "bind: address already in use" und der Smoke-Test meldet
+# faelschlich ein kaputtes Bundle. Einen garantiert freien Port erfragen:
+try {
+    $lsnr = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $lsnr.Start()
+    $testPort = $lsnr.LocalEndpoint.Port
+    $lsnr.Stop()
+} catch {
+    $testPort = 11599
+}
 $proc = $null
 try {
     $env:OLLAMA_HOST   = "127.0.0.1:$testPort"

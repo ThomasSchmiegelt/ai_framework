@@ -2,7 +2,10 @@
 // Strategie: /api/* immer live (nie cachen), Navigationen network-first mit
 // Cache-Fallback (App läuft auch offline-Shell), statische Assets
 // stale-while-revalidate. Nur GET, nur same-origin.
-const CACHE = 'localai-v1';
+// WICHTIG: Cache-Version bei jedem Release anheben — der Browser erkennt die
+// geänderte sw.js, aktiviert sie sofort (skipWaiting) und löscht alte Caches,
+// damit Updates statischer Dateien ohne Hard-Reload durchschlagen.
+const CACHE = 'localai-v2';
 
 self.addEventListener('install', () => self.skipWaiting());
 
