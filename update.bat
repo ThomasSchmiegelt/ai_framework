@@ -45,6 +45,12 @@ set "DOPIP=ASK"
 set "LOGFILE="
 set "DST="
 
+:: --- Quelle = Ordner dieser update.bat (neue Version) ---
+:: WICHTIG: VOR der Argument-Schleife sichern. Die Schleife nutzt "shift" (ohne
+:: /1), das auch %0 mitverschiebt - danach zeigt %~dp0 nicht mehr auf update.bat,
+:: sondern auf ein Argument. Das SRC hier festhalten, bevor geshiftet wird.
+set "SRC=%~dp0"
+
 :: --- Argumente einlesen (Reihenfolge egal) ---
 :parseargs
 if "%~1"=="" goto argsdone
@@ -61,9 +67,6 @@ goto parseargs
 :: Im Silent-Modus sind Rueckfragen unmoeglich -> Pakete standardmaessig mit
 :: aktualisieren, damit neue Abhaengigkeiten nicht fehlen.
 if "%SILENT%"=="1" if "%DOPIP%"=="ASK" set "DOPIP=YES"
-
-:: --- Quelle = Ordner dieser update.bat (neue Version) ---
-set "SRC=%~dp0"
 
 :: --- Ziel abfragen, wenn nicht uebergeben (nur interaktiv moeglich) ---
 if not "%DST%"=="" goto havedst

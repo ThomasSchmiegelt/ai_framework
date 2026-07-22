@@ -145,9 +145,24 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Angaben und stellt **Rückfragen**, gibt dann eine Einschätzung; auf Wunsch in einfaches
   Deutsch übersetzt. Mit **Patienten-Akten** (eigene RAG je Patient) und Datei-Upload.
   *Kein Ersatz für ärztliche Beratung.*
+- 📮 **Postfach** — liest ganze **E-Mail-Postfächer** (`.pst`, `.mbox`, `.eml`, `.msg`)
+  ein und wertet sie **ausschließlich lokal** als **Wissensgraph** aus: Anhang-Analyse
+  (Dokumente + Bilder via Vision-Modell), Themen-Tags, **Konnektoren**, semantische
+  **Themen-Nähe** und **Kommunikationsnetz**, Volltextsuche, Statistik, Zusammenfassung,
+  Übernahme ins RAG und „Postfach fragen". `.pst` immer lesbar (eingebauter Reader)
+- ⚖️ **Patente** — **Patent-Recherche** (Abruf per Nummer, Suche nach Stichwort/
+  Rechteinhaber/Land, Stapelverarbeitung) mit **Fallakten**, mehrstufiger **KI-Analyse**,
+  Akten-Chat, Wissensgraph und JSON/CSV-Export
+- 🧾 **Angebote & Rechnungen** — erzeugt Angebote und Rechnungen im Firmendesign; die KI
+  **zerlegt** einen beschriebenen Auftrag in Positionen, die **Beträge rechnet der Server
+  exakt** (Netto/USt/Brutto nach **§14 UStG**, Kleinunternehmer §19) — **nie das Modell**.
+  Export als **PDF/DOCX**
+- 📜 **Arbeitszeugnisse** — qualifizierte Zeugnisse in üblicher, **codierter
+  Zeugnissprache** passend zur Gesamtnote; nachbearbeitbar, Export als **PDF/DOCX**
 - 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail, Logs, Verzeichnis-Analyse,
-  Morphologischer Kasten und Jury lassen sich im Profil ein-/ausblenden; beim
-  **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
+  Postfach, Patente, Angebote/Rechnungen, Arbeitszeugnisse, Morphologischer Kasten
+  und Jury lassen sich im Profil ein-/ausblenden; beim **Erstaufruf** sind sie
+  ausgeblendet (nur Kern-Tabs sichtbar)
 - 📋 **Diagnose-Logger** — zuschaltbares Protokoll zur Fehlersuche
 - 👤 **Nutzerprofil & Projekte** — Modell-Rollen, Dokument-Footer, Projektzuordnung
 - 💾 **Backup/Restore** — **alle** Nutzerdaten als ZIP: Profil, Projekte, Gespräche,
@@ -207,6 +222,18 @@ Ein Eindruck der wichtigsten Tabs (Screenshots aus der Anwendung):
 
 ![Verzeichnis-Analyse](static/onboarding/verzeichnisanalyse.png)
 *📁 Verzeichnis-Analyse — Ordner serverseitig scannen, Dateien KI-analysieren (personenbezogene Daten werden anonymisiert), Index & Wissensdatenbank erzeugen.*
+
+![Postfach](static/onboarding/Postfach.png)
+*📮 Postfach — PST-/Mail-Dateien lokal einlesen und als Wissensgraph auswerten (Konnektoren, Themen-Nähe, Kommunikationsnetz).*
+
+![Patente](static/onboarding/Patente.png)
+*⚖️ Patente — Patent-Recherche mit Fallakten, mehrstufiger KI-Analyse und Wissensgraph.*
+
+![Angebot / Rechnung](static/onboarding/Rechnung_Angebot.png)
+*🧾 Angebot / Rechnung — Positionen per KI zerlegen, Beträge rechnet der Server exakt (§14 UStG), Export als PDF/DOCX.*
+
+![Arbeitszeugnisse](static/onboarding/Zeugnisse.png)
+*📜 Arbeitszeugnisse — qualifizierte Zeugnisse in codierter Zeugnissprache passend zur Gesamtnote.*
 
 ![Morphologischer Kasten](static/onboarding/morphologischer_kasten.png)
 *🧩 Morphologischer Kasten — Ideenfindung über Parameter × Ausprägungen mit Bewertung, Schulnoten und Wischtechnik.*

@@ -8,6 +8,10 @@ import sys
 import time
 import urllib.request
 
+# Windows-Konsolen laufen oft mit cp1252 statt UTF-8 - Modellantworten enthalten
+# haeufig Emojis, die sonst mit UnicodeEncodeError abbrechen.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 APPDIR = sys.argv[1] if len(sys.argv) > 1 else "."
 
 # config.json einlesen (Port + Standardmodell + Ollama-URL)

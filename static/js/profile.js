@@ -60,7 +60,7 @@ const Profile = (() => {
 
   function applyTabVisibility(hiddenTabs) {
     hiddenTabs = hiddenTabs || [];
-    const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'morph', 'jury'];
+    const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'postfach', 'patente', 'rechnung', 'zeugnis', 'morph', 'jury'];
     for (const tab of optionalTabs) {
       const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
       if (btn) btn.style.display = hiddenTabs.includes(tab) ? 'none' : '';

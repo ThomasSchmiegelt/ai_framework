@@ -357,7 +357,7 @@ _MODEL_ROLES = {
 # Optionale Tabs, die im Profil ein-/ausgeblendet werden können. Beim ERSTAUFRUF
 # (noch kein user_profile.json) sind sie alle ausgeblendet – der Nutzer schaltet
 # Gewünschtes im Profil frei.
-_OPTIONAL_TABS = {"rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph", "jury"}
+_OPTIONAL_TABS = {"rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "postfach", "patente", "rechnung", "zeugnis", "morph", "jury"}
 # Auf erstem Start verborgene optionale Tabs. Der Installer kann die Vorbelegung über
 # config.json ("hidden_tabs_default") setzen (P8); ungültige/unbekannte Tabs werden
 # herausgefiltert, Fallback ist „alle optionalen Tabs verbergen".
@@ -365,7 +365,7 @@ _cfg_hidden = _CONFIG.get("hidden_tabs_default")
 if isinstance(_cfg_hidden, list):
     _DEFAULT_HIDDEN_TABS = [t for t in _cfg_hidden if t in _OPTIONAL_TABS]
 else:
-    _DEFAULT_HIDDEN_TABS = ["rag", "ide", "mail", "logs", "medizin", "mathe", "diranalyse", "morph", "jury"]
+    _DEFAULT_HIDDEN_TABS = list(_OPTIONAL_TABS)
 
 
 def _model_for(role: str) -> str:

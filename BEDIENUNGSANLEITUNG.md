@@ -1,6 +1,6 @@
 # 🤖 AI_Framework_Thomas — Bedienungsanleitung
 
-**Version:** 3.2 · **Stand:** Juni 2026
+**Version:** 3.3 · **Stand:** Juli 2026
 
 ---
 
@@ -23,6 +23,9 @@
 - [Verzeichnis-Analyse-Tab](#11a-verzeichnis-analyse-tab)
 - [Morphologischer-Kasten-Tab](#11b-morphologischer-kasten-tab)
 - [Postfach-Tab (PST-/Mail-Auswertung)](#11c-postfach--pst-mail-auswertung)
+- [Patente-Tab (Patent-Recherche)](#11d-patente--patent-recherche)
+- [Angebot & Rechnung](#11e-angebot--rechnung)
+- [Arbeitszeugnisse](#11f-arbeitszeugnisse)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
 13. [Matrix-Recherche](#13-matrix-recherche)
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
@@ -51,7 +54,9 @@ eigenen Rechner. Alle Daten bleiben lokal; nach außen geht nur die Websuche
 **Kernfunktionen:** Chat mit lokalen Modellen · Websuche · Berechnungen ·
 Präsentationen & Tabellen · Recherche mit Quellen · Netzplanung · Code-IDE ·
 spezialisierte Agenten · Dokument-Export mit Firmen-Design · Medizin-Assistent
-mit Patienten-Akten · Mathematik-Workspace mit Plots und LaTeX-Export.
+mit Patienten-Akten · Mathematik-Workspace mit Plots und LaTeX-Export ·
+Postfach-Auswertung (PST/Mail) als Wissensgraph · Patent-Recherche · Angebote &
+Rechnungen (§14 UStG) · qualifizierte Arbeitszeugnisse.
 
 ---
 
@@ -93,10 +98,14 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | ⚖️ Jury | Dokumente schreiben/bearbeiten und von einer Jury prüfen lassen *(optional)* |
 | 📧 Mail | Postfach (IMAP/POP3) read-only: filtern → bis zu 4 Aktionen (Beta) *(optional)* |
 | 📮 Postfach | PST-/Mail-Dateien einlesen & als Wissensgraph auswerten — nur lokal *(optional)* |
+| ⚖️ Patente | Patent-Recherche, Fallakten & KI-Analyse *(optional)* |
+| 🧾 Angebot / Rechnung | Angebote & Rechnungen mit exakter Betragsrechnung (§14 UStG) *(optional)* |
+| 📜 Zeugnisse | Qualifizierte Arbeitszeugnisse in Zeugnissprache *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
 > **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Verzeichnis**,
-> **Postfach**, **Morph-Kasten**, **Jury**, **Mail** und **Logs** können im Profil ausgeblendet werden
+> **Postfach**, **Patente**, **Angebot/Rechnung**, **Zeugnisse**, **Morph-Kasten**, **Jury**,
+> **Mail** und **Logs** können im Profil ausgeblendet werden
 > (→ [Abschnitt 18 – Tab-Sichtbarkeit](#18-nutzerprofil--projekte)).
 > Sie bleiben jederzeit wieder einschaltbar.
 
@@ -1074,6 +1083,77 @@ sondern nur per **▶ Graph anzeigen** neu aufgebaut. Änderst du Einstellungen,
 
 ---
 
+## 11d. Patente — Patent-Recherche
+
+Tab **⚖️ Patente** — recherchiert **Patente**, sammelt sie in **Fallakten** und wertet sie mit
+einer mehrstufigen **KI-Analyse** aus.
+
+> **Hinweis:** Die Daten stammen aus dem **Scraping** öffentlicher Google-Patents-Seiten (es gibt
+> keine offizielle API). Das ist für die Eigenrecherche gedacht; bei Massenabrufen die
+> Nutzungsbedingungen von Google beachten. Die KI-Analyse läuft je nach Profil lokal oder – wenn
+> „Web-Recherche lokal" aus ist – über dein API-Modell.
+
+1. **Projekt (Fallakte) wählen oder anlegen** — oben über das Dropdown bzw. `Neues Projekt… ＋ Anlegen`.
+2. **🔍 Import** — Patente hinzufügen auf drei Wegen:
+   - **Exakte Nummer** (z. B. `US10000000`) → **📥 Abrufen**.
+   - **Suche** nach *Stichwort*, *Rechteinhaber* und *Land* (mit Trefferzahl).
+   - **Massenverarbeitung**: mehrere Patentnummern (je Zeile oder komma-getrennt) → **Patente lesen**
+     bzw. **⚙ Stapelverarbeitung starten**. Bestehende Akten lassen sich als **JSON** wieder einlesen.
+3. **📁 Akte** — die gesammelten Patente mit Titel, Zusammenfassung, Ansprüchen, IPC-Klassen und
+   Rechteinhabern.
+4. **⚗ Analyse** — startet die **KI-Analyse-Pipeline** (Neuheit, Ansprüche, Umgehung, Bewertung …);
+   Ergebnisse werden als Markdown gespeichert und lassen sich in eine **Wissensdatenbank** übernehmen.
+5. **💬 Chat** — stelle Fragen zur gesamten Akte (belegt aus den enthaltenen Patenten).
+6. **🕸 Graph** — Wissensgraph der Zusammenhänge (Rechteinhaber, IPC-Klassen, Themen).
+7. **Export** — die Akte als **JSON** oder **CSV**.
+
+---
+
+## 11e. Angebot & Rechnung
+
+Tab **🧾 Angebot / Rechnung** — erstellt **Angebote** und **Rechnungen** im Design deines
+Firmenprofils, mit **rechnerisch korrekten** Beträgen.
+
+> **Wichtig:** Die **Beträge berechnet der Server exakt** (Dezimalarithmetik) — **nie das
+> KI-Modell**. Netto, Umsatzsteuer und Brutto folgen den **§14-UStG-Pflichtangaben**; die Option
+> **Kleinunternehmer §19** weist keine USt aus. Das KI-Modell hilft nur beim **Zerlegen** einer
+> Beschreibung in Positionen, nicht beim Rechnen.
+
+1. Oben **Angebot** oder **Rechnung** wählen.
+2. **Positionen erzeugen** – wahlweise:
+   - **📄 Aus Angebot übernehmen** — ein gespeichertes Angebot als Basis laden (Abweichungen
+     Ist ≠ vereinbart je Position „gesondert ausweisen" oder „verstecken").
+   - **🔧 Vorgang zerlegen** — den Auftrag beschreiben; die KI zerlegt ihn nach wählbaren
+     **Leistungskategorien** (Recherche, Planung, Konstruktion, Beschaffung, Fremdleistungen,
+     Fertigung/Montage, Inbetriebnahme, Dokumentation, Projektmanagement; eigene ergänzbar) mit
+     Stundensatz.
+   - **✨ Freitext zerlegen** — die Rechnung frei beschreiben (z. B. „3 Tage à 800 €, 1,5 Std à
+     95,50 €, Fahrtkosten 120 €"); die KI legt die Positionen an, der Server rechnet.
+3. **Kunde** und **Rechnungsdaten** (Nummer wird automatisch vorgeschlagen, Datum, Leistungszeitraum,
+   USt-Satz, Zahlungsziel, optionaler Einleitungssatz) ergänzen.
+4. **Export** als **PDF** oder **DOCX**. Gespeicherte Vorgänge stehen im Verlauf; die Absenderdaten
+   kommen aus dem **Firmenprofil**.
+
+---
+
+## 11f. Arbeitszeugnisse
+
+Tab **📜 Zeugnisse** — formuliert **qualifizierte Arbeitszeugnisse** in üblicher, **codierter
+Zeugnissprache** passend zur gewählten Gesamtnote.
+
+> **Tipp:** Für saubere, juristisch übliche Formulierungen empfiehlt sich ein **API-Modell**
+> (kleine lokale Modelle treffen die Zeugnis-Codes oft nicht zuverlässig).
+
+1. **＋ Neues Zeugnis** — **Angaben** ausfüllen: Arbeitgeber (leer = Firmenprofil), Name, Geschlecht,
+   Position/Funktion, optional Abteilung, **Gesamtnote** (1–5), Ein-/Austritt, Beendigungsgrund,
+   Führungsverantwortung, **Aufgaben/Verantwortungsbereiche** (eine je Zeile) und besondere Stärken.
+2. **Ausstellung** — Ort, Datum, Unterzeichner.
+3. **📜 Zeugnis erzeugen** — die KI schreibt einen zur Note passenden Text. Er lässt sich
+   **nachbearbeiten** und **speichern**.
+4. **📁 Verlauf** — frühere Zeugnisse wieder öffnen; Export als **PDF/DOCX**.
+
+---
+
 ## 12. Planer (Netzplan / CPM)
 
 Tab **🗂️ Planer** — Projektplanung nach der Methode des **Kritischen Pfades**.
@@ -1830,6 +1910,15 @@ Mit **`update.bat`** wird **nur der Programmcode** (Systemdateien) ausgetauscht 
 
 > Danach **App neu starten** (`start.bat`) und im Browser mit **Strg+F5** neu laden.
 > Eine vollständige Datensicherung vorab (siehe Abschnitt **20. Backup**) ist trotzdem empfehlenswert.
+
+### Zentrale Verwaltung (ACMP)
+
+In verwalteten Umgebungen wird AI_Framework_Thomas über die **Aagon Client Management
+Platform (ACMP)** installiert und aktualisiert — dann **musst du selbst nichts tun**:
+Die IT rollt neue Programmversionen automatisch aus. Dabei gilt dieselbe Trennung wie
+oben: Nur der **Programmcode** wird getauscht, deine **Daten, Einstellungen, Ollama und
+die Modelle bleiben unangetastet**. Technisch übernimmt das dasselbe `update.bat`, nur
+lautlos (Schalter `/S`). Details für Administratoren stehen in **`docs/ACMP.md`**.
 
 ---
 

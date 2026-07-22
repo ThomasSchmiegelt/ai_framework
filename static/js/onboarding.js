@@ -147,8 +147,52 @@ const Onboarding = (() => {
            + 'Wissensdatenbank. <em>(Optionaler Tab – im Profil einblenden.)</em>',
     },
     {
+      image: 'Postfach.png',
+      title: '16 · Postfach',
+      text: 'Lies ganze <strong>E-Mail-Postfächer</strong> ein (<strong>.pst</strong>, .mbox, .eml, .msg) und '
+           + 'werte sie als <strong>Wissensgraph</strong> aus – alles <strong>ausschließlich lokal</strong>. '
+           + 'Stufe 2 liest zusätzlich <strong>Anhänge</strong> (Dokumente und Bilder per Vision-Modell) und '
+           + 'vergibt Themen-Tags. Verknüpfe Mails über eigene <strong>Konnektoren</strong> (benannte '
+           + 'Stichwortgruppen), <strong>Themen-Nähe</strong> (semantische Ähnlichkeit) oder das '
+           + '<strong>Kommunikationsnetz</strong> der Beteiligten. Volltextsuche, Zeitleiste, Statistik, '
+           + 'Zusammenfassung, Übernahme <strong>ins RAG</strong> und „Postfach fragen" inklusive. '
+           + '<em>PST wird immer gelesen (eingebauter Reader); das Passwort ist nur eine Prüfsumme. '
+           + '(Optionaler Tab.)</em>',
+    },
+    {
+      image: 'Patente.png',
+      title: '17 · Patente',
+      text: 'Recherchiere <strong>Patente</strong>: rufe sie über die <strong>exakte Nummer</strong> ab oder '
+           + 'suche nach <strong>Stichwort, Rechteinhaber und Land</strong> – auch als '
+           + '<strong>Stapelverarbeitung</strong> vieler Nummern auf einmal. Die Treffer sammelst du in '
+           + '<strong>Fallakten</strong> (Projekten), lässt sie durch eine mehrstufige '
+           + '<strong>KI-Analyse-Pipeline</strong> laufen, <strong>chattest</strong> mit der Akte und '
+           + 'visualisierst Zusammenhänge im <strong>Wissensgraph</strong>. Export als JSON/CSV. '
+           + '<em>(Optionaler Tab.)</em>',
+    },
+    {
+      image: 'Rechnung_Angebot.png',
+      title: '18 · Angebot & Rechnung',
+      text: 'Erstelle <strong>Angebote und Rechnungen</strong> im Design deines Firmenprofils. Beschreibe '
+           + 'einen Auftrag als Freitext – die KI <strong>zerlegt ihn in Einzelpositionen</strong> nach '
+           + 'wählbaren Leistungskategorien; ein Angebot lässt sich direkt in eine Rechnung übernehmen. '
+           + 'Die <strong>Beträge rechnet der Server exakt</strong> (Netto/USt/Brutto nach §14 UStG, '
+           + 'Option Kleinunternehmer §19) – <strong>nie das KI-Modell</strong>. Export als '
+           + '<strong>PDF oder DOCX</strong>. <em>(Optionaler Tab.)</em>',
+    },
+    {
+      image: 'Zeugnisse.png',
+      title: '19 · Arbeitszeugnisse',
+      text: 'Formuliere <strong>qualifizierte Arbeitszeugnisse</strong> in üblicher, codierter '
+           + '<strong>Zeugnissprache</strong> passend zur gewählten <strong>Gesamtnote</strong>. Du gibst '
+           + 'Arbeitgeber, Position, Aufgaben und besondere Stärken an – die KI schreibt daraus einen '
+           + 'stimmigen Text (für saubere Formulierungen empfiehlt sich ein API-Modell), den du '
+           + '<strong>nachbearbeiten, speichern</strong> und als <strong>PDF/DOCX</strong> exportieren '
+           + 'kannst. <em>(Optionaler Tab.)</em>',
+    },
+    {
       image: 'morphologischer_kasten.png',
-      title: '16 · Morphologischer Kasten',
+      title: '20 · Morphologischer Kasten',
       text: 'Systematische Ideenfindung (Zwicky-Box): Die KI füllt ein Raster aus <strong>Parametern</strong> '
            + 'und <strong>Ausprägungen</strong>, bewertet Kombinationen und schlägt Alternativen vor. Mit '
            + '<strong>🃏 Ideen wischen</strong> wischst du KI-Konzepte durch (links = gut, rechts = schlecht) '
@@ -157,7 +201,7 @@ const Onboarding = (() => {
     },
     {
       image: 'jury.png',
-      title: '17 · Jury',
+      title: '21 · Jury',
       text: 'Stelle ein <strong>Gremium aus Agenten</strong> zusammen (z. B. ⚖️ Gesetzes-Agenten), das einen '
            + 'beliebigen Text bewertet: Jedes Mitglied gibt Score, Befund, Risiken und Empfehlung ab, danach '
            + 'folgt ein <strong>Gesamturteil</strong>. So prüfst du erzeugte Dokumente, System-Prompts oder '
@@ -165,7 +209,7 @@ const Onboarding = (() => {
     },
     {
       image: 'log_file.png',
-      title: '18 · Log-Datei',
+      title: '22 · Log-Datei',
       text: 'Im <strong>Log-Tab</strong> siehst du bei Bedarf, was im Hintergrund passiert: '
            + 'Modell-Antworten, Tool-Aufrufe und Diagnosen. Praktisch zur Fehlersuche – '
            + 'ein- und ausschaltbar und als Datei exportierbar.',

@@ -17,7 +17,7 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 AI_Framework_Thomas is a German-language, **general-purpose** AI chat interface that runs entirely locally: local Ollama LLMs wrapped in a **FastAPI** backend with a **vanilla-JS** frontend, plus a tool-calling agentic loop, SQLite conversation persistence, and productivity tools (engineering calculators, material lookup, unit conversion, SymPy solver, matplotlib charting, PDF/DOCX/PPTX/LaTeX generation, planner/CPM, research, RAG).
 
-Derived from IG-11 as the general variant. The UI has **18 tabs** (Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail 🚧, Planer, Matrix, Anfrage, Code, Verzeichnis-Analyse, Postfach, Morph-Kasten, Jury, Logs) and **seven modes** (`maschinenbau`, `ki`, `soziales`, `marketing`, `finanz`, `geschaeftsfuehrung`, plus a user-configurable `custom`) that drive the color scheme and an optional domain framing. See `docs/ENTWICKLUNG.md` for the mode/system-prompt machinery (`_augment_prefix`, `pure_llm`, `lang`).
+Derived from IG-11 as the general variant. The UI has **21 tabs** (Chat, Canvas, Agenten, Recherche, RAG, Dokumente, Medizin, Mathe, Mail 🚧, Planer, Matrix, Anfrage, Code, Verzeichnis-Analyse, Postfach, Morph-Kasten, Jury, Logs, Patente, Rechnungen, Arbeitszeugnisse — `data-tab` values in `static/index.html`) and **seven modes** (`maschinenbau`, `ki`, `soziales`, `marketing`, `finanz`, `geschaeftsfuehrung`, plus a user-configurable `custom`) that drive the color scheme and an optional domain framing. See `docs/ENTWICKLUNG.md` for the mode/system-prompt machinery (`_augment_prefix`, `pure_llm`, `lang`).
 
 ## Running the App
 
@@ -33,7 +33,7 @@ uvicorn main:app --host 0.0.0.0  --port 8780 --reload    # server mode
 .\venv\Scripts\Activate.ps1
 uvicorn main:app --host 127.0.0.1 --port 8780 --reload
 ```
-Or use the scripts: `start.bat` / `start_server.bat` (Windows), `scripts/start.sh` (Linux).
+Or use the scripts: `start.bat` / `start_server.bat` (Windows), `start.sh` (Linux, root of repo — supports `AI_HOST`/`AI_PORT`/`AI_SSL_CERT`/`AI_SSL_KEY` env vars).
 
 Ollama must run separately on `http://localhost:11434` with at least one `config.json` model pulled. For RAG, pull the embedding model once: `ollama pull nomic-embed-text`. Browser: <http://localhost:8780>.
 
@@ -50,9 +50,9 @@ There is **no automated test suite or linter configured** (no pytest, no ruff/fl
 ## Architecture (sketch)
 
 ```
-Frontend (Vanilla JS, 16 tabs)   static/js/app.js, chat.js, canvas.js, …
+Frontend (Vanilla JS, 21 tabs)   static/js/app.js, chat.js, canvas.js, …
        ↓ SSE streaming
-Backend (FastAPI, async)         main.py  (~5800 lines)
+Backend (FastAPI, async)         main.py  (~12,300 lines, single file)
        ↓ tools/llm.py (unified)
 Ollama (local)  ──or──  external OpenAI-compatible API (OpenRouter, OpenAI, Groq …)
        ↓
@@ -108,6 +108,9 @@ Each subsystem's deep documentation is in `docs/ENTWICKLUNG.md` (section numbers
 | Backup/restore & branding | `/api/backup` (Schalter `uploads`/`pst`/`secrets`, Standard aus), `/api/restore` (`replace=0` zusammenführen / `1` überschreiben, Pfade über `_safe_relpath`), `data/profile_assets/`. **Beim Anlegen eines neuen Tabs mit eigenem `data/`-Ordner dort einen Eintrag in `_backup_dirs_always()`/`_backup_files_always()` ergänzen** — sonst fehlt der Bereich im Backup. UI: Profil-Modal „Alle Daten sichern & wiederherstellen" (`btn-profile-export`/`btn-profile-import` in `app.js`) | §18 |
 | PWA / phone-as-frontend | `static/manifest.json`, `static/sw.js`, `scripts/` | §19 |
 | Deployment variants & installers | `install.*`, `make_portable.*`, `make_server.*` | §20 |
+| Patente (patent research) | Tab „⚖️ Patente" (`data-tab="patente"`), `patente.js`, `tools/patente.py` (Google-Patents-Scraping, Fallakten, 7-Stufen-Analyse-Pipeline, Wissensgraph), `/api/patente/*`. Reine Logik in `tools/patente.py` (kein FastAPI/DB-Import, analog `tools/mailstore.py`); HTTP-Plumbing + Persistenz in `main.py`. Ergebnisse per RAG indexierbar (`_pat_index_analysis`). **Hinweis:** Google Patents hat keine offizielle API — Scraping birgt ToS-Risiko (aus dem portierten Original-Tool übernommen, kein neues Risiko). Unterliegt wie Recherche der „Web-Recherche lokal"-Option | not yet in ENTWICKLUNG.md |
+| Rechnungen & Angebote | Tab „Rechnungen" (`data-tab="rechnung"`), `rechnung.js`, `tools/dokumente.py` (`invoice_markdown`/`invoice_docx`), `/api/rechnung/*` + `/api/angebot/*`, `/api/firmenprofil`. Beträge (Netto/USt/Brutto, §14-UStG-Pflichtangaben) werden **deterministisch mit `Decimal`** berechnet — **nie** vom LLM — damit Rechnungen rechnerisch korrekt sind; Export PDF (`tools.export.to_pdf`) und DOCX (eigener Positionstabellen-Bauer) | not yet in ENTWICKLUNG.md |
+| Arbeitszeugnisse | Tab „Zeugnisse" (`data-tab="zeugnis"`), `zeugnis.js`, `tools/dokumente.py` (`zeugnis_system_prompt`/`zeugnis_user_prompt`), `/api/zeugnis/*`. Text (codierte Zeugnissprache) kommt vom LLM, gerendert mit den generischen Exportern `tools.export.to_pdf`/`to_docx`; Datensätze unter `data/zeugnisse/` | not yet in ENTWICKLUNG.md |
 | Database schema | `db.py` | §4 |
 | Tools package | `tools/*.py` | §5 |
 | Frontend modules | `static/js/*.js` | §6 |
@@ -131,6 +134,8 @@ Each subsystem's deep documentation is in `docs/ENTWICKLUNG.md` (section numbers
 | `mailstore.py` | Postfach-Import: `.pst` (Outlook-COM → `libpff`/LGPL → **eingebauter `pst_pure`**), `.mbox`/`.eml` (stdlib), `.msg` (`extract-msg`/BSD); einheitliche Mail-dicts + Anhang-Ablage. `pst_password_status()` = CRC-Passwort-Prüfung. `.pst` immer lesbar |
 | `pst_pure.py` | **Reiner-Python-MS-PST-Leser** (MIT, ohne Fremdlib): NDB (Header→NBT/BBT→Blöcke, XBLOCK/XXBLOCK, permute-Decrypt) + LTP (HN-Heap→BTH→Property/Table-Context) → Nachrichten (Absender/Empfänger/Betreff/Datum/Text) + Anhänge; PST-CRC Passwort-Verifikation (`_pst_crc`, [MS-PST] 5.3). Nur Unicode-PST. CLI: `python -m tools.pst_pure <datei.pst>` |
 | `rag.py` | RAG: cleanup, chunking, Ollama embeddings (CPU), NumPy cosine search; VRAM tiers, per-base `strictness`/`char_limit` |
+| `patente.py` | Patent research: Google-Patents scraping, case-file management, 7-stage analysis pipeline, knowledge-graph data for the Patente tab. Pure logic, no FastAPI/DB imports (`main.py` does HTTP + persistence) |
+| `dokumente.py` | Document generation for Rechnungen/Angebote (deterministic `Decimal` amount math, §14-UStG fields, Markdown + DOCX builder) and Arbeitszeugnisse (LLM prompt/structure helpers; rendering via `tools/export.py`). Pure logic, no FastAPI/DB imports |
 
 Calculations run inside `_safe_exec()` in `main.py` — a restricted `exec()` sandbox (no file I/O or network; whitelisted math/numpy/scipy/sympy).
 

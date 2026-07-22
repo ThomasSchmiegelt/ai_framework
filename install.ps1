@@ -151,8 +151,12 @@ $pipVenv = "$VENV_DIR\Scripts\pip.exe"
 # ── 4. Pakete installieren ─────────────────────────────────────────────────────
 
 Write-Step "Python-Pakete installieren..."
-& $pipVenv install --upgrade pip setuptools wheel --quiet
-& $pipVenv install -r "$APP_DIR\requirements.txt" --quiet --prefer-binary
+# --no-cache-dir: der globale pip-Cache (%LOCALAPPDATA%\pip\cache) kann Wheel-Dateien
+# aus einem frueheren ELEVATED-Lauf enthalten (install.bat fordert UAC an), die dann
+# fuer einen nicht-elevierten Prozess nicht mehr lesbar sind (OSError: Permission
+# denied). Ein projektlokaler Venv braucht den globalen Cache ohnehin nicht.
+& $pipVenv install --upgrade pip setuptools wheel --quiet --no-cache-dir
+& $pipVenv install -r "$APP_DIR\requirements.txt" --quiet --prefer-binary --no-cache-dir
 if ($LASTEXITCODE -ne 0) { Write-Fail "Paket-Installation fehlgeschlagen" }
 Write-OK "Alle Pakete installiert"
 
@@ -194,6 +198,8 @@ $optTabs = [ordered]@{
     rag='Wissensdatenbanken (RAG)'; ide='Code-IDE'; mathe='Mathe'; medizin='Medizin';
     mail='Mail'; logs='Logs'; diranalyse='Verzeichnis-Analyse';
     postfach='Postfach (PST-/Mail-Auswertung, nur lokal)';
+    patente='Patente (Patent-Recherche)'; rechnung='Angebote/Rechnungen';
+    zeugnis='Arbeitszeugnisse';
     morph='Morphologischer Kasten'; jury='Jury'
 }
 $hidden = @()
