@@ -277,6 +277,16 @@ const Transcription = (function () {
       if (!f) { _toast('Bitte zuerst eine Audiodatei wählen.'); return; }
       await _transcribeAndShow(f, f.name, 'tab');
     });
+    _el('tr-speak')?.addEventListener('click', (e) => {
+      const t = _el('tr-text')?.value || '';
+      if (!t) { _toast('Kein Text zum Vorlesen.'); return; }
+      if (typeof TTS !== 'undefined' && TTS.available()) {
+        const lang = _el('tr-language')?.value;
+        TTS.toggle(e.currentTarget, t, '');
+      } else {
+        _toast('Sprachausgabe wird von diesem Browser nicht unterstützt.');
+      }
+    });
     _el('tr-copy')?.addEventListener('click', _copy);
     _el('tr-export')?.addEventListener('click', _exportTxt);
     _el('tr-to-chat')?.addEventListener('click', _toChat);

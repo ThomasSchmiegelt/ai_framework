@@ -30,6 +30,7 @@
 - [To-Do mit Wissensgraph (✅ To-Do)](#11h-to-do-mit-wissensgraph--to-do)
 - [Transkription — Sprache zu Text (🎙 Transkription)](#11i-transkription--sprache-zu-text--transkription)
 - [Geheim-Modus — alles lokal](#11j-geheim-modus--alles-lokal)
+- [Sprachausgabe — Antworten vorlesen (🔊)](#11k-sprachausgabe--antworten-vorlesen-)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
 13. [Matrix-Recherche](#13-matrix-recherche)
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
@@ -1301,8 +1302,13 @@ Tab **🎙 Transkription** — wandelt **gesprochene Sprache in Text** um. Als Q
    Freigabe mit Namen), **● Aufnahme starten**, sprechen, **■ Aufnahme stoppen** — der Text
    erscheint automatisch. **Oder 📄 Datei:** Audiodatei wählen und **Transkribieren**.
 3. **📝 Ergebnis:** Der Text steht editierbar im Feld, darunter **Zeitmarken** je Abschnitt.
-   **📋 Kopieren**, **⬇ .txt** speichern, **→ Chat** (Text in den Chat übernehmen) oder
-   **→ To-Do** (als Notiz ins To-Do, dort „To-Do-Liste ableiten").
+   **🔊 Vorlesen** (Sprachausgabe), **📋 Kopieren**, **⬇ .txt** speichern, **→ Chat** (Text in den
+   Chat übernehmen) oder **→ To-Do** (als Notiz ins To-Do, dort „To-Do-Liste ableiten").
+
+> **Wo werden Sprach-Ein- und -Ausgabe gespeichert?** Die **Spracheingabe** (deine Aufnahme bzw.
+> hochgeladene Audiodatei) wird serverseitig unter `data/transcripts/` abgelegt und ist im **Backup**
+> enthalten (Schalter „Uploads/Medien"). Die **Sprachausgabe (Vorlesen / 🔊)** entsteht **live im
+> Browser** über die System-Stimmen und wird **nicht als Datei gespeichert**.
 
 **🎙 Diktat im Chat:** In der Chat-Eingabeleiste gibt es zusätzlich einen **🎙 Diktat**-Knopf —
 einmal klicken nimmt auf, erneut klicken stoppt und schreibt den erkannten Text direkt ins
@@ -1319,6 +1325,30 @@ Auswertungen, Transkription). So bleibt garantiert **alles auf diesem Rechner**.
 **in beide Richtungen**: schaltest du ihn wieder **aus**, gelten deine gespeicherten (ggf.
 Remote-)Modelle sofort wieder. Bei aktivem Modus zeigt die Marke oben **🔒 lokal**. Denselben
 Schalter findest du auch im **Profil-Modal** („🔒 Geheim-Modus — alles lokal").
+
+---
+
+## 11k. Sprachausgabe — Antworten vorlesen (🔊)
+
+Antworten lassen sich **vorlesen**. Über jeder Assistenten-Antwort im Chat erscheint ein
+**🔊-Knopf** (neben „⬇ .md") — Klick liest die Antwort vor, ein weiterer Klick stoppt. Auch im
+**Transkriptions-Tab** gibt es **🔊 Vorlesen**.
+
+Die Stimme richtet sich nach der gewählten **Antwortstil-Persona** (Profil → *Antwortstil*):
+
+| Persona | Stimme |
+|---|---|
+| 🤖 **Roboter** | synthetisch/monoton |
+| 🎓 **Herr Professor** | älterer Mann |
+| 🩺 **Frau Doktor** | ältere Frau |
+| 😎 **Felix** | junger Mann |
+| 😊 **Sandra** | junge Frau |
+
+Im **Profil-Modal** kannst du die Stimme mit **🔊 Stimme testen** direkt anhören. Die Sprachausgabe
+nutzt die **im Betriebssystem/Browser installierten Stimmen** (Windows/Linux), läuft **komplett lokal
+im Browser** und wird **nicht gespeichert**. Stehen für ein Geschlecht mehrere Stimmen bereit, werden
+Alter/Klang zusätzlich über **Tonhöhe** unterschieden (tiefer = älter). Unterstützt ein Browser keine
+Sprachausgabe, wird der 🔊-Knopf ausgeblendet.
 
 ---
 

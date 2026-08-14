@@ -607,6 +607,21 @@ const Chat = (() => {
         if (typeof showToast === 'function') showToast('✓ Antwort als MD gespeichert');
       });
       saveBar.appendChild(mdBtn);
+      // 🔊 Vorlesen in der Stimme der aktiven Persona (Profil → tone). Nur, wenn der
+      // Browser Sprachausgabe unterstützt.
+      if (typeof TTS !== 'undefined' && TTS.available()) {
+        const ttsBtn = document.createElement('button');
+        ttsBtn.textContent = '🔊';
+        const tone = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get().tone || '') : '';
+        ttsBtn.title = 'Antwort vorlesen (' + TTS.personaLabel(tone) + ')';
+        ttsBtn.addEventListener('click', () => {
+          const raw = (bubbleContent._rawMd || bubbleContent.textContent || '').trim();
+          if (!raw) return;
+          const t = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get().tone || '') : '';
+          TTS.toggle(ttsBtn, raw, t);
+        });
+        saveBar.appendChild(ttsBtn);
+      }
       bubble.appendChild(saveBar);
     }
 
