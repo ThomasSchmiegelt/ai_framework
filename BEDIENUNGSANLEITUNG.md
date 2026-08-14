@@ -1345,10 +1345,17 @@ Die Stimme richtet sich nach der gewählten **Antwortstil-Persona** (Profil → 
 | 😊 **Sandra** | junge Frau |
 
 Im **Profil-Modal** kannst du die Stimme mit **🔊 Stimme testen** direkt anhören. Die Sprachausgabe
-nutzt die **im Betriebssystem/Browser installierten Stimmen** (Windows/Linux), läuft **komplett lokal
-im Browser** und wird **nicht gespeichert**. Stehen für ein Geschlecht mehrere Stimmen bereit, werden
-Alter/Klang zusätzlich über **Tonhöhe** unterschieden (tiefer = älter). Unterstützt ein Browser keine
-Sprachausgabe, wird der 🔊-Knopf ausgeblendet.
+nutzt standardmäßig die **im Betriebssystem/Browser installierten Stimmen** (Windows/Linux), läuft
+**komplett lokal im Browser** und wird **nicht gespeichert**. Stehen für ein Geschlecht mehrere
+Stimmen bereit, werden Alter/Klang zusätzlich über **Tonhöhe** unterschieden (tiefer = älter).
+Unterstützt ein Browser keine Sprachausgabe, wird der 🔊-Knopf ausgeblendet.
+
+**API-Stimme (optional):** Im Profil unter **🧠 Modelle → 🔊 Sprachausgabe (TTS)** kannst du statt
+„Browser (lokal)" ein **API-Modell** eines konfigurierten Anbieters wählen (z. B. `openai::tts-1`) —
+dann werden die Antworten mit den **hochwertigeren Anbieter-Stimmen** vorgelesen (das Audio entsteht
+beim Anbieter). Die Persona bestimmt weiterhin die Stimme. ⚠ Der Text geht dabei an den Anbieter.
+Im **Geheim-Modus** wird immer die **Browser-Ausgabe** genutzt; scheitert die API, wird automatisch
+auf den Browser zurückgefallen.
 
 ---
 

@@ -58,6 +58,28 @@ const Profile = (() => {
     }
   }
 
+  // TTS-Auswahl (Sprachausgabe): „Browser (lokal)" + API-TTS-Vorschläge je Anbieter.
+  async function _fillTtsSelect() {
+    const sel = document.getElementById('profile-tts-model');
+    if (!sel) return;
+    let cfg = null;
+    try { cfg = await (await fetch('/api/tts/config')).json(); } catch (_) {}
+    const current = _data.tts_model || '';
+    const options = (cfg && cfg.options) || [{ value: '', label: 'Browser (lokal, Web Speech API)' }];
+    sel.innerHTML = '';
+    for (const o of options) {
+      const opt = document.createElement('option');
+      opt.value = o.value; opt.textContent = o.label;
+      sel.appendChild(opt);
+    }
+    if (current && !options.some(o => o.value === current)) {
+      const opt = document.createElement('option');
+      opt.value = current; opt.textContent = current;
+      sel.appendChild(opt);
+    }
+    sel.value = current;
+  }
+
   function applyTabVisibility(hiddenTabs) {
     hiddenTabs = hiddenTabs || [];
     const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'postfach', 'patente', 'rechnung', 'zeugnis', 'morph', 'jury'];
@@ -159,6 +181,7 @@ const Profile = (() => {
     const localOnlyEl = document.getElementById('profile-local-only');
     if (localOnlyEl) localOnlyEl.checked = !!_data.local_only_mode;  // Standard: aus
     _fillModelSelects();
+    _fillTtsSelect();
     _loadProviders();
     _refreshPreviews();
     // Tab-Sichtbarkeit: ein Häkchen kann mehrere Tabs steuern (data-tabs="ide,mathe").
@@ -248,6 +271,7 @@ const Profile = (() => {
       model_coding:   document.getElementById('profile-model-coding')?.value || '',
       model_science:  document.getElementById('profile-model-science')?.value || '',
       model_medical:  document.getElementById('profile-model-medical')?.value || '',
+      tts_model:      document.getElementById('profile-tts-model')?.value || '',
       hidden_tabs: [...new Set(
         Array.from(document.querySelectorAll('#profile-tab-vis input[type="checkbox"]'))
           .filter(cb => !cb.checked)
@@ -320,6 +344,7 @@ const Profile = (() => {
       document.getElementById('provider-key').value = '';
       await _loadProviders();
       await _fillModelSelects();   // neue Remote-Modelle in den Rollen-Listen anzeigen
+      await _fillTtsSelect();      // neuer Anbieter → TTS-Vorschläge aktualisieren
     } catch (e) {
       msg.textContent = 'Fehler: ' + e.message;
     }
@@ -331,6 +356,7 @@ const Profile = (() => {
       await fetch('/api/providers/' + encodeURIComponent(pid), { method: 'DELETE' });
       await _loadProviders();
       await _fillModelSelects();
+      await _fillTtsSelect();
     } catch (_) {}
   }
 
