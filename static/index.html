@@ -2717,6 +2717,15 @@
         <label>Medizin <span class="planner-muted" style="font-size:11px">Medizin-Tab</span></label>
         <select id="profile-model-medical" class="sidebar-select"></select>
       </div>
+      <div class="form-group">
+        <label>🔊 Sprachausgabe (TTS) <span class="planner-muted" style="font-size:11px">Antworten vorlesen</span></label>
+        <select id="profile-tts-model" class="sidebar-select"></select>
+        <span class="planner-muted" style="font-size:11px;display:block;margin-top:4px">Standard =
+          <strong>Browser</strong> (Web Speech API, lokal &amp; kostenlos). Optional ein <strong>API-Modell</strong>
+          eines konfigurierten Anbieters (z. B. <code>openai::tts-1</code>) für hochwertigere Stimmen —
+          das Audio wird dann beim Anbieter erzeugt. Im <strong>Geheim-Modus</strong> wird immer der
+          Browser genutzt. Die Persona bestimmt die Stimme.</span>
+      </div>
     </div>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
       <input type="checkbox" id="profile-math-autoroute" style="width:auto;margin-top:2px" />
@@ -3258,14 +3267,14 @@
 <script src="/js/agents.js?v=20260611merge"></script>
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
-<script src="/js/tts.js?v=20260815tts"></script>
+<script src="/js/tts.js?v=20260815tts2"></script>
 <script src="/js/chat.js?v=20260815tts"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260721"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260815tts"></script>
+<script src="/js/profile.js?v=20260815tts2"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
