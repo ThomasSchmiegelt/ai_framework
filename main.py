@@ -13408,6 +13408,81 @@ async def todo_graph(root: str = Query("")):
     return await _db.todo_graph_data(ids)
 
 
+def _todo_parse_due(s: str):
+    """Fälligkeit tolerant parsen: ISO (YYYY-MM-DD) oder DD.MM.(YY)YY → date, sonst None."""
+    import datetime as _d
+    s = (s or "").strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y", "%Y/%m/%d"):
+        try:
+            return _d.datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+@app.get("/api/todo/agenda")
+async def todo_agenda(root: str = Query(""), person: str = Query("")):
+    """Deterministische Empfehlung „was als Nächstes?" für den aktiven Bereich.
+    Priorisiert nach Fälligkeit (Zeit), Abhängigkeiten (blockiert/entblockt) und
+    Status. Optional auf eine Person gefiltert. Kein LLM — nachvollziehbar."""
+    import datetime as _d
+    if root and root != "root":
+        ids = await _db.todo_descendants(root)
+    else:
+        ids = [p["id"] for p in await _db.todo_projects_all()]
+    data = await _db.todo_graph_data(ids)
+    items, preds, succs, persons = {}, {}, {}, set()
+    for pr in data.get("projects", []):
+        for it in pr["items"]:
+            items[it["id"]] = {"id": it["id"], "text": it["text"], "status": it["status"],
+                               "assignees": it.get("assignees") or [], "due": it.get("due", ""),
+                               "project": pr["name"], "project_title": pr["title"]}
+            for a in (it.get("assignees") or []):
+                persons.add(a)
+        for e in pr["edges"]:
+            preds.setdefault(e["target"], set()).add(e["source"])   # source = Vorgänger von target
+            succs.setdefault(e["source"], set()).add(e["target"])
+    today = _d.date.today()
+
+    def _urgency(due):
+        dd = _todo_parse_due(due)
+        if not dd:
+            return (0.0, None)
+        delta = (dd - today).days
+        if delta < 0:
+            return (3.0, delta)
+        if delta <= 3:
+            return (2.0, delta)
+        if delta <= 10:
+            return (1.0, delta)
+        return (0.5, delta)
+
+    pfilter = (person or "").strip().lower()
+    ready, blocked = [], []
+    for iid, it in items.items():
+        if it["status"] == "erledigt":
+            continue
+        if pfilter and not any(pfilter in a.lower() for a in it["assignees"]):
+            continue
+        blockers = [items[s]["text"] for s in preds.get(iid, set())
+                    if s in items and items[s]["status"] != "erledigt"]
+        unblocks = len([t for t in succs.get(iid, set())
+                        if t in items and items[t]["status"] != "erledigt"])
+        u, days = _urgency(it["due"])
+        score = u * 10 + unblocks * 3 + (2 if it["status"] == "laeuft" else 0)
+        row = {**it, "unblocks": unblocks, "urgency": u, "days": days,
+               "blockers": blockers, "score": round(score, 2)}
+        (blocked if blockers else ready).append(row)
+    ready.sort(key=lambda r: (-r["score"], r["days"] if r["days"] is not None else 9999))
+    blocked.sort(key=lambda r: -r["score"])
+    jetzt = [r for r in ready if r["urgency"] >= 2 or r["unblocks"] >= 1 or r["status"] == "laeuft"]
+    demn = [r for r in ready if r not in jetzt]
+    return {"persons": sorted(persons), "jetzt": jetzt, "demnaechst": demn,
+            "blocked": blocked, "scope_root": root or "root"}
+
+
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

@@ -220,13 +220,15 @@ const Onboarding = (() => {
     },
     {
       image: 'todo_wissensgraph.png',
-      title: '23 · To-Do mit Wissensgraph',
-      text: 'Führe Aufgaben als <strong>Besprechung, Projekt</strong> oder freie Liste – mit '
-           + '<strong>Teilnehmern</strong>, Status und Fristen. Aus einer <strong>Besprechungsnotiz</strong> '
-           + 'leitet die KI verknüpfte Aufgaben ab (Zuständige, Abhängigkeiten). Alle Punkte hängen im '
-           + '<strong>Wissensgraph</strong> zusammen – über Zuständige, Status und eigene '
-           + '<strong>Verknüpfungen</strong> („blockiert", „gehört zu"). Alles wird lokal in der '
-           + '<strong>Verzeichnisstruktur</strong> gespeichert. <em>(Optionaler Tab.)</em>',
+      title: '23 · To-Do (Projektbaum & Empfehlung)',
+      text: 'Führe Aufgaben in einem <strong>Projektbaum</strong> (Wurzel = dein Name, beliebig tiefe '
+           + '<strong>Unterprojekte</strong>) – mit <strong>Teilnehmern</strong>, Status und Fristen. Aus einer '
+           + '<strong>Besprechungsnotiz</strong> leitet die KI verknüpfte Aufgaben ab. Ein Projekt lässt sich '
+           + '<strong>⚡ aktivieren</strong>: Suche und <strong>Wissensgraph</strong> zeigen dann nur diesen '
+           + 'Teilbaum. Der Untertab <strong>🎯 Empfehlung</strong> sagt dir (oder einer gewählten Person), '
+           + 'was <strong>als Nächstes</strong> dran ist – priorisiert nach <strong>Fälligkeit</strong> und '
+           + '<strong>Abhängigkeiten</strong>. Gespeichert wird in der <strong>Datenbank</strong>. '
+           + '<em>(Optionaler Tab.)</em>',
     },
     {
       image: 'log_file.png',
