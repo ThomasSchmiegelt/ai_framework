@@ -13292,6 +13292,135 @@ async def todo_next(req: Request):
     return {"text": text, "tokens": {"in": ti, "out": to}}
 
 
+# ── To-Do: Anlagen je Punkt (Dokument → Markdown) ────────────────────────────
+# Beim Anhängen wird das Dokument mit tools.files.extract in Text gewandelt und als
+# Markdown gespeichert; die MD-Dateien werden von der Suche mit durchsucht.
+
+def _todo_safe_file(fn: str) -> str:
+    base = Path(str(fn or "").replace("\\", "/")).name.strip()
+    base = "".join(c for c in base if c.isalnum() or c in (" ", ".", "_", "-")).strip()
+    return base or "datei"
+
+
+def _todo_attach_dir(name: str, item_id: str, create: bool = False) -> Path:
+    d = _todo_dir(name) / "attachments" / _todo_safe_file(item_id)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@app.post("/api/todo/lists/{name}/items/{item_id}/attach")
+async def todo_attach(name: str, item_id: str, file: UploadFile = File(...)):
+    from tools import files as _files
+    data = _todo_load(name)
+    item = next((it for it in data.get("items", []) if it.get("id") == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Aufgabe nicht gefunden")
+    d = _todo_attach_dir(name, item_id, create=True)
+    orig_name = _todo_safe_file(file.filename)
+    orig_path = d / orig_name
+    orig_path.write_bytes(await file.read())
+    # → Markdown erzeugen (Text extrahieren; Bilder bleiben als Hinweis)
+    try:
+        text = _files.extract(orig_path)
+    except Exception as e:
+        text = f"[Konnte Datei nicht lesen: {e}]"
+    md_name = (Path(orig_name).stem or "anlage") + ".md"
+    md_path = d / md_name
+    md_path.write_text(f"# {file.filename}\n\n{text}", encoding="utf-8")
+    item.setdefault("attachments", [])
+    # doppelte MD-Namen vermeiden
+    if any(a.get("md") == md_name for a in item["attachments"]):
+        md_name = f"{Path(orig_name).stem}_{uuid.uuid4().hex[:4]}.md"
+        md_path.rename(d / md_name) if md_path.exists() else None
+    item["attachments"].append({"name": file.filename, "md": md_name, "orig": orig_name})
+    saved = _todo_save(name, data)
+    return {"ok": True, "list": saved}
+
+
+@app.get("/api/todo/lists/{name}/attachment/{item_id}/{filename}")
+async def todo_attachment(name: str, item_id: str, filename: str):
+    d = _todo_attach_dir(name, item_id)
+    fp = d / _todo_safe_file(filename)
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="Anlage nicht gefunden")
+    return FileResponse(fp)
+
+
+@app.delete("/api/todo/lists/{name}/items/{item_id}/attach/{md_name}")
+async def todo_attach_delete(name: str, item_id: str, md_name: str):
+    data = _todo_load(name)
+    item = next((it for it in data.get("items", []) if it.get("id") == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Aufgabe nicht gefunden")
+    md_name = _todo_safe_file(md_name)
+    att = next((a for a in item.get("attachments", []) if a.get("md") == md_name), None)
+    if att:
+        d = _todo_attach_dir(name, item_id)
+        for fn in (att.get("md"), att.get("orig")):
+            if fn:
+                fp = d / _todo_safe_file(fn)
+                if fp.exists():
+                    try:
+                        fp.unlink()
+                    except Exception:
+                        pass
+        item["attachments"] = [a for a in item["attachments"] if a.get("md") != md_name]
+    return {"ok": True, "list": _todo_save(name, data)}
+
+
+@app.get("/api/todo/search")
+async def todo_search(q: str = Query(...)):
+    """Projektübergreifende Suche: durchsucht ALLE To-Do-Projekte nach Aufgabentext,
+    Zuständigen und dem Inhalt der angehängten Markdown-Dateien. So „kommunizieren"
+    die Projekte über eine gemeinsame Suche."""
+    from tools import todo as _todo
+    term = str(q or "").strip().lower()
+    if not term:
+        return {"results": []}
+    results = []
+    if TODO_DIR.exists():
+        for d in sorted(TODO_DIR.iterdir()):
+            if not d.is_dir() or d.name.startswith("_"):
+                continue
+            p = d / "list.json"
+            if not p.exists():
+                continue
+            try:
+                data = _todo.sanitize_list(json.loads(p.read_text(encoding="utf-8")))
+            except Exception:
+                continue
+            title = data.get("title") or d.name
+            for it in data.get("items", []):
+                hay = " ".join([it.get("text", ""), it.get("detail", ""),
+                                " ".join(it.get("assignees") or [])]).lower()
+                hit_text = term in hay
+                hit_att = None
+                for a in (it.get("attachments") or []):
+                    md_fp = d / "attachments" / _todo_safe_file(it.get("id", "")) / _todo_safe_file(a.get("md", ""))
+                    if md_fp.exists():
+                        try:
+                            content = md_fp.read_text(encoding="utf-8", errors="replace")
+                        except Exception:
+                            content = ""
+                        idx = content.lower().find(term)
+                        if idx >= 0:
+                            start = max(0, idx - 60)
+                            hit_att = {"name": a.get("name"), "md": a.get("md"),
+                                       "snippet": content[start:idx + 120].replace("\n", " ").strip()}
+                            break
+                if hit_text or hit_att:
+                    results.append({
+                        "project": d.name, "project_title": title,
+                        "item_id": it.get("id"), "text": it.get("text", ""),
+                        "status": it.get("status", "offen"),
+                        "assignees": it.get("assignees") or [],
+                        "source": "attachment" if (hit_att and not hit_text) else "text",
+                        "attachment": hit_att,
+                    })
+    return {"results": results[:200], "query": q}
+
+
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

@@ -1220,31 +1220,40 @@ abrufbar.
 
 ## 11h. To-Do mit Wissensgraph (✅ To-Do)
 
-Tab **✅ To-Do** — eine **interaktive, KI-gestützte Aufgabenliste**, in der alle Punkte **miteinander
-verknüpft** sind und als **Wissensgraph** dargestellt werden. Alles wird lokal in der
-Verzeichnisstruktur gespeichert (`data/todo/`).
+Tab **✅ To-Do** — eine **interaktive, KI-gestützte Aufgabenliste**. Du schreibst eine
+**Besprechungsnotiz**, lässt die KI daraus einzelne **Punkte** ableiten, hakst sie ab, hängst
+**Dokumente** an (werden als Markdown gespeichert und mitgesucht) und siehst alles im **Wissensgraph**.
+**Suche und Graph laufen projektübergreifend** — so „kommunizieren" deine Projekte miteinander. Alles
+wird lokal gespeichert (`data/todo/`).
 
-**Liste anlegen:** Oben Namen eingeben, **Art** wählen — **Besprechung**, **Projekt** oder **frei** —
-und **➕ Anlegen**. In der Liste trägst du **Titel, Datum, Teilnehmer** ein und kannst sie optional mit
-einem bestehenden **Projekt** verknüpfen.
+**Projekt anlegen:** Oben Namen eingeben, **Art** wählen — **Besprechung**, **Projekt** oder **frei** —
+und **➕ Anlegen**. Titel, Datum und Teilnehmer stehen unter **⚙ Projekt-Details** (einklappbar); optional
+lässt sich das Ganze mit einem Eintrag aus dem **Projekte-Tab** verknüpfen.
 
-**Aufgaben erfassen — zwei Wege:**
+**Der Kern-Ablauf:**
 
-- **Einzeln:** **➕ Aufgabe** und Text, Zuständige (aus den Teilnehmern), Status und Frist eintragen.
-  Der Status-Knopf wechselt per Klick zwischen 🔲 offen · ⏳ läuft · ✅ erledigt.
-- **Aus einer Notiz:** Besprechungsnotiz/Freitext ins Feld einfügen und **🤖 Aufgaben ableiten** — die
-  KI erkennt einzelne Aufgaben, Zuständige, Fristen und **Abhängigkeiten** und legt sie samt
-  Verknüpfungen an.
+1. **📝 Besprechungsnotiz** oben ins große Feld schreiben (oder einfügen).
+2. **🪄 To-Do-Liste ableiten** — die KI macht daraus einzelne Punkte samt Zuständigen, Fristen und
+   **Abhängigkeiten**. („ersetzen" anhaken, um vorhandene Punkte zu überschreiben statt zu ergänzen.)
+3. **Punkte bearbeiten:** Text/Zuständige/Frist anpassen, mit dem **Haken** links auf **erledigt**
+   setzen (durchgestrichen). Einzelne Punkte fügst du auch direkt per **➕ Punkt** hinzu.
 
-**Wissensgraph (🕸):** Über **▶ Graph aufbauen** entsteht der Graph — **Knoten = Aufgaben**,
-farbige **Hubs = Zuständige und Status** (Aufgaben mit gleicher Person/gleichem Status hängen am selben
-Hub), **Pfeile = Verknüpfungen** zwischen Aufgaben („blockiert", „gehört zu" …). Mit **🔗 Verbinden**
-ziehst du selbst Verknüpfungen (zwei Aufgaben anklicken), **✨ Verknüpfungen** lässt die KI passende
-Beziehungen vorschlagen. Klick auf eine Aufgabe zeigt ihre Details, Klick auf eine Kante ändert/löscht
-das Label. **🤖 Nächste Schritte** benennt, was als Nächstes ansteht und was blockiert ist.
+**📎 Dokumente anhängen:** Über den **📎-Knopf** eines Punkts eine Datei anhängen (PDF, DOCX, XLSX,
+Bilder, Text …). Der Inhalt wird automatisch in eine **Markdown-Datei** umgewandelt und beim Punkt als
+anklickbarer Chip abgelegt. Diese Markdown-Anlagen werden von der Suche **mitdurchsucht**.
 
-> **Speichern:** **💾 Speichern** legt Aufgaben, Verknüpfungen **und die Graph-Anordnung** dauerhaft in
-> `data/todo/<Liste>/list.json` ab — beim nächsten Öffnen ist alles wieder da.
+**🔍 Suche (oben rechts):** durchsucht **alle Projekte** auf einmal — Aufgabentexte, Zuständige **und den
+Inhalt der angehängten Dokumente**. Ein Klick auf einen Treffer öffnet das passende Projekt und springt
+zum Punkt.
+
+**🕸 Wissensgraph:** Über **▶ Graph aufbauen** entsteht der Graph — **Knoten = Punkte**, farbige
+**Hubs = Zuständige und Status**, **Pfeile = Verknüpfungen**. Mit **🔗 Verbinden** ziehst du selbst
+Verknüpfungen, **✨ Verknüpfungen** lässt die KI Beziehungen vorschlagen, **🤖 Nächste Schritte** nennt
+das Nächstliegende und Blockaden. Mit **🌐 Alle Projekte** werden die Punkte **aller** Projekte in einem
+Graphen gezeigt (über gemeinsame Zuständige verbunden), jedes Projekt in eigener Farbe.
+
+> **Speichern:** **💾 Speichern** legt Punkte, Verknüpfungen, Anlagen **und die Graph-Anordnung**
+> dauerhaft in `data/todo/<Projekt>/list.json` (Anlagen unter `attachments/`) ab.
 
 ---
 

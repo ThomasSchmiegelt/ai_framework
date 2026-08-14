@@ -37,7 +37,8 @@ def new_id() -> str:
 
 
 def new_item(text: str, detail: str = "", assignees: Optional[list] = None,
-             status: str = "offen", due: str = "", item_id: str = "") -> dict:
+             status: str = "offen", due: str = "", item_id: str = "",
+             attachments: Optional[list] = None) -> dict:
     """Ein Aufgaben-Item bauen (mit stabiler ID)."""
     st = status if status in STATUS else "offen"
     return {
@@ -48,8 +49,30 @@ def new_item(text: str, detail: str = "", assignees: Optional[list] = None,
         "status": st,
         "due": _clean_str(due, 40),
         "links": [],            # [{target: item_id, kind}]
+        "attachments": _clean_attachments(attachments),  # [{name, md, orig}]
         "created_at": time.time(),
     }
+
+
+def _clean_attachments(atts) -> list:
+    """Anlagen-Referenzen säubern. Jede Anlage: originaler Dateiname + der Name der
+    daraus erzeugten Markdown-Datei (die eigentliche Ablage liegt je Item unter
+    ``attachments/<item_id>/`` im Projektordner)."""
+    if not isinstance(atts, list):
+        return []
+    out = []
+    for a in atts:
+        if not isinstance(a, dict):
+            continue
+        md = _clean_str(a.get("md"), 200)
+        if not md:
+            continue
+        out.append({
+            "name": _clean_str(a.get("name"), 200) or md,
+            "md": md,
+            "orig": _clean_str(a.get("orig"), 200),
+        })
+    return out
 
 
 def link_items(items: list, source_id: str, target_id: str, kind: str = "verknuepft") -> bool:
@@ -104,6 +127,7 @@ def sanitize_list(data: dict) -> dict:
             raw.get("text", ""), raw.get("detail", ""), raw.get("assignees"),
             raw.get("status", "offen"), raw.get("due", ""),
             item_id=_clean_str(raw.get("id"), 40),
+            attachments=raw.get("attachments"),
         )
         if it["id"] in seen:
             it["id"] = new_id()
