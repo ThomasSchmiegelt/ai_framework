@@ -1103,6 +1103,7 @@ const Chat = (() => {
       const resp = await fetch(`/api/conversations/${convId}/compress`, { method: 'POST' });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Chat');
       if (convId === currentConvId) {
         await loadConversation(convId);
       }
@@ -1145,6 +1146,7 @@ const Chat = (() => {
       const resp = await fetch(`/api/conversations/${currentConvId}/compress`, { method: 'POST' });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Chat');
       const after = (data.messages || []).length;
       await loadConversation(currentConvId);
       showToast(`💾 Verlauf automatisch komprimiert (${before} → ${after} Nachrichten)`);
@@ -1173,6 +1175,8 @@ const Chat = (() => {
       const resp = await fetch(`/api/conversations/${convId}/to-skill`, { method: 'POST' });
       if (!resp.ok) throw new Error(await resp.text());
       const skillData = await resp.json();
+      if (skillData.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(skillData.tokens, 'Chat');
+      delete skillData.tokens;   // nicht in den Agenten-Datensatz übernehmen
       // Agent-Modal mit generierten Daten öffnen (id=null → neuer Agent)
       AgentManager.openModal({ ...skillData, id: null });
       switchTab('agents');
@@ -1224,6 +1228,8 @@ const Chat = (() => {
         messages.push({ role: 'assistant', content: `**${ev.question}**\n\n${ev.answer || ''}` });
       }
       scrollToBottom();
+    } else if (ev.type === 'done') {
+      if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Deepdive');
     } else if (ev.type === 'error') {
       showToast('Deepdive: ' + (ev.message || 'Fehler'));
     }
@@ -1671,7 +1677,7 @@ const Chat = (() => {
       card.appendChild(sec);
     } else if (ev.type === 'done') {
       if (ev.tokens && typeof TokenMeter !== 'undefined' && TokenMeter.add) {
-        TokenMeter.add({ in: ev.tokens.in || 0, out: ev.tokens.out || 0 }, 'Deepdive');
+        TokenMeter.add({ in: ev.tokens.in || 0, out: ev.tokens.out || 0 }, 'Plan-Orchestrator');
       }
     } else if (ev.type === 'error') {
       showToast('Plan: ' + (ev.message || 'Fehler'));

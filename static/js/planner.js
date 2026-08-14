@@ -915,6 +915,7 @@ const Planner = (() => {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.detail || r.status);
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Planer');
       t.doc = data.md; t.doc_role = data.role; t.researched = true;
       showToast(`✓ ${t.id}: Dossier in „${data.collection_name}" (${data.n_sources} Quellen)`);
       await _savePlanSilent();   // kontinuierlich sichern
@@ -1023,6 +1024,7 @@ const Planner = (() => {
           try {
             const ev = JSON.parse(line.slice(6));
             if (ev.type === 'text') { text += ev.content; assistantDiv.textContent = text; }
+            else if (ev.type === 'done' && ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Planer');
           } catch (_) {}
         }
       }
@@ -1157,7 +1159,9 @@ const Planner = (() => {
                                model: _model(), rag_collections: _currentRag() }),
       });
       if (!r.ok) { let m = 'HTTP ' + r.status; try { m = (await r.json()).detail || m; } catch (_) {} throw new Error(m); }
-      _renderFeasibility(div, await r.json());
+      const feas = await r.json();
+      if (feas.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(feas.tokens, 'Planer');
+      _renderFeasibility(div, feas);
     } catch (e) {
       div.textContent = 'Fehler: ' + e.message;
     } finally {
@@ -1444,7 +1448,10 @@ const Planner = (() => {
               document.getElementById('btn-plan-eval-import').style.display = '';
               status.textContent = '✓ Verbesserter Plan bereit zum Laden';
             }
-            else if (ev.type === 'done') status.textContent = '✓ Analyse abgeschlossen';
+            else if (ev.type === 'done') {
+              if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Planer');
+              status.textContent = '✓ Analyse abgeschlossen';
+            }
           } catch (_) {}
         }
       }
@@ -1521,6 +1528,7 @@ const Planner = (() => {
               statusEl.textContent = '⏳ ' + ev.message;
             } else if (ev.type === 'plan') {
               _fromListPlan = ev.plan;
+              if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Planer');
               if (statusEl) statusEl.textContent = `✓ Plan mit ${ev.plan.tasks?.length || 0} Aufgaben generiert`;
               const loadBtn = document.getElementById('btn-from-list-load');
               if (loadBtn) loadBtn.style.display = '';
@@ -1621,6 +1629,7 @@ const Planner = (() => {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Planer');
       _autoStructResult = data;
       _renderAutoStructPreview(data);
       if (statusEl) statusEl.textContent = '✓ Vorschau bereit';
@@ -1727,6 +1736,7 @@ const Planner = (() => {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Planer');
       _systemPrompt = d.system_prompt || '';
       if (status) { status.textContent = `✓ Agent: ${d.agent_name || 'Projektplaner'}`; status.title = _systemPrompt; }
       showToast('Projekt-Agent abgeleitet – steuert jetzt die KI-Vorschläge');
@@ -1859,6 +1869,7 @@ const Planner = (() => {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Planer');
       if (!(d.predecessors || []).length && !(d.successors || []).length) {
         showToast('Keine Vorschläge erhalten'); return;
       }
@@ -1948,6 +1959,7 @@ const Planner = (() => {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Planer');
       _detailData = { idx, detail: d.detail || {}, preds: d.predecessors || [], succs: d.successors || [] };
       _renderDetailModal(task);
     } catch (e) {
@@ -2150,6 +2162,7 @@ const Planner = (() => {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Planer');
       const cands = d.tasks || [];
       if (!cands.length) { body.innerHTML = '<div class="planner-muted" style="padding:6px 0">Keine Vorschläge erhalten.</div>'; return; }
       _insertData = { aId, bId, candidates: cands };

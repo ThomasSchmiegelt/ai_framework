@@ -464,6 +464,7 @@ const RAG = (() => {
               if (ev.type === 'progress') {
                 _updateOptCard(ev.step, ev.pct ?? 50);
               } else if (ev.type === 'done') {
+                if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'RAG');
                 _updateOptCard(`✓ ${ev.n_chunks} Chunks gespeichert`, 100);
                 setTimeout(_hideOptCard, 2000);
                 showToast(`✓ ${f.name}: ${ev.n_chunks} Chunks (optimiert)`);

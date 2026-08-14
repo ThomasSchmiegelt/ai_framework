@@ -104,13 +104,14 @@ const Onboarding = (() => {
     },
     {
       image: 'code.png',
-      title: '11 · Code-IDE',
-      text: 'Schreibe und führe kleine Programme direkt im Browser aus: links der '
-           + '<strong>Code-Editor</strong>, rechts die <strong>Live-Vorschau</strong> mit interaktiven '
-           + 'Eingabefeldern und Canvas. Der <strong>KI-Assistent</strong> erzeugt den Code auf Zuruf '
-           + '(„was soll das Programm zeigen?") und repariert ihn bei Fehlern. Fertige '
-           + '<strong>Beispiele</strong> wie Toleranzanalyse oder Federkennlinie sind ein Klick entfernt. '
-           + 'Im Reiter <strong>JSON-Editor</strong> reparierst du defekte JSON-Dateien mit Live-Prüfung.',
+      title: '11 · Code',
+      text: 'Ein <strong>chat-getriebener Arbeitsbereich</strong>: beschreibe oben, was das Programm '
+           + 'tun soll – der <strong>KI-Assistent</strong> erzeugt und ändert die aktive Datei und '
+           + 'repariert sie bei Fehlern. Mit <strong>🏗 Struktur</strong> entsteht auf Zuruf ein ganzer '
+           + 'Mehrdatei-Baum. <strong>▶ Ausführen</strong> läuft je nach Dateityp: '
+           + '<code>.js/.html</code> in der Live-Vorschau, <code>.py</code> serverseitig, '
+           + '<code>.json</code> wird geprüft/formatiert. Fertige <strong>Beispiele</strong> (z. B. '
+           + 'Toleranzanalyse, Federkennlinie) und ZIP-Export sind einen Klick entfernt.',
     },
     {
       image: 'medizin.png',
@@ -208,8 +209,28 @@ const Onboarding = (() => {
            + 'Projektpläne. <em>(Optionaler Tab.)</em>',
     },
     {
+      image: 'variantenvergleich.png',
+      title: '22 · Variantenvergleich',
+      text: 'Entscheide systematisch zwischen Alternativen. Du legst <strong>Kriterien</strong> fest '
+           + 'und bringst sie im <strong>Paarvergleich</strong> in eine Rangfolge – daraus errechnet der '
+           + 'Server die <strong>Gewichte</strong> samt <strong>Konsistenzprüfung (CR)</strong>. Die '
+           + '<strong>Varianten</strong> bewertest du je Kriterium auf einer Skala 1–10; das Ergebnis ist '
+           + 'ein gewichtetes <strong>Ranking mit Sieger</strong>. Die KI kann Kriterien, Varianten und '
+           + 'Bewertungen vorschlagen – <strong>gerechnet wird deterministisch</strong>, nie vom Modell.',
+    },
+    {
+      image: 'todo_wissensgraph.png',
+      title: '23 · To-Do mit Wissensgraph',
+      text: 'Führe Aufgaben als <strong>Besprechung, Projekt</strong> oder freie Liste – mit '
+           + '<strong>Teilnehmern</strong>, Status und Fristen. Aus einer <strong>Besprechungsnotiz</strong> '
+           + 'leitet die KI verknüpfte Aufgaben ab (Zuständige, Abhängigkeiten). Alle Punkte hängen im '
+           + '<strong>Wissensgraph</strong> zusammen – über Zuständige, Status und eigene '
+           + '<strong>Verknüpfungen</strong> („blockiert", „gehört zu"). Alles wird lokal in der '
+           + '<strong>Verzeichnisstruktur</strong> gespeichert. <em>(Optionaler Tab.)</em>',
+    },
+    {
       image: 'log_file.png',
-      title: '22 · Log-Datei',
+      title: '24 · Log-Datei',
       text: 'Im <strong>Log-Tab</strong> siehst du bei Bedarf, was im Hintergrund passiert: '
            + 'Modell-Antworten, Tool-Aufrufe und Diagnosen. Praktisch zur Fehlersuche – '
            + 'ein- und ausschaltbar und als Datei exportierbar.',

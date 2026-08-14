@@ -80,6 +80,7 @@ const MorphBox = (() => {
       });
       if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
       const data = await resp.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Morph-Kasten');
       _params = data.parameters || [];
       Object.keys(_selection).forEach(k => delete _selection[k]);
       _render(); _save();
@@ -112,7 +113,9 @@ const MorphBox = (() => {
         body: JSON.stringify({ problem: _problem, selection, parameters: _params, model: _model() }),
       });
       if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
-      _renderEval(await resp.json());
+      const evalData = await resp.json();
+      if (evalData.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(evalData.tokens, 'Morph-Kasten');
+      _renderEval(evalData);
     } catch (e) {
       out.innerHTML = `<span style="color:var(--danger,#e66)">Fehler: ${e.message}</span>`;
     }
@@ -220,6 +223,7 @@ const MorphBox = (() => {
       });
       if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
       const d = await resp.json();
+      if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Morph-Kasten');
       if (action === 'expand' && d.text) {
         p.values[vi] = d.text;
         _elaborated.add(d.text);     // ausformuliert → späteres Löschen zählt als „schlecht"
@@ -657,6 +661,7 @@ const MorphBox = (() => {
       });
       if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
       const data = await resp.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Morph-Kasten');
       _swipeQueue.push(...(data.ideen || []));
     } catch (e) {
       showToast('Fehler: ' + e.message);

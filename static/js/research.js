@@ -155,6 +155,7 @@ const Research = (() => {
           }
 
           if (ev.type === 'done') {
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Recherche');
             setStepState('rp-synth', 'done', 'Fertig ✓');
             document.getElementById('btn-start-research').disabled = false;
             document.getElementById('btn-reset-research').style.display = 'inline-flex';
@@ -294,6 +295,8 @@ const Research = (() => {
       });
       if (!r.ok) throw new Error((await r.json()).detail || r.status);
       const data = await r.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Recherche');
+      delete data.tokens;
       if (typeof CanvasRenderer !== 'undefined') CanvasRenderer.render(data);
       if (typeof switchTab === 'function') switchTab('canvas');
       showToast('✓ Präsentation im Canvas erstellt');

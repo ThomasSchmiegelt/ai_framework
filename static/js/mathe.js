@@ -204,7 +204,8 @@ const MatheChat = (() => {
           body: JSON.stringify({ messages: _history.map(m => ({ role: m.role, content: m.content })), model }),
         });
         if (gr.ok) {
-          const { facts } = await gr.json();
+          const { facts, tokens } = await gr.json();
+          if (tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(tokens, 'Mathe');
           if (facts && outMessages.length) {
             const last = outMessages[outMessages.length - 1];
             last.content = `${last.content}\n\n[Verifizierte Fakten (per SymPy berechnet — intern zum Prüfen und gezielten Anleiten nutzen, NICHT ungefragt komplett verraten):\n${facts}]`;
@@ -252,6 +253,7 @@ const MatheChat = (() => {
               _appendImageFrame(ev.data, ev.alt || 'Diagramm');
               hasPlot = true;
             } else if (ev.type === 'done') {
+              if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Mathe');
               _renderMd(assistantEl, fullText);
             } else if (ev.type === 'error') {
               if (assistantEl) assistantEl.textContent = 'Fehler: ' + (ev.content || 'Unbekannter Fehler');
@@ -305,6 +307,7 @@ const MatheChat = (() => {
             } else if (ev.type === 'text') {
               fullText = ev.content || fullText;
             } else if (ev.type === 'done') {
+              if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Mathe');
               _renderMd(assistantEl, fullText);
               _appendVerifyBadge(assistantEl, ev);
             } else if (ev.type === 'error') {

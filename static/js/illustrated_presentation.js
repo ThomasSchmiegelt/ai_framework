@@ -96,6 +96,7 @@ const IllustratedPresentation = (() => {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Dokumente');
       const ta = document.getElementById('illus-persona');
       if (ta) ta.value = data.system_prompt || '';
       const nm = document.getElementById('illus-persona-name');
@@ -172,6 +173,7 @@ const IllustratedPresentation = (() => {
         });
         if (r.ok) {
           const d = await r.json();
+          if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Dokumente');
           if (Array.isArray(d.bullets) && d.bullets.length) introBullets = d.bullets;
         }
       } catch (_) {}
@@ -190,7 +192,10 @@ const IllustratedPresentation = (() => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: img.dataUrl, system_prompt: persona, filename: img.name, topic }),
         });
-        if (r.ok) analysis = await r.json();
+        if (r.ok) {
+          analysis = await r.json();
+          if (analysis.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(analysis.tokens, 'Dokumente');
+        }
       } catch (_) {}
 
       const lines = [...(analysis.bullets || [])];

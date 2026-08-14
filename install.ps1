@@ -200,6 +200,8 @@ $optTabs = [ordered]@{
     postfach='Postfach (PST-/Mail-Auswertung, nur lokal)';
     patente='Patente (Patent-Recherche)'; rechnung='Angebote/Rechnungen';
     zeugnis='Arbeitszeugnisse';
+    varianten='Variantenvergleich (gewichtete Entscheidung)';
+    todo='To-Do-Liste mit Wissensgraph';
     morph='Morphologischer Kasten'; jury='Jury'
 }
 $hidden = @()

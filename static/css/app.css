@@ -4385,6 +4385,20 @@ select.ob-input option {
 .pat-badge { display: inline-block; font-size: 11.5px; padding: 3px 8px; border-radius: 999px; margin-bottom: 4px; }
 .pat-badge.ok { background: rgba(34,197,94,0.15); color: #22c55e; }
 .pat-badge.warn { background: rgba(245,158,11,0.15); color: #f59e0b; }
+/* Merkmalsanalyse (Claim-Chart): gerenderte Markdown-Tabelle statt pre-wrap-Rohtext
+   (.pat-stage .pat-merkmale-table schlägt die pre-wrap-Regel von .pat-stage div) */
+.pat-stage .pat-merkmale-table { white-space: normal; overflow-x: auto; }
+/* Akte-Statistik: einfache CSS-Balken (Muster wie Postfach-Statistik) */
+.pat-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.pat-stat-grid h4 { margin: 0 0 8px; font-size: 13px; }
+.pat-statbar { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
+.pat-statbar-label { flex: 0 0 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pat-statbar-track { flex: 1; height: 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+.pat-statbar-fill { display: block; height: 100%; background: var(--accent, #4A90D9); }
+.pat-statbar-n { flex: 0 0 34px; text-align: right; color: var(--text-muted); }
+.pat-merkmale-table table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.pat-merkmale-table th, .pat-merkmale-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.pat-merkmale-table th { background: var(--bg-hover, rgba(128,128,128,0.12)); }
 
 .pat-analysis-item { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg-input); }
 .pat-analysis-item summary { cursor: pointer; font-size: 12.5px; font-weight: 600; }
@@ -4696,3 +4710,57 @@ select.ob-input option {
 #jury-doc-text { flex: 1; min-height: 0; resize: none; margin: 12px 14px; padding: 12px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 8px; font-size: 14px; line-height: 1.6; font-family: inherit; }
 #jury-doc-preview { flex: 1; min-height: 0; overflow-y: auto; margin: 12px 14px; padding: 12px 16px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; font-size: 14px; line-height: 1.6; }
 #jury-tab-eval { max-height: 42%; overflow-y: auto; padding: 0 14px 12px; }
+
+/* ── Variantenvergleich (🧮 Varianten) ──────────────────────────────────────── */
+#var-toolbar, #todo-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+#var-body, #todo-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; }
+#varianten-panel input[type="text"], #varianten-panel input[type="number"], #varianten-panel textarea, #varianten-panel select,
+#todo-panel input[type="text"], #todo-panel input[type="date"], #todo-panel textarea, #todo-panel select {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 11px; font-size: 13px; font-family: inherit;
+}
+#varianten-panel input:focus, #varianten-panel textarea:focus, #varianten-panel select:focus,
+#todo-panel input:focus, #todo-panel textarea:focus, #todo-panel select:focus { outline: none; border-color: var(--accent); }
+#varianten-panel input::placeholder, #todo-panel input::placeholder, #varianten-panel textarea::placeholder, #todo-panel textarea::placeholder { color: var(--text-muted); }
+.var-sec { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.var-sec-head { font-size: 14px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.var-lbl { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.var-input { width: 100%; margin-bottom: 6px; }
+.var-ai { background: var(--accent-soft, rgba(79,140,255,0.15)); }
+.var-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.var-row .var-input { margin-bottom: 0; }
+.var-cr { font-size: 12px; font-weight: 600; }
+.var-cr-ok { color: #22c55e; }
+.var-cr-bad { color: #f59e0b; }
+.var-matrix { border-collapse: collapse; font-size: 12.5px; }
+.var-matrix th, .var-matrix td { border: 1px solid var(--border); padding: 4px 8px; text-align: center; }
+.var-matrix th { background: var(--bg-hover, rgba(128,128,128,0.12)); font-weight: 600; }
+.var-matrix .var-diag { color: var(--text-muted); }
+.var-matrix .var-recip { color: var(--text-muted); font-size: 11px; }
+.var-matrix select, .var-matrix input { padding: 3px 6px; margin: 0; min-width: 54px; text-align: center; }
+.var-rank { width: 100%; border-collapse: collapse; font-size: 13px; }
+.var-rank td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.var-rank .var-winner { font-weight: 700; }
+.var-rank-pos { width: 30px; color: var(--text-muted); }
+.var-rank-name { min-width: 130px; }
+.var-rank-bar { width: 45%; }
+.var-bar { height: 12px; background: var(--accent); border-radius: 6px; min-width: 2px; }
+.var-winner .var-bar { background: #22c55e; }
+.var-rank-score { white-space: nowrap; text-align: right; }
+.var-explain { margin-top: 10px; font-size: 13px; line-height: 1.55; }
+.var-explain:empty { display: none; }
+
+/* ── To-Do (✅) ──────────────────────────────────────────────────────────────── */
+#todo-subtabs { display: flex; gap: 6px; padding: 8px 14px 0; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); }
+.todo-subtab { background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); cursor: pointer; font-size: 13px; font-weight: 600; padding: 6px 12px 8px; border-radius: 6px 6px 0 0; }
+.todo-subtab:hover { color: var(--text); }
+.todo-subtab.active { color: var(--text); border-bottom-color: var(--accent); }
+.todo-item { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.todo-item .var-input { margin-bottom: 0; flex: 1; min-width: 140px; }
+.todo-statusbtn { background: transparent; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; padding: 5px 9px; white-space: nowrap; }
+.todo-item-links { flex-basis: 100%; padding-left: 4px; }
+.todo-link { font-size: 11px; color: var(--text-muted); margin-right: 8px; }
+#todo-graph-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 0 10px; }
+#todo-graph { width: 100%; height: 62vh; min-height: 380px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); }
+.todo-stale { box-shadow: 0 0 0 2px var(--accent); animation: todo-pulse 1.4s ease-in-out infinite; }
+@keyframes todo-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }

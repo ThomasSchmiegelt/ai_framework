@@ -408,6 +408,7 @@ const MedizinChat = (() => {
               if (assistantEl) assistantEl.textContent = fullText;
               document.getElementById('medizin-messages').scrollTop = 99999;
             } else if (ev.type === 'done') {
+              if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Medizin');
               _renderMd(assistantEl, fullText);
             } else if (ev.type === 'error') {
               if (assistantEl) assistantEl.textContent = 'Fehler: ' + (ev.content || 'Unbekannter Fehler');
@@ -545,6 +546,7 @@ const MedizinChat = (() => {
             outBox.classList.add('medizin-pipeline-error');
             outBox.textContent = 'Fehler: ' + (ev.content || 'Unbekannter Fehler');
           } else if (ev.type === 'done') {
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Medizin');
             if (typeof ev.round === 'number') nextRound = ev.round;
             if (ev.needs_followup === false) nextRound = 0;
           }
@@ -617,6 +619,7 @@ const MedizinChat = (() => {
           if (!line.startsWith('data: ')) continue;
           let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
           if (ev.type === 'text') { acc += ev.content; bodyEl.textContent = acc; }
+          else if (ev.type === 'done') { if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Medizin'); }
           else if (ev.type === 'error') bodyEl.textContent = 'Fehler: ' + (ev.content || '');
         }
         document.getElementById('medizin-messages').scrollTop = 99999;

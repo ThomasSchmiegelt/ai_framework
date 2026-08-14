@@ -28,6 +28,7 @@ const TAB_MODEL_ROLE = {
   planner: 'general', matrix: 'general', diranalyse: 'general',
   morph: 'general', jury: 'general', patente: 'general',
   rechnung: 'general', zeugnis: 'general',
+  varianten: 'general', todo: 'general',
 };
 let _activeModelName = '';
 
@@ -626,6 +627,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('Patente', () => { if (typeof Patente !== 'undefined') Patente.init(); });
   _safeInit('Rechnung', () => { if (typeof Rechnung !== 'undefined') Rechnung.init(); });
   _safeInit('Zeugnis', () => { if (typeof Zeugnis !== 'undefined') Zeugnis.init(); });
+  _safeInit('Varianten', () => { if (typeof Varianten !== 'undefined') Varianten.init(); });
+  _safeInit('Todo', () => { if (typeof Todo !== 'undefined') Todo.init(); });
   _safeInit('Jury', () => { if (typeof Jury !== 'undefined') Jury.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)

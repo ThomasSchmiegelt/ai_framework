@@ -99,10 +99,14 @@ JURY_DOCS_DIR = DATA_DIR / "jury_docs"   # im Jury-Tab erstellte/geprüfte Dokum
 RFQ_DIR = DATA_DIR / "rfq"   # Anfrage-Auswertung: Job-Zwischenstände (resume-fähig)
 PST_DIR = DATA_DIR / "pst"   # Postfach-Auswertung: geparste Mailstores (+ Anhänge, lokal)
 PATENTE_DIR = DATA_DIR / "patente"   # Patent-Recherche: Fallakten je Projekt (+ Analysen)
+PAT_CACHE_DIR = PATENTE_DIR / "_cache"   # Scrape-/OPS-Cache je Patentnummer (kein Projekt)
+EPO_OPS_FILE = DATA_DIR / "epo_ops.json"   # EPO-OPS-Zugangsdaten (gitignored, Backup nur mit secrets)
 FIRMENPROFIL_FILE = DATA_DIR / "firmenprofil.json"   # Absender-/Steuerdaten für Rechnungen
 RECHNUNGEN_DIR = DATA_DIR / "rechnungen"   # erstellte Rechnungen (JSON-Datensatz je Nummer)
 ANGEBOTE_DIR = DATA_DIR / "angebote"   # erstellte Angebote (JSON-Datensatz je Nummer)
 ZEUGNISSE_DIR = DATA_DIR / "zeugnisse"   # erzeugte Arbeitszeugnisse (JSON-Datensatz)
+VARIANTEN_DIR = DATA_DIR / "varianten"   # Variantenvergleich: ein Ordner je Vergleich (decision.json)
+TODO_DIR = DATA_DIR / "todo"   # KI-To-Do-Listen mit Wissensgraph (ein Ordner je Liste, list.json)
 CAPACITY_FILE = DATA_DIR / "capacity.json"   # globale Kapazitätsliste (tab-übergreifend)
 BILDER_DIR = Path(__file__).parent / "bilder"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
@@ -115,7 +119,7 @@ FEEDBACK_FILE = DATA_DIR / "feedback.md"
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, PROFILE_ASSETS_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, TODO_DIR, PROFILE_ASSETS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -1496,13 +1500,14 @@ async def _research_generator(request: ResearchRequest):
 
     content = llm_result.get("message", {}).get("content", "")
     content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    _r_ti, _r_to = _llm_tok(llm_result)
 
     words = content.split(" ")
     for i, word in enumerate(words):
         yield _sse({"type": "text", "content": word + (" " if i < len(words) - 1 else "")})
         await asyncio.sleep(0.004)
 
-    yield _sse({"type": "done"})
+    yield _sse({"type": "done", "tokens": {"in": _r_ti, "out": _r_to}})
 
 
 # ── Erweiterte Suche („/such"): alternative Suchbegriffe + Websuche + Zusammenfassung ──
@@ -1801,9 +1806,11 @@ async def deepdive(request: DeepDiveRequest):
     )
 
 
-async def _deepdive_questions(model: str, context: str, topic: str, count: int) -> list:
+async def _deepdive_questions(model: str, context: str, topic: str, count: int,
+                              tok: Optional[dict] = None) -> list:
     """Leitet aus der letzten Antwort genau ``count`` Vertiefungsfragen ab.
-    Gibt eine Liste von Fragestrings zurück (Fallback: generische Fragen)."""
+    Gibt eine Liste von Fragestrings zurück (Fallback: generische Fragen).
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     sys = (
         "Du bist ein gründlicher Rechercheur. Aus dem gegebenen Text leitest du "
         f"genau {count} weiterführende, eigenständige Vertiefungsfragen ab, die das "
@@ -1830,7 +1837,12 @@ async def _deepdive_questions(model: str, context: str, topic: str, count: int) 
                 "keep_alive": KEEP_ALIVE,
             })
             resp.raise_for_status()
-            data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+            _dd_j = resp.json()
+            if tok is not None:
+                _a, _b = _llm_tok(_dd_j)
+                tok["in"] += _a
+                tok["out"] += _b
+            data = _parse_llm_json(_dd_j.get("message", {}).get("content", "")) or {}
     except Exception:
         data = {}
     qs = data.get("questions") if isinstance(data, dict) else None
@@ -1843,9 +1855,11 @@ async def _deepdive_questions(model: str, context: str, topic: str, count: int) 
     return out
 
 
-async def _deepdive_answer(model: str, question: str, web: bool, rag_collections: list) -> str:
+async def _deepdive_answer(model: str, question: str, web: bool, rag_collections: list,
+                           tok: Optional[dict] = None) -> str:
     """Beantwortet EINE Deepdive-Frage: Websuche (+ optional RAG) als Beleg, dann
-    ein LLM-Aufruf. Gibt den fertigen Markdown-Antworttext zurück."""
+    ein LLM-Aufruf. Gibt den fertigen Markdown-Antworttext zurück.
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     from tools.search import search_with_sources
     blocks = []
     if web:
@@ -1889,7 +1903,12 @@ async def _deepdive_answer(model: str, question: str, web: bool, rag_collections
                 "keep_alive": KEEP_ALIVE,
             })
             resp.raise_for_status()
-            content = resp.json().get("message", {}).get("content", "")
+            _dd_j = resp.json()
+            if tok is not None:
+                _a, _b = _llm_tok(_dd_j)
+                tok["in"] += _a
+                tok["out"] += _b
+            content = _dd_j.get("message", {}).get("content", "")
     except Exception as e:
         return f"_(Antwort fehlgeschlagen: {e})_"
     return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
@@ -1913,17 +1932,18 @@ async def _deepdive_generator(request: DeepDiveRequest):
 
     yield _sse({"type": "dd_meta", "count": count, "as_document": request.as_document})
 
+    _dd_tok = {"in": 0, "out": 0}
     # 1) Vertiefungsfragen ableiten
-    questions = await _deepdive_questions(model, context, request.topic, count)
+    questions = await _deepdive_questions(model, context, request.topic, count, tok=_dd_tok)
     yield _sse({"type": "dd_questions", "questions": questions})
 
     # 2) Fragen der Reihe nach abarbeiten (je Frage Suche + Antwort)
     for idx, question in enumerate(questions):
         yield _sse({"type": "dd_chapter_start", "index": idx, "question": question})
-        answer = await _deepdive_answer(model, question, request.web_search, request.rag_collections)
+        answer = await _deepdive_answer(model, question, request.web_search, request.rag_collections, tok=_dd_tok)
         yield _sse({"type": "dd_chapter_done", "index": idx, "question": question, "answer": answer})
 
-    yield _sse({"type": "done"})
+    yield _sse({"type": "done", "tokens": _dd_tok})
 
 
 @app.post("/api/chat")
@@ -2055,8 +2075,9 @@ async def rag_add_document(cid: str, file: UploadFile = File(...)):
     return {"ok": True, "filename": file.filename, "n_chunks": n}
 
 
-async def _optimize_chunk_for_rag(chunk: str, model: str) -> str:
-    """Ruft das LLM auf, um einen Textabschnitt RAG-konform aufzubereiten."""
+async def _optimize_chunk_for_rag(chunk: str, model: str, tok: Optional[dict] = None) -> str:
+    """Ruft das LLM auf, um einen Textabschnitt RAG-konform aufzubereiten.
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await _llm.chat(client,{
@@ -2069,7 +2090,12 @@ async def _optimize_chunk_for_rag(chunk: str, model: str) -> str:
                 ],
             })
             resp.raise_for_status()
-            content = resp.json().get("message", {}).get("content", "").strip()
+            _ro_j = resp.json()
+            if tok is not None:
+                _a, _b = _llm_tok(_ro_j)
+                tok["in"] += _a
+                tok["out"] += _b
+            content = _ro_j.get("message", {}).get("content", "").strip()
             # Thinking-Tags und Code-Fences entfernen
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             content = re.sub(r"^```[^\n]*\n?|```$", "", content, flags=re.MULTILINE).strip()
@@ -2115,13 +2141,14 @@ async def rag_add_document_optimized(cid: str, file: UploadFile = File(...)):
 
         model = _model_for("general")
         optimized_parts: list[str] = []
+        _tok = {"in": 0, "out": 0}
         async with _model_session(model):
             for idx, chunk in enumerate(chunks):
                 pct = 5 + int((idx / total) * 85)
                 yield _sse({"type": "progress",
                              "step": f"Abschnitt {idx + 1}/{total} wird optimiert…",
                              "pct": pct})
-                opt = await _optimize_chunk_for_rag(chunk, model)
+                opt = await _optimize_chunk_for_rag(chunk, model, tok=_tok)
                 optimized_parts.append(opt)
 
         optimized_text = "\n\n".join(optimized_parts)
@@ -2133,7 +2160,7 @@ async def rag_add_document_optimized(cid: str, file: UploadFile = File(...)):
             yield _sse({"type": "error", "message": str(e)})
             return
 
-        yield _sse({"type": "done", "filename": file.filename, "n_chunks": n})
+        yield _sse({"type": "done", "filename": file.filename, "n_chunks": n, "tokens": _tok})
 
     return StreamingResponse(
         _stream(),
@@ -2457,9 +2484,11 @@ async def rag_add_folder(cid: str, req: Request):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _derive_adaptive_prompt(user_text: str, model: str, num_ctx: int = CHAT_NUM_CTX):
+async def _derive_adaptive_prompt(user_text: str, model: str, num_ctx: int = CHAT_NUM_CTX,
+                                  tok: Optional[dict] = None):
     """Leitet aus der Nutzerfrage einen fragespezifischen Experten-System-Prompt ab.
     Rückgabe: (rolle, system_prompt) – bei Fehler ("", "").
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird.
 
     Nutzt dasselbe num_ctx wie die anschließende Antwort, damit Ollama das Modell
     nicht erst mit kleinem Fenster lädt und danach für die Antwort neu laden muss."""
@@ -2484,7 +2513,12 @@ async def _derive_adaptive_prompt(user_text: str, model: str, num_ctx: int = CHA
                 ],
             })
             resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "")
+            _ad_j = resp.json()
+            if tok is not None:
+                _a, _b = _llm_tok(_ad_j)
+                tok["in"] += _a
+                tok["out"] += _b
+            raw = _ad_j.get("message", {}).get("content", "")
     except Exception:
         return "", ""
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
@@ -2567,8 +2601,9 @@ async def _chat_generator(request: ChatRequest):
 
     # Adaptiver Agent: erst die Frage analysieren, dann einen fragespezifischen
     # Experten-System-Prompt ableiten, der anschließend die Antwort erzeugt.
+    _ad_tok = {"in": 0, "out": 0}   # Tokenverbrauch der adaptiven Ableitung (→ Gesamtzähler)
     if request.agent_id == "__adaptive__":
-        role, derived = await _derive_adaptive_prompt(_last_user, model, _num_ctx)
+        role, derived = await _derive_adaptive_prompt(_last_user, model, _num_ctx, tok=_ad_tok)
         if derived:
             system_prompt = derived
             yield _sse({"type": "adaptive", "role": role})
@@ -2735,8 +2770,8 @@ async def _chat_generator(request: ChatRequest):
     # _num_ctx wurde bereits oben (vor der adaptiven Ableitung) bestimmt.
     # Denkprozess anfordern? Wird abgeschaltet, falls das Modell 'think' nicht unterstützt.
     _think_on = bool(request.show_thinking)
-    _tok_in = 0   # summierte Prompt-Tokens über alle Loop-Iterationen
-    _tok_out = 0  # summierte Antwort-Tokens
+    _tok_in = _ad_tok["in"]    # summierte Prompt-Tokens über alle Loop-Iterationen
+    _tok_out = _ad_tok["out"]  # summierte Antwort-Tokens (inkl. adaptiver Ableitung)
     # Agentic Loop
     for _iter in range(8):
         payload = {
@@ -2868,7 +2903,10 @@ async def _chat_generator(request: ChatRequest):
             if (not canvas_emitted and presentation_capable and len(content) > 300
                     and (_wants_pres or _presenter_dedicated)
                     and re.search(r"(?i)folie|slide|präsentation|agenda|gliederung|inhaltsverzeichnis", content)):
-                conv = await _text_to_presentation(content, model)
+                _pf_tok = {"in": 0, "out": 0}
+                conv = await _text_to_presentation(content, model, tok=_pf_tok)
+                _tok_in += _pf_tok["in"]
+                _tok_out += _pf_tok["out"]
                 if conv:
                     canvas_data = conv
                     yield _sse({"type": "canvas", "data": canvas_data})
@@ -3490,7 +3528,8 @@ def _parse_prose_presentation(text: str) -> Optional[dict]:
     return _normalize_presentation(data)
 
 
-async def _text_to_presentation(text: str, model: str) -> Optional[dict]:
+async def _text_to_presentation(text: str, model: str,
+                                tok: Optional[dict] = None) -> Optional[dict]:
     """Wandelt einen vom Modell als Fließtext gelieferten Präsentationsentwurf in
     eine Canvas-Präsentation um. Versucht ZUERST den deterministischen Parser
     (`_parse_prose_presentation`, bewahrt den Inhalt vollständig); nur wenn der
@@ -3526,7 +3565,12 @@ async def _text_to_presentation(text: str, model: str) -> Optional[dict]:
                 "stream": False,
             })
             resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "")
+            _tp_j = resp.json()
+            if tok is not None:
+                _a, _b = _llm_tok(_tp_j)
+                tok["in"] += _a
+                tok["out"] += _b
+            raw = _tp_j.get("message", {}).get("content", "")
     except Exception:
         return parsed
 
@@ -3602,6 +3646,7 @@ async def compress_conversation(cid: str):
         })
         resp.raise_for_status()
         result = resp.json()
+        _cc_ti, _cc_to = _llm_tok(result)
 
     summary = result.get("message", {}).get("content", "").strip()
     summary = re.sub(r"<think>.*?</think>", "", summary, flags=re.DOTALL).strip()
@@ -3623,7 +3668,8 @@ async def compress_conversation(cid: str):
         compressed.append(a)
 
     await _db.save_conversation(cid, compressed, model=model, agent_id=data.get("agent_id"))
-    return {"ok": True, "summary": summary, "messages": compressed}
+    return {"ok": True, "summary": summary, "messages": compressed,
+            "tokens": {"in": _cc_ti, "out": _cc_to}}
 
 
 @app.post("/api/conversations/{cid}/to-skill")
@@ -3666,6 +3712,7 @@ async def conversation_to_skill(cid: str):
         })
         resp.raise_for_status()
         result = resp.json()
+        _ts_ti, _ts_to = _llm_tok(result)
 
     content = result.get("message", {}).get("content", "").strip()
     content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
@@ -3684,6 +3731,7 @@ async def conversation_to_skill(cid: str):
             "tools": [],
         }
 
+    skill_data["tokens"] = {"in": _ts_ti, "out": _ts_to}
     return skill_data
 
 
@@ -4416,8 +4464,10 @@ _RFQ_ESTIMATE_SYSTEM = (
 )
 
 
-async def _rfq_estimate_one(client, model: str, task: str, role: str) -> dict:
-    """Schätzt Aufwand (h) und Dauer (Tage) für ein Ticket. Fallback 8 h / 1 Tag."""
+async def _rfq_estimate_one(client, model: str, task: str, role: str,
+                            tok: Optional[dict] = None) -> dict:
+    """Schätzt Aufwand (h) und Dauer (Tage) für ein Ticket. Fallback 8 h / 1 Tag.
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     usr = f"Rolle: {role or 'unbestimmt'}\n\nArbeitspaket:\n{task[:_rfq_task_max()]}"
     try:
         async with _model_session(model):
@@ -4430,7 +4480,12 @@ async def _rfq_estimate_one(client, model: str, task: str, role: str) -> dict:
                 "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
             })
             resp.raise_for_status()
-        data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+        _re_j = resp.json()
+        if tok is not None:
+            _a, _b = _llm_tok(_re_j)
+            tok["in"] += _a
+            tok["out"] += _b
+        data = _parse_llm_json(_re_j.get("message", {}).get("content", "")) or {}
     except Exception:
         data = {}
 
@@ -4521,6 +4576,7 @@ async def rfq_to_plan(req: Request):
             return
 
         cap_items = _load_capacity()
+        _tok = {"in": 0, "out": 0}
 
         async def _one(n, i, client):
             row = rows[i]
@@ -4529,7 +4585,7 @@ async def rfq_to_plan(req: Request):
             rid = str(_cell(row, id_col)).strip() if id_col is not None else ""
             title = str(_cell(row, title_col)).strip() if title_col is not None else ""
             role = str(res.get("responsible", "")).strip()
-            est = await _rfq_estimate_one(client, model, task, role)
+            est = await _rfq_estimate_one(client, model, task, role, tok=_tok)
             cap = _match_catalog(role, cap_items) if role else None
             rate = float((cap or {}).get("rate", 0) or 0)
             name = (title or task[:80] or f"Paket {i + 1}").strip()
@@ -4571,7 +4627,8 @@ async def rfq_to_plan(req: Request):
         }
         _plan_path(plan_id, plan_name).write_text(
             json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
-        yield _sse({"type": "done", "plan_id": plan_id, "plan_name": plan_name, "n": total})
+        yield _sse({"type": "done", "plan_id": plan_id, "plan_name": plan_name, "n": total,
+                    "tokens": _tok})
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -4904,12 +4961,15 @@ async def mail_action_agent(req: Request):
                 "stream": False,
             })
             resp.raise_for_status()
-            out = resp.json().get("message", {}).get("content", "").strip()
+            _ma_j = resp.json()
+            _ma_ti, _ma_to = _llm_tok(_ma_j)
+            out = _ma_j.get("message", {}).get("content", "").strip()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent-Fehler: {e}")
     out = re.sub(r"<think>.*?</think>", "", out, flags=re.DOTALL).strip()
     return {"ok": True, "text": out, "model": model,
-            "subject": m.get("subject", ""), "from": m.get("from", "")}
+            "subject": m.get("subject", ""), "from": m.get("from", ""),
+            "tokens": {"in": _ma_ti, "out": _ma_to}}
 
 
 @app.post("/api/presentation/from-text")
@@ -4922,10 +4982,12 @@ async def presentation_from_text(req: Request):
     if not text:
         raise HTTPException(status_code=400, detail="Kein Text übergeben")
     model = _pick_model(body.get("model"))
-    data = await _text_to_presentation(text, model)
+    _tok = {"in": 0, "out": 0}
+    data = await _text_to_presentation(text, model, tok=_tok)
     if not data:
         raise HTTPException(status_code=422,
                             detail="Konnte aus dem Text keine Folien ableiten")
+    data["tokens"] = _tok
     return data
 
 
@@ -5004,10 +5066,11 @@ async def generate_agent_prompt(req: Request):
         })
         resp.raise_for_status()
         result = resp.json()
+        _gp_ti, _gp_to = _llm_tok(result)
         generated = result.get("message", {}).get("content", "").strip()
 
     generated = re.sub(r"<think>.*?</think>", "", generated, flags=re.DOTALL).strip()
-    return {"prompt": generated}
+    return {"prompt": generated, "tokens": {"in": _gp_ti, "out": _gp_to}}
 
 
 @app.post("/api/derive-persona")
@@ -5051,7 +5114,9 @@ async def derive_persona(req: Request):
             "stream": False,
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _dp_j = resp.json()
+        _dp_ti, _dp_to = _llm_tok(_dp_j)
+        raw = _dp_j.get("message", {}).get("content", "")
 
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     # Markdown-Codezaun entfernen (```json … ```)
@@ -5081,7 +5146,8 @@ async def derive_persona(req: Request):
             "Du bist ein technischer Fach-Experte und beschreibst das gezeigte Bild "
             "knapp und sachlich auf Deutsch (max. 3 Stichpunkte plus eine kurze Bildunterschrift)."
         )
-    return {"persona_name": persona_name, "system_prompt": system_prompt}
+    return {"persona_name": persona_name, "system_prompt": system_prompt,
+            "tokens": {"in": _dp_ti, "out": _dp_to}}
 
 
 def _slide_fields_from_partial(raw: str):
@@ -5171,7 +5237,9 @@ async def analyze_image(req: Request):
             "stream": False,
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _ai_j = resp.json()
+        _ai_ti, _ai_to = _llm_tok(_ai_j)
+        raw = _ai_j.get("message", {}).get("content", "")
 
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
@@ -5206,6 +5274,7 @@ async def analyze_image(req: Request):
         "bullets": bullets,
         "caption": caption,
         "descriptive_filename": descriptive,
+        "tokens": {"in": _ai_ti, "out": _ai_to},
     }
 
 
@@ -5250,7 +5319,9 @@ async def illus_intro(req: Request):
             "options": {"num_ctx": _profile_num_ctx()},
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _ii_j = resp.json()
+        _ii_ti, _ii_to = _llm_tok(_ii_j)
+        raw = _ii_j.get("message", {}).get("content", "")
 
     def _strip_md(s: str) -> str:
         s = re.sub(r"[*_`#>]+", "", s)
@@ -5271,7 +5342,7 @@ async def illus_intro(req: Request):
         # Letzter Fallback: die ORIGINAL-Beschreibung in Sätze zerlegen (nie JSON-Text).
         plain = _strip_md(description)
         bullets = [s.strip() for s in re.split(r"(?<=[.!?])\s+", plain) if s.strip()][:5]
-    return {"bullets": bullets}
+    return {"bullets": bullets, "tokens": {"in": _ii_ti, "out": _ii_to}}
 
 
 @app.post("/api/agents")
@@ -5348,6 +5419,7 @@ async def merge_agents(req: AgentMergeReq):
     merged_name = (req.name or "").strip()
     merged_desc = ""
     merged_prompt = ""
+    _mg_ti, _mg_to = 0, 0
     try:
         async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
             resp = await _llm.chat(client, {
@@ -5373,7 +5445,9 @@ async def merge_agents(req: AgentMergeReq):
                 "stream": False,
             })
             resp.raise_for_status()
-            data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+            _mg_j = resp.json()
+            _mg_ti, _mg_to = _llm_tok(_mg_j)
+            data = _parse_llm_json(_mg_j.get("message", {}).get("content", "")) or {}
         merged_prompt = (data.get("system_prompt") or "").strip()
         merged_name = merged_name or (data.get("name") or "").strip()
         merged_desc = (data.get("description") or "").strip()
@@ -5403,7 +5477,9 @@ async def merge_agents(req: AgentMergeReq):
     agent.id = _to_slug(agent.name or "agent") + "_" + uuid.uuid4().hex[:4]
     fp = _unique_agent_path(agent.name or agent.id, exclude_id=agent.id)
     fp.write_text(json.dumps(agent.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
-    return agent.model_dump()
+    out = agent.model_dump()
+    out["tokens"] = {"in": _mg_ti, "out": _mg_to}
+    return out
 
 
 # Schwelle (Zeichen): bis hierher Text direkt in den system_prompt, darüber RAG-Basis.
@@ -5932,9 +6008,10 @@ def _dir_walk(base: Path):
     return files
 
 
-async def _llm_ner_names(text: str, model: str) -> List[str]:
+async def _llm_ner_names(text: str, model: str, tok: Optional[dict] = None) -> List[str]:
     """Optionaler LLM-NER-Pass: liefert eine Liste zu schwärzender Personennamen.
-    Best effort — bei jedem Fehler leere Liste."""
+    Best effort — bei jedem Fehler leere Liste.
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     snippet = (text or "")[:4000]
     if not snippet.strip():
         return []
@@ -5954,7 +6031,12 @@ async def _llm_ner_names(text: str, model: str) -> List[str]:
                 ],
             })
             resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "")
+            _ner_j = resp.json()
+            if tok is not None:
+                _a, _b = _llm_tok(_ner_j)
+                tok["in"] += _a
+                tok["out"] += _b
+            raw = _ner_j.get("message", {}).get("content", "")
     except Exception:
         return []
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
@@ -5969,12 +6051,13 @@ async def _llm_ner_names(text: str, model: str) -> List[str]:
         return []
 
 
-async def _anonymize(text: str, mapping: dict, model: str, use_llm: bool):
+async def _anonymize(text: str, mapping: dict, model: str, use_llm: bool,
+                     tok: Optional[dict] = None):
     """Anonymisiert Text deterministisch (regex) und optional per LLM-NER."""
     from tools.anonymize import redact_pii, redact_names
     clean, mapping = redact_pii(text, mapping)
     if use_llm:
-        names = await _llm_ner_names(text, model)
+        names = await _llm_ner_names(text, model, tok=tok)
         if names:
             clean, mapping = redact_names(clean, names, mapping)
     return clean, mapping
@@ -6001,6 +6084,7 @@ async def dir_scan(req: Request):
                   and 0 < f["size"] <= _DIR_FILE_MAX_BYTES]
     text_files.sort(key=lambda f: f["size"])
 
+    _tok = {"in": 0, "out": 0}
     mapping: dict = {}
     snippets = []
     for f in text_files[:_DIR_SNIPPET_FILES]:
@@ -6012,7 +6096,7 @@ async def dir_scan(req: Request):
             continue
         snip = txt[:_DIR_SNIPPET_CHARS]
         if anonymize:
-            snip, mapping = await _anonymize(snip, mapping, model, use_llm_ner)
+            snip, mapping = await _anonymize(snip, mapping, model, use_llm_ner, tok=_tok)
         snippets.append({"file": f["rel"], "snippet": snip})
 
     # Kompakte Auflistung für das LLM
@@ -6047,7 +6131,11 @@ async def dir_scan(req: Request):
                 ],
             })
             resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "")
+            _ds_j = resp.json()
+            _a, _b = _llm_tok(_ds_j)
+            _tok["in"] += _a
+            _tok["out"] += _b
+            raw = _ds_j.get("message", {}).get("content", "")
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
         m = re.search(r"\{[\s\S]*\}", raw)
         if m:
@@ -6070,6 +6158,7 @@ async def dir_scan(req: Request):
         "summary": summary,
         "interesting": interesting,
         "redacted": len(mapping),
+        "tokens": _tok,
     }
 
 
@@ -6097,8 +6186,9 @@ async def dir_analyze_file(req: Request):
     if not txt or txt.startswith("[Lesefehler"):
         raise HTTPException(status_code=400, detail=f"Text nicht lesbar: {txt}")
     # Anonymisierung von Personendaten ist PFLICHT (nicht abschaltbar)
+    _tok = {"in": 0, "out": 0}
     mapping: dict = {}
-    txt, mapping = await _anonymize(txt[:16000], mapping, model, use_llm_ner)
+    txt, mapping = await _anonymize(txt[:16000], mapping, model, use_llm_ner, tok=_tok)
 
     analysis = ""
     try:
@@ -6116,12 +6206,16 @@ async def dir_analyze_file(req: Request):
                 ],
             })
             resp.raise_for_status()
-            analysis = resp.json().get("message", {}).get("content", "").strip()
+            _da_j = resp.json()
+            _a, _b = _llm_tok(_da_j)
+            _tok["in"] += _a
+            _tok["out"] += _b
+            analysis = _da_j.get("message", {}).get("content", "").strip()
             analysis = re.sub(r"<think>.*?</think>", "", analysis, flags=re.DOTALL).strip()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analyse fehlgeschlagen: {e}")
 
-    return {"file": file_rel, "analysis": analysis, "redacted": len(mapping)}
+    return {"file": file_rel, "analysis": analysis, "redacted": len(mapping), "tokens": _tok}
 
 
 @app.post("/api/dir/finalize")
@@ -6716,9 +6810,23 @@ async def pst_command(req: Request):
 # überall im Framework lokal (_local_llm_available-Gate).
 
 
+def _pat_ops_creds() -> Optional[dict]:
+    """EPO-OPS-Zugangsdaten (consumer_key/secret) aus data/epo_ops.json — oder
+    None, wenn nicht konfiguriert (→ Google-Scraping-Fallback)."""
+    if not EPO_OPS_FILE.exists():
+        return None
+    try:
+        d = json.loads(EPO_OPS_FILE.read_text(encoding="utf-8"))
+        if d.get("consumer_key") and d.get("consumer_secret"):
+            return d
+    except Exception:
+        pass
+    return None
+
+
 def _pat_safe_name(name: str) -> str:
     safe = "".join(c for c in str(name or "") if c.isalnum() or c in (" ", "_", "-")).strip()
-    if not safe:
+    if not safe or safe.startswith("_"):   # "_cache" u. Ä. sind reserviert
         raise HTTPException(status_code=400, detail="Ungültiger Projektname")
     return safe
 
@@ -6779,11 +6887,19 @@ async def _pat_index_patent(coll: dict, patent: dict):
     pid = patent.get("patent_id")
     if not pid:
         return
+    _legal = "; ".join(f"{e.get('date','')} {e.get('desc') or e.get('code','')}".strip()
+                       for e in (patent.get("legal_status") or [])[:8])
     text = (f"Titel: {patent.get('title','')}\n"
             f"Zusammenfassung: {patent.get('abstract','')}\n"
-            f"Ansprüche: {(patent.get('claims') or '')[:4000]}\n"
+            f"Ansprüche: {(patent.get('claims') or '')[:8000]}\n"
             f"IPC-Klassen: {', '.join(patent.get('ipc_klassen') or [])}\n"
-            f"Rechteinhaber: {', '.join(patent.get('rechteinhaber') or [])}")
+            f"CPC-Klassen: {', '.join(patent.get('cpc_klassen') or [])}\n"
+            f"Rechteinhaber: {', '.join(patent.get('rechteinhaber') or [])}\n"
+            f"Erfinder: {', '.join(patent.get('inventors') or [])}\n"
+            f"Anmeldedatum: {patent.get('filing_date','')} · Priorität: {patent.get('priority_date','')} · "
+            f"Publikation: {patent.get('publication_date','')}\n"
+            + (f"Rechtsstand: {_legal}\n" if _legal else "")
+            + (f"Patentfamilie: {', '.join((patent.get('family') or [])[:20])}" if patent.get("family") else ""))
     await _db.rag_delete_document(pid)
     try:
         await ingest_file(coll, text, patent.get("title") or pid, pid)
@@ -6800,13 +6916,49 @@ async def _pat_index_analysis(coll: dict, doc_id: str, md_text: str, title: str)
         pass
 
 
+class PatOpsConfig(BaseModel):
+    consumer_key: str = ""
+    consumer_secret: str = ""
+
+
+@app.get("/api/patente/ops-config")
+async def patente_ops_config_get():
+    """Status der EPO-OPS-Anbindung (Key nie im Klartext zurückgeben)."""
+    creds = _pat_ops_creds()
+    key = (creds or {}).get("consumer_key", "")
+    return {"configured": bool(creds),
+            "key_masked": (key[:4] + "…" + key[-4:]) if len(key) > 8 else ("•" * len(key))}
+
+
+@app.post("/api/patente/ops-config")
+async def patente_ops_config_set(body: PatOpsConfig):
+    """Speichert die EPO-OPS-Zugangsdaten und prüft sie mit einem Test-Login.
+    Leere Felder löschen die Konfiguration (→ zurück auf Google-Fallback)."""
+    from tools import epo_ops
+    key = (body.consumer_key or "").strip()
+    secret = (body.consumer_secret or "").strip()
+    if not key and not secret:
+        EPO_OPS_FILE.unlink(missing_ok=True)
+        return {"ok": True, "configured": False, "message": "EPO-OPS-Zugang entfernt — Google-Fallback aktiv."}
+    if not key or not secret:
+        raise HTTPException(status_code=400, detail="Consumer Key UND Secret angeben")
+    creds = {"consumer_key": key, "consumer_secret": secret}
+    try:
+        async with httpx.AsyncClient() as client:
+            await epo_ops.get_token(client, creds)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Test-Anmeldung fehlgeschlagen: {e}")
+    EPO_OPS_FILE.write_text(json.dumps(creds, indent=2), encoding="utf-8")
+    return {"ok": True, "configured": True, "message": "✓ EPO OPS verbunden — amtliche Daten aktiv."}
+
+
 @app.get("/api/patente/projects")
 async def patente_projects():
     if not PATENTE_DIR.exists():
         return {"projects": []}
     out = []
     for d in sorted(PATENTE_DIR.iterdir()):
-        if not d.is_dir():
+        if not d.is_dir() or d.name.startswith("_"):   # _cache u. Ä. überspringen
             continue
         items = _pat_load(d.name) if (d / "patente.json").exists() else []
         meta = _pat_meta(d)
@@ -6846,7 +6998,16 @@ async def patente_project_delete(name: str):
 
 @app.get("/api/patente/projects/{name}")
 async def patente_project_get(name: str):
-    return {"patente": _pat_load(name)}
+    from tools import patente as _patente
+    items = _pat_load(name)
+    # Stärke-Kennzahlen zur Laufzeit anreichern (deterministisch, kein LLM,
+    # nicht persistiert — rechnet sich bei jedem Laden frisch aus den Feldern)
+    for p in items:
+        try:
+            p["kennzahlen"] = _patente.patent_kennzahlen(p)
+        except Exception:
+            p["kennzahlen"] = {}
+    return {"patente": items}
 
 
 class PatLookup(BaseModel):
@@ -6861,9 +7022,10 @@ async def patente_import_lookup(name: str, body: PatLookup):
     if not pid:
         raise HTTPException(status_code=400, detail="Keine Patentnummer angegeben")
     async with httpx.AsyncClient() as client:
-        details = await _patente.fetch_patent_details(client, pid)
+        details = await _patente.fetch_patent(client, pid, ops_creds=_pat_ops_creds(),
+                                              cache_dir=PAT_CACHE_DIR)
     if "error" in details:
-        raise HTTPException(status_code=502, detail=f"Scraping fehlgeschlagen: {details['error']}")
+        raise HTTPException(status_code=502, detail=f"Abruf fehlgeschlagen: {details['error']}")
     items = _patente.save_project(d / "patente.json", [details])
     if await _local_llm_available():
         coll = await _pat_rag_collection_for(name)
@@ -6876,16 +7038,21 @@ class PatSearch(BaseModel):
     assignee: str = ""
     country: str = ""
     max_results: int = 20
+    ipc: str = ""          # IPC-/CPC-Klasse, z. B. "B60L" oder "H01M10/052"
+    date_from: str = ""    # Publikationsdatum von (YYYY-MM-DD)
+    date_to: str = ""      # Publikationsdatum bis (YYYY-MM-DD)
 
 
 @app.post("/api/patente/search")
 async def patente_search(body: PatSearch):
     from tools import patente as _patente
     async with httpx.AsyncClient() as client:
-        results = await _patente.search_patents(
+        results, fehler, quelle = await _patente.search_patents(
             client, body.term, body.assignee, body.country,
-            max(1, min(int(body.max_results or 20), 50)))
-    return {"results": results}
+            max(1, min(int(body.max_results or 20), 50)),
+            ipc=body.ipc, date_from=body.date_from, date_to=body.date_to,
+            ops_creds=_pat_ops_creds(), cache_dir=PAT_CACHE_DIR)
+    return {"results": results, "error": fehler, "source": quelle}
 
 
 class PatPreview(BaseModel):
@@ -6901,7 +7068,8 @@ async def patente_preview(body: PatPreview):
     if not pid:
         raise HTTPException(status_code=400, detail="Keine Patentnummer angegeben.")
     async with httpx.AsyncClient() as client:
-        details = await _patente.fetch_patent_details(client, pid)
+        details = await _patente.fetch_patent(client, pid, ops_creds=_pat_ops_creds(),
+                                              cache_dir=PAT_CACHE_DIR)
     if "error" in details:
         raise HTTPException(status_code=502, detail=f"Abruf fehlgeschlagen: {details['error']}")
     return details
@@ -6917,12 +7085,14 @@ async def patente_import_csv(name: str, body: PatImportCsv):
     d = _pat_project_dir(name)
     coll = await _pat_rag_collection_for(name) if await _local_llm_available() else None
     imported, failed = [], []
+    _creds = _pat_ops_creds()
     async with httpx.AsyncClient() as client:
         for raw in body.numbers[:500]:
             n = str(raw).strip()
             if not n:
                 continue
-            details = await _patente.fetch_patent_details(client, n)
+            details = await _patente.fetch_patent(client, n, ops_creds=_creds,
+                                                  cache_dir=PAT_CACHE_DIR)
             if "error" in details:
                 failed.append(n)
                 continue
@@ -6968,9 +7138,11 @@ async def patente_import_citations(name: str, body: PatImportCitations):
     zu_laden = [z for z in (quelle.get("zitate") or []) if z not in vorhandene]
     coll = await _pat_rag_collection_for(name) if await _local_llm_available() else None
     neu, failed = [], []
+    _creds = _pat_ops_creds()
     async with httpx.AsyncClient() as client:
         for n in zu_laden[:200]:
-            details = await _patente.fetch_patent_details(client, n)
+            details = await _patente.fetch_patent(client, n, ops_creds=_creds,
+                                                  cache_dir=PAT_CACHE_DIR)
             if "error" in details:
                 failed.append(n)
                 continue
@@ -6995,12 +7167,15 @@ async def patente_export_csv(name: str):
     import io
     items = _pat_load(name)
     buf = io.StringIO()
-    fields = ["patent_id", "title", "ipc_klassen", "rechteinhaber", "zitate", "url", "scraped_at"]
+    fields = ["patent_id", "title", "ipc_klassen", "cpc_klassen", "rechteinhaber",
+              "inventors", "filing_date", "priority_date", "publication_date",
+              "family", "zitate", "zitiert_von", "source", "url", "scraped_at"]
     w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
     w.writeheader()
     for it in items:
         row = dict(it)
-        for k in ("ipc_klassen", "rechteinhaber", "zitate"):
+        for k in ("ipc_klassen", "cpc_klassen", "rechteinhaber", "inventors", "family",
+                  "zitate", "zitiert_von"):
             if isinstance(row.get(k), list):
                 row[k] = ", ".join(row[k])
         w.writerow(row)
@@ -7034,25 +7209,63 @@ async def _patente_analyze_generator(name: str, body: PatAnalyze):
         yield _sse({"type": "error", "message": "Keine gültigen Patente ausgewählt"})
         return
 
+    # Anspruchs-Volltexte für die Merkmalsanalyse (Anspruch 1 ungekürzt) — die
+    # ersten beiden gewählten Dokumente (Einzel- oder Vergleichs-Claim-Chart).
+    claims_texts = [(p["patent_id"], p.get("claims") or "") for p in gewaehlt[:2]
+                    if (p.get("claims") or "").strip()]
+
+    # Kontextbudget aus dem Profil-Kontextfenster ableiten (~3,5 Zeichen/Token,
+    # 60 % für das Patentmaterial) — statt fixer 500-Zeichen-Kürzung.
+    _budget = max(8000, int(_profile_num_ctx() * 3.5 * 0.6))
+
     if len(gewaehlt) == 1:
         p = gewaehlt[0]
-        analyse_text = f"Patent {p['patent_id']}: {p.get('title','')}\n{p.get('abstract','')}\n{p.get('claims','')}"
+        analyse_text = (f"Patent {p['patent_id']}: {p.get('title','')}\n"
+                        f"{p.get('abstract','')}\n{p.get('claims','')}")[:_budget]
         analyse_typ = "Einzelnes_Dokument"
     elif len(gewaehlt) == 2:
         d1, d2 = gewaehlt
+        _each = _budget // 2
         analyse_text = (
-            f"DOKUMENT 1 ({d1['patent_id']}): {d1.get('abstract','')}\nAnsprüche: {d1.get('claims','')}\n\n"
-            f"DOKUMENT 2 ({d2['patent_id']}): {d2.get('abstract','')}\nAnsprüche: {d2.get('claims','')}")
+            (f"DOKUMENT 1 ({d1['patent_id']}): {d1.get('abstract','')}\nAnsprüche: {d1.get('claims','')}")[:_each]
+            + "\n\n"
+            + (f"DOKUMENT 2 ({d2['patent_id']}): {d2.get('abstract','')}\nAnsprüche: {d2.get('claims','')}")[:_each])
         analyse_typ = "Vergleich_zweier_Dokumente"
     else:
+        # Mehrfachauswahl: Anspruch 1 VOLLSTÄNDIG (deterministisch extrahiert) statt
+        # der früheren 500-Zeichen-Kürzung; Gesamtbudget proportional verteilt.
+        _each = max(1500, _budget // len(gewaehlt))
         analyse_text = "\n\n".join(
-            f"Patent {p['patent_id']}: {p.get('abstract','')}\nAnspruch 1: {(p.get('claims') or '')[:500]}"
+            (f"Patent {p['patent_id']}: {p.get('abstract','')}\n"
+             f"Anspruch 1: {_patente.extract_claim1(p.get('claims') or '')}")[:_each]
             for p in gewaehlt)
         analyse_typ = "Mehrfachauswahl"
 
-    # Patentrecherche zählt zur web-gestützten Recherche: Profil-Schalter
-    # „Web-Recherche lokal" biegt ein API-Modell auf ein lokales um.
-    model, _m_err = await _research_model(body.model, _model_for("general"))
+    # Nächstliegender Stand der Technik aus der Projekt-Akte (RAG-Treffer) für
+    # den Aufgabe-Lösungs-Ansatz — eigene (analysierte) Dokumente per Titel
+    # ausgefiltert; leer ohne lokales LLM/Embeddings.
+    sdt_kontext = ""
+    try:
+        if claims_texts and await _local_llm_available():
+            cid = _pat_meta(d).get("rag_collection_id")
+            if cid:
+                from tools.rag import query_collections
+                own_titles = {(p.get("title") or "").strip() for p in gewaehlt}
+                q = _patente.extract_claim1(claims_texts[0][1])[:2000]
+                hits = await query_collections([cid], q, top_k_cap=6)
+                hits = [h for h in hits if (h.get("filename") or "").strip() not in own_titles][:3]
+                if hits:
+                    sdt_kontext = "\n\n".join(f"[{h['filename']}]\n{h['text']}" for h in hits)
+    except Exception:
+        sdt_kontext = ""
+
+    # Deterministische Kennzahlen-Tabelle für den Moderator (Triage-Score)
+    kennzahlen_text = _patente.kennzahlen_markdown(gewaehlt)
+
+    # Patentrecherche zählt zur web-gestützten Recherche: Rolle „Wissenschaftlich
+    # (Recherche)" — dort zugewiesene API-Modelle werden genutzt; nur der Profil-
+    # Schalter „Web-Recherche lokal" biegt ein API-Modell auf ein lokales um.
+    model, _m_err = await _research_model(body.model, _model_for("science"))
     if _m_err:
         # Läuft bereits als SSE-Stream: Fehler als Frame melden, nicht als
         # HTTPException (die käme hier nie beim Client an).
@@ -7091,7 +7304,10 @@ async def _patente_analyze_generator(name: str, body: PatAnalyze):
 
     async def _run():
         try:
-            erg = await _patente.run_pipeline(chat_haupt, chat_neben, analyse_text, on_progress=on_progress)
+            erg = await _patente.run_pipeline(chat_haupt, chat_neben, analyse_text,
+                                              on_progress=on_progress, claims_texts=claims_texts,
+                                              sdt_kontext=sdt_kontext,
+                                              kennzahlen_text=kennzahlen_text)
             queue.put_nowait(("__result__", erg))
         except Exception as e:
             queue.put_nowait(("__error__", str(e)))
@@ -7123,6 +7339,125 @@ async def _patente_analyze_generator(name: str, body: PatAnalyze):
         md_path = d / "analysen" / f"{base}.md"
         md_text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
         await _pat_index_analysis(coll, f"analyse_{base}", md_text, f"Analyse {base}")
+
+    yield _sse({"type": "done", "ergebnisse": ergebnisse, "datei_name": f"{base}.json", "tokens": tok})
+
+
+class PatFto(BaseModel):
+    patent_ids: list[str]
+    produkt: str
+    model: Optional[str] = None
+    neben_model: Optional[str] = None
+
+
+@app.post("/api/patente/projects/{name}/fto")
+async def patente_fto(name: str, body: PatFto):
+    return StreamingResponse(
+        _patente_fto_generator(name, body),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _patente_fto_generator(name: str, body: PatFto):
+    """FTO-Produkt-Check: Claim-Chart Anspruch 1 ↔ Produktbeschreibung je
+    gewähltem Patent (All-Elements-Rule, Prüfschleife), Ergebnis als gespeicherte
+    Analyse vom Typ FTO_Check. Keine Rechtsberatung (Hinweis im Fazit)."""
+    from tools import patente as _patente
+    d = _pat_project_dir(name)
+    bestand = _pat_load(name)
+    ids = [i for i in (body.patent_ids or []) if i]
+    idset = set(ids)
+    gewaehlt = [p for p in bestand if p.get("patent_id") in idset]
+    produkt = (body.produkt or "").strip()
+    if not gewaehlt:
+        yield _sse({"type": "error", "message": "Keine gültigen Patente ausgewählt"})
+        return
+    if len(produkt) < 30:
+        yield _sse({"type": "error", "message": "Bitte das eigene Produkt/die Idee ausführlicher beschreiben (mind. ein paar Sätze)."})
+        return
+
+    patents = [(p["patent_id"], p.get("claims") or "") for p in gewaehlt
+               if (p.get("claims") or "").strip()]
+    if not patents:
+        yield _sse({"type": "error", "message": "Für die Auswahl liegen keine Anspruchstexte vor."})
+        return
+
+    # Produktbeschreibung ans Kontextbudget anpassen (wie analyze)
+    produkt = produkt[:max(4000, int(_profile_num_ctx() * 3.5 * 0.3))]
+
+    model, _m_err = await _research_model(body.model, _model_for("science"))
+    if _m_err:
+        yield _sse({"type": "error", "message": _m_err})
+        return
+    neben_model = _pick_model(body.neben_model, model) if body.neben_model else model
+    if _research_local_only() and _llm.is_remote(neben_model):
+        neben_model = model
+    tok = {"in": 0, "out": 0}
+    queue: asyncio.Queue = asyncio.Queue()
+    SENTINEL = object()
+
+    async def _call(mdl: str, system: str, user: str) -> str:
+        async with _model_session(mdl), httpx.AsyncClient(timeout=400) as client:
+            resp = await _llm.chat(client, {
+                "model": mdl, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": user}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+            j = resp.json()
+            a, b = _llm_tok(j)
+            tok["in"] += a
+            tok["out"] += b
+            return j.get("message", {}).get("content", "") or ""
+
+    async def chat_haupt(system: str, user: str) -> str:
+        return await _call(model, system, user)
+
+    async def chat_neben(system: str, user: str) -> str:
+        return await _call(neben_model, system, user)
+
+    def on_progress(msg: str):
+        queue.put_nowait(msg)
+
+    async def _run():
+        try:
+            erg = await _patente.run_fto_check(chat_haupt, chat_neben, produkt,
+                                               patents, on_progress=on_progress)
+            queue.put_nowait(("__result__", erg))
+        except Exception as e:
+            queue.put_nowait(("__error__", str(e)))
+        finally:
+            queue.put_nowait(SENTINEL)
+
+    task = asyncio.create_task(_run())
+    ergebnisse = None
+    error = None
+    while True:
+        item = await queue.get()
+        if item is SENTINEL:
+            break
+        if isinstance(item, tuple) and item[0] == "__result__":
+            ergebnisse = item[1]
+        elif isinstance(item, tuple) and item[0] == "__error__":
+            error = item[1]
+        else:
+            yield _sse({"type": "progress", "message": item})
+    await task
+
+    if error or not ergebnisse:
+        yield _sse({"type": "error", "message": f"FTO-Check fehlgeschlagen: {error or 'kein Ergebnis'}"})
+        return
+
+    # Produktbeschreibung mit ins Ergebnis (Nachvollziehbarkeit im „Gespeichert"-Tab)
+    ergebnisse["produktbeschreibung"] = produkt
+    base = _patente.save_analysis(d / "analysen", "FTO_Check", ids, ergebnisse)
+    if await _local_llm_available():
+        coll = await _pat_rag_collection_for(name)
+        md_path = d / "analysen" / f"{base}.md"
+        md_text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+        await _pat_index_analysis(coll, f"analyse_{base}", md_text, f"FTO-Check {base}")
 
     yield _sse({"type": "done", "ergebnisse": ergebnisse, "datei_name": f"{base}.json", "tokens": tok})
 
@@ -7184,7 +7519,7 @@ async def patente_ask(name: str, body: PatAsk):
     if not hits:
         return {"answer": "Keine relevanten Textstellen in der Akte gefunden.", "sources": []}
     context = "\n\n---\n\n".join(f"[{h.get('filename','')}]\n{h.get('text','')}" for h in hits)
-    model = _pick_model(body.model, _model_for("general"))
+    model = _pick_model(body.model, _model_for("science"))
     async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
         resp = await _llm.chat(client, {
             "model": model, "think": False, "stream": False,
@@ -7308,7 +7643,9 @@ def _parse_llm_json(raw: str) -> Optional[dict]:
         return None
 
 
-async def _morph_llm(model: str, system: str, user: str) -> Optional[dict]:
+async def _morph_llm(model: str, system: str, user: str,
+                     tok: Optional[dict] = None) -> Optional[dict]:
+    """``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     try:
         async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
             resp = await _llm.chat(client,{
@@ -7322,7 +7659,12 @@ async def _morph_llm(model: str, system: str, user: str) -> Optional[dict]:
                 ],
             })
             resp.raise_for_status()
-            return _parse_llm_json(resp.json().get("message", {}).get("content", ""))
+            j = resp.json()
+            if tok is not None:
+                _a, _b = _llm_tok(j)
+                tok["in"] += _a
+                tok["out"] += _b
+            return _parse_llm_json(j.get("message", {}).get("content", ""))
     except Exception:
         return None
 
@@ -7368,6 +7710,7 @@ async def morph_generate(req: Request):
     model = _pick_model(body.get("model"), _model_for("general"))
     _ctx = await _morph_sources_context(
         problem, bool(body.get("web")), body.get("rag_collections") or [])
+    _tok = {"in": 0, "out": 0}
     data = await _morph_llm(
         model,
         ("Du erstellst einen morphologischen Kasten (Zwicky-Box) für eine "
@@ -7377,7 +7720,7 @@ async def morph_generate(req: Request):
          "keine verschachtelten Felder. Antworte NUR mit JSON: "
          "{\"parameters\":[{\"name\":\"Parameter\",\"values\":"
          "[\"Ausprägung 1\",\"Ausprägung 2\"]}]}"),
-        f"Aufgabenstellung:\n{problem}{_ctx}")
+        f"Aufgabenstellung:\n{problem}{_ctx}", tok=_tok)
     params = []
     if data:
         for p in (data.get("parameters") or []):
@@ -7387,7 +7730,7 @@ async def morph_generate(req: Request):
                     params.append({"name": str(p["name"]).strip(), "values": vals})
     if not params:
         raise HTTPException(status_code=502, detail="KI lieferte keine verwertbaren Parameter")
-    return {"parameters": params}
+    return {"parameters": params, "tokens": _tok}
 
 
 @app.post("/api/morph/evaluate")
@@ -7408,6 +7751,7 @@ async def morph_evaluate(req: Request):
         params_txt = "\n\nVerfügbare Parameter/Ausprägungen:\n" + "\n".join(
             f"- {p.get('name','?')}: {', '.join(p.get('values', []))}"
             for p in body["parameters"] if isinstance(p, dict))
+    _tok = {"in": 0, "out": 0}
     data = await _morph_llm(
         model,
         ("Du bewertest eine Lösungskombination aus einem morphologischen Kasten. "
@@ -7417,7 +7761,7 @@ async def morph_evaluate(req: Request):
          "Antworte NUR mit JSON: {\"score\":0,\"machbarkeit\":0,\"innovation\":0,"
          "\"begruendung\":\"…\",\"risiken\":[\"…\"],\"vorschlaege\":[{\"picks\":"
          "[{\"parameter\":\"…\",\"value\":\"…\"}],\"score\":0,\"begruendung\":\"…\"}]}"),
-        f"Aufgabenstellung:\n{problem}\n\nGewählte Kombination:\n{sel_txt}{params_txt}")
+        f"Aufgabenstellung:\n{problem}\n\nGewählte Kombination:\n{sel_txt}{params_txt}", tok=_tok)
     if not data:
         raise HTTPException(status_code=502, detail="KI-Bewertung fehlgeschlagen")
     return {
@@ -7427,6 +7771,7 @@ async def morph_evaluate(req: Request):
         "begruendung": (data.get("begruendung") or "").strip(),
         "risiken": [str(r) for r in (data.get("risiken") or [])],
         "vorschlaege": data.get("vorschlaege") or [],
+        "tokens": _tok,
     }
 
 
@@ -7452,13 +7797,16 @@ async def morph_refine_cell(req: Request):
         system = ("Du formulierst eine Ausprägung in einem morphologischen Kasten "
                   "konkreter und anschaulicher aus (1–3 Sätze). Antworte NUR mit JSON: "
                   "{\"text\":\"…\",\"alternativen\":[]}")
+    _tok = {"in": 0, "out": 0}
     data = await _morph_llm(
         model, system,
-        f"Aufgabenstellung:\n{problem}\n\nParameter: {parameter}\nAusprägung: {value}{_ctx}")
+        f"Aufgabenstellung:\n{problem}\n\nParameter: {parameter}\nAusprägung: {value}{_ctx}",
+        tok=_tok)
     if not data:
         raise HTTPException(status_code=502, detail="KI-Verfeinerung fehlgeschlagen")
     return {"text": (data.get("text") or "").strip(),
-            "alternativen": [str(a) for a in (data.get("alternativen") or [])]}
+            "alternativen": [str(a) for a in (data.get("alternativen") or [])],
+            "tokens": _tok}
 
 
 @app.post("/api/morph/ideas")
@@ -7479,6 +7827,7 @@ async def morph_ideas(req: Request):
             for p in params if isinstance(p, dict))
     _ctx = await _morph_sources_context(
         problem, bool(body.get("web")), body.get("rag_collections") or [])
+    _tok = {"in": 0, "out": 0}
     data = await _morph_llm(
         model,
         (f"Du erzeugst {n} KREATIVE, deutlich unterschiedliche Lösungsideen für eine "
@@ -7488,7 +7837,7 @@ async def morph_ideas(req: Request):
          "auch ungewöhnliche, originelle Kombinationen. Antworte NUR mit JSON: "
          "{\"ideen\":[{\"concept\":\"kurzer Konzepttext\",\"picks\":"
          "[{\"parameter\":\"…\",\"value\":\"…\"}]}]}"),
-        f"Aufgabenstellung:\n{problem}{params_txt}{_ctx}")
+        f"Aufgabenstellung:\n{problem}{params_txt}{_ctx}", tok=_tok)
     ideen = []
     if data:
         for it in (data.get("ideen") or []):
@@ -7504,7 +7853,7 @@ async def morph_ideas(req: Request):
                 ideen.append({"concept": concept, "picks": picks})
     if not ideen:
         raise HTTPException(status_code=502, detail="KI lieferte keine Ideen")
-    return {"ideen": ideen}
+    return {"ideen": ideen, "tokens": _tok}
 
 
 # ── Morph-Trainingsfile (Backend, automatisch generiert) ──────────────────────
@@ -8651,7 +9000,8 @@ async def plan_ai(pid: str, req: Request):
                     if token:
                         yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
                     if chunk.get("done"):
-                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                        _a, _b = _llm_tok(chunk)
+                        yield f"data: {json.dumps({'type': 'done', 'tokens': {'in': _a, 'out': _b}})}\n\n"
                 except Exception:
                     pass
 
@@ -8738,7 +9088,9 @@ async def plan_check_feasibility(pid: str, req: Request):
             "stream": False, "options": {"num_ctx": 8192},
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _cf_j = resp.json()
+        _cf_ti, _cf_to = _llm_tok(_cf_j)
+        raw = _cf_j.get("message", {}).get("content", "")
 
     data = _parse_llm_json(raw) or {}
     if not isinstance(data, dict):
@@ -8757,6 +9109,7 @@ async def plan_check_feasibility(pid: str, req: Request):
     data["cycle"] = cycle
     data["no_predecessor"] = no_pred
     data["loose_ends"] = no_succ
+    data["tokens"] = {"in": _cf_ti, "out": _cf_to}
     return data
 
 
@@ -8802,6 +9155,7 @@ async def plan_evaluate(req: Request):
 
     async def _stream():
         text_buf = ""
+        _tok = {"in": 0, "out": 0}
         async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
             async for chunk in _llm.stream(client, {
                 "model": model, "think": False,
@@ -8815,6 +9169,9 @@ async def plan_evaluate(req: Request):
                         text_buf += token
                         yield f"data: {json.dumps({'type': 'text', 'content': token})}\n\n"
                     if chunk.get("done"):
+                        _a, _b = _llm_tok(chunk)
+                        _tok["in"] += _a
+                        _tok["out"] += _b
                         break
                 except Exception:
                     pass
@@ -8831,7 +9188,7 @@ async def plan_evaluate(req: Request):
                 yield f"data: {json.dumps({'type': 'plan', 'plan': improved})}\n\n"
             except Exception:
                 pass
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'tokens': _tok})}\n\n"
 
     return StreamingResponse(
         _stream(), media_type="text/event-stream",
@@ -8889,8 +9246,9 @@ async def plan_research_task(pid: str, req: Request):
     query = f"{tname} {context}".strip()
 
     # 1. Adaptiver Agent aus der Tätigkeit ableiten
+    _tok = {"in": 0, "out": 0}
     role, persona = await _derive_adaptive_prompt(
-        f"Projektaufgabe: {tname}. Projektkontext: {context}", model)
+        f"Projektaufgabe: {tname}. Projektkontext: {context}", model, tok=_tok)
 
     # 2. Web-Recherche
     try:
@@ -8916,7 +9274,11 @@ async def plan_research_task(pid: str, req: Request):
                              {"role": "user", "content": prompt}],
             })
             resp.raise_for_status()
-            md = resp.json().get("message", {}).get("content", "")
+            _rt_j = resp.json()
+            _a, _b = _llm_tok(_rt_j)
+            _tok["in"] += _a
+            _tok["out"] += _b
+            md = _rt_j.get("message", {}).get("content", "")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Synthese fehlgeschlagen: {e}")
     md = _re.sub(r"<think>.*?</think>", "", md, flags=_re.DOTALL).strip()
@@ -8965,7 +9327,8 @@ async def plan_research_task(pid: str, req: Request):
     return {"ok": True, "task_id": task_id, "role": role, "md": md,
             "collection_id": coll["id"], "collection_name": coll["name"],
             "n_sources": len(sources),
-            "doc_file": task.get("doc_file")}
+            "doc_file": task.get("doc_file"),
+            "tokens": _tok}
 
 
 @app.post("/api/plans/derive-agent")
@@ -9008,7 +9371,9 @@ async def plan_derive_agent(req: Request):
             "stream": False,
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _da_j = resp.json()
+        _da_ti, _da_to = _llm_tok(_da_j)
+        raw = _da_j.get("message", {}).get("content", "")
 
     system_prompt = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     system_prompt = re.sub(r"^```[a-zA-Z]*\s*", "", system_prompt).strip()
@@ -9026,7 +9391,8 @@ async def plan_derive_agent(req: Request):
     # Kurzname heuristisch aus den ersten sinnvollen Wörtern der Beschreibung
     words = re.findall(r"[A-Za-zÄÖÜäöüß0-9\-]{3,}", description)
     agent_name = " ".join(words[:3]) + "-Planer" if words else "Projektplaner"
-    return {"agent_name": agent_name[:40], "system_prompt": system_prompt}
+    return {"agent_name": agent_name[:40], "system_prompt": system_prompt,
+            "tokens": {"in": _da_ti, "out": _da_to}}
 
 
 # Schlüsselwörter zur Typ-Erkennung. Mensch wird ZUERST geprüft, damit Rollen wie
@@ -9241,7 +9607,9 @@ async def suggest_tasks(req: Request):
             "stream": False,
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _st_j = resp.json()
+        _st_ti, _st_to = _llm_tok(_st_j)
+        raw = _st_j.get("message", {}).get("content", "")
 
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
@@ -9261,7 +9629,8 @@ async def suggest_tasks(req: Request):
         succs = []
     for c in preds + succs:
         c["resources"] = _apply_catalog_to_resources(c.get("resources", []), catalog, res_mode)
-    return {"predecessors": preds, "successors": succs}
+    return {"predecessors": preds, "successors": succs,
+            "tokens": {"in": _st_ti, "out": _st_to}}
 
 
 @app.post("/api/plans/detail-task")
@@ -9325,7 +9694,9 @@ async def detail_task(req: Request):
             "stream": False,
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _dt_j = resp.json()
+        _dt_ti, _dt_to = _llm_tok(_dt_j)
+        raw = _dt_j.get("message", {}).get("content", "")
 
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
@@ -9369,7 +9740,8 @@ async def detail_task(req: Request):
     detail["resources"] = _apply_catalog_to_resources(detail["resources"], catalog, res_mode)
     for c in preds + succs:
         c["resources"] = _apply_catalog_to_resources(c.get("resources", []), catalog, res_mode)
-    return {"detail": detail, "predecessors": preds, "successors": succs}
+    return {"detail": detail, "predecessors": preds, "successors": succs,
+            "tokens": {"in": _dt_ti, "out": _dt_to}}
 
 
 @app.post("/api/plans/insert-between")
@@ -9418,7 +9790,9 @@ async def insert_between(req: Request):
             "stream": False,
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "")
+        _ib_j = resp.json()
+        _ib_ti, _ib_to = _llm_tok(_ib_j)
+        raw = _ib_j.get("message", {}).get("content", "")
 
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw).strip()
@@ -9439,7 +9813,7 @@ async def insert_between(req: Request):
         except Exception:
             pass
 
-    return {"tasks": tasks}
+    return {"tasks": tasks, "tokens": {"in": _ib_ti, "out": _ib_to}}
 
 
 @app.post("/api/plans/from-list")
@@ -9489,7 +9863,9 @@ async def plan_from_list(req: Request):
             async with _model_session(_model), httpx.AsyncClient(timeout=300) as client:
                 resp = await _llm.chat(client,payload)
                 resp.raise_for_status()
-                raw = resp.json().get("message", {}).get("content", "")
+                _fl_j = resp.json()
+                _fl_ti, _fl_to = _llm_tok(_fl_j)
+                raw = _fl_j.get("message", {}).get("content", "")
         except Exception as e:
             yield _sse({"type": "error", "message": str(e)})
             return
@@ -9554,7 +9930,7 @@ async def plan_from_list(req: Request):
                 t["is_end"] = True
 
         plan = {"name": name, "description": "", "tasks": tasks}
-        yield _sse({"type": "plan", "plan": plan})
+        yield _sse({"type": "plan", "plan": plan, "tokens": {"in": _fl_ti, "out": _fl_to}})
 
     return StreamingResponse(_gen(), media_type="text/event-stream")
 
@@ -9641,6 +10017,7 @@ async def auto_structure_plan(req: Request):
     idset = set(ids)
     preds = {i: set() for i in ids}
     area_out = dict(area_by)
+    _as_ti, _as_to = 0, 0
 
     # 1) Fachliche Abhängigkeiten + Phasen via LLM
     if want_deps or want_phases:
@@ -9664,7 +10041,9 @@ async def auto_structure_plan(req: Request):
                     "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
                 })
                 resp.raise_for_status()
-            data = _parse_llm_json(resp.json().get("message", {}).get("content", "")) or {}
+            _as_j = resp.json()
+            _as_ti, _as_to = _llm_tok(_as_j)
+            data = _parse_llm_json(_as_j.get("message", {}).get("content", "")) or {}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Strukturierung fehlgeschlagen: {e}")
         for link in (data.get("links") or []):
@@ -9706,7 +10085,8 @@ async def auto_structure_plan(req: Request):
              for tid in ids]
     n_phases = len({a for a in area_out.values() if a})
     return {"links": links, "stats": {"tasks": len(ids), "dep_links": dep_links,
-                                      "leveled_links": leveled, "phases": n_phases}}
+                                      "leveled_links": leveled, "phases": n_phases},
+            "tokens": {"in": _as_ti, "out": _as_to}}
 
 
 async def _generate_plan_core(_model, description, max_tasks, system_prompt="",
@@ -10369,6 +10749,7 @@ def _backup_dirs_always() -> list:
         (ANGEBOTE_DIR, "angebote"), (RECHNUNGEN_DIR, "rechnungen"),
         (ZEUGNISSE_DIR, "zeugnisse"), (PATENTE_DIR, "patente"),
         (RFQ_DIR, "rfq"), (MORPH_TRAIN_DIR, "morph_training"),
+        (VARIANTEN_DIR, "varianten"), (TODO_DIR, "todo"),
     ]
 
 
@@ -10505,6 +10886,8 @@ async def create_backup(uploads: bool = False, pst: bool = False,
         # Schlüssel sonst im Klartext in einer weitergebbaren Datei landen.
         if secrets and API_PROVIDERS_FILE.exists():
             zf.write(API_PROVIDERS_FILE, "api_providers.json")
+        if secrets and EPO_OPS_FILE.exists():
+            zf.write(EPO_OPS_FILE, "epo_ops.json")
 
         # Kennzeichnung des Archivinhalts – der Restore und der Nutzer sehen so,
         # was drin ist (und was bewusst fehlt).
@@ -10780,6 +11163,12 @@ async def restore_backup(file: UploadFile = File(...), replace: bool = False):
                     stats["api_providers"] = True
                 except Exception as e:
                     stats["errors"].append(f"api_providers.json: {e}")
+            if "epo_ops.json" in names:
+                try:
+                    EPO_OPS_FILE.write_bytes(zf.read("epo_ops.json"))
+                    stats["epo_ops"] = True
+                except Exception as e:
+                    stats["errors"].append(f"epo_ops.json: {e}")
 
     except zipfile.BadZipFile:
         raise HTTPException(400, "Ungültige ZIP-Datei")
@@ -11505,6 +11894,8 @@ async def refine_document(req: Request):
         ratio = difflib.SequenceMatcher(None, a, b).ratio()
         return round((1.0 - ratio) * 100, 1)
 
+    _tok = {"in": 0, "out": 0}
+
     async def _refine_once(current: str, agent: dict) -> str:
         sys_prompt = agent.get("system_prompt") or (
             "Verbessere den folgenden Text: korrigiere Fehler, verbessere Klarheit und Struktur. "
@@ -11536,7 +11927,11 @@ async def refine_document(req: Request):
                                      {"role": "user", "content": chunk}],
                     })
                     resp.raise_for_status()
-                    content = resp.json().get("message", {}).get("content", "").strip()
+                    _rf_j = resp.json()
+                    _a, _b = _llm_tok(_rf_j)
+                    _tok["in"] += _a
+                    _tok["out"] += _b
+                    content = _rf_j.get("message", {}).get("content", "").strip()
                     content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
                     refined_parts.append(content if content else chunk)
             except Exception:
@@ -11564,7 +11959,7 @@ async def refine_document(req: Request):
                     yield _sse({"type": "converged", "n": iteration, "change_pct": change_pct,
                                 "message": f"Konvergiert nach {iteration} Iterationen ({change_pct} % < {threshold} % Schwelle)"})
                     break
-            yield _sse({"type": "done", "text": current})
+            yield _sse({"type": "done", "text": current, "tokens": _tok})
 
     return StreamingResponse(
         _stream(), media_type="text/event-stream",
@@ -11778,8 +12173,10 @@ _MED_DISCLAIMER = (
 )
 
 
-async def _med_call(client, model: str, system: str, user: str, *, think: bool = False) -> str:
-    """Ein nicht-streamender Ollama-Chat-Aufruf, gibt den reinen Text zurück."""
+async def _med_call(client, model: str, system: str, user: str, *, think: bool = False,
+                    tok: Optional[dict] = None) -> str:
+    """Ein nicht-streamender Ollama-Chat-Aufruf, gibt den reinen Text zurück.
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     resp = await _llm.chat(client,{
         "model": model,
         "think": think,
@@ -11790,7 +12187,12 @@ async def _med_call(client, model: str, system: str, user: str, *, think: bool =
         ],
     })
     resp.raise_for_status()
-    raw = resp.json().get("message", {}).get("content", "") or ""
+    j = resp.json()
+    if tok is not None:
+        _a, _b = _llm_tok(j)
+        tok["in"] += _a
+        tok["out"] += _b
+    raw = j.get("message", {}).get("content", "") or ""
     return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
 
@@ -11924,6 +12326,7 @@ async def medizin_consult(req: Request):
             yield _sse({"type": "error", "content": "Keine Eingabe erhalten."})
             return
 
+        _tok = {"in": 0, "out": 0}   # Tokenverbrauch über alle Stufen (→ done-Frame)
         # ── Stage 1: Ministral strukturiert die Anfrage medizinisch ──────────
         yield _sse({"type": "stage", "stage": "refine", "status": "start",
                      "label": f"{model_general} strukturiert die Anfrage…"})
@@ -11941,7 +12344,7 @@ async def medizin_consult(req: Request):
                      "Angaben wie Alter/Geschlecht/Symptome/Dauer/Vorerkrankungen/Medikamente, soweit "
                      "genannt; nenne relevante Inhalte der Dokumente). Erfinde nichts, ergänze keine "
                      "nicht genannten Fakten. Nur die Falldarstellung, kein Vorwort."),
-                    refine_user,
+                    refine_user, tok=_tok,
                 )
         except Exception as e:
             yield _sse({"type": "error", "content": f"Aufbereitung fehlgeschlagen: {e}"})
@@ -11971,7 +12374,7 @@ async def medizin_consult(req: Request):
                          "wären. Wenn alles Wesentliche vorhanden ist, antworte mit GENAU dem Wort "
                          "VOLLSTAENDIG. Andernfalls beginne mit FEHLT: und liste danach in kurzen "
                          "Stichpunkten (max. 4) nur die wirklich fehlenden Angaben bzw. Unterlagen."),
-                        analyze_user,
+                        analyze_user, tok=_tok,
                     )
             except Exception as e:
                 yield _sse({"type": "error", "content": f"Analyse fehlgeschlagen: {e}"})
@@ -11995,6 +12398,7 @@ async def medizin_consult(req: Request):
                              "einem kurzen Satz freundlich darauf hin, dass diese auch direkt als "
                              "Dokument angehängt werden können. Nur die Rückfrage, kein Vorwort."),
                             f"Ursprüngliches Anliegen:\n{latest}\n\nFehlende Angaben:\n{analysis}",
+                            tok=_tok,
                         )
                 except Exception as e:
                     yield _sse({"type": "error", "content": f"Rückfrage fehlgeschlagen: {e}"})
@@ -12003,7 +12407,7 @@ async def medizin_consult(req: Request):
                     question = "Können Sie bitte noch ein paar Angaben ergänzen (Alter, Dauer, Begleitsymptome)?"
                 yield _sse({"type": "stage", "stage": "formulate", "status": "done"})
                 yield _sse({"type": "question", "content": question, "round": rnd + 1})
-                yield _sse({"type": "done", "needs_followup": True, "round": rnd + 1})
+                yield _sse({"type": "done", "needs_followup": True, "round": rnd + 1, "tokens": _tok})
                 return
 
         # ── Stage 3b: MedGemma erstellt die finale Einschätzung (gestreamt) ──
@@ -12034,10 +12438,14 @@ async def medizin_consult(req: Request):
                     token = chunk.get("message", {}).get("content", "")
                     if token:
                         yield _sse({"type": "text", "content": token})
+                    if chunk.get("done"):
+                        _a, _b = _llm_tok(chunk)
+                        _tok["in"] += _a
+                        _tok["out"] += _b
         except Exception as e:
             yield _sse({"type": "error", "content": f"Einschätzung fehlgeschlagen: {e}"})
             return
-        yield _sse({"type": "done", "needs_followup": False, "round": rnd})
+        yield _sse({"type": "done", "needs_followup": False, "round": rnd, "tokens": _tok})
 
     return StreamingResponse(_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -12054,6 +12462,7 @@ async def medizin_translate(req: Request):
         raise HTTPException(status_code=400, detail="Kein Text übergeben")
 
     async def _stream():
+        _tok = {"in": 0, "out": 0}
         try:
             async with _model_session(model_general), httpx.AsyncClient(timeout=180) as client:
                 async for chunk in _llm.stream(client, {
@@ -12072,10 +12481,14 @@ async def medizin_translate(req: Request):
                     token = chunk.get("message", {}).get("content", "")
                     if token:
                         yield _sse({"type": "text", "content": token})
+                    if chunk.get("done"):
+                        _a, _b = _llm_tok(chunk)
+                        _tok["in"] += _a
+                        _tok["out"] += _b
         except Exception as e:
             yield _sse({"type": "error", "content": f"Übersetzung fehlgeschlagen: {e}"})
             return
-        yield _sse({"type": "done"})
+        yield _sse({"type": "done", "tokens": _tok})
 
     return StreamingResponse(_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -12155,11 +12568,12 @@ def _mathe_sympy_facts(kind: str, sympy_str: str, goal: str) -> str:
         return ""
 
 
-async def _mathe_ground_facts(client, model, messages) -> str:
+async def _mathe_ground_facts(client, model, messages, tok: Optional[dict] = None) -> str:
     """Extrahiert die zentrale Aufgabe aus dem Gespräch und liefert die
     SymPy-verifizierte Grundwahrheit als Fakten-String (oder "" wenn nichts
     deterministisch prüfbar ist). Erwartet einen offenen httpx-Client, dessen
-    Modell bereits unter ``_model_session`` geladen wurde."""
+    Modell bereits unter ``_model_session`` geladen wurde.
+    ``tok`` (optional): dict {"in","out"}, in das der Tokenverbrauch summiert wird."""
     transcript = _med_transcript(messages)  # gleiche Formatierung wie Medizin
     if not transcript:
         return ""
@@ -12178,7 +12592,12 @@ async def _mathe_ground_facts(client, model, messages) -> str:
             ],
         })
         resp.raise_for_status()
-        raw = resp.json().get("message", {}).get("content", "") or ""
+        _mg_j = resp.json()
+        if tok is not None:
+            _a, _b = _llm_tok(_mg_j)
+            tok["in"] += _a
+            tok["out"] += _b
+        raw = _mg_j.get("message", {}).get("content", "") or ""
     except Exception:
         return ""
 
@@ -12230,9 +12649,10 @@ async def mathe_ground(req: Request):
     body = await req.json()
     messages = body.get("messages") or []
     model = _pick_model(body.get("model"), _model_for("general"))
+    _tok = {"in": 0, "out": 0}
     async with _model_session(model), httpx.AsyncClient(timeout=90) as client:
-        facts = await _mathe_ground_facts(client, model, messages)
-    return {"facts": facts}
+        facts = await _mathe_ground_facts(client, model, messages, tok=_tok)
+    return {"facts": facts, "tokens": _tok}
 
 
 _MATHE_VERIFY_ROUNDS = 2  # zusätzliche Korrekturrunden nach dem ersten Lösungsversuch
@@ -12250,12 +12670,13 @@ async def mathe_solve_verified(req: Request):
     model = _pick_model(body.get("model"), _model_for("coding"))
 
     async def gen():
+        _tok = {"in": 0, "out": 0}
         try:
             async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
                 # 1) Deterministische Grundwahrheit
                 yield _sse({"type": "stage", "stage": "verify", "status": "start",
                             "label": "SymPy-Grundwahrheit"})
-                facts = await _mathe_ground_facts(client, model, messages)
+                facts = await _mathe_ground_facts(client, model, messages, tok=_tok)
                 tokens = _mathe_check_tokens(facts) if facts else []
                 yield _sse({"type": "stage", "stage": "verify", "status": "done",
                             "label": "SymPy-Grundwahrheit",
@@ -12287,7 +12708,11 @@ async def mathe_solve_verified(req: Request):
                                          {"role": "user", "content": user}],
                         })
                         resp.raise_for_status()
-                        solution = resp.json().get("message", {}).get("content", "") or ""
+                        _sv_j = resp.json()
+                        _a, _b = _llm_tok(_sv_j)
+                        _tok["in"] += _a
+                        _tok["out"] += _b
+                        solution = _sv_j.get("message", {}).get("content", "") or ""
                         solution = re.sub(r"<think>.*?</think>", "", solution, flags=re.DOTALL).strip()
                     except Exception as e:
                         yield _sse({"type": "error", "content": f"Modellfehler: {e}"})
@@ -12303,11 +12728,568 @@ async def mathe_solve_verified(req: Request):
 
                 yield _sse({"type": "text", "content": solution})
                 yield _sse({"type": "done", "verified": verified, "checkable": bool(tokens),
-                            "rounds": rounds, "facts": facts})
+                            "rounds": rounds, "facts": facts, "tokens": _tok})
         except Exception as e:
             yield _sse({"type": "error", "content": str(e)})
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Variantenvergleich (gewichtete Entscheidung, AHP-Hybrid)
+# ══════════════════════════════════════════════════════════════════════════════
+# Persistenz je Vergleich in VARIANTEN_DIR/<name>/decision.json. Die Gewichte
+# (Paarvergleich) und das Ranking werden **deterministisch** in tools/decision.py
+# gerechnet — nie vom LLM. Das LLM schlägt nur Kriterien/Varianten/Urteile vor.
+
+def _var_safe_name(name: str) -> str:
+    safe = "".join(c for c in str(name or "") if c.isalnum() or c in (" ", "_", "-")).strip()
+    if not safe or safe.startswith("_"):
+        raise HTTPException(status_code=400, detail="Ungültiger Name")
+    return safe
+
+
+def _var_dir(name: str, create: bool = False) -> Path:
+    d = VARIANTEN_DIR / _var_safe_name(name)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    elif not d.exists():
+        raise HTTPException(status_code=404, detail="Vergleich nicht gefunden")
+    return d
+
+
+def _var_compute(data: dict) -> dict:
+    """Deterministische Kennzahlen (Gewichte + Ranking) aus den Rohdaten rechnen."""
+    from tools import decision as _dec
+    criteria = data.get("criteria") or []
+    variants = data.get("variants") or []
+    directions = [(c.get("direction") if c.get("direction") in ("benefit", "cost") else "benefit")
+                  for c in criteria]
+    pairwise = data.get("pairwise") or []
+    if pairwise and len(pairwise) == len(criteria) and len(criteria) >= 2:
+        pw = _dec.pairwise_weights(pairwise)
+        weights = pw["weights"]
+    else:
+        weights = _dec.equal_weights(len(criteria))
+        pw = {"weights": weights, "cr": 0.0, "consistent": True, "lambda_max": float(len(criteria)), "n": len(criteria)}
+    ratings = data.get("ratings") or []
+    sc = _dec.score_variants(weights, ratings, directions)
+    best = sc.get("best")
+    result = {
+        "weights": weights,
+        "cr": pw.get("cr", 0.0),
+        "consistent": pw.get("consistent", True),
+        "lambda_max": pw.get("lambda_max", 0.0),
+        "scores": sc.get("scores", []),
+        "ranking": sc.get("ranking", []),
+        "best": best,
+        "best_name": (variants[best].get("name") if (best is not None and best < len(variants)) else ""),
+    }
+    return result
+
+
+def _var_load(name: str) -> dict:
+    p = _var_dir(name) / "decision.json"
+    if not p.exists():
+        return {"title": name, "description": "", "criteria": [], "variants": [],
+                "pairwise": [], "ratings": [], "result": {}}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    data.setdefault("title", name)
+    data["result"] = _var_compute(data)
+    return data
+
+
+def _var_save(name: str, body: dict) -> dict:
+    d = _var_dir(name, create=True)
+    criteria = [{"name": str(c.get("name", "")).strip()[:120],
+                 "direction": (c.get("direction") if c.get("direction") in ("benefit", "cost") else "benefit")}
+                for c in (body.get("criteria") or []) if str(c.get("name", "")).strip()]
+    variants = [{"name": str(v.get("name", "")).strip()[:120],
+                 "description": str(v.get("description", "")).strip()[:2000]}
+                for v in (body.get("variants") or []) if str(v.get("name", "")).strip()]
+    data = {
+        "title": str(body.get("title", name)).strip()[:200] or name,
+        "description": str(body.get("description", "")).strip()[:4000],
+        "criteria": criteria,
+        "variants": variants,
+        "pairwise": body.get("pairwise") or [],
+        "ratings": body.get("ratings") or [],
+        "updated_at": time.time(),
+    }
+    data["result"] = _var_compute(data)
+    (d / "decision.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return data
+
+
+@app.get("/api/varianten/projects")
+async def varianten_list():
+    out = []
+    if VARIANTEN_DIR.exists():
+        for d in sorted(VARIANTEN_DIR.iterdir()):
+            if not d.is_dir() or d.name.startswith("_"):
+                continue
+            p = d / "decision.json"
+            meta = {}
+            if p.exists():
+                try:
+                    meta = json.loads(p.read_text(encoding="utf-8"))
+                except Exception:
+                    meta = {}
+            res = _var_compute(meta) if meta else {}
+            out.append({
+                "name": d.name,
+                "title": meta.get("title") or d.name,
+                "n_criteria": len(meta.get("criteria") or []),
+                "n_variants": len(meta.get("variants") or []),
+                "best_name": res.get("best_name", ""),
+                "updated_at": meta.get("updated_at", 0),
+            })
+    out.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+    return out
+
+
+@app.post("/api/varianten/projects")
+async def varianten_create(req: Request):
+    body = await req.json()
+    name = _var_safe_name(body.get("name", ""))
+    d = VARIANTEN_DIR / name
+    if d.exists():
+        raise HTTPException(status_code=409, detail="Vergleich existiert bereits")
+    return _var_save(name, {"title": body.get("title", name)})
+
+
+@app.get("/api/varianten/projects/{name}")
+async def varianten_get(name: str):
+    return _var_load(name)
+
+
+@app.put("/api/varianten/projects/{name}")
+async def varianten_put(name: str, req: Request):
+    body = await req.json()
+    return _var_save(name, body)
+
+
+@app.delete("/api/varianten/projects/{name}")
+async def varianten_delete(name: str):
+    import shutil
+    d = _var_dir(name)
+    shutil.rmtree(d, ignore_errors=True)
+    return {"ok": True}
+
+
+_VAR_CRITERIA_SYSTEM = (
+    "Du hilfst bei einer Entscheidung (Variantenvergleich). Nenne die wichtigsten "
+    "ENTSCHEIDUNGSKRITERIEN, nach denen die Varianten bewertet werden sollten — "
+    "konkret, überschneidungsfrei, 4–8 Stück. Gib pro Kriterium an, ob ein hoher "
+    "Wert gut ('benefit', z. B. Qualität) oder schlecht ('cost', z. B. Preis) ist. "
+    'Antworte NUR mit JSON: {"criteria":[{"name":"<Kriterium>","direction":"benefit|cost"}]}.'
+)
+_VAR_VARIANTS_SYSTEM = (
+    "Du hilfst bei einer Entscheidung. Schlage sinnvolle, klar unterscheidbare "
+    "VARIANTEN/Alternativen vor (3–6), jeweils mit kurzer Beschreibung. "
+    'Antworte NUR mit JSON: {"variants":[{"name":"<Variante>","description":"<kurz>"}]}.'
+)
+_VAR_PAIRWISE_SYSTEM = (
+    "Du schätzt die relative Wichtigkeit von Entscheidungskriterien im PAARVERGLEICH "
+    "(Saaty-Skala 1–9: 1=gleich wichtig, 3=etwas wichtiger, 5=deutlich, 7=sehr, "
+    "9=extrem wichtiger; Zwischenwerte erlaubt). Du bekommst eine nummerierte "
+    "Kriterienliste. Gib für jedes Paar (i<j) an, um welchen Faktor Kriterium i "
+    "wichtiger ist als j (Wert <1, wenn j wichtiger ist). "
+    'Antworte NUR mit JSON: {"pairs":[{"i":0,"j":1,"value":3,"grund":"<kurz>"}]}.'
+)
+_VAR_RATINGS_SYSTEM = (
+    "Du bewertest VARIANTEN je KRITERIUM auf einer Skala von 1 (sehr schlecht) bis "
+    "10 (sehr gut) — immer so, dass 10 = am besten ist (auch bei Kosten: 10 = "
+    "günstigste Variante). Stütze dich auf die gegebenen Variantenbeschreibungen "
+    "und den Kontext; erfinde keine Fakten, im Zweifel neutral (5). "
+    'Antworte NUR mit JSON: {"ratings":[{"variant":0,"scores":[{"criterion":0,"value":7}]}]}.'
+)
+_VAR_EXPLAIN_SYSTEM = (
+    "Du erklärst das Ergebnis eines gewichteten Variantenvergleichs (Nutzwertanalyse). "
+    "Du bekommst die deterministisch berechneten Gewichte, das Ranking und eine "
+    "Sensitivitätsangabe (bei welchem Kriterium der Sieger wechselt). Fasse in "
+    "2–4 Sätzen zusammen: Wer gewinnt und warum, wie knapp/robust das ist, worauf "
+    "man achten sollte. Rechne KEINE Zahlen neu; nutze die gegebenen Werte."
+)
+
+
+@app.post("/api/varianten/suggest-criteria")
+async def varianten_suggest_criteria(req: Request):
+    body = await req.json()
+    model = _pick_model(body.get("model"), _model_for("general"))
+    prompt = (f"Entscheidung: {str(body.get('title','')).strip()}\n"
+              f"Beschreibung: {str(body.get('description','')).strip()[:2000]}")
+    data, ti, to, _ = await _research_llm_json(model, _VAR_CRITERIA_SYSTEM, prompt)
+    crits = []
+    for c in (data.get("criteria") or []):
+        nm = str((c or {}).get("name", "")).strip()[:120]
+        if nm:
+            d = (c or {}).get("direction")
+            crits.append({"name": nm, "direction": d if d in ("benefit", "cost") else "benefit"})
+    return {"criteria": crits, "tokens": {"in": ti, "out": to}}
+
+
+@app.post("/api/varianten/suggest-variants")
+async def varianten_suggest_variants(req: Request):
+    body = await req.json()
+    model = _pick_model(body.get("model"), _model_for("general"))
+    crit_names = ", ".join(str(c.get("name", "")).strip() for c in (body.get("criteria") or []) if c.get("name"))
+    prompt = (f"Entscheidung: {str(body.get('title','')).strip()}\n"
+              f"Beschreibung: {str(body.get('description','')).strip()[:2000]}\n"
+              f"Kriterien: {crit_names}")
+    data, ti, to, _ = await _research_llm_json(model, _VAR_VARIANTS_SYSTEM, prompt)
+    variants = []
+    for v in (data.get("variants") or []):
+        nm = str((v or {}).get("name", "")).strip()[:120]
+        if nm:
+            variants.append({"name": nm, "description": str((v or {}).get("description", "")).strip()[:2000]})
+    return {"variants": variants, "tokens": {"in": ti, "out": to}}
+
+
+@app.post("/api/varianten/suggest-pairwise")
+async def varianten_suggest_pairwise(req: Request):
+    body = await req.json()
+    criteria = [str(c.get("name", "")).strip() for c in (body.get("criteria") or []) if c.get("name")]
+    n = len(criteria)
+    if n < 2:
+        return {"pairwise": [], "rationale": [], "tokens": {"in": 0, "out": 0}}
+    model = _pick_model(body.get("model"), _model_for("general"))
+    lst = "\n".join(f"{i}: {c}" for i, c in enumerate(criteria))
+    prompt = (f"Entscheidung: {str(body.get('title','')).strip()}\n\nKriterien:\n{lst}")
+    data, ti, to, _ = await _research_llm_json(model, _VAR_PAIRWISE_SYSTEM, prompt)
+    # Vollständige Matrix aufbauen (Diagonale 1, Reziprozität); Rest 1 (Gleichstand)
+    matrix = [[1.0] * n for _ in range(n)]
+    rationale = []
+    for pr in (data.get("pairs") or []):
+        try:
+            i, j = int(pr.get("i")), int(pr.get("j"))
+            val = float(pr.get("value"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < n and 0 <= j < n and i != j and val > 0:
+            val = max(1.0 / 9.0, min(9.0, val))
+            matrix[i][j] = val
+            matrix[j][i] = 1.0 / val
+            g = str(pr.get("grund", "")).strip()[:200]
+            if g:
+                rationale.append({"i": i, "j": j, "grund": g})
+    return {"pairwise": matrix, "rationale": rationale, "tokens": {"in": ti, "out": to}}
+
+
+@app.post("/api/varianten/suggest-ratings")
+async def varianten_suggest_ratings(req: Request):
+    body = await req.json()
+    criteria = [str(c.get("name", "")).strip() for c in (body.get("criteria") or []) if c.get("name")]
+    variants = [{"name": str(v.get("name", "")).strip(), "description": str(v.get("description", "")).strip()}
+                for v in (body.get("variants") or []) if v.get("name")]
+    nc, nv = len(criteria), len(variants)
+    if nc == 0 or nv == 0:
+        return {"ratings": [], "tokens": {"in": 0, "out": 0}}
+    # Recherche-Modell (respektiert „Web-Recherche lokal"); optional RAG-Kontext
+    model, err = await _research_model(body.get("model"))
+    if err:
+        raise HTTPException(status_code=503, detail=err)
+    rag_ctx = await _plan_rag_context(body.get("collection_ids"),
+                                      str(body.get("title", "")) + " " + " ".join(criteria))
+    clist = "\n".join(f"{i}: {c}" for i, c in enumerate(criteria))
+    vlist = "\n".join(f"{i}: {v['name']} — {v['description'][:400]}" for i, v in enumerate(variants))
+    prompt = (f"Entscheidung: {str(body.get('title','')).strip()}\n\nKriterien:\n{clist}\n\n"
+              f"Varianten:\n{vlist}")
+    if rag_ctx:
+        prompt += f"\n\nBelegkontext (aus Quellen):\n{rag_ctx[:3000]}"
+    data, ti, to, _ = await _research_llm_json(model, _VAR_RATINGS_SYSTEM, prompt)
+    ratings = [[5.0] * nc for _ in range(nv)]
+    for rv in (data.get("ratings") or []):
+        try:
+            vi = int(rv.get("variant"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= vi < nv):
+            continue
+        for sc in (rv.get("scores") or []):
+            try:
+                ci, val = int(sc.get("criterion")), float(sc.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= ci < nc:
+                ratings[vi][ci] = max(1.0, min(10.0, val))
+    return {"ratings": ratings, "tokens": {"in": ti, "out": to}}
+
+
+@app.post("/api/varianten/explain")
+async def varianten_explain(req: Request):
+    body = await req.json()
+    name = body.get("name")
+    data = _var_load(name) if name else body.get("data") or {}
+    res = data.get("result") or _var_compute(data)
+    criteria = data.get("criteria") or []
+    variants = data.get("variants") or []
+    if not res.get("ranking"):
+        return {"text": "Noch keine vollständige Bewertung vorhanden.", "tokens": {"in": 0, "out": 0}}
+    from tools import decision as _dec
+    directions = [(c.get("direction") if c.get("direction") in ("benefit", "cost") else "benefit") for c in criteria]
+    sens = _dec.sensitivity(res.get("weights") or [], data.get("ratings") or [], directions)
+    wtxt = "\n".join(f"- {criteria[i].get('name','?')}: Gewicht {res['weights'][i]:.2f}"
+                     for i in range(min(len(criteria), len(res.get("weights") or []))))
+    rtxt = "\n".join(f"{r['index']+1}. {variants[r['index']].get('name','?')} — Nutzwert {r['score']:.2f} ({r['percent']}%)"
+                     for r in res["ranking"] if r["index"] < len(variants))
+    flip = [criteria[s["criterion"]].get("name", "?") for s in sens
+            if s.get("flips") and s["criterion"] < len(criteria)]
+    stxt = ("Sieger wechselt bei stärkerer Gewichtung von: " + ", ".join(flip)) if flip else \
+           "Der Sieger bleibt auch bei moderat veränderten Gewichten stabil."
+    model = _pick_model(body.get("model"), _model_for("general"))
+    prompt = (f"Entscheidung: {data.get('title','')}\n\nGewichte:\n{wtxt}\n\n"
+              f"Konsistenz CR={res.get('cr',0):.2f} ({'ok' if res.get('consistent') else 'zu inkonsistent'}).\n\n"
+              f"Ranking:\n{rtxt}\n\nSensitivität: {stxt}")
+    text, ti, to = "", 0, 0
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": _VAR_EXPLAIN_SYSTEM},
+                             {"role": "user", "content": prompt}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        j = resp.json()
+        ti, to = _llm_tok(j)
+        text = re.sub(r"<think>.*?</think>", "", j.get("message", {}).get("content", ""), flags=re.DOTALL).strip()
+    except Exception as e:
+        text = f"(Analyse nicht möglich: {e})"
+    return {"text": text, "tokens": {"in": ti, "out": to}}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KI-To-Do-Listen mit Wissensgraph
+# ══════════════════════════════════════════════════════════════════════════════
+# Persistenz je Liste in TODO_DIR/<name>/list.json (Items, Kanten, Graph-Positionen).
+# Struktur-Logik in tools/todo.py; hier HTTP + LLM-Helfer (Extraktion/Verknüpfung).
+
+def _todo_safe_name(name: str) -> str:
+    safe = "".join(c for c in str(name or "") if c.isalnum() or c in (" ", "_", "-")).strip()
+    if not safe or safe.startswith("_"):
+        raise HTTPException(status_code=400, detail="Ungültiger Name")
+    return safe
+
+
+def _todo_dir(name: str, create: bool = False) -> Path:
+    d = TODO_DIR / _todo_safe_name(name)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    elif not d.exists():
+        raise HTTPException(status_code=404, detail="Liste nicht gefunden")
+    return d
+
+
+def _todo_load(name: str) -> dict:
+    from tools import todo as _todo
+    p = _todo_dir(name) / "list.json"
+    if not p.exists():
+        return _todo.sanitize_list({"title": name})
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    return _todo.sanitize_list(data)
+
+
+def _todo_save(name: str, body: dict) -> dict:
+    from tools import todo as _todo
+    d = _todo_dir(name, create=True)
+    data = _todo.sanitize_list(body)
+    (d / "list.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return data
+
+
+@app.get("/api/todo/lists")
+async def todo_lists():
+    from tools import todo as _todo
+    out = []
+    if TODO_DIR.exists():
+        for d in sorted(TODO_DIR.iterdir()):
+            if not d.is_dir() or d.name.startswith("_"):
+                continue
+            p = d / "list.json"
+            meta = {}
+            if p.exists():
+                try:
+                    meta = json.loads(p.read_text(encoding="utf-8"))
+                except Exception:
+                    meta = {}
+            out.append({
+                "name": d.name,
+                "title": meta.get("title") or d.name,
+                "type": meta.get("type") or "frei",
+                "stats": _todo.stats(meta),
+                "updated_at": meta.get("updated_at", 0),
+            })
+    out.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+    return out
+
+
+@app.post("/api/todo/lists")
+async def todo_create(req: Request):
+    body = await req.json()
+    name = _todo_safe_name(body.get("name", ""))
+    d = TODO_DIR / name
+    if d.exists():
+        raise HTTPException(status_code=409, detail="Liste existiert bereits")
+    return _todo_save(name, {
+        "title": body.get("title", name),
+        "type": body.get("type", "frei"),
+        "date": body.get("date", ""),
+        "participants": body.get("participants") or [],
+        "project_id": body.get("project_id", ""),
+        "items": [],
+    })
+
+
+@app.get("/api/todo/lists/{name}")
+async def todo_get(name: str):
+    return _todo_load(name)
+
+
+@app.put("/api/todo/lists/{name}")
+async def todo_put(name: str, req: Request):
+    body = await req.json()
+    return _todo_save(name, body)
+
+
+@app.delete("/api/todo/lists/{name}")
+async def todo_delete(name: str):
+    import shutil
+    d = _todo_dir(name)
+    shutil.rmtree(d, ignore_errors=True)
+    return {"ok": True}
+
+
+_TODO_EXTRACT_SYSTEM = (
+    "Du wandelst eine Besprechungsnotiz / einen Freitext in eine strukturierte "
+    "AUFGABENLISTE (To-Dos) um. Erkenne einzelne konkrete Aufgaben, den/die "
+    "Zuständigen (nur wenn genannt; nutze bevorzugt die vorgegebenen Teilnehmer), "
+    "eine Fälligkeit (falls genannt, Format wie im Text) und Abhängigkeiten "
+    "zwischen Aufgaben (welche Aufgabe muss vor einer anderen erledigt sein). "
+    "Nummeriere die Aufgaben ab 0 und verweise in 'blockiert_von' auf diese Nummern. "
+    'Antworte NUR mit JSON: {"items":[{"n":0,"text":"<Aufgabe>","assignees":["<Name>"],'
+    '"due":"<Frist>","blockiert_von":[<n>]}]}.'
+)
+_TODO_LINKS_SYSTEM = (
+    "Du findest inhaltliche VERKNÜPFUNGEN zwischen bestehenden Aufgaben (To-Dos). "
+    "Du bekommst eine nummerierte Aufgabenliste. Nenne sinnvolle gerichtete "
+    "Beziehungen (source→target) mit kurzem Label (z. B. 'blockiert', 'gehört zu', "
+    "'folgt auf'). Nur echte Zusammenhänge, keine erzwungenen. "
+    'Antworte NUR mit JSON: {"edges":[{"source":<n>,"target":<n>,"label":"<kurz>"}]}.'
+)
+_TODO_NEXT_SYSTEM = (
+    "Du bist ein pragmatischer Projekt-Assistent. Aus der gegebenen Aufgabenliste "
+    "(mit Status und Abhängigkeiten) benennst du kurz: (1) was als Nächstes "
+    "sinnvoll angegangen wird, (2) welche Aufgaben blockiert sind und warum, "
+    "(3) womöglich Vergessenes. Knapp, in Stichpunkten, kein Geschwätz."
+)
+
+
+@app.post("/api/todo/extract")
+async def todo_extract(req: Request):
+    from tools import todo as _todo
+    body = await req.json()
+    text = str(body.get("text", "")).strip()
+    if not text:
+        return {"items": [], "edges": [], "tokens": {"in": 0, "out": 0}}
+    participants = [str(p).strip() for p in (body.get("participants") or []) if str(p).strip()]
+    model = _pick_model(body.get("model"), _model_for("general"))
+    prompt = text[:8000]
+    if participants:
+        prompt = f"Teilnehmer: {', '.join(participants)}\n\nNotiz:\n" + prompt
+    data, ti, to, _ = await _research_llm_json(model, _TODO_EXTRACT_SYSTEM, prompt)
+    raw_items = data.get("items") or []
+    items, idx_to_id = [], {}
+    for k, ri in enumerate(raw_items):
+        if not isinstance(ri, dict):
+            continue
+        n = ri.get("n", k)
+        it = _todo.new_item(ri.get("text", ""), assignees=ri.get("assignees"),
+                            due=str(ri.get("due", "")).strip())
+        if not it["text"]:
+            continue
+        try:
+            idx_to_id[int(n)] = it["id"]
+        except (TypeError, ValueError):
+            idx_to_id[k] = it["id"]
+        items.append((it, ri))
+    # Abhängigkeiten → Kanten (blockiert_von: dep blockiert this)
+    edges = []
+    id_list = [it["id"] for it, _ in items]
+    for it, ri in items:
+        for dep in (ri.get("blockiert_von") or []):
+            try:
+                dep_id = idx_to_id.get(int(dep))
+            except (TypeError, ValueError):
+                dep_id = None
+            if dep_id and dep_id != it["id"]:
+                edges.append({"source": dep_id, "target": it["id"], "label": "blockiert"})
+    return {"items": [it for it, _ in items], "edges": edges, "tokens": {"in": ti, "out": to}}
+
+
+@app.post("/api/todo/suggest-links")
+async def todo_suggest_links(req: Request):
+    body = await req.json()
+    items = [it for it in (body.get("items") or []) if isinstance(it, dict) and it.get("id")]
+    if len(items) < 2:
+        return {"edges": [], "tokens": {"in": 0, "out": 0}}
+    model = _pick_model(body.get("model"), _model_for("general"))
+    id_by_idx = {i: it["id"] for i, it in enumerate(items)}
+    valid = set(id_by_idx.values())
+    lst = "\n".join(f"{i}: {str(it.get('text','')).strip()[:200]}" for i, it in enumerate(items))
+    data, ti, to, _ = await _research_llm_json(model, _TODO_LINKS_SYSTEM, "Aufgaben:\n" + lst)
+    edges, seen = [], set()
+    for e in (data.get("edges") or []):
+        try:
+            s = id_by_idx.get(int((e or {}).get("source")))
+            t = id_by_idx.get(int((e or {}).get("target")))
+        except (TypeError, ValueError):
+            continue
+        if s and t and s != t and (s, t) not in seen and s in valid and t in valid:
+            seen.add((s, t))
+            edges.append({"source": s, "target": t, "label": str((e or {}).get("label", "")).strip()[:60]})
+    return {"edges": edges, "tokens": {"in": ti, "out": to}}
+
+
+@app.post("/api/todo/next")
+async def todo_next(req: Request):
+    body = await req.json()
+    name = body.get("name")
+    data = _todo_load(name) if name else body.get("data") or {}
+    items = data.get("items") or []
+    if not items:
+        return {"text": "Die Liste ist leer.", "tokens": {"in": 0, "out": 0}}
+    id2text = {it.get("id"): it.get("text", "") for it in items}
+    lines = []
+    for it in items:
+        deps = "; ".join(f"←{id2text.get(l.get('target'), '')}" for l in (it.get("links") or []))
+        lines.append(f"[{it.get('status','offen')}] {it.get('text','')}"
+                     + (f" (Zuständig: {', '.join(it.get('assignees') or [])})" if it.get("assignees") else "")
+                     + (f" {{{deps}}}" if deps else ""))
+    model = _pick_model(body.get("model"), _model_for("general"))
+    prompt = f"Liste: {data.get('title','')}\n\nAufgaben:\n" + "\n".join(lines)
+    text, ti, to = "", 0, 0
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": _TODO_NEXT_SYSTEM},
+                             {"role": "user", "content": prompt}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        j = resp.json()
+        ti, to = _llm_tok(j)
+        text = re.sub(r"<think>.*?</think>", "", j.get("message", {}).get("content", ""), flags=re.DOTALL).strip()
+    except Exception as e:
+        text = f"(Analyse nicht möglich: {e})"
+    return {"text": text, "tokens": {"in": ti, "out": to}}
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────

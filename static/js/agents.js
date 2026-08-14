@@ -222,6 +222,8 @@ const AgentManager = (() => {
       });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || ('HTTP ' + resp.status));
       const saved = await resp.json();
+      if (saved.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(saved.tokens, 'Agenten');
+      delete saved.tokens;   // nicht in den Agenten-Datensatz übernehmen
       selected.clear();
       await load();
       openModal(saved);   // zur Kontrolle/Nachbearbeitung direkt öffnen
@@ -402,6 +404,7 @@ const AgentManager = (() => {
         body: JSON.stringify({ description: task }),
       });
       const data = await resp.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Agenten');
       if (data.prompt) {
         document.getElementById('field-agent-prompt').value = data.prompt;
         showToast('System-Prompt generiert');

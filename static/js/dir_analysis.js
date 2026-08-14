@@ -49,6 +49,7 @@ const DirAnalysis = (() => {
       });
       if (!resp.ok) { throw new Error((await resp.json()).detail || resp.statusText); }
       _scan = await resp.json();
+      if (_scan.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(_scan.tokens, 'Verzeichnis-Analyse');
       _renderScan();
       _el('dir-actions').style.display = 'flex';
     } catch (e) {
@@ -156,6 +157,7 @@ const DirAnalysis = (() => {
           throw new Error(msg);
         }
         const data = await resp.json();
+        if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Verzeichnis-Analyse');
         _analyses[rel] = data.analysis || '';
         _render(body, data.analysis || '_(keine Analyse)_');
       } catch (e) {
