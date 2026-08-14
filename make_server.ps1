@@ -15,6 +15,7 @@ $SERVER_DIR  = Join-Path (Split-Path $APP_DIR -Parent) "AI_Framework_Thomas_Serv
 $DATE_STAMP  = Get-Date -Format "yyyyMMdd"
 $BASE_MODELS = @("ministral-3:3b", "qwen3.5:4b")   # Standardmodelle; weitere unten abfragbar
 $EMBED_MODEL = "nomic-embed-text"   # RAG-Embeddings
+$STT_MODEL   = "base"               # Spracherkennung (faster-whisper), CPU-tauglich
 $NSSM_URL    = "https://nssm.cc/release/nssm-2.24.zip"
 
 function Write-Step  { param($t) Write-Host "`n[►] $t" -ForegroundColor Cyan }
@@ -107,6 +108,10 @@ $serverConfig = [ordered]@{
     allowed_models = $allModels
     default_model  = $BASE_MODELS[0]
     embed_model    = $EMBED_MODEL
+    stt_model      = $STT_MODEL
+    stt_device     = "cpu"
+    stt_compute    = "int8"
+    stt_download_root = "models/whisper"
     ollama_base    = "http://localhost:11434"
     port           = [int]$PORT
     host           = $HOST_IP
@@ -174,6 +179,13 @@ foreach ($m in ($allModels + $EMBED_MODEL)) {
     if ($LASTEXITCODE -eq 0) { Write-OK "$m" }
     else { Write-Warn "$m fehlgeschlagen — manuell: ollama pull $m" }
 }
+
+# Spracherkennungs-Modell (faster-whisper) vor-cachen — laedt von HuggingFace, nicht Ollama.
+Write-Step "Spracherkennungs-Modell '$STT_MODEL' vor-cachen (faster-whisper, CPU)..."
+$sttRoot = Join-Path $SERVER_DIR "models\whisper"
+& "$SERVER_DIR\venv\Scripts\python.exe" -c "from faster_whisper import WhisperModel; WhisperModel('$STT_MODEL', device='cpu', compute_type='int8', download_root=r'$sttRoot')"
+if ($LASTEXITCODE -eq 0) { Write-OK "STT-Modell '$STT_MODEL' bereit" }
+else { Write-Warn "STT-Modell nicht vorab geladen — wird beim ersten Transkribieren nachgeladen" }
 
 # ── Start-Skript ──────────────────────────────────────────────────────────────
 

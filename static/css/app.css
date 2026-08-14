@@ -4847,3 +4847,44 @@ select.ob-input option {
 .todo-badge.soon { background: #f59e0b; color: #1a1a1a; font-weight: 600; }
 .todo-badge.run { background: #3b82f6; color: #fff; }
 .todo-badge.unblock { background: #22c55e; color: #08240f; font-weight: 600; }
+
+/* ── Geheim-/Lokal-Modus (Sidebar-Schnellschalter) ─────────────────────────── */
+#btn-secret-mode.secret-on {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+/* Dezenter, dauerhaft sichtbarer Hinweis, dass der Geheim-Modus aktiv ist. */
+body.secret-mode #sidebar-brand::after {
+  content: "🔒 lokal";
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  letter-spacing: .04em;
+  color: var(--accent);
+  opacity: .9;
+}
+
+/* ── Transkription (Audio → Text) ──────────────────────────────────────────── */
+#tr-mic-toggle.recording,
+#btn-chat-mic.active {
+  border-color: #ef4444;
+  color: #ef4444;
+  animation: tr-pulse 1.1s ease-in-out infinite;
+}
+@keyframes tr-pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.tr-seg {
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tr-seg-t {
+  display: inline-block;
+  min-width: 46px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  margin-right: 8px;
+  opacity: .8;
+}

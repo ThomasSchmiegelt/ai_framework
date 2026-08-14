@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260814agenda" />
+  <link rel="stylesheet" href="/css/app.css?v=20260815stt" />
 </head>
 <body>
 
@@ -107,6 +107,8 @@
       </div>
       <input type="file" id="restore-input" accept=".zip" style="display:none" />
       <button id="btn-profile" class="btn-sidebar-action" style="width:100%">👤 Profil bearbeiten</button>
+      <button id="btn-secret-mode" class="btn-sidebar-action" style="width:100%"
+              title="Geheim-Modus: sämtliche Modell-Rollen zwingend lokal. Klick schaltet um.">🔓 Geheim-Modus: aus</button>
       <div id="token-meter" title="Tokens dieser Sitzung. Klick öffnet die Aufschlüsselung nach Vorgang. Preis je 1.000 Tokens im Profil hinterlegen."
            style="display:none;margin-top:8px;font-size:11px;opacity:.85;cursor:pointer;line-height:1.5;position:relative;
                   border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--bg-input)">
@@ -149,6 +151,7 @@
       <button class="tab-btn" data-tab="zeugnis">📜 Zeugnisse</button>
       <button class="tab-btn" data-tab="varianten">🧮 Varianten</button>
       <button class="tab-btn" data-tab="todo">✅ To-Do</button>
+      <button class="tab-btn" data-tab="transcription">🎙 Transkription</button>
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
       <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
     </div>
@@ -214,6 +217,9 @@
             </button>
             <button id="btn-upload" class="tool-toggle" title="Datei anhängen (PDF, Bild, DOCX, XLSX…)">
               📎 Datei
+            </button>
+            <button id="btn-chat-mic" class="tool-toggle" title="Diktieren: Aufnahme starten/stoppen, Text wird ins Eingabefeld geschrieben">
+              🎙 Diktat
             </button>
             <div id="rag-chat-wrap" style="position:relative;display:inline-flex">
               <button id="btn-rag-toggle" class="tool-toggle" title="Wissenssammlung (RAG) für die Antwort nutzen">
@@ -2382,6 +2388,81 @@
       </div>
     </div><!-- /todo-panel -->
 
+    <!-- ── Transkription (Spracherkennung, Audio → Text) ─────────────────────── -->
+    <div id="transcription-panel" class="panel">
+      <div style="max-width:900px;margin:0 auto;padding:14px 16px">
+        <h2 style="font-size:17px;margin:0 0 4px">🎙 Transkription</h2>
+        <p class="planner-muted" style="font-size:12px;margin:0 0 14px">
+          Sprache in Text umwandeln – aus dem <strong>Mikrofon</strong> (auch USB) oder aus einer
+          <strong>Datei</strong>. Wahlweise lokal (faster-whisper, läuft auf diesem Rechner) oder
+          über ein API-Modell. Im <strong>Geheim-Modus</strong> ist nur die lokale Engine aktiv.
+        </p>
+
+        <!-- Engine / Modell / Sprache -->
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px">
+          <label style="font-size:12px">Engine
+            <select id="tr-engine" style="display:block;margin-top:3px">
+              <option value="local">Lokal (faster-whisper)</option>
+              <option value="api">API-Modell</option>
+            </select>
+          </label>
+          <label style="font-size:12px">Modell
+            <select id="tr-model" style="display:block;margin-top:3px;min-width:180px"></select>
+          </label>
+          <label style="font-size:12px">Sprache
+            <select id="tr-language" style="display:block;margin-top:3px">
+              <option value="auto">automatisch erkennen</option>
+              <option value="de" selected>Deutsch</option>
+              <option value="en">Englisch</option>
+              <option value="fr">Französisch</option>
+              <option value="es">Spanisch</option>
+              <option value="it">Italienisch</option>
+            </select>
+          </label>
+          <label style="font-size:12px" title="„Übersetzen" gibt den Text auf Englisch aus">Aufgabe
+            <select id="tr-task" style="display:block;margin-top:3px">
+              <option value="transcribe">Transkribieren (Originalsprache)</option>
+              <option value="translate">Ins Englische übersetzen</option>
+            </select>
+          </label>
+        </div>
+        <div id="tr-engine-note" class="planner-muted" style="font-size:11.5px;margin:-4px 0 12px"></div>
+
+        <!-- Quelle: Mikrofon -->
+        <div class="var-sec">
+          <div class="var-sec-head">🎤 Mikrofon</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+            <select id="tr-mic-device" style="font-size:12px;min-width:220px" title="Eingabegerät (z.B. USB-Mikrofon)"></select>
+            <button id="tr-mic-toggle" class="export-btn">● Aufnahme starten</button>
+            <span id="tr-mic-status" class="planner-muted" style="font-size:12px"></span>
+          </div>
+        </div>
+
+        <!-- Quelle: Datei -->
+        <div class="var-sec">
+          <div class="var-sec-head">📄 Datei</div>
+          <input type="file" id="tr-file" accept="audio/*,video/*,.mp3,.wav,.m4a,.ogg,.webm,.flac"
+                 style="font-size:12px" />
+          <button id="tr-file-go" class="export-btn" style="margin-left:8px">Transkribieren</button>
+        </div>
+
+        <!-- Ergebnis -->
+        <div class="var-sec">
+          <div class="var-sec-head">📝 Ergebnis
+            <span style="flex:1"></span>
+            <button id="tr-copy" class="export-btn" title="Text kopieren">📋 Kopieren</button>
+            <button id="tr-export" class="export-btn" title="Als .txt speichern">⬇ .txt</button>
+            <button id="tr-to-chat" class="export-btn" title="Text in den Chat übernehmen">→ Chat</button>
+            <button id="tr-to-todo" class="export-btn" title="Als Notiz ins To-Do ableiten">→ To-Do</button>
+          </div>
+          <div id="tr-progress" class="planner-muted" style="font-size:12px;display:none">⏳ Transkribiere …</div>
+          <textarea id="tr-text" placeholder="Der erkannte Text erscheint hier …"
+                    style="width:100%;min-height:160px;font-size:13px;line-height:1.5"></textarea>
+          <div id="tr-segments" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div><!-- /transcription-panel -->
+
   </main>
 </div>
 
@@ -2657,6 +2738,16 @@
         gehen dabei an den externen Anbieter! Standard: aus — alles bleibt auf diesem Rechner.
         Semantische Funktionen (Themen-Nähe, RAG-Übernahme) brauchen weiterhin das lokale
         Embedding-Modell.</span>
+      </span>
+    </label>
+
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-local-only" style="width:auto;margin-top:2px" />
+      <span>🔒 Geheim-Modus — alles lokal
+        <span class="planner-muted">— schaltet <b>sämtliche</b> Modell-Rollen auf lokale
+        Standardmodelle um; API-/Remote-Modelle werden überall ignoriert (auch bei
+        vertraulichen Auswertungen). Beidseitig schaltbar — auch über das Schloss in der
+        Seitenleiste. Standard: aus.</span>
       </span>
     </label>
 
@@ -3165,7 +3256,7 @@
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260710capi"></script>
+<script src="/js/profile.js?v=20260815stt"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
@@ -3174,7 +3265,7 @@
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
 <script src="/js/logger.js?v=20260603"></script>
 <script src="/js/code_workspace.js?v=20260627pst1"></script>
-<script src="/js/onboarding.js?v=20260814b"></script>
+<script src="/js/onboarding.js?v=20260815stt"></script>
 <script src="/js/medizin.js?v=20260711docs2"></script>
 <script src="/js/mathe.js?v=20260622"></script>
 <script src="/js/dir_analysis.js?v=20260627local"></script>
@@ -3185,8 +3276,9 @@
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260814b"></script>
 <script src="/js/todo.js?v=20260814agenda"></script>
+<script src="/js/transcription.js?v=20260815stt"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260814vt"></script>
+<script src="/js/app.js?v=20260815stt"></script>
 
 </body>
 </html>

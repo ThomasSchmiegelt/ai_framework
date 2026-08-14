@@ -33,6 +33,13 @@ echo "Installiere Python-Abhängigkeiten..."
 venv/bin/pip install --upgrade pip setuptools wheel --quiet
 venv/bin/pip install -r requirements.txt --quiet --prefer-binary
 
+# Spracherkennungs-Modell (faster-whisper) vor-cachen — laedt von HuggingFace nach
+# models/whisper (config.json: stt_download_root), damit die erste Transkription
+# offline laeuft. ~150 MB, laeuft auf CPU. Fehlschlag ist unkritisch (Nachladen zur Laufzeit).
+echo "Lade Spracherkennungs-Modell 'base' (faster-whisper, ~150 MB, CPU)…"
+venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8', download_root='models/whisper')" \
+  && echo "  ok: STT-Modell bereit" || echo "  WARNUNG: STT-Modell nicht vorab geladen — wird beim ersten Transkribieren nachgeladen"
+
 # Datenverzeichnisse anlegen (falls nicht vorhanden)
 for dir in data/uploads data/reports data/code data/plans data/dossiers data/profile_assets data/jury_docs; do
   mkdir -p "$dir"

@@ -14,6 +14,7 @@ $ErrorActionPreference = "Stop"
 $APP_DIR       = $PSScriptRoot
 $MODELS        = @("ministral-3:3b", "qwen3.5:4b")   # Standardmodelle; weitere bei Bedarf via 'ollama pull'
 $EMBED_MODEL   = "nomic-embed-text"   # RAG-Embeddings (klein, CPU-tauglich)
+$STT_MODEL     = "base"               # Spracherkennung (faster-whisper), ~150 MB, laeuft auf CPU / 6 GB VRAM
 $PYTHON_MIN    = [Version]"3.11.0"
 $VENV_DIR      = Join-Path $APP_DIR "venv"
 $CONFIG_FILE   = Join-Path $APP_DIR "config.json"
@@ -172,6 +173,16 @@ foreach ($model in ($MODELS + $EMBED_MODEL)) {
     else { Write-Warn "$model fehlgeschlagen — Tag prüfen oder später manuell: ollama pull $model" }
 }
 
+# ── 5b. Spracherkennungs-Modell vor-cachen (faster-whisper) ────────────────────
+# faster-whisper laedt sein Modell nicht ueber Ollama, sondern von HuggingFace nach
+# STT_DOWNLOAD_ROOT. Hier einmalig ziehen, damit die erste Transkription offline laeuft.
+Write-Step "Spracherkennungs-Modell '$STT_MODEL' vor-cachen (faster-whisper, ~150 MB, CPU)..."
+$sttRoot = Join-Path $APP_DIR "models\whisper"
+$sttDl = "from faster_whisper import WhisperModel; WhisperModel('$STT_MODEL', device='cpu', compute_type='int8', download_root=r'$sttRoot')"
+& $pyVenv -c $sttDl
+if ($LASTEXITCODE -eq 0) { Write-OK "Spracherkennungs-Modell '$STT_MODEL' bereit" }
+else { Write-Warn "STT-Modell konnte nicht vorab geladen werden — wird beim ersten Transkribieren nachgeladen" }
+
 # ── 6. config.json ────────────────────────────────────────────────────────────
 
 Write-Step "Konfigurationsdatei anlegen..."
@@ -180,6 +191,10 @@ if (-not (Test-Path $CONFIG_FILE)) {
         allowed_models = $MODELS
         default_model  = $MODELS[0]
         embed_model    = $EMBED_MODEL
+        stt_model      = $STT_MODEL
+        stt_device     = "cpu"
+        stt_compute    = "int8"
+        stt_download_root = "models/whisper"
         ollama_base    = "http://localhost:11434"
         port           = 8780
         host           = "127.0.0.1"

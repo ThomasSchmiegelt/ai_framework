@@ -231,8 +231,18 @@ const Onboarding = (() => {
            + '<em>(Optionaler Tab.)</em>',
     },
     {
+      title: '24 · Transkription & Geheim-Modus',
+      text: 'Der Tab <strong>🎙 Transkription</strong> wandelt <strong>Sprache in Text</strong> um – '
+           + 'aus dem <strong>Mikrofon</strong> (auch USB) oder einer <strong>Audiodatei</strong>, wahlweise '
+           + '<strong>lokal</strong> (faster-whisper, läuft auf diesem Rechner) oder über ein API-Modell. Das '
+           + 'Ergebnis kommt mit <strong>Zeitmarken</strong> und lässt sich an Chat, RAG oder To-Do übergeben; '
+           + 'im Chat gibt es zusätzlich einen <strong>🎙 Diktat</strong>-Knopf. Mit dem Schalter '
+           + '<strong>🔒 Geheim-Modus</strong> in der Seitenleiste stellst du auf Wunsch <strong>alle Modelle '
+           + 'auf lokal</strong> um – beidseitig schaltbar, damit garantiert nichts diesen Rechner verlässt.',
+    },
+    {
       image: 'log_file.png',
-      title: '24 · Log-Datei',
+      title: '25 · Log-Datei',
       text: 'Im <strong>Log-Tab</strong> siehst du bei Bedarf, was im Hintergrund passiert: '
            + 'Modell-Antworten, Tool-Aufrufe und Diagnosen. Praktisch zur Fehlersuche – '
            + 'ein- und ausschaltbar und als Datei exportierbar.',
