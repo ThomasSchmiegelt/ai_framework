@@ -4804,3 +4804,30 @@ select.ob-input option {
 .todo-hfield .var-input, .todo-hfield input, .todo-hfield select { margin-bottom: 0; width: 100%; }
 .todo-hfield-wide { grid-column: 1 / -1; }
 @media (max-width: 720px) { .todo-header-grid { grid-template-columns: 1fr; } .todo-hfield-wide { grid-column: auto; } }
+
+/* ── To-Do Projektbaum (DB) ───────────────────────────────────────────────────── */
+#todo-main { display: flex; gap: 0; height: 100%; min-height: 0; }
+#todo-tree-pane { width: 300px; min-width: 180px; flex-shrink: 0; overflow: auto; padding: 8px 6px; border-right: 1px solid var(--border); }
+#todo-tree-splitter { width: 6px; cursor: col-resize; flex-shrink: 0; }
+#todo-content { flex: 1; min-width: 0; overflow: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; }
+.todo-tree-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.todo-tree-head input, .todo-tree-head select { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 7px; font-size: 12px; }
+.todo-tree-head #todo-new-name { width: 96px; }
+.todo-tree-node { display: flex; align-items: center; gap: 4px; padding: 4px 4px; border-radius: 6px; }
+.todo-tree-node:hover { background: var(--bg-hover); }
+.todo-tree-node.open { background: var(--bg-active, var(--bg-hover)); }
+.todo-tree-node.active-scope { box-shadow: inset 3px 0 0 var(--accent); }
+.todo-tree-name { flex: 1; cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.todo-tree-count { font-size: 10.5px; color: var(--text-muted); }
+.todo-tree-actions { display: inline-flex; gap: 1px; opacity: 0.35; }
+.todo-tree-node:hover .todo-tree-actions { opacity: 1; }
+.todo-tree-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 4px; }
+.todo-tree-btn:hover { color: var(--text); background: var(--bg-input); }
+.todo-tree-btn.on { color: #f59e0b; }
+.todo-reorder { display: inline-flex; flex-direction: column; gap: 0; }
+.todo-mini { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 8px; line-height: 1; padding: 1px 3px; }
+.todo-mini:hover:not(:disabled) { color: var(--accent); }
+.todo-mini:disabled { opacity: 0.25; cursor: default; }
+.todo-it-move { background: var(--bg-input); color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; padding: 4px 6px; max-width: 130px; }
+#todo-content .var-sec:first-of-type { margin-top: 8px; }
+@media (max-width: 760px) { #todo-main { flex-direction: column; } #todo-tree-pane { width: auto; border-right: none; border-bottom: 1px solid var(--border); max-height: 30vh; } #todo-tree-splitter { display: none; } }

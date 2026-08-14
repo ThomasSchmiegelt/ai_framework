@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260814hdr" />
+  <link rel="stylesheet" href="/css/app.css?v=20260814tree" />
 </head>
 <body>
 
@@ -2249,37 +2249,52 @@
     <div id="todo-panel" class="panel">
       <div id="todo-toolbar">
         <h2 style="font-size:16px;margin:0">✅ To-Do</h2>
-        <select id="todo-list" style="min-width:170px"><option value="">— Projekt wählen —</option></select>
-        <input type="text" id="todo-new-list" placeholder="Neues Projekt…" style="max-width:150px" />
-        <select id="todo-new-type" title="Art des Projekts" style="max-width:130px">
-          <option value="besprechung">Besprechung</option>
-          <option value="projekt">Projekt</option>
-          <option value="frei">Frei</option>
-        </select>
-        <button id="btn-todo-create" class="export-btn">➕ Anlegen</button>
-        <button id="btn-todo-delete" class="export-btn btn-danger-sm" title="Projekt löschen">✕</button>
-        <button id="btn-todo-save" class="export-btn" title="In Verzeichnisstruktur speichern">💾 Speichern</button>
+        <span id="todo-active-label" class="planner-muted" style="font-size:12px" title="Aktives Projekt: Suche &amp; Graph auf diesen Teilbaum beschränkt"></span>
+        <button id="btn-todo-save" class="export-btn" title="Änderungen speichern">💾 Speichern</button>
         <span class="todo-toolbar-sep"></span>
-        <input type="search" id="todo-search" placeholder="🔍 Alle Projekte + Anlagen durchsuchen…" style="min-width:230px" />
+        <input type="search" id="todo-search" placeholder="🔍 Suchen (aktiver Bereich + Anlagen)…" style="min-width:250px" />
         <span id="todo-spin" class="pf-spin" style="display:none;margin-left:auto"></span>
         <span id="todo-status" class="planner-muted" style="font-size:11.5px"></span>
       </div>
-      <div id="todo-subtabs">
-        <button class="todo-subtab active" data-view="liste">📋 Liste</button>
-        <button class="todo-subtab" data-view="graph">🕸 Wissensgraph</button>
-      </div>
       <div id="todo-body">
-        <div id="todo-empty" class="dir-hint" style="display:block">
-          Lege oben ein <strong>Projekt</strong> an (Besprechung, Projekt oder frei). Schreibe die
-          <strong>Besprechungsnotiz</strong> ins Notizfeld und klicke <strong>🪄 To-Do-Liste ableiten</strong> –
-          die KI macht daraus einzelne Punkte. Punkte hakst du als erledigt ab, hängst
-          <strong>Dokumente</strong> an (werden als Markdown gespeichert und mitgesucht) und siehst sie im
-          <strong>Wissensgraph</strong>. Die <strong>Suche</strong> oben rechts findet Punkte und Anlagen
-          über <em>alle</em> Projekte hinweg. Gespeichert wird in <code>data/todo/</code>.
-        </div>
-
-        <!-- Globale Suchergebnisse (über allen Projekten) -->
+        <!-- Globale/aktive Suchergebnisse -->
         <div id="todo-search-results" style="display:none"></div>
+
+        <div id="todo-main">
+          <!-- Linke Spalte: Projektbaum -->
+          <div id="todo-tree-pane">
+            <div class="todo-tree-head">
+              <span>🌳 Projektbaum</span>
+              <span style="flex:1"></span>
+              <input type="text" id="todo-new-name" placeholder="Name…" />
+              <select id="todo-new-type" title="Art">
+                <option value="projekt">Projekt</option>
+                <option value="besprechung">Besprechung</option>
+                <option value="frei">Frei</option>
+              </select>
+              <button id="btn-todo-add-sub" class="export-btn" title="Unterprojekt unter dem gewählten Knoten anlegen">➕ Unterprojekt</button>
+            </div>
+            <div id="todo-tree"></div>
+            <p class="planner-muted" style="font-size:11px;margin:8px 4px 0">
+              Klick = öffnen. <strong>⚡</strong> aktiviert ein Projekt: Suche &amp; Graph zeigen dann nur
+              diesen Teilbaum. Die Wurzel (dein Name) aktiv = alle Projekte verbunden.
+            </p>
+          </div>
+          <div id="todo-tree-splitter" class="pane-splitter" title="Ziehen zum Verschieben"></div>
+
+          <!-- Rechte Spalte: Inhalt des gewählten Projekts -->
+          <div id="todo-content">
+            <div id="todo-subtabs">
+              <button class="todo-subtab active" data-view="liste">📋 Liste</button>
+              <button class="todo-subtab" data-view="graph">🕸 Wissensgraph</button>
+            </div>
+            <div id="todo-empty" class="dir-hint" style="display:block">
+              Wähle links ein <strong>Projekt</strong> (oder lege ein <strong>Unterprojekt</strong> an).
+              Schreibe die <strong>Besprechungsnotiz</strong> und klicke <strong>🪄 To-Do-Liste ableiten</strong> –
+              die KI macht daraus einzelne Punkte. Punkte hakst du ab, verschiebst sie zwischen Projekten,
+              hängst <strong>Dokumente</strong> an (→ Markdown, mitgesucht) und siehst alles im
+              <strong>Wissensgraph</strong>.
+            </div>
 
         <div id="todo-view-liste" class="todo-view" style="display:none">
           <!-- 1) Besprechungsheader -->
@@ -2343,6 +2358,8 @@
           </div>
           <div id="todo-graph"></div>
         </div>
+          </div><!-- /todo-content -->
+        </div><!-- /todo-main -->
       </div>
     </div><!-- /todo-panel -->
 
@@ -3148,7 +3165,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260814b"></script>
-<script src="/js/todo.js?v=20260814hdr"></script>
+<script src="/js/todo.js?v=20260814tree"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/app.js?v=20260814vt"></script>
 

@@ -830,6 +830,9 @@ app.add_middleware(
 async def _startup():
     await _db.init()
     await _db.migrate_json(CONVERSATIONS_DIR)
+    # To-Do-Projekte einmalig aus den alten JSON-Dateien in die DB übernehmen
+    # (Wurzelprojekt = Benutzername); Alt-JSON bleibt liegen, bis der DB-Betrieb steht.
+    await _db.migrate_todo_json(TODO_DIR, _todo_root_name())
 
 # ── Tool-Definitionen für Ollama ──────────────────────────────────────────────
 
@@ -10750,6 +10753,7 @@ def _backup_dirs_always() -> list:
         (ZEUGNISSE_DIR, "zeugnisse"), (PATENTE_DIR, "patente"),
         (RFQ_DIR, "rfq"), (MORPH_TRAIN_DIR, "morph_training"),
         (VARIANTEN_DIR, "varianten"), (TODO_DIR, "todo"),
+        (TODO_ATT_DIR, "todo_att"),   # To-Do-Anlagen (Original-Dateien; MD-Text + Baum sind in der DB)
     ]
 
 
@@ -10863,6 +10867,14 @@ async def create_backup(uploads: bool = False, pst: bool = False,
                         ch["embedding"] = _b64.b64encode(ch["embedding"]).decode("ascii")
             if rag_dump:
                 zf.writestr("rag/collections.json", json.dumps(rag_dump, ensure_ascii=False))
+        except Exception:
+            pass
+
+        # To-Do-Projektbaum inkl. Punkte/Kanten/Anlagen-Markdown (aus der DB)
+        try:
+            todo_dump = await _db.todo_export()
+            if todo_dump.get("projects"):
+                zf.writestr("todo/todos.json", json.dumps(todo_dump, ensure_ascii=False))
         except Exception:
             pass
 
@@ -11115,6 +11127,15 @@ async def restore_backup(file: UploadFile = File(...), replace: bool = False):
                         stats["rag_collections"] += 1
                 except Exception as e:
                     stats["errors"].append(f"rag/collections.json: {e}")
+
+            # To-Do-Projektbaum (aus der DB exportiert)
+            if "todo/todos.json" in names:
+                try:
+                    todo_dump = json.loads(zf.read("todo/todos.json").decode("utf-8"))
+                    await _db.todo_import(todo_dump)
+                    stats["todo_projects"] = len(todo_dump.get("projects", []))
+                except Exception as e:
+                    stats["errors"].append(f"todo/todos.json: {e}")
 
             # ── Geschäftsdaten, Uploads, Postfach, Zugangsdaten ──────────────
             # Dateibasierte Bereiche generisch zurückspielen. ``replace=False``
@@ -13068,101 +13089,96 @@ async def varianten_explain(req: Request):
 # Persistenz je Liste in TODO_DIR/<name>/list.json (Items, Kanten, Graph-Positionen).
 # Struktur-Logik in tools/todo.py; hier HTTP + LLM-Helfer (Extraktion/Verknüpfung).
 
-def _todo_safe_name(name: str) -> str:
-    safe = "".join(c for c in str(name or "") if c.isalnum() or c in (" ", "_", "-")).strip()
-    if not safe or safe.startswith("_"):
-        raise HTTPException(status_code=400, detail="Ungültiger Name")
-    return safe
+TODO_ATT_DIR = DATA_DIR / "todo_att"   # Original-Anlagen je Punkt (MD-Text liegt in der DB)
 
 
-def _todo_dir(name: str, create: bool = False) -> Path:
-    d = TODO_DIR / _todo_safe_name(name)
-    if create:
-        d.mkdir(parents=True, exist_ok=True)
-    elif not d.exists():
-        raise HTTPException(status_code=404, detail="Liste nicht gefunden")
-    return d
+def _todo_root_name() -> str:
+    """Name des Wurzelprojekts = Benutzername aus dem Profil (Rückfall: default_project)."""
+    p = _load_profile()
+    nm = " ".join(x for x in (
+        str(p.get("first_name", "")).strip(), str(p.get("last_name", "")).strip()) if x).strip()
+    return nm or str(p.get("default_project", "")).strip() or "Meine To-Dos"
 
 
-def _todo_load(name: str) -> dict:
-    from tools import todo as _todo
-    p = _todo_dir(name) / "list.json"
-    if not p.exists():
-        return _todo.sanitize_list({"title": name})
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        data = {}
-    return _todo.sanitize_list(data)
+def _todo_build_tree(projects: list) -> list:
+    """Flache Projektliste (aus der DB) in einen verschachtelten Baum überführen."""
+    by_parent: dict = {}
+    for p in projects:
+        by_parent.setdefault(p.get("parent_id") or None, []).append(p)
+
+    def _kids(pid):
+        out = []
+        for p in by_parent.get(pid, []):
+            node = dict(p)
+            node["children"] = _kids(p["id"])
+            out.append(node)
+        return out
+    return _kids(None)
 
 
-def _todo_save(name: str, body: dict) -> dict:
-    from tools import todo as _todo
-    d = _todo_dir(name, create=True)
-    data = _todo.sanitize_list(body)
-    (d / "list.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return data
+@app.get("/api/todo/tree")
+async def todo_tree():
+    await _db.todo_root_ensure(_todo_root_name())
+    projects = await _db.todo_projects_all()
+    return {"tree": _todo_build_tree(projects), "flat": projects}
 
 
-@app.get("/api/todo/lists")
-async def todo_lists():
-    from tools import todo as _todo
-    out = []
-    if TODO_DIR.exists():
-        for d in sorted(TODO_DIR.iterdir()):
-            if not d.is_dir() or d.name.startswith("_"):
-                continue
-            p = d / "list.json"
-            meta = {}
-            if p.exists():
-                try:
-                    meta = json.loads(p.read_text(encoding="utf-8"))
-                except Exception:
-                    meta = {}
-            out.append({
-                "name": d.name,
-                "title": meta.get("title") or d.name,
-                "type": meta.get("type") or "frei",
-                "stats": _todo.stats(meta),
-                "updated_at": meta.get("updated_at", 0),
-            })
-    out.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
-    return out
-
-
-@app.post("/api/todo/lists")
-async def todo_create(req: Request):
+@app.post("/api/todo/projects")
+async def todo_project_create(req: Request):
     body = await req.json()
-    name = _todo_safe_name(body.get("name", ""))
-    d = TODO_DIR / name
-    if d.exists():
-        raise HTTPException(status_code=409, detail="Liste existiert bereits")
-    return _todo_save(name, {
-        "title": body.get("title", name),
-        "type": body.get("type", "frei"),
-        "date": body.get("date", ""),
+    await _db.todo_root_ensure(_todo_root_name())
+    pid = "tp_" + uuid.uuid4().hex[:12]
+    parent = str(body.get("parent_id", "") or "").strip() or "root"
+    name = str(body.get("name", "")).strip() or "Projekt"
+    return await _db.todo_project_create({
+        "id": pid, "name": name, "parent_id": parent,
+        "type": body.get("type", "projekt"), "title": body.get("title", name),
         "participants": body.get("participants") or [],
-        "project_id": body.get("project_id", ""),
-        "items": [],
     })
 
 
-@app.get("/api/todo/lists/{name}")
-async def todo_get(name: str):
-    return _todo_load(name)
+@app.get("/api/todo/projects/{pid}")
+async def todo_project_get(pid: str):
+    proj = await _db.todo_project_get(pid)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
+    return proj
 
 
-@app.put("/api/todo/lists/{name}")
-async def todo_put(name: str, req: Request):
+@app.put("/api/todo/projects/{pid}")
+async def todo_project_save(pid: str, req: Request):
+    from tools import todo as _todo
     body = await req.json()
-    return _todo_save(name, body)
+    clean = _todo.sanitize_list(body)   # Items/Kanten/Teilnehmer normalisieren
+    header = {
+        "type": clean.get("type", "projekt"), "title": clean.get("title", ""),
+        "date": clean.get("date", ""), "participants": clean.get("participants") or [],
+        "project_ref": clean.get("project_id", ""),
+        "settings": {**(clean.get("settings") or {}), "positions": clean.get("positions") or {}},
+    }
+    saved = await _db.todo_save_project(pid, header, clean.get("items") or [], clean.get("edges") or [])
+    if not saved:
+        raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
+    return saved
 
 
-@app.delete("/api/todo/lists/{name}")
-async def todo_delete(name: str):
-    import shutil
-    d = _todo_dir(name)
-    shutil.rmtree(d, ignore_errors=True)
+@app.post("/api/todo/projects/{pid}/rename")
+async def todo_project_rename(pid: str, req: Request):
+    body = await req.json()
+    await _db.todo_project_rename(pid, str(body.get("name", "")).strip() or "Projekt")
+    return {"ok": True}
+
+
+@app.post("/api/todo/projects/{pid}/move")
+async def todo_project_move(pid: str, req: Request):
+    body = await req.json()
+    await _db.todo_project_move(pid, str(body.get("parent_id", "") or "").strip() or "root")
+    return {"ok": True}
+
+
+@app.delete("/api/todo/projects/{pid}")
+async def todo_project_delete(pid: str, reparent: bool = False):
+    await _db.todo_project_delete(pid, reparent=reparent)
     return {"ok": True}
 
 
@@ -13269,9 +13285,9 @@ async def todo_suggest_links(req: Request):
 @app.post("/api/todo/next")
 async def todo_next(req: Request):
     body = await req.json()
-    name = body.get("name")
-    data = _todo_load(name) if name else body.get("data") or {}
-    items = data.get("items") or []
+    pid = body.get("pid") or body.get("name")
+    data = (await _db.todo_project_get(pid)) if pid else (body.get("data") or {})
+    items = (data or {}).get("items") or []
     if not items:
         return {"text": "Die Liste ist leer.", "tokens": {"in": 0, "out": 0}}
     id2text = {it.get("id"): it.get("text", "") for it in items}
@@ -13301,9 +13317,7 @@ async def todo_next(req: Request):
     return {"text": text, "tokens": {"in": ti, "out": to}}
 
 
-# ── To-Do: Anlagen je Punkt (Dokument → Markdown) ────────────────────────────
-# Beim Anhängen wird das Dokument mit tools.files.extract in Text gewandelt und als
-# Markdown gespeichert; die MD-Dateien werden von der Suche mit durchsucht.
+# ── To-Do: Anlagen (Dokument -> Markdown in DB), Verschieben, Suche, Graph ────
 
 def _todo_safe_file(fn: str) -> str:
     base = Path(str(fn or "").replace("\\", "/")).name.strip()
@@ -13311,123 +13325,87 @@ def _todo_safe_file(fn: str) -> str:
     return base or "datei"
 
 
-def _todo_attach_dir(name: str, item_id: str, create: bool = False) -> Path:
-    d = _todo_dir(name) / "attachments" / _todo_safe_file(item_id)
-    if create:
-        d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-@app.post("/api/todo/lists/{name}/items/{item_id}/attach")
-async def todo_attach(name: str, item_id: str, file: UploadFile = File(...)):
+@app.post("/api/todo/items/{item_id}/attach")
+async def todo_item_attach(item_id: str, file: UploadFile = File(...)):
+    """Datei an einen Punkt haengen: Original auf Platte, Text als Markdown in die DB
+    (fuer Anzeige + Suche)."""
     from tools import files as _files
-    data = _todo_load(name)
-    item = next((it for it in data.get("items", []) if it.get("id") == item_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Aufgabe nicht gefunden")
-    d = _todo_attach_dir(name, item_id, create=True)
-    orig_name = _todo_safe_file(file.filename)
-    orig_path = d / orig_name
+    d = TODO_ATT_DIR / _todo_safe_file(item_id)
+    d.mkdir(parents=True, exist_ok=True)
+    orig_path = d / _todo_safe_file(file.filename)
     orig_path.write_bytes(await file.read())
-    # → Markdown erzeugen (Text extrahieren; Bilder bleiben als Hinweis)
     try:
         text = _files.extract(orig_path)
     except Exception as e:
         text = f"[Konnte Datei nicht lesen: {e}]"
-    md_name = (Path(orig_name).stem or "anlage") + ".md"
-    md_path = d / md_name
-    md_path.write_text(f"# {file.filename}\n\n{text}", encoding="utf-8")
-    item.setdefault("attachments", [])
-    # doppelte MD-Namen vermeiden
-    if any(a.get("md") == md_name for a in item["attachments"]):
-        md_name = f"{Path(orig_name).stem}_{uuid.uuid4().hex[:4]}.md"
-        md_path.rename(d / md_name) if md_path.exists() else None
-    item["attachments"].append({"name": file.filename, "md": md_name, "orig": orig_name})
-    saved = _todo_save(name, data)
-    return {"ok": True, "list": saved}
+    md_text = f"# {file.filename}\n\n{text}"
+    att_id = "ta_" + uuid.uuid4().hex[:12]
+    try:
+        await _db.todo_attach_add(att_id, item_id, file.filename, str(orig_path), md_text)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Punkt nicht gefunden - bitte erst speichern.")
+    return {"ok": True, "attachment": {"id": att_id, "name": file.filename}}
 
 
-@app.get("/api/todo/lists/{name}/attachment/{item_id}/{filename}")
-async def todo_attachment(name: str, item_id: str, filename: str):
-    d = _todo_attach_dir(name, item_id)
-    fp = d / _todo_safe_file(filename)
-    if not fp.exists():
+@app.get("/api/todo/attachment/{att_id}")
+async def todo_attachment(att_id: str, orig: bool = False):
+    att = await _db.todo_attach_get(att_id)
+    if not att:
         raise HTTPException(status_code=404, detail="Anlage nicht gefunden")
-    return FileResponse(fp)
+    if orig and att.get("orig_path") and Path(att["orig_path"]).exists():
+        return FileResponse(att["orig_path"], filename=att.get("name") or "anlage")
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(att.get("md_text", ""), media_type="text/markdown; charset=utf-8")
 
 
-@app.delete("/api/todo/lists/{name}/items/{item_id}/attach/{md_name}")
-async def todo_attach_delete(name: str, item_id: str, md_name: str):
-    data = _todo_load(name)
-    item = next((it for it in data.get("items", []) if it.get("id") == item_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Aufgabe nicht gefunden")
-    md_name = _todo_safe_file(md_name)
-    att = next((a for a in item.get("attachments", []) if a.get("md") == md_name), None)
-    if att:
-        d = _todo_attach_dir(name, item_id)
-        for fn in (att.get("md"), att.get("orig")):
-            if fn:
-                fp = d / _todo_safe_file(fn)
-                if fp.exists():
-                    try:
-                        fp.unlink()
-                    except Exception:
-                        pass
-        item["attachments"] = [a for a in item["attachments"] if a.get("md") != md_name]
-    return {"ok": True, "list": _todo_save(name, data)}
+@app.delete("/api/todo/attachment/{att_id}")
+async def todo_attachment_delete(att_id: str):
+    att = await _db.todo_attach_delete(att_id)
+    if att and att.get("orig_path"):
+        try:
+            Path(att["orig_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+    return {"ok": True}
+
+
+@app.post("/api/todo/items/{item_id}/move")
+async def todo_item_move(item_id: str, req: Request):
+    body = await req.json()
+    target = str(body.get("project_id", "")).strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Kein Zielprojekt")
+    await _db.todo_item_move(item_id, target)
+    return {"ok": True}
+
+
+@app.post("/api/todo/items/{item_id}/reorder")
+async def todo_item_reorder(item_id: str, req: Request):
+    body = await req.json()
+    direction = "up" if str(body.get("direction", "up")) == "up" else "down"
+    await _db.todo_item_reorder(item_id, direction)
+    return {"ok": True}
 
 
 @app.get("/api/todo/search")
-async def todo_search(q: str = Query(...)):
-    """Projektübergreifende Suche: durchsucht ALLE To-Do-Projekte nach Aufgabentext,
-    Zuständigen und dem Inhalt der angehängten Markdown-Dateien. So „kommunizieren"
-    die Projekte über eine gemeinsame Suche."""
-    from tools import todo as _todo
-    term = str(q or "").strip().lower()
-    if not term:
-        return {"results": []}
-    results = []
-    if TODO_DIR.exists():
-        for d in sorted(TODO_DIR.iterdir()):
-            if not d.is_dir() or d.name.startswith("_"):
-                continue
-            p = d / "list.json"
-            if not p.exists():
-                continue
-            try:
-                data = _todo.sanitize_list(json.loads(p.read_text(encoding="utf-8")))
-            except Exception:
-                continue
-            title = data.get("title") or d.name
-            for it in data.get("items", []):
-                hay = " ".join([it.get("text", ""), it.get("detail", ""),
-                                " ".join(it.get("assignees") or [])]).lower()
-                hit_text = term in hay
-                hit_att = None
-                for a in (it.get("attachments") or []):
-                    md_fp = d / "attachments" / _todo_safe_file(it.get("id", "")) / _todo_safe_file(a.get("md", ""))
-                    if md_fp.exists():
-                        try:
-                            content = md_fp.read_text(encoding="utf-8", errors="replace")
-                        except Exception:
-                            content = ""
-                        idx = content.lower().find(term)
-                        if idx >= 0:
-                            start = max(0, idx - 60)
-                            hit_att = {"name": a.get("name"), "md": a.get("md"),
-                                       "snippet": content[start:idx + 120].replace("\n", " ").strip()}
-                            break
-                if hit_text or hit_att:
-                    results.append({
-                        "project": d.name, "project_title": title,
-                        "item_id": it.get("id"), "text": it.get("text", ""),
-                        "status": it.get("status", "offen"),
-                        "assignees": it.get("assignees") or [],
-                        "source": "attachment" if (hit_att and not hit_text) else "text",
-                        "attachment": hit_att,
-                    })
-    return {"results": results[:200], "query": q}
+async def todo_search(q: str = Query(...), root: str = Query("")):
+    """Projektuebergreifende Suche (Punkte + Anlagen-Markdown). Mit ?root=<id> auf den
+    Teilbaum dieses Projekts beschraenkt; ohne (bzw. root) ueber ALLE Projekte."""
+    scope = None
+    if root and root != "root":
+        scope = await _db.todo_descendants(root)
+    results = await _db.todo_search(q, scope)
+    return {"results": results, "query": q}
+
+
+@app.get("/api/todo/graph")
+async def todo_graph(root: str = Query("")):
+    """Graph-Daten (Punkte+Kanten je Projekt) des Teilbaums <root> bzw. aller Projekte."""
+    if root and root != "root":
+        ids = await _db.todo_descendants(root)
+    else:
+        ids = [p["id"] for p in await _db.todo_projects_all()]
+    return await _db.todo_graph_data(ids)
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────

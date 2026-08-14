@@ -40,6 +40,9 @@ data/pst/
 data/angebote/
 data/rechnungen/
 data/patente/
+data/todo/
+data/todo_att/
+data/varianten/
 
 # Selbstsignierte TLS-Zertifikate (privater Schlüssel!) — siehe scripts/gen_cert.*
 certs/
