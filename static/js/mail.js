@@ -448,6 +448,7 @@ const Mail = (() => {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.detail || r.status);
+      if (j.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(j.tokens, 'Mail');
       const card = _resultCard(`Agent-Ergebnis${a.instruction ? ': ' + a.instruction : ''}`, '', '🤖');
       const ta = document.createElement('textarea');
       ta.className = 'mail-result-text'; ta.value = j.text || '';

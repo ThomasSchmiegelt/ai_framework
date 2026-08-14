@@ -135,6 +135,7 @@ const CanvasEditor = (() => {
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const a = await r.json();
+      if (a.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(a.tokens, 'Canvas');
       const lines = [...(a.bullets || [])];
       if (a.caption) lines.push(a.caption);
       slide.title = a.title || slide.title;

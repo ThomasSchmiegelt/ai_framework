@@ -378,6 +378,7 @@ const RFQ = (() => {
             status.textContent = `⏳ Aufwand wird geschätzt … ${ev.done}/${ev.total}`;
           } else if (ev.type === 'done') {
             planId = ev.plan_id;
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Anfrage');
             status.textContent = `✓ Plan „${ev.plan_name}" mit ${ev.n} Aufgaben erstellt`;
           } else if (ev.type === 'error') {
             throw new Error(ev.message || 'Fehler');

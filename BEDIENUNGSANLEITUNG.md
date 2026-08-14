@@ -26,6 +26,8 @@
 - [Patente-Tab (Patent-Recherche)](#11d-patente--patent-recherche)
 - [Angebot & Rechnung](#11e-angebot--rechnung)
 - [Arbeitszeugnisse](#11f-arbeitszeugnisse)
+- [Variantenvergleich (🧮 Varianten)](#11g-variantenvergleich--varianten)
+- [To-Do mit Wissensgraph (✅ To-Do)](#11h-to-do-mit-wissensgraph--to-do)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
 13. [Matrix-Recherche](#13-matrix-recherche)
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
@@ -101,11 +103,13 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | ⚖️ Patente | Patent-Recherche, Fallakten & KI-Analyse *(optional)* |
 | 🧾 Angebot / Rechnung | Angebote & Rechnungen mit exakter Betragsrechnung (§14 UStG) *(optional)* |
 | 📜 Zeugnisse | Qualifizierte Arbeitszeugnisse in Zeugnissprache *(optional)* |
+| 🧮 Varianten | Gewichteter Variantenvergleich (Paarvergleich/AHP) mit KI-Hilfe *(optional)* |
+| ✅ To-Do | KI-Aufgabenliste (Besprechung/Projekt) mit Wissensgraph *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
 > **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Verzeichnis**,
-> **Postfach**, **Patente**, **Angebot/Rechnung**, **Zeugnisse**, **Morph-Kasten**, **Jury**,
-> **Mail** und **Logs** können im Profil ausgeblendet werden
+> **Postfach**, **Patente**, **Angebot/Rechnung**, **Zeugnisse**, **Varianten**, **To-Do**,
+> **Morph-Kasten**, **Jury**, **Mail** und **Logs** können im Profil ausgeblendet werden
 > (→ [Abschnitt 18 – Tab-Sichtbarkeit](#18-nutzerprofil--projekte)).
 > Sie bleiben jederzeit wieder einschaltbar.
 
@@ -1088,24 +1092,54 @@ sondern nur per **▶ Graph anzeigen** neu aufgebaut. Änderst du Einstellungen,
 Tab **⚖️ Patente** — recherchiert **Patente**, sammelt sie in **Fallakten** und wertet sie mit
 einer mehrstufigen **KI-Analyse** aus.
 
-> **Hinweis:** Die Daten stammen aus dem **Scraping** öffentlicher Google-Patents-Seiten (es gibt
-> keine offizielle API). Das ist für die Eigenrecherche gedacht; bei Massenabrufen die
-> Nutzungsbedingungen von Google beachten. Die KI-Analyse läuft je nach Profil lokal oder – wenn
-> „Web-Recherche lokal" aus ist – über dein API-Modell.
+> **Datenquellen:** Mit hinterlegtem **EPO-OPS-Key** (siehe unten) kommen die Daten **amtlich**
+> von der Europäischen Patentorganisation — inklusive **Rechtsstand**, **Patentfamilie**,
+> Anmelde-/Prioritäts-/Publikationsdaten, Erfindern und CPC-Klassen. Ohne Key (oder als
+> Ergänzung) wird auf das **Scraping** öffentlicher Google-Patents-Seiten zurückgegriffen
+> (keine offizielle API — bei Massenabrufen die Nutzungsbedingungen beachten; Abrufe laufen
+> gedrosselt und über einen lokalen Cache). Die KI-Analyse läuft je nach Profil lokal oder –
+> wenn „Web-Recherche lokal" aus ist – über dein API-Modell (Rolle „Wissenschaftlich").
 
+0. **🔑 EPO OPS einrichten (empfohlen, einmalig)** — im Import-Bereich den Abschnitt
+   „EPO OPS — amtliche Datenquelle" aufklappen. Kostenlosen Developer-Account unter
+   **developers.epo.org** anlegen, dort *Consumer Key* + *Secret* erzeugen und im Tab
+   speichern (**💾 Verbinden** prüft den Zugang sofort). Der Status zeigt „✓ verbunden";
+   Suche und Abrufe tragen dann das Badge **🏛 EPO**.
 1. **Projekt (Fallakte) wählen oder anlegen** — oben über das Dropdown bzw. `Neues Projekt… ＋ Anlegen`.
 2. **🔍 Import** — Patente hinzufügen auf drei Wegen:
    - **Exakte Nummer** (z. B. `US10000000`) → **📥 Abrufen**.
-   - **Suche** nach *Stichwort*, *Rechteinhaber* und *Land* (mit Trefferzahl).
+   - **Suche** nach *Stichwort* (Boolean AND/OR/NOT erlaubt), *Rechteinhaber*, *Land*,
+     **IPC/CPC-Klasse** und **Publikationszeitraum** (von/bis). Das Badge zeigt die Quelle
+     (🏛 EPO amtlich / 🌐 Google-Fallback); Fehler werden angezeigt statt verschluckt.
    - **Massenverarbeitung**: mehrere Patentnummern (je Zeile oder komma-getrennt) → **Patente lesen**
      bzw. **⚙ Stapelverarbeitung starten**. Bestehende Akten lassen sich als **JSON** wieder einlesen.
-3. **📁 Akte** — die gesammelten Patente mit Titel, Zusammenfassung, Ansprüchen, IPC-Klassen und
-   Rechteinhabern.
-4. **⚗ Analyse** — startet die **KI-Analyse-Pipeline** (Neuheit, Ansprüche, Umgehung, Bewertung …);
-   Ergebnisse werden als Markdown gespeichert und lassen sich in eine **Wissensdatenbank** übernehmen.
-5. **💬 Chat** — stelle Fragen zur gesamten Akte (belegt aus den enthaltenen Patenten).
-6. **🕸 Graph** — Wissensgraph der Zusammenhänge (Rechteinhaber, IPC-Klassen, Themen).
-7. **Export** — die Akte als **JSON** oder **CSV**.
+3. **📁 Akte** — die gesammelten Patente mit Titel, Zusammenfassung, Ansprüchen, IPC/CPC,
+   Rechteinhabern, Erfindern, Daten sowie (mit OPS) **Rechtsstand** und **Patentfamilie**.
+4. **⚗ Analyse** — startet die **KI-Analyse-Pipeline** nach Prüfer-Methodik: Technik (mit
+   Prüfschleife) → **📐 Merkmalsanalyse** (Anspruch 1 element-weise als Tabelle; bei zwei
+   Dokumenten als Claim-Chart-Gegenüberstellung identisch/ähnlich/fehlt) → **🧪 Neuheit &
+   erfinderische Tätigkeit** (EPA-Aufgabe-Lösungs-Ansatz: nächstliegender Stand der Technik
+   aus der Akte → Unterschiedsmerkmale → objektive Aufgabe → Could-Would-Test, mit eigener
+   Prüfschleife) → Recht (Schutzbereich je Merkmal) → Umgehung → Innovation → Entwurf →
+   Kritik → **Moderator** (Management-Summary mit deterministischer Kennzahlen-Tabelle und
+   klarer Handlungsempfehlung). Ergebnisse werden als Markdown gespeichert und lassen sich
+   in eine **Wissensdatenbank** übernehmen.
+5. **🛡 FTO-Check** (im Analyse-Bereich) — beschreibe **dein eigenes Produkt / deine Idee**
+   im Textfeld und starte den Check gegen die ausgewählten Patente (max. 5): je Patent eine
+   **Ampel-Tabelle je Anspruchsmerkmal** (verwirklicht / nicht verwirklicht / unklar, mit
+   wörtlicher Fundstelle) nach der All-Elements-Rule plus Gesamtfazit.
+   > ⚠️ Die automatisierte Auswertung ist **keine Rechtsberatung** — für belastbare
+   > FTO-Aussagen immer einen Patentanwalt einbeziehen.
+6. **📈 Stärke-Score** — jede Akte-Zeile erhält einen deterministisch berechneten
+   Triage-Score 0–100 (Vorwärtszitate, Familiengröße, Restlaufzeit, Anspruchsbreite/-zahl;
+   Spalte per Klick sortierbar; Details als Badges in der Patentansicht). Der Score
+   priorisiert („welches Patent lohnt den Blick"), er bewertet nicht den Patentwert.
+7. **📊 Statistik** — deterministisches Dashboard der Akte: Top-Anmelder, Anmeldungen pro
+   Jahr, IPC-Hauptklassen, Score-Verteilung und eine **White-Space-Matrix** (IPC × Anmelder;
+   leere Zellen = unbesetzte Felder).
+8. **💬 Chat** — stelle Fragen zur gesamten Akte (belegt aus den enthaltenen Patenten).
+9. **🕸 Graph** — Wissensgraph der Zusammenhänge (Rechteinhaber, IPC-Klassen, Themen).
+10. **Export** — die Akte als **JSON** oder **CSV**.
 
 ---
 
@@ -1151,6 +1185,66 @@ Zeugnissprache** passend zur gewählten Gesamtnote.
 3. **📜 Zeugnis erzeugen** — die KI schreibt einen zur Note passenden Text. Er lässt sich
    **nachbearbeiten** und **speichern**.
 4. **📁 Verlauf** — frühere Zeugnisse wieder öffnen; Export als **PDF/DOCX**.
+
+---
+
+## 11g. Variantenvergleich (🧮 Varianten)
+
+Tab **🧮 Varianten** — hilft, **systematisch und nachvollziehbar** zwischen mehreren Alternativen
+zu entscheiden (gewichtete Nutzwertanalyse nach dem **Paarvergleichs-Verfahren / AHP**). Die
+**Rechnung ist deterministisch** — Gewichte und Ranking kommen vom Server, **nie vom KI-Modell**.
+Die KI unterstützt nur beim Ausfüllen.
+
+**Ablauf (fünf Schritte, oben nach unten):**
+
+1. **Vergleich anlegen** — oben einen Namen eingeben und **➕ Anlegen**. Titel und Beschreibung der
+   Entscheidung eintragen.
+2. **Kriterien** — die Entscheidungskriterien auflisten (z. B. Kosten, Qualität, Lieferzeit). Je
+   Kriterium wählst du, ob ein **hoher Wert gut** („höher = besser") oder **schlecht** ist
+   („höher = schlechter", z. B. Preis). **🤖 vorschlagen** lässt die KI passende Kriterien finden.
+3. **Paarvergleich** — für je zwei Kriterien gibst du an, **wie viel wichtiger** das eine gegenüber
+   dem anderen ist (Skala 1 = gleich wichtig … 9 = extrem wichtiger; Kehrwerte für die Gegenrichtung).
+   Daraus errechnet der Server die **Gewichte** und die **Konsistenz (CR)** — eine grüne Anzeige
+   (CR ≤ 0,10) bedeutet, dass deine Urteile widerspruchsarm sind; wird sie gelb, solltest du einzelne
+   Vergleiche überdenken. **🤖 Vorschlag** füllt den Paarvergleich vor.
+4. **Varianten & Bewertung** — die Alternativen eintragen (**🤖 vorschlagen** möglich) und in der
+   Bewertungsmatrix je Kriterium mit **1–10** benoten (10 = am besten, auch bei Kosten). **🤖 bewerten**
+   schätzt die Werte aus den Variantenbeschreibungen (und optional aus hinterlegten Quellen).
+5. **Ergebnis** — ein **Ranking mit Balken** und markiertem Sieger. **🤖 Analyse** erklärt das Ergebnis
+   inkl. Hinweis, wie stabil es gegenüber veränderten Gewichten ist. **⬇ CSV** exportiert die Rangliste.
+
+Jeder Vergleich wird automatisch gespeichert (`data/varianten/`) und ist über die Auswahl oben wieder
+abrufbar.
+
+---
+
+## 11h. To-Do mit Wissensgraph (✅ To-Do)
+
+Tab **✅ To-Do** — eine **interaktive, KI-gestützte Aufgabenliste**, in der alle Punkte **miteinander
+verknüpft** sind und als **Wissensgraph** dargestellt werden. Alles wird lokal in der
+Verzeichnisstruktur gespeichert (`data/todo/`).
+
+**Liste anlegen:** Oben Namen eingeben, **Art** wählen — **Besprechung**, **Projekt** oder **frei** —
+und **➕ Anlegen**. In der Liste trägst du **Titel, Datum, Teilnehmer** ein und kannst sie optional mit
+einem bestehenden **Projekt** verknüpfen.
+
+**Aufgaben erfassen — zwei Wege:**
+
+- **Einzeln:** **➕ Aufgabe** und Text, Zuständige (aus den Teilnehmern), Status und Frist eintragen.
+  Der Status-Knopf wechselt per Klick zwischen 🔲 offen · ⏳ läuft · ✅ erledigt.
+- **Aus einer Notiz:** Besprechungsnotiz/Freitext ins Feld einfügen und **🤖 Aufgaben ableiten** — die
+  KI erkennt einzelne Aufgaben, Zuständige, Fristen und **Abhängigkeiten** und legt sie samt
+  Verknüpfungen an.
+
+**Wissensgraph (🕸):** Über **▶ Graph aufbauen** entsteht der Graph — **Knoten = Aufgaben**,
+farbige **Hubs = Zuständige und Status** (Aufgaben mit gleicher Person/gleichem Status hängen am selben
+Hub), **Pfeile = Verknüpfungen** zwischen Aufgaben („blockiert", „gehört zu" …). Mit **🔗 Verbinden**
+ziehst du selbst Verknüpfungen (zwei Aufgaben anklicken), **✨ Verknüpfungen** lässt die KI passende
+Beziehungen vorschlagen. Klick auf eine Aufgabe zeigt ihre Details, Klick auf eine Kante ändert/löscht
+das Label. **🤖 Nächste Schritte** benennt, was als Nächstes ansteht und was blockiert ist.
+
+> **Speichern:** **💾 Speichern** legt Aufgaben, Verknüpfungen **und die Graph-Anordnung** dauerhaft in
+> `data/todo/<Liste>/list.json` ab — beim nächsten Öffnen ist alles wieder da.
 
 ---
 
@@ -1624,7 +1718,7 @@ Unter **👤 Profil → 🧠 Modelle** weist du je Einsatzzweck ein Modell zu
 |-------|---------------|
 | **Allgemein** | normaler Chat (Standard der Sidebar-Auswahl) |
 | **Programmieren / Mathe** | KI-Assistent im Code-Tab (IDE), der Mathe-Tab und der Programmier-Agent (gemeinsames Modell) |
-| **Wissenschaftlich** | Recherche und der wissenschaftliche/quellengebundene Modus |
+| **Wissenschaftlich** | Recherche, Patente-Tab und der wissenschaftliche/quellengebundene Modus |
 | **Medizin** | Medizin-Tab (🩺) — voreingestelltes Modell für medizinische Anfragen |
 
 Die Auswahllisten enthalten **alle** in Ollama installierten Modelle; neue Modelle
@@ -1846,7 +1940,7 @@ Unter **👤 Profil → 🧠 Modelle** weist du je Einsatzzweck ein Modell zu:
 |-------|---------------|
 | **Allgemein** | normaler Chat (Standard der Sidebar-Auswahl) |
 | **Programmieren / Mathe** | KI-Assistent im Code-Tab (IDE), der Mathe-Tab und der Programmier-Agent (gemeinsames Modell) |
-| **Wissenschaftlich** | Recherche und der wissenschaftliche/quellengebundene Modus |
+| **Wissenschaftlich** | Recherche, Patente-Tab und der wissenschaftliche/quellengebundene Modus |
 | **Medizin** | Medizin-Tab — voreingestelltes Modell für medizinische Anfragen |
 
 Leer = `ministral-3:3b`. **Andere Modelle vorher laden** (sie werden bei Bedarf

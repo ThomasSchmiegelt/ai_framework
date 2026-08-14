@@ -26,6 +26,7 @@ data/profile_assets/*
 data/mail.json
 data/mail_rules.json
 data/api_providers.json
+data/epo_ops.json
 data/juries/*
 data/jury_docs/*
 data/morph_training/*

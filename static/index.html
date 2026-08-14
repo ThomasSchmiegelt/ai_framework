@@ -147,6 +147,8 @@
       <button class="tab-btn" data-tab="patente">⚖️ Patente</button>
       <button class="tab-btn" data-tab="rechnung">🧾 Angebot / Rechnung</button>
       <button class="tab-btn" data-tab="zeugnis">📜 Zeugnisse</button>
+      <button class="tab-btn" data-tab="varianten">🧮 Varianten</button>
+      <button class="tab-btn" data-tab="todo">✅ To-Do</button>
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
       <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
     </div>
@@ -1728,20 +1730,37 @@
         <button class="pat-subtab" data-subtab="chat">💬 Chat</button>
         <button class="pat-subtab" data-subtab="analyse">🤖 Analyse</button>
         <button class="pat-subtab" data-subtab="gespeichert">💾 Gespeichert</button>
+        <button class="pat-subtab" data-subtab="statistik">📊 Statistik</button>
         <button class="pat-subtab" data-subtab="graph">🕸 Graph</button>
       </div>
 
       <div id="pat-body">
 
         <div class="pat-section active" data-subtab="import">
+          <details class="dir-hint" style="display:block" id="pat-ops-box">
+            <summary style="cursor:pointer;font-size:12px">🔑 EPO OPS — amtliche Datenquelle <span id="pat-ops-status" class="planner-muted" style="font-size:11px"></span></summary>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+              <input type="password" id="pat-ops-key" placeholder="Consumer Key" style="min-width:180px" autocomplete="off" />
+              <input type="password" id="pat-ops-secret" placeholder="Consumer Secret" style="min-width:180px" autocomplete="off" />
+              <button id="btn-pat-ops-save" class="export-btn">💾 Verbinden</button>
+              <button id="btn-pat-ops-clear" class="export-btn btn-danger-sm" title="Zugang entfernen">✕</button>
+            </div>
+            <p class="planner-muted" style="font-size:11px;margin:6px 0 0">
+              Kostenloser Key unter <a href="https://developers.epo.org" target="_blank" rel="noopener noreferrer">developers.epo.org</a> —
+              liefert Rechtsstand, Patentfamilien, Daten &amp; CPC (amtlich). Ohne Key: Google-Patents-Fallback.
+            </p>
+          </details>
           <div class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input type="text" id="pat-import-id" placeholder="Exakte Nummer (z. B. US10000000B2)" style="min-width:220px" />
             <button id="btn-pat-lookup" class="export-btn">🚀 Abrufen</button>
           </div>
           <div class="dir-hint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="text" id="pat-search-term" placeholder="Suchbegriff / Stichwort" style="min-width:180px" />
+            <input type="text" id="pat-search-term" placeholder="Suchbegriff (AND/OR/NOT erlaubt)" style="min-width:180px" />
             <input type="text" id="pat-search-assignee" placeholder="Rechteinhaber" style="min-width:150px" />
-            <input type="text" id="pat-search-country" placeholder="Land (z. B. DE, US)" style="max-width:120px" />
+            <input type="text" id="pat-search-country" placeholder="Land (z. B. DE, US)" style="max-width:110px" />
+            <input type="text" id="pat-search-ipc" placeholder="IPC/CPC (z. B. B60L)" style="max-width:130px" />
+            <label style="font-size:11.5px;display:flex;align-items:center;gap:4px">von <input type="date" id="pat-search-from" style="width:130px" /></label>
+            <label style="font-size:11.5px;display:flex;align-items:center;gap:4px">bis <input type="date" id="pat-search-to" style="width:130px" /></label>
             <label style="font-size:11.5px;display:flex;align-items:center;gap:4px">Anzahl <input type="number" id="pat-search-max" value="20" min="1" max="50" style="width:60px" /></label>
             <button id="btn-pat-search" class="export-btn">🔎 Suchen</button>
           </div>
@@ -1788,14 +1807,24 @@
         </div>
 
         <div class="pat-section" data-subtab="analyse">
-          <p class="planner-muted" style="font-size:11.5px">Dokumente für die 7-Stufen-Experten-Pipeline auswählen (Technik → Recht → Umgehung → Innovation → Entwurf → Kritik → Moderator).</p>
+          <p class="planner-muted" style="font-size:11.5px">Dokumente für die Experten-Pipeline auswählen (Technik → Merkmalsanalyse → Recht → Umgehung → Innovation → Entwurf → Kritik → Moderator). Die Merkmalsanalyse zerlegt Anspruch 1 element-weise (Claim-Chart); bei zwei Dokumenten als Gegenüberstellung.</p>
           <div id="pat-analyse-select" class="pat-check-list"></div>
           <div><button id="btn-pat-analyze" class="export-btn">🧠 Experten-Runde starten</button></div>
+          <div class="dir-hint" style="flex-direction:column;align-items:stretch;gap:6px">
+            <span style="font-size:12px"><strong>🛡 FTO-Check:</strong> prüft die oben ausgewählten Patente (max. 5) element-weise gegen dein eigenes Produkt / deine Idee (All-Elements-Rule). <span class="planner-muted">Keine Rechtsberatung.</span></span>
+            <textarea id="pat-fto-produkt" rows="4" placeholder="Eigenes Produkt / eigene Idee beschreiben — je konkreter (Aufbau, Komponenten, Funktionsweise), desto belastbarer die Ampel-Bewertung…" style="width:100%;font-size:12.5px"></textarea>
+            <div><button id="btn-pat-fto" class="export-btn">🛡 FTO-Check starten</button></div>
+          </div>
           <div id="pat-analyse-result" class="pat-analyse-result"></div>
         </div>
 
         <div class="pat-section" data-subtab="gespeichert">
           <div id="pat-analyses-list"></div>
+        </div>
+
+        <div class="pat-section" data-subtab="statistik">
+          <p class="planner-muted" style="font-size:11.5px">Deterministische Auswertung der Fallakte (ohne KI): Anmelder, Zeitverlauf, IPC-Verteilung, Stärke-Scores und White-Space-Matrix.</p>
+          <div id="pat-statistik"></div>
         </div>
 
         <div class="pat-section" data-subtab="graph">
@@ -2145,6 +2174,148 @@
       </div>
     </div><!-- /jury-panel -->
 
+    <!-- ── Variantenvergleich (gewichtete Entscheidung) ─────────────────────── -->
+    <div id="varianten-panel" class="panel">
+      <div id="var-toolbar">
+        <h2 style="font-size:16px;margin:0">🧮 Varianten</h2>
+        <select id="var-project" style="min-width:170px"><option value="">— Vergleich wählen —</option></select>
+        <input type="text" id="var-new-project" placeholder="Neuer Vergleich…" style="max-width:170px" />
+        <button id="btn-var-create" class="export-btn">➕ Anlegen</button>
+        <button id="btn-var-delete" class="export-btn btn-danger-sm" title="Vergleich löschen">✕</button>
+        <button id="btn-var-csv" class="export-btn" title="Ergebnis als CSV">⬇ CSV</button>
+        <span id="var-spin" class="pf-spin" style="display:none;margin-left:auto"></span>
+        <span id="var-status" class="planner-muted" style="font-size:11.5px"></span>
+      </div>
+      <div id="var-body">
+        <div id="var-empty" class="dir-hint" style="display:block">
+          Lege oben einen Vergleich an. Ablauf: <strong>Kriterien</strong> festlegen →
+          <strong>Paarvergleich</strong> (Wichtigkeit) → <strong>Varianten</strong> →
+          <strong>Bewerten</strong> → <strong>Ergebnis</strong>. Die KI kann jeden Schritt vorbefüllen;
+          Gewichte und Ranking rechnet der Server deterministisch.
+        </div>
+        <div id="var-editor" style="display:none">
+          <div class="var-sec">
+            <label class="var-lbl">Titel &amp; Beschreibung der Entscheidung</label>
+            <input type="text" id="var-title" class="var-input" placeholder="z. B. Auswahl Antriebskonzept" />
+            <textarea id="var-desc" class="var-input" rows="2" placeholder="Worum geht es? Rahmenbedingungen…"></textarea>
+          </div>
+
+          <div class="var-sec">
+            <div class="var-sec-head">1 · Kriterien
+              <button id="btn-var-ai-criteria" class="export-btn var-ai">🤖 vorschlagen</button>
+            </div>
+            <div id="var-criteria"></div>
+            <button id="btn-var-add-criterion" class="export-btn">➕ Kriterium</button>
+          </div>
+
+          <div class="var-sec">
+            <div class="var-sec-head">2 · Paarvergleich der Kriterien
+              <button id="btn-var-ai-pairwise" class="export-btn var-ai">🤖 Vorschlag</button>
+              <span id="var-cr" class="var-cr"></span>
+            </div>
+            <p class="planner-muted" style="font-size:11.5px;margin:2px 0 6px">
+              Wie viel wichtiger ist das Zeilen- gegenüber dem Spaltenkriterium? (1 = gleich, 9 = extrem)
+            </p>
+            <div id="var-pairwise" style="overflow-x:auto"></div>
+          </div>
+
+          <div class="var-sec">
+            <div class="var-sec-head">3 · Varianten
+              <button id="btn-var-ai-variants" class="export-btn var-ai">🤖 vorschlagen</button>
+            </div>
+            <div id="var-variants"></div>
+            <button id="btn-var-add-variant" class="export-btn">➕ Variante</button>
+          </div>
+
+          <div class="var-sec">
+            <div class="var-sec-head">4 · Bewertung (1 = schlecht … 10 = gut)
+              <button id="btn-var-ai-ratings" class="export-btn var-ai">🤖 bewerten</button>
+            </div>
+            <div id="var-ratings" style="overflow-x:auto"></div>
+          </div>
+
+          <div class="var-sec">
+            <div class="var-sec-head">5 · Ergebnis
+              <button id="btn-var-ai-explain" class="export-btn var-ai">🤖 Analyse</button>
+            </div>
+            <div id="var-result"></div>
+            <div id="var-explain" class="var-explain"></div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /varianten-panel -->
+
+    <!-- ── KI-To-Do-Liste mit Wissensgraph ──────────────────────────────────── -->
+    <div id="todo-panel" class="panel">
+      <div id="todo-toolbar">
+        <h2 style="font-size:16px;margin:0">✅ To-Do</h2>
+        <select id="todo-list" style="min-width:170px"><option value="">— Liste wählen —</option></select>
+        <input type="text" id="todo-new-list" placeholder="Neue Liste…" style="max-width:150px" />
+        <select id="todo-new-type" title="Art der Liste" style="max-width:130px">
+          <option value="besprechung">Besprechung</option>
+          <option value="projekt">Projekt</option>
+          <option value="frei">Frei</option>
+        </select>
+        <button id="btn-todo-create" class="export-btn">➕ Anlegen</button>
+        <button id="btn-todo-delete" class="export-btn btn-danger-sm" title="Liste löschen">✕</button>
+        <button id="btn-todo-save" class="export-btn" title="In Verzeichnisstruktur speichern">💾 Speichern</button>
+        <span id="todo-spin" class="pf-spin" style="display:none;margin-left:auto"></span>
+        <span id="todo-status" class="planner-muted" style="font-size:11.5px"></span>
+      </div>
+      <div id="todo-subtabs">
+        <button class="todo-subtab active" data-view="liste">📋 Liste</button>
+        <button class="todo-subtab" data-view="graph">🕸 Wissensgraph</button>
+      </div>
+      <div id="todo-body">
+        <div id="todo-empty" class="dir-hint" style="display:block">
+          Lege oben eine Liste an (Besprechung, Projekt oder frei). Trage Teilnehmer ein, füge
+          Aufgaben hinzu oder lass die KI aus einer <strong>Besprechungsnotiz</strong> verknüpfte
+          Aufgaben erzeugen. Der <strong>Wissensgraph</strong> verbindet alle Punkte über
+          Zuständige, Status und explizite Verknüpfungen. Gespeichert wird in <code>data/todo/</code>.
+        </div>
+
+        <div id="todo-view-liste" class="todo-view" style="display:none">
+          <div class="var-sec">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <input type="text" id="todo-title" class="var-input" style="flex:1;min-width:180px" placeholder="Titel der Besprechung / des Projekts" />
+              <input type="date" id="todo-date" style="width:150px" />
+              <select id="todo-project" title="Mit Projekt verknüpfen" style="min-width:150px"><option value="">— kein Projekt —</option></select>
+            </div>
+            <label class="var-lbl" style="margin-top:8px">Teilnehmer (Komma-getrennt)</label>
+            <input type="text" id="todo-participants" class="var-input" placeholder="z. B. Anna, Bernd, Chris" />
+          </div>
+
+          <div class="var-sec">
+            <div class="var-sec-head">Aus Notiz erzeugen
+              <button id="btn-todo-extract" class="export-btn var-ai">🤖 Aufgaben ableiten</button>
+            </div>
+            <textarea id="todo-note" class="var-input" rows="3" placeholder="Besprechungsnotiz / Freitext hier einfügen – die KI erkennt Aufgaben, Zuständige, Fristen und Abhängigkeiten."></textarea>
+          </div>
+
+          <div class="var-sec">
+            <div class="var-sec-head">Aufgaben
+              <button id="btn-todo-add" class="export-btn">➕ Aufgabe</button>
+              <button id="btn-todo-suggest-links" class="export-btn var-ai">✨ Verknüpfungen</button>
+              <button id="btn-todo-next" class="export-btn var-ai">🤖 Nächste Schritte</button>
+            </div>
+            <div id="todo-items"></div>
+            <div id="todo-next-out" class="var-explain"></div>
+          </div>
+        </div>
+
+        <div id="todo-view-graph" class="todo-view" style="display:none">
+          <div id="todo-graph-toolbar">
+            <button id="btn-todo-graph-build" class="export-btn">▶ Graph aufbauen</button>
+            <button id="btn-todo-graph-connect" class="export-btn" title="Zwei Aufgaben verbinden">🔗 Verbinden</button>
+            <label class="mathe-inline-opt"><input type="checkbox" id="todo-graph-hubs" checked /> 👥 Zuständige/Status</label>
+            <button id="btn-todo-graph-layout" class="export-btn">↻ Anordnen</button>
+            <span id="todo-graph-hint" class="planner-muted" style="font-size:11.5px;margin-left:auto"></span>
+          </div>
+          <div id="todo-graph"></div>
+        </div>
+      </div>
+    </div><!-- /todo-panel -->
+
   </main>
 </div>
 
@@ -2384,7 +2555,7 @@
         <select id="profile-model-coding" class="sidebar-select"></select>
       </div>
       <div class="form-group">
-        <label>Wissenschaftlich <span class="planner-muted" style="font-size:11px">Recherche</span></label>
+        <label>Wissenschaftlich <span class="planner-muted" style="font-size:11px">Recherche & Patente</span></label>
         <select id="profile-model-science" class="sidebar-select"></select>
       </div>
       <div class="form-group">
@@ -2627,6 +2798,12 @@
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="zeugnis" /> 📜 Zeugnisse
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="varianten" /> 🧮 Varianten
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="todo" /> ✅ To-Do
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="morph" /> 🧩 Morph-Kasten
@@ -2931,7 +3108,7 @@
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
 <script src="/js/logger.js?v=20260603"></script>
 <script src="/js/code_workspace.js?v=20260627pst1"></script>
-<script src="/js/onboarding.js?v=20260622"></script>
+<script src="/js/onboarding.js?v=20260814"></script>
 <script src="/js/medizin.js?v=20260711docs2"></script>
 <script src="/js/mathe.js?v=20260622"></script>
 <script src="/js/dir_analysis.js?v=20260627local"></script>
@@ -2940,8 +3117,10 @@
 <script src="/js/rechnung.js?v=20260714"></script>
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
+<script src="/js/varianten.js?v=20260814b"></script>
+<script src="/js/todo.js?v=20260814"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260721c"></script>
+<script src="/js/app.js?v=20260814vt"></script>
 
 </body>
 </html>

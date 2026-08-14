@@ -271,6 +271,7 @@ const PresentationAssistant = (() => {
         try {
           const ev = JSON.parse(line.slice(6));
           if (ev.type === 'text') fullText += ev.content;
+          else if (ev.type === 'done' && ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Dokumente');
         } catch (_) {}
       }
     }

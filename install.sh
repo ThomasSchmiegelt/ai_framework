@@ -46,7 +46,7 @@ if [ -t 0 ]; then
   echo ""
   echo "=== Funktionsauswahl (optionale Tabs) ==="
   echo "Jeweils [j/N]. Diese Tabs sind beim Erststart sonst ausgeblendet."
-  OPT_TABS="rag:Wissensdatenbanken-(RAG) ide:Code-IDE mathe:Mathe medizin:Medizin mail:Mail logs:Logs diranalyse:Verzeichnis-Analyse postfach:Postfach-(PST/Mail,-nur-lokal) morph:Morphologischer-Kasten jury:Jury"
+  OPT_TABS="rag:Wissensdatenbanken-(RAG) ide:Code-IDE mathe:Mathe medizin:Medizin mail:Mail logs:Logs diranalyse:Verzeichnis-Analyse postfach:Postfach-(PST/Mail,-nur-lokal) patente:Patente-(Patent-Recherche) rechnung:Angebote/Rechnungen zeugnis:Arbeitszeugnisse varianten:Variantenvergleich todo:To-Do-mit-Wissensgraph morph:Morphologischer-Kasten jury:Jury"
   HIDDEN=""
   for entry in $OPT_TABS; do
     tab="${entry%%:*}"; label="${entry#*:}"

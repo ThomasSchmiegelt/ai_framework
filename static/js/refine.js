@@ -161,6 +161,7 @@ const Refine = (() => {
               _log(`✅ ${ev.message}`);
               document.getElementById('refine-status').textContent = `✅ ${ev.message}`;
             } else if (ev.type === 'done') {
+              if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Dokumente');
               _finalText = ev.text || _finalText;
               // Ergebnis ins erzeugte Dokument (rechts) schieben — dort stehen
               // bereits alle Export-/Übernahme-Knöpfe (DOCX/PDF/LaTeX/RAG).

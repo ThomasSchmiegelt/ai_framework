@@ -235,6 +235,8 @@ const DocGen = (() => {
       });
       if (!r.ok) throw new Error((await r.json()).detail || r.status);
       const data = await r.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Dokumente');
+      delete data.tokens;
       if (typeof CanvasRenderer !== 'undefined') CanvasRenderer.render(data);
       if (typeof switchTab === 'function') switchTab('canvas');
       else document.querySelector('.tab-btn[data-tab="canvas"]')?.click();
