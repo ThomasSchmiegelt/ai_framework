@@ -1220,16 +1220,25 @@ abrufbar.
 
 ## 11h. To-Do mit Wissensgraph (✅ To-Do)
 
-Tab **✅ To-Do** — eine **interaktive, KI-gestützte Aufgabenliste**. Du schreibst eine
-**Besprechungsnotiz**, lässt die KI daraus einzelne **Punkte** ableiten, hakst sie ab, hängst
-**Dokumente** an (werden als Markdown gespeichert und mitgesucht) und siehst alles im **Wissensgraph**.
-**Suche und Graph laufen projektübergreifend** — so „kommunizieren" deine Projekte miteinander. Alles
-wird lokal gespeichert (`data/todo/`).
+Tab **✅ To-Do** — eine **interaktive, KI-gestützte Aufgabenliste** als **Projektbaum**. Du schreibst
+eine **Besprechungsnotiz**, lässt die KI daraus einzelne **Punkte** ableiten, hakst sie ab, verschiebst
+sie zwischen Projekten, hängst **Dokumente** an (→ Markdown, mitgesucht) und siehst alles im
+**Wissensgraph**. Alles wird in der **Datenbank** gespeichert (im Backup als `todo/todos.json`; die
+Original-Anlagen unter `data/todo_att/`).
 
-**Projekt anlegen:** Oben Namen eingeben, **Art** wählen — **Besprechung**, **Projekt** oder **frei** —
-und **➕ Anlegen**.
+**🌳 Projektbaum (linke Spalte):** Die **Wurzel = dein Name** (aus dem Profil) ist deine persönliche
+Liste. Darunter legst du **Unterprojekte** an (Feld *Name* + **➕ Unterprojekt** unter dem gewählten
+Knoten) — beliebig tief. Je Knoten: **Klick** öffnet ihn, **✎** umbenennen, **✕** löschen (mit
+Rückfrage: Unterprojekte mitlöschen oder hochziehen).
 
-**Der Kern-Ablauf:**
+**⚡ Aktivieren (Scope):** Ein Klick auf **⚡** aktiviert ein Projekt — **Suche und Wissensgraph zeigen
+dann nur diesen Teilbaum** (Projekt + Unterprojekte). Ist die **Wurzel** aktiv, sind **alle** Projekte
+im Graphen verbunden. Der aktive Bereich steht oben (`⚡ aktiv: …`).
+
+**↪ Verschieben & Sortieren:** Jeder Punkt hat **▲▼** (Reihenfolge) und ein **„↪ verschieben…"**-Menü,
+das ihn in ein anderes Projekt des Baums verschiebt.
+
+**Der Kern-Ablauf (rechte Spalte):**
 
 1. **👥 Besprechungsheader** ausfüllen: **Thema / Worum geht es**, **Teilnehmer** und **Datum** (optional
    Verknüpfung mit einem Eintrag aus dem **Projekte-Tab**). Diese Angaben geben der KI Kontext und
@@ -1245,18 +1254,20 @@ und **➕ Anlegen**.
 Bilder, Text …). Der Inhalt wird automatisch in eine **Markdown-Datei** umgewandelt und beim Punkt als
 anklickbarer Chip abgelegt. Diese Markdown-Anlagen werden von der Suche **mitdurchsucht**.
 
-**🔍 Suche (oben rechts):** durchsucht **alle Projekte** auf einmal — Aufgabentexte, Zuständige **und den
-Inhalt der angehängten Dokumente**. Ein Klick auf einen Treffer öffnet das passende Projekt und springt
-zum Punkt.
+**🔍 Suche (oben rechts):** durchsucht den **aktiven Bereich** — Aufgabentexte, Zuständige **und den
+Inhalt der angehängten Dokumente**. Ist die Wurzel aktiv, geht die Suche über **alle** Projekte. Ein
+Klick auf einen Treffer öffnet das passende Projekt und springt zum Punkt.
 
-**🕸 Wissensgraph:** Über **▶ Graph aufbauen** entsteht der Graph — **Knoten = Punkte**, farbige
-**Hubs = Zuständige und Status**, **Pfeile = Verknüpfungen**. Mit **🔗 Verbinden** ziehst du selbst
-Verknüpfungen, **✨ Verknüpfungen** lässt die KI Beziehungen vorschlagen, **🤖 Nächste Schritte** nennt
-das Nächstliegende und Blockaden. Mit **🌐 Alle Projekte** werden die Punkte **aller** Projekte in einem
-Graphen gezeigt (über gemeinsame Zuständige verbunden), jedes Projekt in eigener Farbe.
+**🕸 Wissensgraph:** Über **▶ Graph aufbauen** entsteht der Graph des **aktiven Bereichs** —
+**Knoten = Punkte**, farbige **Hubs = Zuständige und Status**, **Pfeile = Verknüpfungen**. Mit
+**🔗 Verbinden** ziehst du selbst Verknüpfungen, **✨ Verknüpfungen** lässt die KI Beziehungen
+vorschlagen, **🤖 Nächste Schritte** nennt das Nächstliegende und Blockaden. Umfasst der Bereich mehrere
+Projekte (Wurzel aktiv oder Umschalter **🌐 Alle Projekte**), erscheinen sie in **einem** Graphen —
+je Projekt eine eigene Rahmenfarbe, verbunden über gemeinsame Zuständige.
 
-> **Speichern:** **💾 Speichern** legt Punkte, Verknüpfungen, Anlagen **und die Graph-Anordnung**
-> dauerhaft in `data/todo/<Projekt>/list.json` (Anlagen unter `attachments/`) ab.
+> **Speichern:** **💾 Speichern** legt Punkte, Verknüpfungen und Anlagen in der Datenbank ab. Verschieben,
+> Umsortieren und Aktivieren wirken sofort. Ein **Backup** (Profil-Modal) sichert den ganzen Baum
+> (`todo/todos.json`) samt Original-Anlagen.
 
 ---
 

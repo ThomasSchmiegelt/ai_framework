@@ -86,6 +86,50 @@ _SCHEMA_STMTS = [
         embedding     BLOB    NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_ragchunk_coll ON rag_chunks(collection_id)",
+    # ── To-Do: Projektbaum, Punkte, Kanten, Anlagen ─────────────────────────
+    """CREATE TABLE IF NOT EXISTS todo_projects (
+        id                TEXT PRIMARY KEY,
+        name              TEXT NOT NULL,
+        parent_id         TEXT,                       -- NULL = Wurzel (Benutzer)
+        type              TEXT NOT NULL DEFAULT 'projekt',
+        title             TEXT NOT NULL DEFAULT '',
+        date              TEXT NOT NULL DEFAULT '',
+        participants_json TEXT NOT NULL DEFAULT '[]',
+        project_ref       TEXT NOT NULL DEFAULT '',    -- Verknüpfung Projekte-Tab
+        settings_json     TEXT NOT NULL DEFAULT '{}',  -- u. a. Graph-Positionen
+        sort              INTEGER NOT NULL DEFAULT 0,
+        created_at        REAL NOT NULL,
+        updated_at        REAL NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_todo_proj_parent ON todo_projects(parent_id)",
+    """CREATE TABLE IF NOT EXISTS todo_items (
+        id             TEXT PRIMARY KEY,
+        project_id     TEXT NOT NULL REFERENCES todo_projects(id) ON DELETE CASCADE,
+        seq            INTEGER NOT NULL DEFAULT 0,
+        text           TEXT NOT NULL DEFAULT '',
+        detail         TEXT NOT NULL DEFAULT '',
+        status         TEXT NOT NULL DEFAULT 'offen',
+        assignees_json TEXT NOT NULL DEFAULT '[]',
+        due            TEXT NOT NULL DEFAULT '',
+        created_at     REAL NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_todo_item_proj ON todo_items(project_id, seq)",
+    """CREATE TABLE IF NOT EXISTS todo_edges (
+        project_id TEXT NOT NULL REFERENCES todo_projects(id) ON DELETE CASCADE,
+        source     TEXT NOT NULL,
+        target     TEXT NOT NULL,
+        label      TEXT NOT NULL DEFAULT ''
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_todo_edge_proj ON todo_edges(project_id)",
+    """CREATE TABLE IF NOT EXISTS todo_attachments (
+        id         TEXT PRIMARY KEY,
+        item_id    TEXT NOT NULL REFERENCES todo_items(id) ON DELETE CASCADE,
+        name       TEXT NOT NULL DEFAULT '',
+        orig_path  TEXT NOT NULL DEFAULT '',
+        md_text    TEXT NOT NULL DEFAULT '',
+        created_at REAL NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_todo_att_item ON todo_attachments(item_id)",
 ]
 
 
@@ -540,3 +584,448 @@ async def rag_import_collection(coll: dict, documents: list):
                     (coll["id"], d["id"], ch["seq"], ch["text"], ch["embedding"]),
                 )
         await db.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# To-Do: Projektbaum, Punkte, Kanten, Anlagen
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _row_project(r) -> dict:
+    d = dict(r)
+    d["participants"] = json.loads(d.pop("participants_json", "[]") or "[]")
+    d["settings"] = json.loads(d.pop("settings_json", "{}") or "{}")
+    return d
+
+
+def _row_item(r) -> dict:
+    d = dict(r)
+    d["assignees"] = json.loads(d.pop("assignees_json", "[]") or "[]")
+    return d
+
+
+async def todo_root_ensure(name: str) -> dict:
+    """Wurzelprojekt (id 'root', parent NULL) sicherstellen; Name aktualisieren."""
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM todo_projects WHERE id='root'")
+        row = await cur.fetchone()
+        if row is None:
+            await db.execute(
+                "INSERT INTO todo_projects(id,name,parent_id,type,title,date,"
+                "participants_json,project_ref,settings_json,sort,created_at,updated_at) "
+                "VALUES('root',?,NULL,'projekt','','','[]','','{}',0,?,?)",
+                (name or "Meine To-Dos", now, now),
+            )
+        else:
+            await db.execute("UPDATE todo_projects SET name=?, updated_at=? WHERE id='root'",
+                             (name or row["name"] or "Meine To-Dos", now))
+        await db.commit()
+        cur = await db.execute("SELECT * FROM todo_projects WHERE id='root'")
+        return _row_project(await cur.fetchone())
+
+
+async def todo_project_create(proj: dict) -> dict:
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT COALESCE(MAX(sort),0)+1 FROM todo_projects WHERE COALESCE(parent_id,'')=?",
+            (proj.get("parent_id") or "",))
+        nxt = (await cur.fetchone())[0]
+        await db.execute(
+            "INSERT INTO todo_projects(id,name,parent_id,type,title,date,"
+            "participants_json,project_ref,settings_json,sort,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (proj["id"], proj["name"], proj.get("parent_id") or None,
+             proj.get("type", "projekt"), proj.get("title", ""), proj.get("date", ""),
+             json.dumps(proj.get("participants") or [], ensure_ascii=False),
+             proj.get("project_ref", ""),
+             json.dumps(proj.get("settings") or {}, ensure_ascii=False),
+             int(proj.get("sort", nxt)), now, now),
+        )
+        await db.commit()
+        cur = await db.execute("SELECT * FROM todo_projects WHERE id=?", (proj["id"],))
+        return _row_project(await cur.fetchone())
+
+
+async def todo_projects_all() -> list:
+    """Alle Projekte (flach) mit Punkt-/Erledigt-Zaehlern - fuer den Baumaufbau."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT p.*, "
+            "(SELECT COUNT(*) FROM todo_items i WHERE i.project_id=p.id) AS n_items, "
+            "(SELECT COUNT(*) FROM todo_items i WHERE i.project_id=p.id AND i.status='erledigt') AS n_done "
+            "FROM todo_projects p ORDER BY p.parent_id IS NOT NULL, p.sort, p.created_at")
+        return [_row_project(r) for r in await cur.fetchall()]
+
+
+async def _item_attachments(db, item_id: str) -> list:
+    cur = await db.execute(
+        "SELECT id,name,orig_path,created_at FROM todo_attachments WHERE item_id=? ORDER BY created_at",
+        (item_id,))
+    return [dict(r) for r in await cur.fetchall()]
+
+
+async def todo_project_get(pid: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM todo_projects WHERE id=?", (pid,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        proj = _row_project(row)
+        cur = await db.execute("SELECT * FROM todo_items WHERE project_id=? ORDER BY seq, created_at", (pid,))
+        items = [_row_item(r) for r in await cur.fetchall()]
+        for it in items:
+            it["attachments"] = await _item_attachments(db, it["id"])
+        proj["items"] = items
+        cur = await db.execute("SELECT source,target,label FROM todo_edges WHERE project_id=?", (pid,))
+        proj["edges"] = [dict(r) for r in await cur.fetchall()]
+        return proj
+
+
+async def todo_save_project(pid: str, header: dict, items: list, edges: list):
+    """Header aktualisieren + Punkte per Diff-Upsert (Anlagen bleiben erhalten) +
+    Kanten ersetzen. Punkte werden NICHT geloescht/neu angelegt, damit die per
+    FK verknuepften Anlagen nicht kaskadierend verloren gehen."""
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT id FROM todo_projects WHERE id=?", (pid,))
+        if not await cur.fetchone():
+            return None
+        await db.execute(
+            "UPDATE todo_projects SET type=?,title=?,date=?,participants_json=?,"
+            "project_ref=?,settings_json=?,updated_at=? WHERE id=?",
+            (header.get("type", "projekt"), header.get("title", ""), header.get("date", ""),
+             json.dumps(header.get("participants") or [], ensure_ascii=False),
+             header.get("project_ref", ""),
+             json.dumps(header.get("settings") or {}, ensure_ascii=False), now, pid))
+        cur = await db.execute("SELECT id FROM todo_items WHERE project_id=?", (pid,))
+        existing = {r[0] for r in await cur.fetchall()}
+        incoming = []
+        for seq, it in enumerate(items or []):
+            iid = it.get("id")
+            if not iid:
+                continue
+            incoming.append(iid)
+            vals = (seq, it.get("text", ""), it.get("detail", ""), it.get("status", "offen"),
+                    json.dumps(it.get("assignees") or [], ensure_ascii=False), it.get("due", ""))
+            if iid in existing:
+                await db.execute(
+                    "UPDATE todo_items SET seq=?,text=?,detail=?,status=?,assignees_json=?,due=? WHERE id=? AND project_id=?",
+                    (*vals, iid, pid))
+            else:
+                await db.execute(
+                    "INSERT INTO todo_items(id,project_id,seq,text,detail,status,assignees_json,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (iid, pid, *vals, now))
+        for iid in existing - set(incoming):
+            await db.execute("DELETE FROM todo_items WHERE id=? AND project_id=?", (iid, pid))
+        await db.execute("DELETE FROM todo_edges WHERE project_id=?", (pid,))
+        for e in edges or []:
+            if e.get("source") and e.get("target"):
+                await db.execute("INSERT INTO todo_edges(project_id,source,target,label) VALUES(?,?,?,?)",
+                                 (pid, e["source"], e["target"], e.get("label", "")))
+        await db.commit()
+    return await todo_project_get(pid)
+
+
+async def todo_project_move(pid: str, new_parent):
+    if pid == "root" or pid == new_parent:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE todo_projects SET parent_id=?, updated_at=? WHERE id=?",
+                         (new_parent or None, time.time(), pid))
+        await db.commit()
+
+
+async def todo_project_rename(pid: str, name: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE todo_projects SET name=?, updated_at=? WHERE id=?",
+                         (name, time.time(), pid))
+        await db.commit()
+
+
+async def todo_project_delete(pid: str, reparent: bool = False):
+    """Projekt loeschen. reparent=True zieht Kinder eine Ebene hoch, sonst
+    kaskadiert das Loeschen ueber parent_id auf alle Nachfahren."""
+    if pid == "root":
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT parent_id FROM todo_projects WHERE id=?", (pid,))
+        row = await cur.fetchone()
+        parent = row["parent_id"] if row else None
+        if reparent:
+            await db.execute("UPDATE todo_projects SET parent_id=? WHERE parent_id=?", (parent, pid))
+        else:
+            ids = []
+            frontier = [pid]
+            while frontier:
+                nxt = []
+                for f in frontier:
+                    cur = await db.execute("SELECT id FROM todo_projects WHERE parent_id=?", (f,))
+                    for r in await cur.fetchall():
+                        ids.append(r["id"]); nxt.append(r["id"])
+                frontier = nxt
+            for i in ids:
+                await db.execute("DELETE FROM todo_projects WHERE id=?", (i,))
+        await db.execute("DELETE FROM todo_projects WHERE id=?", (pid,))
+        await db.commit()
+
+
+async def todo_descendants(root_id: str) -> list:
+    """root_id + alle Nachfahren (IDs). Fuer Scope von Suche/Graph."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        ids = [root_id]; frontier = [root_id]
+        while frontier:
+            nxt = []
+            for f in frontier:
+                cur = await db.execute("SELECT id FROM todo_projects WHERE parent_id=?", (f,))
+                for r in await cur.fetchall():
+                    ids.append(r["id"]); nxt.append(r["id"])
+            frontier = nxt
+        return ids
+
+
+async def todo_item_add(pid: str, item: dict) -> dict:
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM todo_items WHERE project_id=?", (pid,))
+        seq = (await cur.fetchone())[0]
+        await db.execute(
+            "INSERT INTO todo_items(id,project_id,seq,text,detail,status,assignees_json,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (item["id"], pid, seq, item.get("text", ""), item.get("detail", ""),
+             item.get("status", "offen"), json.dumps(item.get("assignees") or [], ensure_ascii=False),
+             item.get("due", ""), now))
+        await db.commit()
+    return item
+
+
+async def todo_item_move(item_id: str, new_pid: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM todo_items WHERE project_id=?", (new_pid,))
+        seq = (await cur.fetchone())[0]
+        await db.execute("UPDATE todo_items SET project_id=?, seq=? WHERE id=?", (new_pid, seq, item_id))
+        await db.execute("DELETE FROM todo_edges WHERE source=? OR target=?", (item_id, item_id))
+        await db.commit()
+
+
+async def todo_item_reorder(item_id: str, direction: str):
+    """Punkt eins hoch/runter tauschen (innerhalb seines Projekts)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT project_id, seq FROM todo_items WHERE id=?", (item_id,))
+        row = await cur.fetchone()
+        if not row:
+            return
+        pid, seq = row["project_id"], row["seq"]
+        op = "<" if direction == "up" else ">"
+        order = "DESC" if direction == "up" else "ASC"
+        cur = await db.execute(
+            "SELECT id, seq FROM todo_items WHERE project_id=? AND seq " + op + " ? ORDER BY seq " + order + " LIMIT 1",
+            (pid, seq))
+        nb = await cur.fetchone()
+        if not nb:
+            return
+        await db.execute("UPDATE todo_items SET seq=? WHERE id=?", (nb["seq"], item_id))
+        await db.execute("UPDATE todo_items SET seq=? WHERE id=?", (seq, nb["id"]))
+        await db.commit()
+
+
+async def todo_attach_add(att_id: str, item_id: str, name: str, orig_path: str, md_text: str) -> dict:
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute(
+            "INSERT INTO todo_attachments(id,item_id,name,orig_path,md_text,created_at) VALUES(?,?,?,?,?,?)",
+            (att_id, item_id, name, orig_path, md_text, now))
+        await db.commit()
+    return {"id": att_id, "item_id": item_id, "name": name, "orig_path": orig_path, "created_at": now}
+
+
+async def todo_attach_get(att_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM todo_attachments WHERE id=?", (att_id,))
+        r = await cur.fetchone()
+        return dict(r) if r else None
+
+
+async def todo_attach_delete(att_id: str):
+    att = await todo_attach_get(att_id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM todo_attachments WHERE id=?", (att_id,))
+        await db.commit()
+    return att
+
+
+async def todo_search(term: str, project_ids=None) -> list:
+    """Punkte + Anlagen-MD durchsuchen (optional auf project_ids beschraenkt)."""
+    term = (term or "").strip().lower()
+    if not term:
+        return []
+    like = "%" + term + "%"
+    scope = ""
+    params = [like, like, like]
+    if project_ids is not None:
+        ph = ",".join("?" for _ in project_ids)
+        scope = " AND i.project_id IN (" + ph + ")"
+        params += list(project_ids)
+    results = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT i.id, i.project_id, i.text, i.status, i.assignees_json, p.name AS project_name, "
+            "p.title AS project_title FROM todo_items i JOIN todo_projects p ON i.project_id=p.id "
+            "WHERE (LOWER(i.text) LIKE ? OR LOWER(i.detail) LIKE ? OR LOWER(i.assignees_json) LIKE ?)" + scope,
+            tuple(params))
+        seen = set()
+        for r in await cur.fetchall():
+            seen.add(r["id"])
+            results.append({"project": r["project_id"], "project_title": r["project_title"] or r["project_name"],
+                            "item_id": r["id"], "text": r["text"], "status": r["status"],
+                            "assignees": json.loads(r["assignees_json"] or "[]"), "source": "text",
+                            "attachment": None})
+        params2 = [like]
+        scope2 = ""
+        if project_ids is not None:
+            ph = ",".join("?" for _ in project_ids)
+            scope2 = " AND i.project_id IN (" + ph + ")"
+            params2 += list(project_ids)
+        cur = await db.execute(
+            "SELECT a.name AS att_name, a.md_text, i.id AS item_id, i.project_id, i.text, i.status, "
+            "p.name AS project_name, p.title AS project_title FROM todo_attachments a "
+            "JOIN todo_items i ON a.item_id=i.id JOIN todo_projects p ON i.project_id=p.id "
+            "WHERE LOWER(a.md_text) LIKE ?" + scope2,
+            tuple(params2))
+        for r in await cur.fetchall():
+            if r["item_id"] in seen:
+                continue
+            content = r["md_text"] or ""
+            idx = content.lower().find(term)
+            snip = content[max(0, idx - 60):idx + 120].replace("\n", " ").strip() if idx >= 0 else ""
+            results.append({"project": r["project_id"], "project_title": r["project_title"] or r["project_name"],
+                            "item_id": r["item_id"], "text": r["text"], "status": r["status"], "assignees": [],
+                            "source": "attachment", "attachment": {"name": r["att_name"], "snippet": snip}})
+    return results[:200]
+
+
+async def todo_graph_data(project_ids: list) -> dict:
+    """Punkte + Kanten der gegebenen Projekte (fuer den projektuebergreifenden Graph)."""
+    if not project_ids:
+        return {"projects": []}
+    out = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        for pid in project_ids:
+            cur = await db.execute("SELECT name FROM todo_projects WHERE id=?", (pid,))
+            pr = await cur.fetchone()
+            if not pr:
+                continue
+            cur = await db.execute("SELECT * FROM todo_items WHERE project_id=? ORDER BY seq", (pid,))
+            items = [_row_item(r) for r in await cur.fetchall()]
+            cur = await db.execute("SELECT source,target,label FROM todo_edges WHERE project_id=?", (pid,))
+            edges = [dict(r) for r in await cur.fetchall()]
+            out.append({"name": pid, "title": pr["name"], "items": items, "edges": edges})
+    return {"projects": out}
+
+
+async def todo_export() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM todo_projects")
+        projects = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute("SELECT * FROM todo_items")
+        items = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute("SELECT * FROM todo_edges")
+        edges = [dict(r) for r in await cur.fetchall()]
+        cur = await db.execute("SELECT * FROM todo_attachments")
+        atts = [dict(r) for r in await cur.fetchall()]
+    return {"projects": projects, "items": items, "edges": edges, "attachments": atts}
+
+
+async def todo_import(dump: dict):
+    if not dump:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys=OFF")
+        for p in dump.get("projects", []):
+            await db.execute(
+                "INSERT OR REPLACE INTO todo_projects(id,name,parent_id,type,title,date,"
+                "participants_json,project_ref,settings_json,sort,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (p["id"], p.get("name", ""), p.get("parent_id"), p.get("type", "projekt"),
+                 p.get("title", ""), p.get("date", ""), p.get("participants_json", "[]"),
+                 p.get("project_ref", ""), p.get("settings_json", "{}"), int(p.get("sort", 0)),
+                 p.get("created_at") or time.time(), p.get("updated_at") or time.time()))
+        for it in dump.get("items", []):
+            await db.execute(
+                "INSERT OR REPLACE INTO todo_items(id,project_id,seq,text,detail,status,assignees_json,due,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (it["id"], it["project_id"], int(it.get("seq", 0)), it.get("text", ""), it.get("detail", ""),
+                 it.get("status", "offen"), it.get("assignees_json", "[]"), it.get("due", ""),
+                 it.get("created_at") or time.time()))
+        for e in dump.get("edges", []):
+            await db.execute("INSERT INTO todo_edges(project_id,source,target,label) VALUES(?,?,?,?)",
+                             (e["project_id"], e["source"], e["target"], e.get("label", "")))
+        for a in dump.get("attachments", []):
+            await db.execute(
+                "INSERT OR REPLACE INTO todo_attachments(id,item_id,name,orig_path,md_text,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (a["id"], a["item_id"], a.get("name", ""), a.get("orig_path", ""), a.get("md_text", ""),
+                 a.get("created_at") or time.time()))
+        await db.commit()
+
+
+async def migrate_todo_json(todo_dir: Path, root_name: str):
+    """Bestehende data/todo/<name>/list.json einmalig in die DB uebernehmen.
+    Jede Altliste wird Kind der Wurzel; Anlagen-MD werden als md_text gespeichert."""
+    marker = todo_dir / ".db_migrated"
+    if marker.exists() or not todo_dir.exists():
+        await todo_root_ensure(root_name)
+        return
+    import uuid as _uuid
+    await todo_root_ensure(root_name)
+    imported = 0
+    for d in sorted(todo_dir.iterdir()):
+        if not d.is_dir() or d.name.startswith("_") or d.name.startswith("."):
+            continue
+        p = d / "list.json"
+        if not p.exists():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        pid = "tp_" + _uuid.uuid4().hex[:12]
+        header = {"type": data.get("type", "projekt"), "title": data.get("title", ""),
+                  "date": data.get("date", ""), "participants": data.get("participants") or [],
+                  "project_ref": data.get("project_id", ""),
+                  "settings": {"positions": data.get("positions") or {}}}
+        await todo_project_create({"id": pid, "name": data.get("title") or d.name,
+                                   "parent_id": "root", **header})
+        items = data.get("items") or []
+        await todo_save_project(pid, header, items, data.get("edges") or [])
+        for it in items:
+            for a in (it.get("attachments") or []):
+                md_fp = d / "attachments" / it.get("id", "") / (a.get("md") or "")
+                md_text = ""
+                if md_fp.exists():
+                    try:
+                        md_text = md_fp.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        md_text = ""
+                await todo_attach_add("ta_" + _uuid.uuid4().hex[:12], it["id"],
+                                      a.get("name") or a.get("md", ""), str(md_fp), md_text)
+        imported += 1
+    marker.write_text("ok", encoding="utf-8")
+    if imported:
+        print("[DB] " + str(imported) + " To-Do-Projekt(e) aus JSON migriert -> " + str(DB_PATH))
