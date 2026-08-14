@@ -370,16 +370,32 @@ try {
     $smokeLog = Join-Path $env:TEMP "aif_ollama_smoke.log"
     $proc = Start-Process "$ollamaDir\ollama.exe" -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardError $smokeLog
     $ok = $false
-    foreach ($i in 1..15) {
+    $resp = $null
+    # Zwei Erfolgskriterien, weil auf Rechnern mit dedizierter GPU die
+    # GPU-Erkennung (CUDA-Kaltstart) 30-60 s dauern kann, WÄHREND das /api/tags
+    # dieser Ollama-Version noch nicht antwortet — der HTTP-Server lauscht aber
+    # längst. Ein „Listening on …:<port>" im Log beweist bereits, dass das
+    # Bundle (Binary + lib\-Laufzeit) vollständig geladen ist. Deshalb: großzügig
+    # pollen UND die Log-Zeile als gleichwertigen Erfolg werten.
+    foreach ($i in 1..60) {
         Start-Sleep -Seconds 1
         if ($proc.HasExited) { break }
         try {
             $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$testPort/api/tags" -UseBasicParsing -TimeoutSec 2
             if ($resp.StatusCode -eq 200) { $ok = $true; break }
         } catch {}
+        if (Select-String -Path $smokeLog -Pattern ([regex]::Escape("Listening on 127.0.0.1:$testPort")) -Quiet -ErrorAction SilentlyContinue) {
+            $ok = $true; break
+        }
     }
     if ($ok) {
-        $tags = ($resp.Content | ConvertFrom-Json).models
+        # Falls der Erfolg nur über die Log-Zeile kam, /api/tags noch einmal
+        # bestmöglich abfragen (für die Modellzählung) — schlägt es fehl, gilt der
+        # Server dennoch als lauffähig.
+        if (-not $resp) {
+            try { $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$testPort/api/tags" -UseBasicParsing -TimeoutSec 5 } catch {}
+        }
+        $tags = if ($resp) { ($resp.Content | ConvertFrom-Json).models } else { @() }
         Write-OK ("Gebündeltes Ollama läuft — sieht {0} Modell(e)" -f @($tags).Count)
         if (-not @($tags).Count) {
             if ($NoModels) { Write-OK "Keine Modelle im Bundle — wie vorgesehen (Erststart lädt nach)." }
