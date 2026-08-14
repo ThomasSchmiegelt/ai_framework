@@ -1258,6 +1258,14 @@ anklickbarer Chip abgelegt. Diese Markdown-Anlagen werden von der Suche **mitdur
 Inhalt der angehängten Dokumente**. Ist die Wurzel aktiv, geht die Suche über **alle** Projekte. Ein
 Klick auf einen Treffer öffnet das passende Projekt und springt zum Punkt.
 
+**🎯 Empfehlung – was als Nächstes?** Ein eigener Untertab **priorisiert deterministisch** (kein
+KI-Raten), was im **aktiven Bereich** als Nächstes drankommt — nach **Fälligkeit** (überfällig / in X
+Tagen), **Abhängigkeiten** (was ist blockiert, was *entblockt* andere Punkte) und **Status** (läuft vor
+offen). Über **„Für: <Person>"** filterst du auf eine Zuständige — dann siehst du **deren** nächste
+Schritte. Die Liste ist dreigeteilt: **🔥 Jetzt dran** (nummeriert, mit Badges wie *überfällig*,
+*entblockt N*, *läuft*), **🕒 Demnächst** und **⛔ Blockiert** (mit „wartet auf: …"). Klick auf einen
+Eintrag springt zum Punkt.
+
 **🕸 Wissensgraph:** Über **▶ Graph aufbauen** entsteht der Graph des **aktiven Bereichs** —
 **Knoten = Punkte**, farbige **Hubs = Zuständige und Status**, **Pfeile = Verknüpfungen**. Mit
 **🔗 Verbinden** ziehst du selbst Verknüpfungen, **✨ Verknüpfungen** lässt die KI Beziehungen

@@ -104,6 +104,7 @@ const Todo = (() => {
     _renderTree(); _updateActiveLabel();
     if (_el('todo-search').value.trim()) _runSearch();
     if (_view === 'graph') _buildGraph();
+    else if (_view === 'agenda') _loadAgenda();
     _status('Aktiver Bereich gesetzt.');
     setTimeout(() => _status(''), 1200);
   }
@@ -192,6 +193,7 @@ const Todo = (() => {
   function _showView(v) {
     _el('todo-view-liste').style.display = (v === 'liste') ? 'block' : 'none';
     _el('todo-view-graph').style.display = (v === 'graph') ? 'block' : 'none';
+    _el('todo-view-agenda').style.display = (v === 'agenda') ? 'block' : 'none';
     document.querySelectorAll('.todo-subtab').forEach(b => b.classList.toggle('active', b.dataset.view === v));
     if (v === 'graph' && _cy) setTimeout(() => { _cy.resize(); _cy.fit(undefined, 30); }, 30);
   }
@@ -541,6 +543,64 @@ const Todo = (() => {
     }
   }
 
+  // ── Empfehlung / Agenda (deterministisch) ──────────────────────────────────
+  function _dueBadge(r) {
+    if (r.days === null || r.days === undefined) return '';
+    if (r.days < 0) return `<span class="todo-badge overdue">überfällig (${-r.days} T)</span>`;
+    if (r.days === 0) return '<span class="todo-badge soon">heute fällig</span>';
+    if (r.days <= 10) return `<span class="todo-badge soon">in ${r.days} T</span>`;
+    return `<span class="todo-badge">${escHtml(r.due)}</span>`;
+  }
+
+  function _agendaSection(title, rows, ranked) {
+    if (!rows.length) return '';
+    let h = `<div class="todo-agenda-head">${title} <span class="planner-muted">(${rows.length})</span></div>`;
+    rows.forEach((r, i) => {
+      const badges = [];
+      if (r.status === 'laeuft') badges.push('<span class="todo-badge run">läuft</span>');
+      const db = _dueBadge(r); if (db) badges.push(db);
+      if (r.unblocks > 0) badges.push(`<span class="todo-badge unblock">entblockt ${r.unblocks}</span>`);
+      const who = (r.assignees || []).length ? ` · 👤 ${escHtml(r.assignees.join(', '))}` : '';
+      const wait = (r.blockers && r.blockers.length) ? `<div class="todo-agenda-wait">wartet auf: ${r.blockers.map(escHtml).join(', ')}</div>` : '';
+      h += `<div class="todo-agenda-row" data-project="${escHtml(r.project)}" data-item="${escHtml(r.id)}" title="Zum Punkt springen">
+        <span class="todo-agenda-rank">${ranked ? (i + 1) : '⛔'}</span>
+        <div class="todo-agenda-main">
+          <div class="todo-agenda-text">${escHtml(r.text)}</div>
+          <div class="todo-agenda-meta">${escHtml(r.project_title)}${who} ${badges.join(' ')}</div>${wait}
+        </div></div>`;
+    });
+    return h;
+  }
+
+  async function _loadAgenda() {
+    const out = _el('todo-agenda-out');
+    const person = _el('todo-agenda-person').value || '';
+    out.innerHTML = '<span class="planner-muted">Berechne Empfehlung…</span>';
+    try {
+      const a = await _api('GET', `/api/todo/agenda?root=${encodeURIComponent(_active)}&person=${encodeURIComponent(person)}`);
+      const sel = _el('todo-agenda-person'); const cur = sel.value;
+      sel.innerHTML = '<option value="">alle</option>' + (a.persons || []).map(p => `<option value="${escHtml(p)}">${escHtml(p)}</option>`).join('');
+      sel.value = cur;
+      const scopeName = _active === 'root' ? 'alle Projekte' : (_nodeName(_flat.find(p => p.id === _active) || {}) + ' + Unterprojekte');
+      let html = `<div class="planner-muted" style="font-size:11.5px;margin-bottom:8px">Bereich: <strong>${escHtml(scopeName)}</strong>${person ? ` · für <strong>${escHtml(person)}</strong>` : ' · für alle'}</div>`;
+      if (!a.jetzt.length && !a.demnaechst.length && !a.blocked.length) {
+        out.innerHTML = html + '<div class="dir-hint">Nichts Offenes im aktiven Bereich – alles erledigt oder leer. 🎉</div>';
+        return;
+      }
+      html += _agendaSection('🔥 Jetzt dran', a.jetzt, true);
+      html += _agendaSection('🕒 Demnächst', a.demnaechst, true);
+      html += _agendaSection('⛔ Blockiert – erst Vorarbeit erledigen', a.blocked, false);
+      out.innerHTML = html;
+      out.querySelectorAll('.todo-agenda-row').forEach(row => row.addEventListener('click', () => _jumpTo(row.dataset.project, row.dataset.item)));
+    } catch (e) { out.innerHTML = `<span class="planner-muted">Fehler: ${escHtml(e.message)}</span>`; }
+  }
+
+  async function _jumpTo(project, item) {
+    await _open(project);
+    _view = 'liste'; _showView('liste');
+    setTimeout(() => { const el = document.querySelector(`.todo-item[data-id="${item}"]`); if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('todo-flash'); setTimeout(() => el.classList.remove('todo-flash'), 1600); } }, 200);
+  }
+
   function init() {
     _el('btn-todo-save').addEventListener('click', _save);
     _el('btn-todo-add-sub').addEventListener('click', () => _createSub(_pid || _active || 'root'));
@@ -550,7 +610,10 @@ const Todo = (() => {
     document.querySelectorAll('.todo-subtab').forEach(b => b.addEventListener('click', () => {
       _view = b.dataset.view; _showView(_view);
       if (_view === 'graph') _buildGraph();
+      else if (_view === 'agenda') _loadAgenda();
     }));
+    _el('todo-agenda-person').addEventListener('change', _loadAgenda);
+    _el('btn-todo-agenda-refresh').addEventListener('click', _loadAgenda);
     ['todo-title', 'todo-date', 'todo-project', 'todo-participants'].forEach(id => _el(id).addEventListener('change', _collect));
     _el('btn-todo-add').addEventListener('click', _addItem);
     _el('btn-todo-extract').addEventListener('click', _extract);

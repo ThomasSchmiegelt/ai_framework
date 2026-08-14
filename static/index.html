@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260814tree" />
+  <link rel="stylesheet" href="/css/app.css?v=20260814agenda" />
 </head>
 <body>
 
@@ -2287,6 +2287,7 @@
             <div id="todo-subtabs">
               <button class="todo-subtab active" data-view="liste">📋 Liste</button>
               <button class="todo-subtab" data-view="graph">🕸 Wissensgraph</button>
+              <button class="todo-subtab" data-view="agenda">🎯 Empfehlung</button>
             </div>
             <div id="todo-empty" class="dir-hint" style="display:block">
               Wähle links ein <strong>Projekt</strong> (oder lege ein <strong>Unterprojekt</strong> an).
@@ -2357,6 +2358,24 @@
             <span id="todo-graph-hint" class="planner-muted" style="font-size:11.5px;margin-left:auto"></span>
           </div>
           <div id="todo-graph"></div>
+        </div>
+
+        <div id="todo-view-agenda" class="todo-view" style="display:none">
+          <div class="var-sec">
+            <div class="var-sec-head">🎯 Empfehlung – was als Nächstes?
+              <span style="flex:1"></span>
+              <label style="font-size:12px;display:flex;align-items:center;gap:5px">Für:
+                <select id="todo-agenda-person" title="Auf eine Person filtern"><option value="">alle</option></select>
+              </label>
+              <button id="btn-todo-agenda-refresh" class="export-btn" title="Neu berechnen">↻</button>
+            </div>
+            <p class="planner-muted" style="font-size:11.5px;margin:0 0 8px">
+              Deterministisch priorisiert im <strong>aktiven Bereich</strong> (⚡) nach <strong>Fälligkeit</strong>,
+              <strong>Abhängigkeiten</strong> (was blockiert / entblockt wird) und <strong>Status</strong>.
+              Kein KI-Raten – nachvollziehbar.
+            </p>
+            <div id="todo-agenda-out"></div>
+          </div>
         </div>
           </div><!-- /todo-content -->
         </div><!-- /todo-main -->
@@ -3155,7 +3174,7 @@
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
 <script src="/js/logger.js?v=20260603"></script>
 <script src="/js/code_workspace.js?v=20260627pst1"></script>
-<script src="/js/onboarding.js?v=20260814"></script>
+<script src="/js/onboarding.js?v=20260814b"></script>
 <script src="/js/medizin.js?v=20260711docs2"></script>
 <script src="/js/mathe.js?v=20260622"></script>
 <script src="/js/dir_analysis.js?v=20260627local"></script>
@@ -3165,7 +3184,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260814b"></script>
-<script src="/js/todo.js?v=20260814tree"></script>
+<script src="/js/todo.js?v=20260814agenda"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/app.js?v=20260814vt"></script>
 

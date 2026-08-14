@@ -144,10 +144,13 @@ def score_variants(weights: list, ratings: list, directions: Optional[list] = No
     """Gewichtete Nutzwertsumme je Variante → Ranking.
 
     weights     – Kriteriengewichte (Länge = Anzahl Kriterien)
-    ratings     – Matrix [Variante][Kriterium] mit Bewertungen (Standard 1..scale_max)
-    directions  – optional je Kriterium 'benefit' (höher besser, Standard) oder
-                  'cost' (niedriger besser → wird gespiegelt)
-    scale_max   – oberes Skalenende (für die Kosten-Spiegelung und die Prozentanzeige)
+    ratings     – Matrix [Variante][Kriterium] mit **Güte**-Bewertungen (1..scale_max,
+                  10 = am besten — auch bei Kosten: die günstigste Variante bekommt 10)
+    directions  – optional je Kriterium 'benefit'/'cost'. **Nur informativ** (Anzeige-
+                  Hinweis „↓" und KI-Kontext); die Bewertung ist bereits die Güte, daher
+                  wird NICHT gespiegelt (sonst würde eine als „gut" bewertete günstige
+                  Variante fälschlich bestraft).
+    scale_max   – oberes Skalenende (für die Prozentanzeige)
 
     Rückgabe: scores (je Variante), ranking (Indizes + Score + Prozent, absteigend),
     best (Index der Siegervariante) oder None."""
@@ -156,16 +159,12 @@ def score_variants(weights: list, ratings: list, directions: Optional[list] = No
     if m == 0 or k == 0:
         return {"scores": [], "ranking": [], "best": None}
 
-    dirs = directions or ["benefit"] * k
     scores = []
     for vi in range(m):
         row = ratings[vi] if vi < len(ratings) else []
         s = 0.0
         for ci in range(k):
             r = _num(row[ci] if ci < len(row) else 0.0)
-            if (dirs[ci] if ci < len(dirs) else "benefit") == "cost":
-                # Kosten spiegeln: hoher Rohwert = schlecht
-                r = scale_max - r
             s += _num(weights[ci]) * r
         scores.append(round(s, 6))
 
