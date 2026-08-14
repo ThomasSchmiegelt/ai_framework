@@ -324,6 +324,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
+  // Geheim-/Lokal-Modus: Schnell-Umschalter in der Sidebar. Flippt das Profil-Flag
+  // (voller Round-Trip über /api/profile, damit keine anderen Einstellungen verloren
+  // gehen) und spiegelt den Zustand ins Badge + <body>-Klasse.
+  const _secretBtn = document.getElementById('btn-secret-mode');
+  function _reflectSecret(on) {
+    document.body.classList.toggle('secret-mode', !!on);
+    if (_secretBtn) {
+      _secretBtn.textContent = on ? '🔒 Geheim-Modus: an' : '🔓 Geheim-Modus: aus';
+      _secretBtn.classList.toggle('secret-on', !!on);
+    }
+  }
+  _reflectSecret(!!_profile.local_only_mode);
+  if (_secretBtn) {
+    _secretBtn.addEventListener('click', async () => {
+      _secretBtn.disabled = true;
+      try {
+        const cur = await (await fetch('/api/profile')).json();
+        cur.local_only_mode = !cur.local_only_mode;
+        await fetch('/api/profile', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cur),
+        });
+        _reflectSecret(cur.local_only_mode);
+        if (typeof Profile !== 'undefined' && Profile.load) { try { await Profile.load(); } catch (_) {} }
+        if (typeof Transcription !== 'undefined' && Transcription.refresh) { try { Transcription.refresh(); } catch (_) {} }
+        if (typeof showToast === 'function') {
+          showToast(cur.local_only_mode
+            ? '🔒 Geheim-Modus an — alle Modelle laufen lokal.'
+            : '🔓 Geheim-Modus aus — konfigurierte Modelle gelten wieder.');
+        }
+      } catch (_) {
+      } finally { _secretBtn.disabled = false; }
+    });
+  }
+
   // Neues Gespräch
   document.getElementById('btn-new-chat').addEventListener('click', () => {
     Chat.newConversation();
@@ -629,6 +664,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('Zeugnis', () => { if (typeof Zeugnis !== 'undefined') Zeugnis.init(); });
   _safeInit('Varianten', () => { if (typeof Varianten !== 'undefined') Varianten.init(); });
   _safeInit('Todo', () => { if (typeof Todo !== 'undefined') Todo.init(); });
+  _safeInit('Transcription', () => { if (typeof Transcription !== 'undefined') Transcription.init(); });
   _safeInit('Jury', () => { if (typeof Jury !== 'undefined') Jury.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)

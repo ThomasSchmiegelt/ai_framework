@@ -28,6 +28,8 @@
 - [Arbeitszeugnisse](#11f-arbeitszeugnisse)
 - [Variantenvergleich (🧮 Varianten)](#11g-variantenvergleich--varianten)
 - [To-Do mit Wissensgraph (✅ To-Do)](#11h-to-do-mit-wissensgraph--to-do)
+- [Transkription — Sprache zu Text (🎙 Transkription)](#11i-transkription--sprache-zu-text--transkription)
+- [Geheim-Modus — alles lokal](#11j-geheim-modus--alles-lokal)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
 13. [Matrix-Recherche](#13-matrix-recherche)
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
@@ -1276,6 +1278,47 @@ je Projekt eine eigene Rahmenfarbe, verbunden über gemeinsame Zuständige.
 > **Speichern:** **💾 Speichern** legt Punkte, Verknüpfungen und Anlagen in der Datenbank ab. Verschieben,
 > Umsortieren und Aktivieren wirken sofort. Ein **Backup** (Profil-Modal) sichert den ganzen Baum
 > (`todo/todos.json`) samt Original-Anlagen.
+
+---
+
+## 11i. Transkription — Sprache zu Text (🎙 Transkription)
+
+Tab **🎙 Transkription** — wandelt **gesprochene Sprache in Text** um. Als Quelle dient das
+**Mikrofon** (auch ein **USB-Mikrofon**) oder eine **Audiodatei** (mp3, wav, m4a, ogg, webm …).
+
+**Engine wählen:**
+- **Lokal (faster-whisper)** — läuft **auf diesem Rechner**, die Audiodaten verlassen ihn nicht.
+  Standardmäßig auf der **CPU** (hält die Grafikkarte für die Sprachmodelle frei; läuft auch auf
+  einer 6-GB-Karte). Das Modell (Standard **base**) wird bei der Installation vorab geladen.
+- **API-Modell** — schickt die Aufnahme an einen externen Anbieter (z. B. OpenAI/Groq mit einem
+  `whisper`-Modell). Nur sinnvoll, wenn oben im Profil ein KI-Anbieter hinterlegt ist. ⚠ Die
+  Audiodaten gehen dann an den Anbieter. **Im Geheim-Modus ist diese Option gesperrt.**
+
+**So geht's:**
+1. **Engine**, **Modell**, **Sprache** (oder *automatisch erkennen*) und **Aufgabe**
+   (*Transkribieren* = Originalsprache · *Ins Englische übersetzen*) wählen.
+2. **🎤 Mikrofon:** Gerät im Dropdown wählen (USB-Mikrofone erscheinen nach der ersten
+   Freigabe mit Namen), **● Aufnahme starten**, sprechen, **■ Aufnahme stoppen** — der Text
+   erscheint automatisch. **Oder 📄 Datei:** Audiodatei wählen und **Transkribieren**.
+3. **📝 Ergebnis:** Der Text steht editierbar im Feld, darunter **Zeitmarken** je Abschnitt.
+   **📋 Kopieren**, **⬇ .txt** speichern, **→ Chat** (Text in den Chat übernehmen) oder
+   **→ To-Do** (als Notiz ins To-Do, dort „To-Do-Liste ableiten").
+
+**🎙 Diktat im Chat:** In der Chat-Eingabeleiste gibt es zusätzlich einen **🎙 Diktat**-Knopf —
+einmal klicken nimmt auf, erneut klicken stoppt und schreibt den erkannten Text direkt ins
+Eingabefeld. Es gelten die Engine-/Modell-/Spracheinstellungen des Transkriptions-Tabs.
+
+---
+
+## 11j. Geheim-Modus — alles lokal
+
+In der **Sidebar** (unter „Profil bearbeiten") gibt es den Umschalter **🔒 Geheim-Modus**. Ist er
+**an**, laufen **sämtliche Modell-Rollen zwingend auf den lokalen Standardmodellen** — jede zuvor
+gewählte API-/Remote-Zuweisung wird **überall ignoriert** (Chat, Recherche, vertrauliche
+Auswertungen, Transkription). So bleibt garantiert **alles auf diesem Rechner**. Der Schalter geht
+**in beide Richtungen**: schaltest du ihn wieder **aus**, gelten deine gespeicherten (ggf.
+Remote-)Modelle sofort wieder. Bei aktivem Modus zeigt die Marke oben **🔒 lokal**. Denselben
+Schalter findest du auch im **Profil-Modal** („🔒 Geheim-Modus — alles lokal").
 
 ---
 

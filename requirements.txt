@@ -54,3 +54,14 @@ extract-msg>=0.48
 # gescrapten Google-Patents-Seiten (keine offizielle API). BeautifulSoup nutzt
 # den stdlib-html.parser — kein lxml nötig. MIT-Lizenz, permissiv.
 beautifulsoup4>=4.12.0
+
+# Transkription / Spracherkennung (Tab „🎙 Transkription", tools/transcribe.py):
+# faster-whisper (MIT) wandelt Audio → Text, lokal und CPU-schonend
+# (compute_type="int8" hält die ~6 GB VRAM für Ollama frei; GPU optional per
+# config.json "stt_device":"cuda"). Modelle werden bei Bedarf von HuggingFace nach
+# config.json "stt_download_root" geladen (Installer cachen sie vor).
+# LIZENZ-HINWEIS: faster-whisper bringt PyAV als Audio-Decoder mit; PyAV bündelt
+# ffmpeg-Bibliotheken (LGPL, schwaches Copyleft, DYNAMISCH gelinkt, unverändert) —
+# analog zur dokumentierten libpff-Ausnahme eine zugelassene, nicht modifizierte,
+# dynamisch gezogene weak-copyleft-Abhängigkeit (nötig, um mp3/m4a/webm zu dekodieren).
+faster-whisper>=1.0

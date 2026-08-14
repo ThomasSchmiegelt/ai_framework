@@ -190,6 +190,14 @@ Write-Step "Python-Pakete installieren (in Bundle)..."
 if ($LASTEXITCODE -ne 0) { Write-Fail "Paket-Installation fehlgeschlagen" }
 Write-OK "Pakete installiert"
 
+# Spracherkennungs-Modell (faster-whisper) OFFLINE ins Bundle legen — laedt von
+# HuggingFace nach app\models\whisper, damit die erste Transkription ohne Netz laeuft.
+Write-Step "Spracherkennungs-Modell 'base' ins Bundle legen (faster-whisper, ~150 MB)..."
+$sttRoot = "$BUNDLE_DIR\app\models\whisper"
+& "$pyDir\python.exe" -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8', download_root=r'$sttRoot')"
+if ($LASTEXITCODE -eq 0) { Write-OK "STT-Modell 'base' offline im Bundle" }
+else { Write-Warn "STT-Modell konnte nicht vorab geladen werden — laedt beim ersten Transkribieren nach (Netz noetig)" }
+
 # ── 3. Ollama Binary kopieren ──────────────────────────────────────────────────
 # (Bei -UseSystemOllama übersprungen: das Bundle nutzt das installierte Ollama.)
 
