@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260815stt" />
+  <link rel="stylesheet" href="/css/app.css?v=20260815tts" />
 </head>
 <body>
 
@@ -2450,6 +2450,7 @@
         <div class="var-sec">
           <div class="var-sec-head">📝 Ergebnis
             <span style="flex:1"></span>
+            <button id="tr-speak" class="export-btn" title="Text vorlesen">🔊 Vorlesen</button>
             <button id="tr-copy" class="export-btn" title="Text kopieren">📋 Kopieren</button>
             <button id="tr-export" class="export-btn" title="Als .txt speichern">⬇ .txt</button>
             <button id="tr-to-chat" class="export-btn" title="Text in den Chat übernehmen">→ Chat</button>
@@ -2652,7 +2653,10 @@
         </label>
       </div>
       <div class="form-group">
-        <label>Antwortstil (Persona)</label>
+        <label>Antwortstil (Persona)
+          <button type="button" id="profile-tone-test" class="export-btn" style="float:right;font-size:11.5px"
+                  title="Stimme dieser Persona als Sprachausgabe testen (🔊)">🔊 Stimme testen</button>
+        </label>
         <select id="profile-tone" class="sidebar-select">
           <option value="">Neutral (Standard)</option>
           <option value="roboter">🤖 Roboter (extrem sachlich)</option>
@@ -2661,6 +2665,10 @@
           <option value="felix">😎 Felix (Du, kumpelhaft)</option>
           <option value="sandra">😊 Sandra (Du, sehr korrekt & kumpelhaft)</option>
         </select>
+        <span class="planner-muted" style="font-size:11px;display:block;margin-top:4px">Jede Persona
+          erhält im Chat eine passende <strong>Sprachausgabe</strong> (🔊 an der Antwort): Roboter =
+          synthetisch, Herr Professor = älterer Mann, Frau Doktor = ältere Frau, Felix = junger Mann,
+          Sandra = junge Frau. Die Ausgabe entsteht live im Browser (nichts wird gespeichert).</span>
       </div>
     </div>
 
@@ -3250,13 +3258,14 @@
 <script src="/js/agents.js?v=20260611merge"></script>
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
-<script src="/js/chat.js?v=20260714clarify"></script>
+<script src="/js/tts.js?v=20260815tts"></script>
+<script src="/js/chat.js?v=20260815tts"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260721"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260815stt"></script>
+<script src="/js/profile.js?v=20260815tts"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
@@ -3276,9 +3285,9 @@
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260814b"></script>
 <script src="/js/todo.js?v=20260814agenda"></script>
-<script src="/js/transcription.js?v=20260815stt"></script>
+<script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260815stt"></script>
+<script src="/js/app.js?v=20260815tts"></script>
 
 </body>
 </html>

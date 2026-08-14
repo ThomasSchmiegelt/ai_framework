@@ -10928,7 +10928,8 @@ def _backup_files_always() -> list:
 # Optional – können groß werden:
 def _backup_dirs_bulk() -> list:
     return [(UPLOADS_DIR, "uploads"), (REPORTS_DIR, "reports"),
-            (DOSSIERS_DIR, "dossiers")]
+            (DOSSIERS_DIR, "dossiers"),
+            (TRANSCRIPTS_DIR, "transcripts")]   # Audiodateien der Transkription (Sprach-EINGABE)
 
 
 def _zip_tree(zf, base: Path, prefix: str) -> int:

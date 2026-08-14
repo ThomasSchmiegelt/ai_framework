@@ -361,6 +361,23 @@ const Profile = (() => {
     document.getElementById('profile-lang')?.addEventListener('change', e => {
       if (typeof I18n !== 'undefined') I18n.setLang(e.target.value);
     });
+    // Persona-Stimme testen (Sprachausgabe)
+    document.getElementById('profile-tone-test')?.addEventListener('click', () => {
+      const tone = document.getElementById('profile-tone')?.value || '';
+      if (typeof TTS === 'undefined' || !TTS.available()) {
+        if (typeof showToast === 'function') showToast('Sprachausgabe wird von diesem Browser nicht unterstützt.');
+        return;
+      }
+      const samples = {
+        '':        'Hallo, so klingt die neutrale Standardstimme.',
+        roboter:   'Ich bin der Roboter. Meine Stimme ist rein synthetisch und sachlich.',
+        professor: 'Guten Tag, hier spricht der Herr Professor. Lassen Sie es mich erklären.',
+        doktor:    'Guten Tag, hier ist Frau Doktor. Ich fasse das für Sie zusammen.',
+        felix:     'Hey, hier ist Felix! Ich sag dir schnell, wie es läuft.',
+        sandra:    'Hi, ich bin Sandra! Ich erklär dir das gern ganz genau.',
+      };
+      TTS.speak(samples[tone] || samples[''], tone);
+    });
     // Asset-Uploads
     for (const kind of KINDS) {
       document.getElementById('file-' + kind)?.addEventListener('change', e => {

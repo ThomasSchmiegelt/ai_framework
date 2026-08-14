@@ -665,6 +665,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('Varianten', () => { if (typeof Varianten !== 'undefined') Varianten.init(); });
   _safeInit('Todo', () => { if (typeof Todo !== 'undefined') Todo.init(); });
   _safeInit('Transcription', () => { if (typeof Transcription !== 'undefined') Transcription.init(); });
+  _safeInit('TTS', () => { if (typeof TTS !== 'undefined') TTS.init(); });
   _safeInit('Jury', () => { if (typeof Jury !== 'undefined') Jury.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)
