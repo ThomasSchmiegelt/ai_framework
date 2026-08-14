@@ -13200,9 +13200,18 @@ async def todo_extract(req: Request):
         return {"items": [], "edges": [], "tokens": {"in": 0, "out": 0}}
     participants = [str(p).strip() for p in (body.get("participants") or []) if str(p).strip()]
     model = _pick_model(body.get("model"), _model_for("general"))
-    prompt = text[:8000]
+    # Besprechungsheader als Kontext voranstellen (Thema, Datum, Teilnehmer) — hilft
+    # der KI beim Zuordnen von Zuständigen und beim Ableiten von Fristen.
+    header = []
+    topic = str(body.get("title") or body.get("topic") or "").strip()
+    if topic:
+        header.append(f"Thema der Besprechung: {topic}")
+    date = str(body.get("date") or "").strip()
+    if date:
+        header.append(f"Datum: {date}")
     if participants:
-        prompt = f"Teilnehmer: {', '.join(participants)}\n\nNotiz:\n" + prompt
+        header.append(f"Teilnehmer: {', '.join(participants)}")
+    prompt = ("\n".join(header) + "\n\nNotiz:\n" + text[:8000]) if header else text[:8000]
     data, ti, to, _ = await _research_llm_json(model, _TODO_EXTRACT_SYSTEM, prompt)
     raw_items = data.get("items") or []
     items, idx_to_id = [], {}

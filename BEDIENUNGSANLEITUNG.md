@@ -1227,15 +1227,18 @@ Tab **✅ To-Do** — eine **interaktive, KI-gestützte Aufgabenliste**. Du schr
 wird lokal gespeichert (`data/todo/`).
 
 **Projekt anlegen:** Oben Namen eingeben, **Art** wählen — **Besprechung**, **Projekt** oder **frei** —
-und **➕ Anlegen**. Titel, Datum und Teilnehmer stehen unter **⚙ Projekt-Details** (einklappbar); optional
-lässt sich das Ganze mit einem Eintrag aus dem **Projekte-Tab** verknüpfen.
+und **➕ Anlegen**.
 
 **Der Kern-Ablauf:**
 
-1. **📝 Besprechungsnotiz** oben ins große Feld schreiben (oder einfügen).
-2. **🪄 To-Do-Liste ableiten** — die KI macht daraus einzelne Punkte samt Zuständigen, Fristen und
+1. **👥 Besprechungsheader** ausfüllen: **Thema / Worum geht es**, **Teilnehmer** und **Datum** (optional
+   Verknüpfung mit einem Eintrag aus dem **Projekte-Tab**). Diese Angaben geben der KI Kontext und
+   **fließen beim Ableiten in den Prompt ein** (Thema, Datum für Fristen, Teilnehmer als mögliche
+   Zuständige).
+2. **📝 Besprechungsnotiz** ins große Feld schreiben (oder einfügen).
+3. **🪄 To-Do-Liste ableiten** — die KI macht daraus einzelne Punkte samt Zuständigen, Fristen und
    **Abhängigkeiten**. („ersetzen" anhaken, um vorhandene Punkte zu überschreiben statt zu ergänzen.)
-3. **Punkte bearbeiten:** Text/Zuständige/Frist anpassen, mit dem **Haken** links auf **erledigt**
+4. **Punkte bearbeiten:** Text/Zuständige/Frist anpassen, mit dem **Haken** links auf **erledigt**
    setzen (durchgestrichen). Einzelne Punkte fügst du auch direkt per **➕ Punkt** hinzu.
 
 **📎 Dokumente anhängen:** Über den **📎-Knopf** eines Punkts eine Datei anhängen (PDF, DOCX, XLSX,

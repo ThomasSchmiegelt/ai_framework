@@ -258,7 +258,9 @@ const Todo = (() => {
     _collect();
     _spin(true); _status('KI leitet Punkte ab…');
     try {
-      const res = await _api('POST', '/api/todo/extract', { text, participants: _data.participants, model: _model() });
+      const res = await _api('POST', '/api/todo/extract', {
+        text, participants: _data.participants, title: _data.title, date: _data.date, model: _model(),
+      });
       _tok(res.tokens);
       if (_el('todo-extract-replace').checked) { _data.items = []; _data.edges = []; }
       (res.items || []).forEach(it => _data.items.push(it));

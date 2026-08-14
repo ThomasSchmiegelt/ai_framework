@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260814todo" />
+  <link rel="stylesheet" href="/css/app.css?v=20260814hdr" />
 </head>
 <body>
 
@@ -2282,7 +2282,34 @@
         <div id="todo-search-results" style="display:none"></div>
 
         <div id="todo-view-liste" class="todo-view" style="display:none">
-          <!-- 1) Besprechungsnotiz → Punkte ableiten -->
+          <!-- 1) Besprechungsheader -->
+          <div class="var-sec">
+            <div class="var-sec-head">👥 Besprechungsheader</div>
+            <div class="todo-header-grid">
+              <label class="todo-hfield todo-hfield-wide">
+                <span class="var-lbl">Thema / Worum geht es?</span>
+                <input type="text" id="todo-title" class="var-input" placeholder="z. B. Kickoff Maschine X – Konzeptauswahl" />
+              </label>
+              <label class="todo-hfield todo-hfield-wide">
+                <span class="var-lbl">Teilnehmer (Komma-getrennt)</span>
+                <input type="text" id="todo-participants" class="var-input" placeholder="z. B. Anna, Bernd, Chris" />
+              </label>
+              <label class="todo-hfield">
+                <span class="var-lbl">Datum</span>
+                <input type="date" id="todo-date" />
+              </label>
+              <label class="todo-hfield">
+                <span class="var-lbl">Projekt verknüpfen <span class="planner-muted">(optional)</span></span>
+                <select id="todo-project" title="Mit einem Eintrag aus dem Projekte-Tab verknüpfen"><option value="">— kein Projekt —</option></select>
+              </label>
+            </div>
+            <p class="planner-muted" style="font-size:11.5px;margin:6px 0 0">
+              Diese Angaben geben der KI Kontext und fließen beim <strong>Ableiten</strong> in den Prompt ein
+              (Thema, Datum für Fristen, Teilnehmer als mögliche Zuständige).
+            </p>
+          </div>
+
+          <!-- 2) Besprechungsnotiz → Punkte ableiten -->
           <div class="var-sec">
             <div class="var-sec-head">📝 Besprechungsnotiz</div>
             <textarea id="todo-note" class="var-input" rows="5" placeholder="Besprechungsnotiz / Freitext hier schreiben – dann „To-Do-Liste ableiten": die KI macht daraus einzelne Aufgaben (mit Zuständigen, Fristen, Abhängigkeiten)."></textarea>
@@ -2292,7 +2319,7 @@
             </div>
           </div>
 
-          <!-- 2) Punkte -->
+          <!-- 3) Punkte -->
           <div class="var-sec">
             <div class="var-sec-head">✅ Punkte <span id="todo-count" class="planner-muted" style="font-weight:400;font-size:12px"></span>
               <span style="flex:1"></span>
@@ -2303,18 +2330,6 @@
             <div id="todo-items"></div>
             <div id="todo-next-out" class="var-explain"></div>
           </div>
-
-          <!-- 3) Projekt-Details (einklappbar) -->
-          <details class="var-sec" id="todo-meta-box">
-            <summary style="cursor:pointer;font-weight:700">⚙ Projekt-Details (Titel, Datum, Teilnehmer)</summary>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
-              <input type="text" id="todo-title" class="var-input" style="flex:1;min-width:180px" placeholder="Titel der Besprechung / des Projekts" />
-              <input type="date" id="todo-date" style="width:150px" />
-              <select id="todo-project" title="Mit Projekt (Projekte-Tab) verknüpfen" style="min-width:150px"><option value="">— kein Projekt —</option></select>
-            </div>
-            <label class="var-lbl" style="margin-top:8px">Teilnehmer (Komma-getrennt)</label>
-            <input type="text" id="todo-participants" class="var-input" placeholder="z. B. Anna, Bernd, Chris" />
-          </details>
         </div>
 
         <div id="todo-view-graph" class="todo-view" style="display:none">
@@ -3133,7 +3148,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260814b"></script>
-<script src="/js/todo.js?v=20260814rework"></script>
+<script src="/js/todo.js?v=20260814hdr"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/app.js?v=20260814vt"></script>
 

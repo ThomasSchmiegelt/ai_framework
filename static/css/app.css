@@ -4796,3 +4796,11 @@ select.ob-input option {
 .todo-search-proj { font-size: 11.5px; color: var(--accent); font-weight: 600; flex: 0 0 auto; }
 .todo-search-text { font-size: 13px; flex: 1; min-width: 160px; }
 .todo-search-snip { flex-basis: 100%; font-size: 11.5px; color: var(--text-muted); font-style: italic; padding-left: 4px; }
+
+/* ── To-Do Besprechungsheader ─────────────────────────────────────────────────── */
+.todo-header-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.todo-hfield { display: flex; flex-direction: column; gap: 3px; }
+.todo-hfield .var-lbl { margin-bottom: 0; }
+.todo-hfield .var-input, .todo-hfield input, .todo-hfield select { margin-bottom: 0; width: 100%; }
+.todo-hfield-wide { grid-column: 1 / -1; }
+@media (max-width: 720px) { .todo-header-grid { grid-template-columns: 1fr; } .todo-hfield-wide { grid-column: auto; } }
