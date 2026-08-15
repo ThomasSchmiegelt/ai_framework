@@ -863,31 +863,36 @@ app.add_middleware(
 
 
 async def _seed_todo_demo() -> None:
-    """Großen Demo-To-Do-Baum einmalig einspielen (Vorführung „vernetzte Informationen").
-    Quelle: ``defaults/todo_demo.json`` (Form von ``db.todo_export``). Nur wenn Config-Flag
-    ``seed_todo_demo`` gesetzt ist und der Marker fehlt. Stabile IDs → ``todo_import`` ist
-    idempotent (INSERT OR REPLACE), es entstehen keine Duplikate. Entfernen: Demo-Projekte
-    im Tab löschen; erneut laden: Marker ``data/todo/.demo_seeded`` löschen."""
+    """Großen Demo-To-Do-Baum einspielen (Vorführung „vernetzte Informationen").
+    Quelle: ``defaults/todo_demo.json`` (Form von ``db.todo_export`` + optional ``version``).
+    Nur wenn Config-Flag ``seed_todo_demo`` gesetzt ist. Der Marker ``data/todo/.demo_seeded``
+    speichert die zuletzt eingespielte **Version** — ändert sich diese (neue Demo), wird
+    automatisch neu eingespielt. Dabei werden ALLE ``tp_demo_*``-Projekte zuerst gelöscht
+    (saubere Ersetzung, Kanten haben keine stabile ID). Eigene Projekte bleiben unberührt.
+    Erneut laden erzwingen: Marker löschen."""
     if not bool(_CONFIG.get("seed_todo_demo", False)):
         return
     marker = TODO_DIR / ".demo_seeded"
     fp = DEFAULTS_DIR / "todo_demo.json"
-    if marker.exists() or not fp.exists():
+    if not fp.exists():
         return
     try:
         dump = json.loads(fp.read_text(encoding="utf-8"))
+        version = str(dump.get("version", "1"))
+        if marker.exists() and marker.read_text(encoding="utf-8").strip() == version:
+            return   # bereits in dieser Version eingespielt
         await _db.todo_root_ensure(_todo_root_name())
-        # Vorhandene Demo-Projekte zuerst entfernen (Kaskade), damit ein erneutes Laden
-        # nach Löschen des Markers wirklich sauber ist (Kanten haben keine stabile ID →
-        # sonst würden sie sich beim Re-Import verdoppeln).
-        for p in dump.get("projects", []):
+        # ALLE vorhandenen Demo-Projekte entfernen (Kaskade) — auch solche mit alten IDs,
+        # damit die neue Version sauber ersetzt und keine Kanten doppelt entstehen.
+        for p in await _db.todo_projects_all():
             pid = p.get("id", "")
-            if pid and pid != "root":
+            if pid.startswith("tp_demo_"):
                 await _db.todo_project_delete(pid)
         await _db.todo_import(dump)
         TODO_DIR.mkdir(parents=True, exist_ok=True)
-        marker.write_text("ok", encoding="utf-8")
-        print("[DB] Demo-To-Do-Projekt eingespielt -> " + str(fp.name))
+        marker.write_text(version, encoding="utf-8")
+        n = len(dump.get("items", []))
+        print(f"[DB] Demo-To-Do-Projekt eingespielt (v{version}, {n} Punkte) -> {fp.name}")
     except Exception as e:
         print("[DB] Demo-To-Do-Seed übersprungen: " + str(e))
 

@@ -563,6 +563,29 @@ const Todo = (() => {
         return { ...p, items, edges };
       }).filter(p => p.items.length);
     }
+    // Schutz vor dem Einfrieren des Browsers: sehr viele Knoten (z. B. Wurzel = alle
+    // Projekte im großen Demo) legen die Layout-Berechnung lahm. Ab einem Schwellwert
+    // erst nach Rückfrage bauen und zum Aktivieren eines Einzelprojekts (⚡) raten.
+    const nItems = projects.reduce((s, p) => s + (p.items || []).length, 0);
+    const LIMIT = 300;
+    if (nItems > LIMIT) {
+      const hint = _el('todo-graph-hint');
+      if (hint) hint.textContent = `${nItems} Punkte im Bereich – für den Graphen zu viel.`;
+      host.innerHTML = `<div class="dir-hint" style="margin:12px">
+        <strong>${nItems} Punkte</strong> im aktiven Bereich – ein Graph mit so vielen Knoten
+        kann den Browser einfrieren. Aktiviere links ein <strong>Einzelprojekt (⚡)</strong>
+        oder nutze den <strong>👤 Personenfilter</strong>, dann wird der Graph schlank.
+        <div style="margin-top:10px"><button id="todo-graph-force" class="export-btn">Trotzdem aufbauen (${nItems})</button></div>
+      </div>`;
+      const fb = _el('todo-graph-force');
+      if (fb) fb.addEventListener('click', () => { host.innerHTML = ''; _buildGraphForce(projects); });
+      return;
+    }
+    _buildGraphForce(projects);
+  }
+
+  function _buildGraphForce(projects) {
+    const host = _el('todo-graph');
     if (_cy) { _cy.destroy(); _cy = null; }
     const { nodes, edges, multi } = _graphElements(projects);
     _cy = cytoscape({

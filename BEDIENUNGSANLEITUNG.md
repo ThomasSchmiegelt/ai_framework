@@ -1274,7 +1274,10 @@ Eintrag springt zum Punkt.
 **🔗 Verbinden** ziehst du selbst Verknüpfungen, **✨ Verknüpfungen** lässt die KI Beziehungen
 vorschlagen, **🤖 Nächste Schritte** nennt das Nächstliegende und Blockaden. Umfasst der Bereich mehrere
 Projekte (Wurzel aktiv oder Umschalter **🌐 Alle Projekte**), erscheinen sie in **einem** Graphen —
-je Projekt eine eigene Rahmenfarbe, verbunden über gemeinsame Zuständige.
+je Projekt eine eigene Rahmenfarbe, verbunden über gemeinsame Zuständige. **Bei sehr vielen Punkten**
+(z. B. der ganze Bestand des großen Demos) warnt der Graph und baut erst nach Bestätigung auf, damit
+der Browser nicht einfriert — dann besser ein **Einzelprojekt aktivieren (⚡)** oder den **👤 Personenfilter**
+nutzen.
 
 **🧩 Ansicht anpassen (Splitter, Ein-/Ausklappen, Filter):** Die **Trennlinie** zwischen Projektbaum
 und Inhalt lässt sich **ziehen** (Breite bleibt gespeichert). Im Untertab **Liste** sind die drei
@@ -1308,8 +1311,9 @@ Jahre gepflegten Liste **vernetzte Informationen** über Kollegen ergeben.
 > erlaubten Rahmen aus.*
 
 **Demonstrations-Projekt:** Zum Ausprobieren bringt die App einen großen **fiktiven Beispiel-Baum**
-mit (operative Projekte, ein **🎉 Firmenfest** und ein bewusst deplatziertes **„Persönliches"**-Projekt)
-und rund zehn erfundenen Kolleg:innen, die **projektübergreifend** auftauchen. Er zeigt eindrücklich,
+mit (**~25 Projekte, ~1000 Aufgaben**: operative Projekte, ein **🎉 Firmenfest** und ein bewusst
+deplatziertes **„Persönliches"**-Projekt) und **14 erfundenen Kolleg:innen**, die **projektübergreifend**
+auftauchen. Er zeigt eindrücklich,
 was der Daten-Chat und der Wissensgraph aus vernetzten Informationen herausholen. Die Namen sind frei
 **umbenennbar**, und du kannst die Demo-Projekte jederzeit löschen.
 
