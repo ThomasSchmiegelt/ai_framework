@@ -1276,6 +1276,43 @@ vorschlagen, **🤖 Nächste Schritte** nennt das Nächstliegende und Blockaden.
 Projekte (Wurzel aktiv oder Umschalter **🌐 Alle Projekte**), erscheinen sie in **einem** Graphen —
 je Projekt eine eigene Rahmenfarbe, verbunden über gemeinsame Zuständige.
 
+**🧩 Ansicht anpassen (Splitter, Ein-/Ausklappen, Filter):** Die **Trennlinie** zwischen Projektbaum
+und Inhalt lässt sich **ziehen** (Breite bleibt gespeichert). Im Untertab **Liste** sind die drei
+Bereiche **👥 Besprechungsheader**, **📝 Besprechungsnotiz** und **✅ Punkte** über das **▾** in der
+Kopfzeile **einklappbar**, und die **waagerechten Trennlinien** dazwischen lassen sich **ziehen**, um
+den Bereichen mehr oder weniger Höhe zu geben (alles wird gespeichert). Direkt in der **Punkte-Kopfzeile**
+(ohne extra Platz) sitzen **Filter**: **„nur offene"** (erledigte ausblenden), ein **Fälligkeits-Zeitraum**
+(von–bis) und ein **Zuständigkeits-Filter** (👤). Der Zähler zeigt dann „… · X/Y sichtbar"; **✕** setzt
+die Filter zurück. Im **Wissensgraph** gibt es zusätzlich einen **Personenfilter** (👤), der den Graphen
+auf die Punkte einer Person eingrenzt.
+
+**📤 Export / 📥 Import / 🗑 Reset:** In der oberen Leiste kannst du die **gesamte Projektliste als
+JSON-Datei exportieren** (Sicherung/Weitergabe) und eine solche Datei wieder **importieren** (Projekte
+mit gleicher Kennung werden ersetzt, andere ergänzt; deine Wurzel bleibt). **🗑 Reset** leert die
+**komplette** Liste – vorher wird **automatisch eine Sicherung** der alten Liste angelegt
+(`data/todo_backups/todo_backup_<Zeitstempel>.json`), sodass nichts verloren geht.
+
+**🤖 Über die Daten fragen (Daten-Chat):** Oben rechts in der To-Do-Leiste gibt es eine **Chat-Zeile**.
+Damit **sprichst du mit einem Sprachmodell über deine To-Do-Daten** — es liest Aufgaben, Zuständige,
+Status, Fristen, Notizen und Anhänge des **aktiven Bereichs** (Wurzel aktiv = alles). Beispiele:
+*„Wer arbeitet an den meisten Projekten?"*, *„Welche Aufgaben sind überfällig und blockieren andere?"*,
+*„Erstelle ein Persönlichkeitsprofil von Anna Berger anhand ihrer Aufgaben und Notizen."* Die Antwort
+erscheint in einem **einklappbaren Feld** über der Liste. So wird sichtbar, wie sich aus einer über
+Jahre gepflegten Liste **vernetzte Informationen** über Kollegen ergeben.
+>
+> **Datenschutz:** Der Daten-Chat rechnet **lokal-bevorzugt** — bei sensiblen Personen-/Kollegen-Fragen
+> bleibt er **auf diesem Rechner** (nutzt das lokale Sprachmodell), außer du erlaubst im Profil
+> ausdrücklich API-Modelle für vertrauliche Auswertungen. Im **🔒 Geheim-Modus** bleibt es immer lokal.
+> Personenauswertungen sind bewusst **sachlich-neutral** aus den Daten abgeleitet (keine erfundenen
+> oder abwertenden Aussagen). *Hinweis: Werte Daten über andere Menschen nur mit deren Wissen und im
+> erlaubten Rahmen aus.*
+
+**Demonstrations-Projekt:** Zum Ausprobieren bringt die App einen großen **fiktiven Beispiel-Baum**
+mit (operative Projekte, ein **🎉 Firmenfest** und ein bewusst deplatziertes **„Persönliches"**-Projekt)
+und rund zehn erfundenen Kolleg:innen, die **projektübergreifend** auftauchen. Er zeigt eindrücklich,
+was der Daten-Chat und der Wissensgraph aus vernetzten Informationen herausholen. Die Namen sind frei
+**umbenennbar**, und du kannst die Demo-Projekte jederzeit löschen.
+
 > **Speichern:** **💾 Speichern** legt Punkte, Verknüpfungen und Anlagen in der Datenbank ab. Verschieben,
 > Umsortieren und Aktivieren wirken sofort. Ein **Backup** (Profil-Modal) sichert den ganzen Baum
 > (`todo/todos.json`) samt Original-Anlagen.

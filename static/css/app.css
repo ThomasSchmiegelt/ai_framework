@@ -4767,8 +4767,16 @@ select.ob-input option {
 
 /* ── To-Do Rework: Notiz, Punkte mit Haken/Anlagen, Suche ────────────────────── */
 .todo-toolbar-sep { flex-basis: 100%; height: 0; }
-#todo-search { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; font-size: 13px; }
-#todo-search:focus { outline: none; border-color: var(--accent); }
+#todo-search, #todo-ask-input { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; font-size: 13px; }
+#todo-search:focus, #todo-ask-input:focus { outline: none; border-color: var(--accent); }
+#todo-ask-input::placeholder { color: var(--text-muted); }
+/* Daten-Chat-Antwort (einklappbar, themenkonform) */
+#todo-ask-answer { background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 12px; margin-bottom: 14px; }
+.todo-ask-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 700; font-size: 13.5px; margin-bottom: 8px; }
+.todo-ask-head .export-btn { padding: 3px 9px; }
+#todo-ask-out { color: var(--text); font-size: 14px; line-height: 1.6; }
+#todo-ask-out p:first-child { margin-top: 0; }
+#todo-ask-out p:last-child { margin-bottom: 0; }
 .todo-item { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 7px 0; border-bottom: 1px solid var(--border); }
 .todo-item .var-input { margin-bottom: 0; flex: 1; min-width: 140px; }
 .todo-check { width: 18px; height: 18px; cursor: pointer; accent-color: #22c55e; flex: 0 0 auto; }
@@ -4831,6 +4839,40 @@ select.ob-input option {
 .todo-it-move { background: var(--bg-input); color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; padding: 4px 6px; max-width: 130px; }
 #todo-content .var-sec:first-of-type { margin-top: 8px; }
 @media (max-width: 760px) { #todo-main { flex-direction: column; } #todo-tree-pane { width: auto; border-right: none; border-bottom: 1px solid var(--border); max-height: 30vh; } #todo-tree-splitter { display: none; } }
+
+/* ── To-Do Liste: einklappbare + höhenverstellbare Abschnitte ─────────────────── */
+#todo-view-liste { flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 0; overflow: hidden; }
+/* .todo-view display wird per JS gesetzt (Liste = flex) */
+.todo-sec { margin: 0 !important; padding: 6px 2px 4px !important; border-bottom: none !important; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.todo-sec > .var-sec-head { margin-bottom: 6px; flex: 0 0 auto; }
+/* Der Rumpf füllt IMMER den Abschnitt (auch das Notiz-Eingabefeld) und scrollt bei Bedarf */
+.todo-sec-body { flex: 1 1 auto; overflow: auto; min-height: 0; }
+/* Kopf & Notiz: feste, per Splitter ziehbare Höhe; „Punkte" füllt den Rest */
+#todo-sec-header { flex: 0 0 auto; height: 176px; }
+#todo-sec-note { flex: 0 0 auto; height: 132px; }
+.todo-sec-grow { flex: 1 1 auto; min-height: 72px; }
+.todo-sec.collapsed { flex: 0 0 auto !important; height: auto !important; }
+.todo-sec.collapsed > .todo-sec-body { display: none !important; }
+.todo-sec-toggle { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 0 2px; width: 16px; line-height: 1; }
+.todo-sec-toggle:hover { color: var(--text); }
+.todo-sec.collapsed > .var-sec-head .todo-sec-toggle { transform: rotate(-90deg); }
+/* Notiz: Eingabefeld füllt den ganzen Abschnittsrumpf (folgt dem Splitter) */
+#todo-sec-note > .todo-sec-body { display: flex; flex-direction: column; gap: 4px; }
+#todo-note { flex: 1 1 auto; min-height: 36px; resize: none; margin-bottom: 0; }
+#todo-sec-note .todo-note-actions { flex: 0 0 auto; }
+/* Horizontale Splitter zwischen den Abschnitten */
+.todo-hsplit { height: 8px; flex: 0 0 auto; cursor: row-resize; position: relative; }
+.todo-hsplit::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-50%); background: var(--border); border-radius: 2px; }
+.todo-hsplit:hover::after, .todo-hsplit.dragging::after { background: var(--accent); }
+.todo-hsplit.hidden { display: none; }
+/* Kompakte Filter in der Punkte-Kopfzeile */
+.todo-filters { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11.5px; font-weight: 400; }
+.todo-filter-lbl { display: inline-flex; align-items: center; gap: 3px; color: var(--text-muted); white-space: nowrap; }
+.todo-filters input[type="date"] { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 2px 5px; font-size: 11px; }
+.todo-filter-sel { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; padding: 2px 6px; max-width: 140px; }
+.todo-filter-clear { display: none; font-size: 11px; color: var(--danger, #ef4444); }
+.todo-filters.active .todo-filter-clear { display: inline-block; }
+.todo-item.todo-filtered { display: none !important; }
 
 /* ── To-Do Empfehlung / Agenda ────────────────────────────────────────────────── */
 #todo-agenda-person { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 7px; font-size: 12px; }

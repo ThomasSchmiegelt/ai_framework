@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260815tts" />
+  <link rel="stylesheet" href="/css/app.css?v=20260815todoui3" />
 </head>
 <body>
 
@@ -2257,12 +2257,27 @@
         <h2 style="font-size:16px;margin:0">✅ To-Do</h2>
         <span id="todo-active-label" class="planner-muted" style="font-size:12px" title="Aktives Projekt: Suche &amp; Graph auf diesen Teilbaum beschränkt"></span>
         <button id="btn-todo-save" class="export-btn" title="Änderungen speichern">💾 Speichern</button>
+        <button id="btn-todo-export" class="export-btn" title="Projektliste als JSON-Datei exportieren">📤 Export</button>
+        <button id="btn-todo-import" class="export-btn" title="Projektliste aus einer JSON-Datei importieren">📥 Import</button>
+        <button id="btn-todo-reset" class="export-btn btn-danger-sm" title="Alles leeren – mit automatischer Sicherung der alten Liste">🗑 Reset</button>
+        <div id="todo-ask-bar" style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:nowrap" title="Mit einem LLM über die To-Do-Daten sprechen – auch Fragen zu Kollegen. Nutzt den aktiven Bereich (Wurzel = alles).">
+          <input type="search" id="todo-ask-input" placeholder="🤖 Über die Daten fragen (z. B. „Profil von Anna Berger“)…" style="min-width:280px" />
+          <button id="todo-ask-go" class="export-btn" title="Frage an das Modell senden">Fragen</button>
+        </div>
         <span class="todo-toolbar-sep"></span>
         <input type="search" id="todo-search" placeholder="🔍 Suchen (aktiver Bereich + Anlagen)…" style="min-width:250px" />
         <span id="todo-spin" class="pf-spin" style="display:none;margin-left:auto"></span>
         <span id="todo-status" class="planner-muted" style="font-size:11.5px"></span>
       </div>
       <div id="todo-body">
+        <!-- Antwort des Daten-Chats (einklappbar) -->
+        <div id="todo-ask-answer" style="display:none">
+          <div class="todo-ask-head">
+            <span>🤖 Antwort <span id="todo-ask-scope" class="planner-muted" style="font-size:11px"></span></span>
+            <button id="todo-ask-close" class="export-btn" title="Antwort schließen">✕</button>
+          </div>
+          <div id="todo-ask-out" class="pf-ask-txt markdown-body"></div>
+        </div>
         <!-- Globale/aktive Suchergebnisse -->
         <div id="todo-search-results" style="display:none"></div>
 
@@ -2304,53 +2319,69 @@
             </div>
 
         <div id="todo-view-liste" class="todo-view" style="display:none">
-          <!-- 1) Besprechungsheader -->
-          <div class="var-sec">
-            <div class="var-sec-head">👥 Besprechungsheader</div>
-            <div class="todo-header-grid">
-              <label class="todo-hfield todo-hfield-wide">
-                <span class="var-lbl">Thema / Worum geht es?</span>
-                <input type="text" id="todo-title" class="var-input" placeholder="z. B. Kickoff Maschine X – Konzeptauswahl" />
-              </label>
-              <label class="todo-hfield todo-hfield-wide">
-                <span class="var-lbl">Teilnehmer (Komma-getrennt)</span>
-                <input type="text" id="todo-participants" class="var-input" placeholder="z. B. Anna, Bernd, Chris" />
-              </label>
-              <label class="todo-hfield">
-                <span class="var-lbl">Datum</span>
-                <input type="date" id="todo-date" />
-              </label>
-              <label class="todo-hfield">
-                <span class="var-lbl">Projekt verknüpfen <span class="planner-muted">(optional)</span></span>
-                <select id="todo-project" title="Mit einem Eintrag aus dem Projekte-Tab verknüpfen"><option value="">— kein Projekt —</option></select>
-              </label>
-            </div>
-            <p class="planner-muted" style="font-size:11.5px;margin:6px 0 0">
-              Diese Angaben geben der KI Kontext und fließen beim <strong>Ableiten</strong> in den Prompt ein
-              (Thema, Datum für Fristen, Teilnehmer als mögliche Zuständige).
-            </p>
-          </div>
-
-          <!-- 2) Besprechungsnotiz → Punkte ableiten -->
-          <div class="var-sec">
-            <div class="var-sec-head">📝 Besprechungsnotiz</div>
-            <textarea id="todo-note" class="var-input" rows="5" placeholder="Besprechungsnotiz / Freitext hier schreiben – dann „To-Do-Liste ableiten": die KI macht daraus einzelne Aufgaben (mit Zuständigen, Fristen, Abhängigkeiten)."></textarea>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
-              <button id="btn-todo-extract" class="export-btn var-ai">🪄 To-Do-Liste ableiten</button>
-              <label class="mathe-inline-opt" title="Vorhandene Punkte ersetzen statt anhängen"><input type="checkbox" id="todo-extract-replace" /> ersetzen</label>
+          <!-- 1) Besprechungsheader (einklappbar) -->
+          <div class="var-sec todo-sec" id="todo-sec-header">
+            <div class="var-sec-head"><button class="todo-sec-toggle" data-sec="header" title="Ein-/ausklappen">▾</button> 👥 Besprechungsheader</div>
+            <div class="todo-sec-body">
+              <div class="todo-header-grid">
+                <label class="todo-hfield todo-hfield-wide">
+                  <span class="var-lbl">Thema / Worum geht es?</span>
+                  <input type="text" id="todo-title" class="var-input" placeholder="z. B. Kickoff Maschine X – Konzeptauswahl" />
+                </label>
+                <label class="todo-hfield todo-hfield-wide">
+                  <span class="var-lbl">Teilnehmer (Komma-getrennt)</span>
+                  <input type="text" id="todo-participants" class="var-input" placeholder="z. B. Anna, Bernd, Chris" />
+                </label>
+                <label class="todo-hfield">
+                  <span class="var-lbl">Datum</span>
+                  <input type="date" id="todo-date" />
+                </label>
+                <label class="todo-hfield">
+                  <span class="var-lbl">Projekt verknüpfen <span class="planner-muted">(optional)</span></span>
+                  <select id="todo-project" title="Mit einem Eintrag aus dem Projekte-Tab verknüpfen"><option value="">— kein Projekt —</option></select>
+                </label>
+              </div>
+              <p class="planner-muted" style="font-size:11.5px;margin:6px 0 0">
+                Diese Angaben geben der KI Kontext und fließen beim <strong>Ableiten</strong> in den Prompt ein
+                (Thema, Datum für Fristen, Teilnehmer als mögliche Zuständige).
+              </p>
             </div>
           </div>
+          <div class="todo-hsplit" data-split="header" title="Ziehen zum Verschieben"></div>
 
-          <!-- 3) Punkte -->
-          <div class="var-sec">
-            <div class="var-sec-head">✅ Punkte <span id="todo-count" class="planner-muted" style="font-weight:400;font-size:12px"></span>
+          <!-- 2) Besprechungsnotiz → Punkte ableiten (einklappbar) -->
+          <div class="var-sec todo-sec" id="todo-sec-note">
+            <div class="var-sec-head"><button class="todo-sec-toggle" data-sec="note" title="Ein-/ausklappen">▾</button> 📝 Besprechungsnotiz</div>
+            <div class="todo-sec-body">
+              <textarea id="todo-note" class="var-input" placeholder="Besprechungsnotiz / Freitext hier schreiben – dann „To-Do-Liste ableiten": die KI macht daraus einzelne Aufgaben (mit Zuständigen, Fristen, Abhängigkeiten)."></textarea>
+              <div class="todo-note-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+                <button id="btn-todo-extract" class="export-btn var-ai">🪄 To-Do-Liste ableiten</button>
+                <label class="mathe-inline-opt" title="Vorhandene Punkte ersetzen statt anhängen"><input type="checkbox" id="todo-extract-replace" /> ersetzen</label>
+              </div>
+            </div>
+          </div>
+          <div class="todo-hsplit" data-split="note" title="Ziehen zum Verschieben"></div>
+
+          <!-- 3) Punkte (einklappbar, füllt den Rest) -->
+          <div class="var-sec todo-sec todo-sec-grow" id="todo-sec-items">
+            <div class="var-sec-head"><button class="todo-sec-toggle" data-sec="items" title="Ein-/ausklappen">▾</button> ✅ Punkte
+              <span id="todo-count" class="planner-muted" style="font-weight:400;font-size:12px"></span>
+              <!-- Filter (kompakt, in die Kopfzeile integriert) -->
+              <span class="todo-filters">
+                <label class="todo-filter-lbl" title="Erledigte Aufgaben ausblenden"><input type="checkbox" id="todo-filter-done" /> nur offene</label>
+                <span class="todo-filter-lbl" title="Nach Fälligkeitsdatum filtern">📅 <input type="date" id="todo-filter-from" title="fällig ab" /> – <input type="date" id="todo-filter-to" title="fällig bis" /></span>
+                <select id="todo-filter-assign" class="todo-filter-sel" title="Nach Zuständiger filtern"><option value="">👤 alle</option></select>
+                <button id="todo-filter-clear" class="todo-mini todo-filter-clear" title="Filter zurücksetzen">✕</button>
+              </span>
               <span style="flex:1"></span>
               <button id="btn-todo-add" class="export-btn">➕ Punkt</button>
               <button id="btn-todo-suggest-links" class="export-btn var-ai">✨ Verknüpfungen</button>
               <button id="btn-todo-next" class="export-btn var-ai">🤖 Nächste Schritte</button>
             </div>
-            <div id="todo-items"></div>
-            <div id="todo-next-out" class="var-explain"></div>
+            <div class="todo-sec-body">
+              <div id="todo-items"></div>
+              <div id="todo-next-out" class="var-explain"></div>
+            </div>
           </div>
         </div>
 
@@ -2360,6 +2391,9 @@
             <button id="btn-todo-graph-connect" class="export-btn" title="Zwei Aufgaben verbinden">🔗 Verbinden</button>
             <label class="mathe-inline-opt"><input type="checkbox" id="todo-graph-hubs" checked /> 👥 Zuständige/Status</label>
             <label class="mathe-inline-opt" title="Punkte aus allen Projekten zusammen zeigen"><input type="checkbox" id="todo-graph-all" /> 🌐 Alle Projekte</label>
+            <label class="mathe-inline-opt" title="Nur Punkte einer Person zeigen">👤
+              <select id="todo-graph-person" class="todo-filter-sel"><option value="">alle</option></select>
+            </label>
             <button id="btn-todo-graph-layout" class="export-btn">↻ Anordnen</button>
             <span id="todo-graph-hint" class="planner-muted" style="font-size:11.5px;margin-left:auto"></span>
           </div>
@@ -3267,7 +3301,7 @@
 <script src="/js/agents.js?v=20260611merge"></script>
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
-<script src="/js/tts.js?v=20260815tts2"></script>
+<script src="/js/tts.js?v=20260815tts3"></script>
 <script src="/js/chat.js?v=20260815tts"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260721"></script>
@@ -3293,7 +3327,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260814b"></script>
-<script src="/js/todo.js?v=20260814agenda"></script>
+<script src="/js/todo.js?v=20260815todoui2"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/app.js?v=20260815tts"></script>

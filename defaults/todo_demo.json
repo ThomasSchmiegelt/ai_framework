@@ -1,0 +1,1010 @@
+{
+  "projects": [
+    {
+      "id": "tp_demo_release",
+      "name": "Produktrelease 2026",
+      "parent_id": "root",
+      "type": "projekt",
+      "title": "🚀 Produktrelease 2026",
+      "date": "",
+      "participants_json": "[\"Anna Berger\", \"Tom Kessler\", \"Mira Sahin\", \"Lena Fischer\", \"Paul Neumann\"]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 1,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    },
+    {
+      "id": "tp_demo_nord",
+      "name": "Kunde Nord – Migration",
+      "parent_id": "root",
+      "type": "projekt",
+      "title": "🏢 Kunde Nord – Datenmigration",
+      "date": "",
+      "participants_json": "[\"Anna Berger\", \"Jonas Weber\", \"Paul Neumann\", \"David Klein\"]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 2,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    },
+    {
+      "id": "tp_demo_audit",
+      "name": "Audit ISO 9001",
+      "parent_id": "root",
+      "type": "projekt",
+      "title": "📋 Audit ISO 9001",
+      "date": "",
+      "participants_json": "[\"Anna Berger\", \"Mira Sahin\", \"Sara Vogt\", \"David Klein\"]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 3,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    },
+    {
+      "id": "tp_demo_web",
+      "name": "Website-Relaunch",
+      "parent_id": "root",
+      "type": "projekt",
+      "title": "🌐 Website-Relaunch",
+      "date": "",
+      "participants_json": "[\"Lena Fischer\", \"Nadia Roth\", \"Tom Kessler\", \"Erik Baumann\"]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 4,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    },
+    {
+      "id": "tp_demo_recruit",
+      "name": "Recruiting Q3",
+      "parent_id": "root",
+      "type": "projekt",
+      "title": "🧑‍💼 Recruiting Q3",
+      "date": "",
+      "participants_json": "[\"Sara Vogt\", \"Anna Berger\", \"Paul Neumann\"]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 5,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    },
+    {
+      "id": "tp_demo_fest",
+      "name": "Firmenfest 2026 vorbereiten",
+      "parent_id": "root",
+      "type": "projekt",
+      "title": "🎉 Firmenfest 2026",
+      "date": "",
+      "participants_json": "[\"Sara Vogt\", \"Nadia Roth\", \"Jonas Weber\", \"David Klein\"]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 6,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    },
+    {
+      "id": "tp_demo_priv",
+      "name": "Persönliches (gehört hier nicht hin)",
+      "parent_id": "root",
+      "type": "frei",
+      "title": "🔒 Persönliches (eigentlich nicht hierher)",
+      "date": "",
+      "participants_json": "[]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 7,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    },
+    {
+      "id": "tp_demo_budget",
+      "name": "Budget & Controlling 2026",
+      "parent_id": "root",
+      "type": "projekt",
+      "title": "💶 Budget & Controlling 2026",
+      "date": "",
+      "participants_json": "[\"David Klein\", \"Anna Berger\"]",
+      "project_ref": "",
+      "settings_json": "{}",
+      "sort": 8,
+      "created_at": 1750000000.0,
+      "updated_at": 1750000000.0
+    }
+  ],
+  "items": [
+    {
+      "id": "ti_demo_rel01",
+      "project_id": "tp_demo_release",
+      "seq": 0,
+      "text": "Release-Scope festlegen",
+      "detail": "Anna hat den Scope wie immer früh und sauber dokumentiert.",
+      "status": "erledigt",
+      "assignees_json": "[\"Anna Berger\"]",
+      "due": "2026-05-10",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_rel02",
+      "project_id": "tp_demo_release",
+      "seq": 1,
+      "text": "Feature: Export-Modul entwickeln",
+      "detail": "Tom: Frist zum dritten Mal verschoben. Prototyp sieht kreativ aus, aber unfertig.",
+      "status": "laeuft",
+      "assignees_json": "[\"Tom Kessler\"]",
+      "due": "2026-08-20",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_rel03",
+      "project_id": "tp_demo_release",
+      "seq": 2,
+      "text": "Feature: Login-Redesign",
+      "detail": "Lena liefert nachts die finalen Screens – sehr detailverliebt.",
+      "status": "laeuft",
+      "assignees_json": "[\"Lena Fischer\", \"Tom Kessler\"]",
+      "due": "2026-08-25",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_rel04",
+      "project_id": "tp_demo_release",
+      "seq": 3,
+      "text": "Testplan schreiben",
+      "detail": "Mira: penibel, jeder Testfall dokumentiert.",
+      "status": "erledigt",
+      "assignees_json": "[\"Mira Sahin\"]",
+      "due": "2026-07-30",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_rel05",
+      "project_id": "tp_demo_release",
+      "seq": 4,
+      "text": "Regressionstests Export-Modul",
+      "detail": "Wartet auf Toms Export-Modul.",
+      "status": "offen",
+      "assignees_json": "[\"Mira Sahin\"]",
+      "due": "2026-08-28",
+      "created_at": 1750000004.0
+    },
+    {
+      "id": "ti_demo_rel06",
+      "project_id": "tp_demo_release",
+      "seq": 5,
+      "text": "Staging-Umgebung aufsetzen",
+      "detail": "Paul: kommentarlos erledigt, lief sofort.",
+      "status": "erledigt",
+      "assignees_json": "[\"Paul Neumann\"]",
+      "due": "2026-08-05",
+      "created_at": 1750000005.0
+    },
+    {
+      "id": "ti_demo_rel07",
+      "project_id": "tp_demo_release",
+      "seq": 6,
+      "text": "Release-Notes verfassen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Anna Berger\"]",
+      "due": "2026-09-01",
+      "created_at": 1750000006.0
+    },
+    {
+      "id": "ti_demo_rel08",
+      "project_id": "tp_demo_release",
+      "seq": 7,
+      "text": "Performance-Optimierung Datenbank",
+      "detail": "Paul murrt über 'Altlasten im Code'.",
+      "status": "laeuft",
+      "assignees_json": "[\"Paul Neumann\"]",
+      "due": "2026-08-30",
+      "created_at": 1750000007.0
+    },
+    {
+      "id": "ti_demo_rel09",
+      "project_id": "tp_demo_release",
+      "seq": 8,
+      "text": "Sicherheitsreview",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Paul Neumann\", \"Mira Sahin\"]",
+      "due": "2026-09-03",
+      "created_at": 1750000008.0
+    },
+    {
+      "id": "ti_demo_rel10",
+      "project_id": "tp_demo_release",
+      "seq": 9,
+      "text": "Go/No-Go-Meeting",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Anna Berger\", \"Tom Kessler\", \"Mira Sahin\", \"Lena Fischer\", \"Paul Neumann\"]",
+      "due": "2026-09-05",
+      "created_at": 1750000009.0
+    },
+    {
+      "id": "ti_demo_rel11",
+      "project_id": "tp_demo_release",
+      "seq": 10,
+      "text": "Deployment Produktion",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Paul Neumann\"]",
+      "due": "2026-09-06",
+      "created_at": 1750000010.0
+    },
+    {
+      "id": "ti_demo_rel12",
+      "project_id": "tp_demo_release",
+      "seq": 11,
+      "text": "Feature: Export-Modul – Doku",
+      "detail": "Erik unsicher, fragt Anna dreimal am Tag um Rat.",
+      "status": "offen",
+      "assignees_json": "[\"Erik Baumann\"]",
+      "due": "2026-09-02",
+      "created_at": 1750000011.0
+    },
+    {
+      "id": "ti_demo_nor01",
+      "project_id": "tp_demo_nord",
+      "seq": 0,
+      "text": "Kick-off mit Kunde Nord",
+      "detail": "Jonas dominierte das Gespräch, sehr extrovertiert – Kunde mochte ihn.",
+      "status": "erledigt",
+      "assignees_json": "[\"Jonas Weber\", \"Anna Berger\"]",
+      "due": "2026-06-02",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_nor02",
+      "project_id": "tp_demo_nord",
+      "seq": 1,
+      "text": "Ist-Datenbestand analysieren",
+      "detail": "",
+      "status": "erledigt",
+      "assignees_json": "[\"Paul Neumann\"]",
+      "due": "2026-06-20",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_nor03",
+      "project_id": "tp_demo_nord",
+      "seq": 2,
+      "text": "Migrationsskript entwickeln",
+      "detail": "Tom sollte zuarbeiten, ist aber im Release gebunden – Konflikt.",
+      "status": "laeuft",
+      "assignees_json": "[\"Paul Neumann\", \"Tom Kessler\"]",
+      "due": "2026-08-22",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_nor04",
+      "project_id": "tp_demo_nord",
+      "seq": 3,
+      "text": "Testmigration durchführen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Mira Sahin\"]",
+      "due": "2026-08-29",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_nor05",
+      "project_id": "tp_demo_nord",
+      "seq": 4,
+      "text": "Abnahme mit Kunde Nord",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Jonas Weber\", \"Anna Berger\"]",
+      "due": "2026-09-10",
+      "created_at": 1750000004.0
+    },
+    {
+      "id": "ti_demo_nor06",
+      "project_id": "tp_demo_nord",
+      "seq": 5,
+      "text": "Angebot Folgeauftrag kalkulieren",
+      "detail": "David rechnet dreimal nach, sehr vorsichtig bei Zahlen.",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\", \"Jonas Weber\"]",
+      "due": "2026-09-12",
+      "created_at": 1750000005.0
+    },
+    {
+      "id": "ti_demo_nor07",
+      "project_id": "tp_demo_nord",
+      "seq": 6,
+      "text": "Vertrag Folgeauftrag prüfen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\"]",
+      "due": "2026-09-15",
+      "created_at": 1750000006.0
+    },
+    {
+      "id": "ti_demo_nor08",
+      "project_id": "tp_demo_nord",
+      "seq": 7,
+      "text": "Reisekosten Kundentermin abrechnen",
+      "detail": "Jonas reicht Belege regelmäßig zu spät ein.",
+      "status": "offen",
+      "assignees_json": "[\"Jonas Weber\"]",
+      "due": "2026-09-01",
+      "created_at": 1750000007.0
+    },
+    {
+      "id": "ti_demo_aud01",
+      "project_id": "tp_demo_audit",
+      "seq": 0,
+      "text": "Prozessdokumentation sichten",
+      "detail": "",
+      "status": "erledigt",
+      "assignees_json": "[\"Mira Sahin\"]",
+      "due": "2026-07-01",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_aud02",
+      "project_id": "tp_demo_audit",
+      "seq": 1,
+      "text": "Abweichungen aus Vor-Audit prüfen",
+      "detail": "",
+      "status": "laeuft",
+      "assignees_json": "[\"Mira Sahin\", \"Anna Berger\"]",
+      "due": "2026-08-25",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_aud03",
+      "project_id": "tp_demo_audit",
+      "seq": 2,
+      "text": "Schulungsnachweise sammeln",
+      "detail": "Sara kümmert sich zuverlässig um alles Organisatorische.",
+      "status": "offen",
+      "assignees_json": "[\"Sara Vogt\"]",
+      "due": "2026-08-27",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_aud04",
+      "project_id": "tp_demo_audit",
+      "seq": 3,
+      "text": "Interne Auditoren briefen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Anna Berger\"]",
+      "due": "2026-09-02",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_aud05",
+      "project_id": "tp_demo_audit",
+      "seq": 4,
+      "text": "Audit-Termin koordinieren",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Sara Vogt\"]",
+      "due": "2026-09-04",
+      "created_at": 1750000004.0
+    },
+    {
+      "id": "ti_demo_aud06",
+      "project_id": "tp_demo_audit",
+      "seq": 5,
+      "text": "Budget Zertifizierung freigeben",
+      "detail": "David: 'Zertifizierung ist teuer – lohnt sich das?' Sehr sparsam.",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\"]",
+      "due": "2026-08-31",
+      "created_at": 1750000005.0
+    },
+    {
+      "id": "ti_demo_aud07",
+      "project_id": "tp_demo_audit",
+      "seq": 6,
+      "text": "Maßnahmenplan erstellen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Anna Berger\", \"Mira Sahin\"]",
+      "due": "2026-09-08",
+      "created_at": 1750000006.0
+    },
+    {
+      "id": "ti_demo_web01",
+      "project_id": "tp_demo_web",
+      "seq": 0,
+      "text": "Wireframes Startseite",
+      "detail": "",
+      "status": "erledigt",
+      "assignees_json": "[\"Lena Fischer\"]",
+      "due": "2026-06-15",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_web02",
+      "project_id": "tp_demo_web",
+      "seq": 1,
+      "text": "Design-System festlegen",
+      "detail": "Lena perfektioniert Abstände bis auf den Pixel.",
+      "status": "laeuft",
+      "assignees_json": "[\"Lena Fischer\"]",
+      "due": "2026-08-24",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_web03",
+      "project_id": "tp_demo_web",
+      "seq": 2,
+      "text": "Texte/Content erstellen",
+      "detail": "Nadia schreibt werblich-energisch, viele Emojis.",
+      "status": "laeuft",
+      "assignees_json": "[\"Nadia Roth\"]",
+      "due": "2026-08-26",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_web04",
+      "project_id": "tp_demo_web",
+      "seq": 3,
+      "text": "Frontend umsetzen",
+      "detail": "Erik lernt viel von Tom, traut sich aber wenig zu.",
+      "status": "offen",
+      "assignees_json": "[\"Tom Kessler\", \"Erik Baumann\"]",
+      "due": "2026-09-05",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_web05",
+      "project_id": "tp_demo_web",
+      "seq": 4,
+      "text": "SEO-Optimierung",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Nadia Roth\"]",
+      "due": "2026-09-09",
+      "created_at": 1750000004.0
+    },
+    {
+      "id": "ti_demo_web06",
+      "project_id": "tp_demo_web",
+      "seq": 5,
+      "text": "Social-Media-Kampagne planen",
+      "detail": "Nadia liebt Social Media, postet auch privat sehr viel.",
+      "status": "offen",
+      "assignees_json": "[\"Nadia Roth\"]",
+      "due": "2026-09-12",
+      "created_at": 1750000005.0
+    },
+    {
+      "id": "ti_demo_web07",
+      "project_id": "tp_demo_web",
+      "seq": 6,
+      "text": "Barrierefreiheit prüfen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Mira Sahin\", \"Lena Fischer\"]",
+      "due": "2026-09-14",
+      "created_at": 1750000006.0
+    },
+    {
+      "id": "ti_demo_web08",
+      "project_id": "tp_demo_web",
+      "seq": 7,
+      "text": "Launch koordinieren",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Nadia Roth\", \"Lena Fischer\"]",
+      "due": "2026-09-20",
+      "created_at": 1750000007.0
+    },
+    {
+      "id": "ti_demo_rec01",
+      "project_id": "tp_demo_recruit",
+      "seq": 0,
+      "text": "Stellenanzeige Entwickler schalten",
+      "detail": "",
+      "status": "erledigt",
+      "assignees_json": "[\"Sara Vogt\"]",
+      "due": "2026-07-10",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_rec02",
+      "project_id": "tp_demo_recruit",
+      "seq": 1,
+      "text": "Bewerbungen sichten",
+      "detail": "Paul bewertet fachlich, Sara achtet auf Team-Fit.",
+      "status": "laeuft",
+      "assignees_json": "[\"Sara Vogt\", \"Paul Neumann\"]",
+      "due": "2026-08-23",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_rec03",
+      "project_id": "tp_demo_recruit",
+      "seq": 2,
+      "text": "Interviews terminieren",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Sara Vogt\"]",
+      "due": "2026-08-28",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_rec04",
+      "project_id": "tp_demo_recruit",
+      "seq": 3,
+      "text": "Technische Interviews führen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Paul Neumann\", \"Tom Kessler\"]",
+      "due": "2026-09-04",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_rec05",
+      "project_id": "tp_demo_recruit",
+      "seq": 4,
+      "text": "Onboarding-Plan für Erik finalisieren",
+      "detail": "Erik ist noch Junior – braucht klare Struktur.",
+      "status": "laeuft",
+      "assignees_json": "[\"Anna Berger\", \"Sara Vogt\"]",
+      "due": "2026-08-30",
+      "created_at": 1750000004.0
+    },
+    {
+      "id": "ti_demo_rec06",
+      "project_id": "tp_demo_recruit",
+      "seq": 5,
+      "text": "Gehaltsband abstimmen",
+      "detail": "Vertraulich – nur David und Sara.",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\", \"Sara Vogt\"]",
+      "due": "2026-09-06",
+      "created_at": 1750000005.0
+    },
+    {
+      "id": "ti_demo_fes01",
+      "project_id": "tp_demo_fest",
+      "seq": 0,
+      "text": "Termin & Location festlegen",
+      "detail": "Sara organisiert das Fest – wie jedes Jahr mit Herzblut.",
+      "status": "erledigt",
+      "assignees_json": "[\"Sara Vogt\"]",
+      "due": "2026-07-20",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_fes02",
+      "project_id": "tp_demo_fest",
+      "seq": 1,
+      "text": "Budget beantragen",
+      "detail": "David hat das Budget knapp gehalten.",
+      "status": "erledigt",
+      "assignees_json": "[\"David Klein\", \"Sara Vogt\"]",
+      "due": "2026-07-25",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_fes03",
+      "project_id": "tp_demo_fest",
+      "seq": 2,
+      "text": "Catering auswählen",
+      "detail": "WICHTIG: Sara ist allergisch gegen Nüsse – nussfreies Menü. Mira ist Vegetarierin. Jonas mag deftig/Fleisch.",
+      "status": "laeuft",
+      "assignees_json": "[\"Sara Vogt\", \"Nadia Roth\"]",
+      "due": "2026-08-24",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_fes04",
+      "project_id": "tp_demo_fest",
+      "seq": 3,
+      "text": "Einladungen versenden",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Nadia Roth\"]",
+      "due": "2026-08-28",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_fes05",
+      "project_id": "tp_demo_fest",
+      "seq": 4,
+      "text": "Programm/Spiele planen",
+      "detail": "Jonas will eine laute Karaoke-Bühne. Lena hätte lieber etwas Ruhiges.",
+      "status": "offen",
+      "assignees_json": "[\"Jonas Weber\", \"Nadia Roth\"]",
+      "due": "2026-09-01",
+      "created_at": 1750000004.0
+    },
+    {
+      "id": "ti_demo_fes06",
+      "project_id": "tp_demo_fest",
+      "seq": 5,
+      "text": "Getränke bestellen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Jonas Weber\"]",
+      "due": "2026-09-03",
+      "created_at": 1750000005.0
+    },
+    {
+      "id": "ti_demo_fes07",
+      "project_id": "tp_demo_fest",
+      "seq": 6,
+      "text": "Fotografen buchen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Nadia Roth\"]",
+      "due": "2026-09-05",
+      "created_at": 1750000006.0
+    },
+    {
+      "id": "ti_demo_fes08",
+      "project_id": "tp_demo_fest",
+      "seq": 7,
+      "text": "Geschenke/Tombola organisieren",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Sara Vogt\"]",
+      "due": "2026-09-08",
+      "created_at": 1750000007.0
+    },
+    {
+      "id": "ti_demo_fes09",
+      "project_id": "tp_demo_fest",
+      "seq": 8,
+      "text": "Rede der Geschäftsführung vorbereiten",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"Anna Berger\"]",
+      "due": "2026-09-10",
+      "created_at": 1750000008.0
+    },
+    {
+      "id": "ti_demo_pri01",
+      "project_id": "tp_demo_priv",
+      "seq": 0,
+      "text": "Annas Geburtstag 14.03.",
+      "detail": "Anna mag KEINE Überraschungspartys – nur kleine Runde.",
+      "status": "offen",
+      "assignees_json": "[\"Anna Berger\"]",
+      "due": "2027-03-14",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_pri02",
+      "project_id": "tp_demo_priv",
+      "seq": 1,
+      "text": "Toms Arzttermin (Rücken) 12.09.",
+      "detail": "Tom hat wiederkehrende Rückenprobleme, deshalb oft im Homeoffice.",
+      "status": "offen",
+      "assignees_json": "[\"Tom Kessler\"]",
+      "due": "2026-09-12",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_pri03",
+      "project_id": "tp_demo_priv",
+      "seq": 2,
+      "text": "Sara: Nussallergie im Blick behalten",
+      "detail": "Gilt überall, nicht nur beim Fest.",
+      "status": "offen",
+      "assignees_json": "[\"Sara Vogt\"]",
+      "due": "",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_pri04",
+      "project_id": "tp_demo_priv",
+      "seq": 3,
+      "text": "David spart auf Hauskauf",
+      "detail": "Deshalb sehr sparsam bei Budgets – erklärt sein Verhalten im Controlling.",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\"]",
+      "due": "",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_pri05",
+      "project_id": "tp_demo_priv",
+      "seq": 4,
+      "text": "Nadia: Hund Bello – dienstags Homeoffice",
+      "detail": "Bello muss dienstags zum Training.",
+      "status": "offen",
+      "assignees_json": "[\"Nadia Roth\"]",
+      "due": "",
+      "created_at": 1750000004.0
+    },
+    {
+      "id": "ti_demo_pri06",
+      "project_id": "tp_demo_priv",
+      "seq": 5,
+      "text": "Paul: Gaming-Turnier am Wochenende",
+      "detail": "Paul ist begeisterter Gamer, montags oft müde.",
+      "status": "offen",
+      "assignees_json": "[\"Paul Neumann\"]",
+      "due": "2026-08-30",
+      "created_at": 1750000005.0
+    },
+    {
+      "id": "ti_demo_pri07",
+      "project_id": "tp_demo_priv",
+      "seq": 6,
+      "text": "Jonas & Lena – Spannungen im Team",
+      "detail": "Unterschiedliche Naturen (laut vs. ruhig), gelegentlich Reibung.",
+      "status": "offen",
+      "assignees_json": "[\"Jonas Weber\", \"Lena Fischer\"]",
+      "due": "",
+      "created_at": 1750000006.0
+    },
+    {
+      "id": "ti_demo_pri08",
+      "project_id": "tp_demo_priv",
+      "seq": 7,
+      "text": "Erik: Unsicherheit, braucht Mentoring",
+      "detail": "Anna mentort Erik informell.",
+      "status": "laeuft",
+      "assignees_json": "[\"Erik Baumann\", \"Anna Berger\"]",
+      "due": "",
+      "created_at": 1750000007.0
+    },
+    {
+      "id": "ti_demo_pri09",
+      "project_id": "tp_demo_priv",
+      "seq": 8,
+      "text": "Mira: bevorzugt schriftliche Kommunikation",
+      "detail": "Meetings mag sie nicht, E-Mail lieber.",
+      "status": "offen",
+      "assignees_json": "[\"Mira Sahin\"]",
+      "due": "",
+      "created_at": 1750000008.0
+    },
+    {
+      "id": "ti_demo_bud01",
+      "project_id": "tp_demo_budget",
+      "seq": 0,
+      "text": "Quartalszahlen Q2 aufbereiten",
+      "detail": "",
+      "status": "erledigt",
+      "assignees_json": "[\"David Klein\"]",
+      "due": "2026-07-15",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ti_demo_bud02",
+      "project_id": "tp_demo_budget",
+      "seq": 1,
+      "text": "Forecast Q3/Q4 erstellen",
+      "detail": "David sehr gründlich, aber langsam – dreifache Kontrolle.",
+      "status": "laeuft",
+      "assignees_json": "[\"David Klein\"]",
+      "due": "2026-08-25",
+      "created_at": 1750000001.0
+    },
+    {
+      "id": "ti_demo_bud03",
+      "project_id": "tp_demo_budget",
+      "seq": 2,
+      "text": "Projektbudgets abgleichen",
+      "detail": "",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\", \"Anna Berger\"]",
+      "due": "2026-08-29",
+      "created_at": 1750000002.0
+    },
+    {
+      "id": "ti_demo_bud04",
+      "project_id": "tp_demo_budget",
+      "seq": 3,
+      "text": "Reisekosten-Richtlinie überarbeiten",
+      "detail": "Anlass: Jonas' verspätete Belege.",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\"]",
+      "due": "2026-09-05",
+      "created_at": 1750000003.0
+    },
+    {
+      "id": "ti_demo_bud05",
+      "project_id": "tp_demo_budget",
+      "seq": 4,
+      "text": "Freigabe Marketingbudget",
+      "detail": "Nadia will mehr für Social Ads, David bremst.",
+      "status": "offen",
+      "assignees_json": "[\"David Klein\", \"Nadia Roth\"]",
+      "due": "2026-09-07",
+      "created_at": 1750000004.0
+    }
+  ],
+  "edges": [
+    {
+      "project_id": "tp_demo_release",
+      "source": "ti_demo_rel02",
+      "target": "ti_demo_rel05",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_release",
+      "source": "ti_demo_rel02",
+      "target": "ti_demo_rel12",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_release",
+      "source": "ti_demo_rel05",
+      "target": "ti_demo_rel10",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_release",
+      "source": "ti_demo_rel03",
+      "target": "ti_demo_rel10",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_release",
+      "source": "ti_demo_rel09",
+      "target": "ti_demo_rel10",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_release",
+      "source": "ti_demo_rel10",
+      "target": "ti_demo_rel11",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_nord",
+      "source": "ti_demo_nor02",
+      "target": "ti_demo_nor03",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_nord",
+      "source": "ti_demo_nor03",
+      "target": "ti_demo_nor04",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_nord",
+      "source": "ti_demo_nor04",
+      "target": "ti_demo_nor05",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_nord",
+      "source": "ti_demo_nor05",
+      "target": "ti_demo_nor06",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_nord",
+      "source": "ti_demo_nor06",
+      "target": "ti_demo_nor07",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_audit",
+      "source": "ti_demo_aud01",
+      "target": "ti_demo_aud02",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_audit",
+      "source": "ti_demo_aud03",
+      "target": "ti_demo_aud04",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_audit",
+      "source": "ti_demo_aud04",
+      "target": "ti_demo_aud05",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_web",
+      "source": "ti_demo_web01",
+      "target": "ti_demo_web02",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_web",
+      "source": "ti_demo_web02",
+      "target": "ti_demo_web04",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_web",
+      "source": "ti_demo_web03",
+      "target": "ti_demo_web04",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_web",
+      "source": "ti_demo_web04",
+      "target": "ti_demo_web07",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_web",
+      "source": "ti_demo_web07",
+      "target": "ti_demo_web08",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_recruit",
+      "source": "ti_demo_rec01",
+      "target": "ti_demo_rec02",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_recruit",
+      "source": "ti_demo_rec02",
+      "target": "ti_demo_rec03",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_recruit",
+      "source": "ti_demo_rec03",
+      "target": "ti_demo_rec04",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_fest",
+      "source": "ti_demo_fes01",
+      "target": "ti_demo_fes03",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_fest",
+      "source": "ti_demo_fes02",
+      "target": "ti_demo_fes03",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_fest",
+      "source": "ti_demo_fes03",
+      "target": "ti_demo_fes04",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_fest",
+      "source": "ti_demo_fes01",
+      "target": "ti_demo_fes04",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_budget",
+      "source": "ti_demo_bud01",
+      "target": "ti_demo_bud02",
+      "label": "blockiert"
+    },
+    {
+      "project_id": "tp_demo_budget",
+      "source": "ti_demo_bud02",
+      "target": "ti_demo_bud03",
+      "label": "blockiert"
+    }
+  ],
+  "attachments": [
+    {
+      "id": "ta_demo_rel_a",
+      "item_id": "ti_demo_rel10",
+      "name": "go-nogo-agenda.md",
+      "orig_path": "",
+      "md_text": "# Go/No-Go Agenda\n\nTeilnehmer: Anna, Tom, Mira, Lena, Paul.\n- Anna leitet, hält strikt die Zeit ein.\n- Offener Streitpunkt: Tom vs. Mira wegen Testabdeckung Export-Modul.\n- Paul: 'Deployment nur freitags, sonst nicht.'\n",
+      "created_at": 1750000000.0
+    },
+    {
+      "id": "ta_demo_fest_a",
+      "item_id": "ti_demo_fes03",
+      "name": "catering-notizen.md",
+      "orig_path": "",
+      "md_text": "# Catering – Notizen\n\n- Sara: **Nussallergie** → strikt nussfrei.\n- Mira: vegetarisch.\n- Jonas: 'Hauptsache Fleisch und laut.'\n- Lena: mag es ruhig, geht früh.\n- David: achtet auf den Preis pro Kopf.\n",
+      "created_at": 1750000000.0
+    }
+  ]
+}

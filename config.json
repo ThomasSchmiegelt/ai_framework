@@ -15,5 +15,6 @@
   "data_dir": "data",
   "hidden_tabs_default": [],
   "enable_api": true,
-  "allow_python_exec": true
+  "allow_python_exec": true,
+  "seed_todo_demo": true
 }

@@ -862,6 +862,36 @@ app.add_middleware(
 )
 
 
+async def _seed_todo_demo() -> None:
+    """Großen Demo-To-Do-Baum einmalig einspielen (Vorführung „vernetzte Informationen").
+    Quelle: ``defaults/todo_demo.json`` (Form von ``db.todo_export``). Nur wenn Config-Flag
+    ``seed_todo_demo`` gesetzt ist und der Marker fehlt. Stabile IDs → ``todo_import`` ist
+    idempotent (INSERT OR REPLACE), es entstehen keine Duplikate. Entfernen: Demo-Projekte
+    im Tab löschen; erneut laden: Marker ``data/todo/.demo_seeded`` löschen."""
+    if not bool(_CONFIG.get("seed_todo_demo", False)):
+        return
+    marker = TODO_DIR / ".demo_seeded"
+    fp = DEFAULTS_DIR / "todo_demo.json"
+    if marker.exists() or not fp.exists():
+        return
+    try:
+        dump = json.loads(fp.read_text(encoding="utf-8"))
+        await _db.todo_root_ensure(_todo_root_name())
+        # Vorhandene Demo-Projekte zuerst entfernen (Kaskade), damit ein erneutes Laden
+        # nach Löschen des Markers wirklich sauber ist (Kanten haben keine stabile ID →
+        # sonst würden sie sich beim Re-Import verdoppeln).
+        for p in dump.get("projects", []):
+            pid = p.get("id", "")
+            if pid and pid != "root":
+                await _db.todo_project_delete(pid)
+        await _db.todo_import(dump)
+        TODO_DIR.mkdir(parents=True, exist_ok=True)
+        marker.write_text("ok", encoding="utf-8")
+        print("[DB] Demo-To-Do-Projekt eingespielt -> " + str(fp.name))
+    except Exception as e:
+        print("[DB] Demo-To-Do-Seed übersprungen: " + str(e))
+
+
 @app.on_event("startup")
 async def _startup():
     await _db.init()
@@ -869,6 +899,7 @@ async def _startup():
     # To-Do-Projekte einmalig aus den alten JSON-Dateien in die DB übernehmen
     # (Wurzelprojekt = Benutzername); Alt-JSON bleibt liegen, bis der DB-Betrieb steht.
     await _db.migrate_todo_json(TODO_DIR, _todo_root_name())
+    await _seed_todo_demo()
 
 # ── Tool-Definitionen für Ollama ──────────────────────────────────────────────
 
@@ -11024,7 +11055,8 @@ def _backup_files_always() -> list:
 def _backup_dirs_bulk() -> list:
     return [(UPLOADS_DIR, "uploads"), (REPORTS_DIR, "reports"),
             (DOSSIERS_DIR, "dossiers"),
-            (TRANSCRIPTS_DIR, "transcripts")]   # Audiodateien der Transkription (Sprach-EINGABE)
+            (TRANSCRIPTS_DIR, "transcripts"),   # Audiodateien der Transkription (Sprach-EINGABE)
+            (DATA_DIR / "todo_backups", "todo_backups")]   # Reset-Sicherungen der To-Do-Liste
 
 
 def _zip_tree(zf, base: Path, prefix: str) -> int:
@@ -13460,6 +13492,17 @@ _TODO_NEXT_SYSTEM = (
     "sinnvoll angegangen wird, (2) welche Aufgaben blockiert sind und warum, "
     "(3) womöglich Vergessenes. Knapp, in Stichpunkten, kein Geschwätz."
 )
+_TODO_ASK_SYSTEM = (
+    "Du bist ein Analyse-Assistent für eine To-Do-/Projektdatenbank. Du beantwortest "
+    "Fragen AUSSCHLIESSLICH anhand der bereitgestellten Aufgaben-Daten (Projekte, "
+    "Aufgaben, Zuständige, Status, Fristen, Notizen, Anhänge, Abhängigkeiten). "
+    "Erfinde nichts — steht etwas nicht in den Daten, sag es offen. Antworte auf Deutsch, "
+    "klar strukturiert (Überschriften/Stichpunkte, wo sinnvoll). "
+    "Bei Fragen zu Personen/Kollegen bleibe sachlich und neutral: leite Aussagen "
+    "nachvollziehbar aus den Daten ab (z. B. Arbeitsschwerpunkte, Themen, Zuverlässigkeit "
+    "anhand von Status/Fristen), spekuliere nicht über sensible Merkmale und formuliere "
+    "keine abwertenden Urteile. Nenne, worauf du dich stützt (Projekt/Aufgabe)."
+)
 
 
 @app.post("/api/todo/extract")
@@ -13570,6 +13613,147 @@ async def todo_next(req: Request):
     except Exception as e:
         text = f"(Analyse nicht möglich: {e})"
     return {"text": text, "tokens": {"in": ti, "out": to}}
+
+
+@app.post("/api/todo/ask")
+async def todo_ask(req: Request):
+    """„Über die Daten fragen": beantwortet eine freie Frage über den gesamten (oder den
+    aktiven) To-Do-Datenbestand — inkl. Personen-/Kollegen-Auswertungen. LOKAL-BEVORZUGT
+    (`_analysis_model` respektiert Geheim-Modus / vertrauliche Auswertungen). Bei großen
+    Datenmengen Map-Reduce."""
+    body = await req.json()
+    question = str(body.get("question", "")).strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Keine Frage angegeben")
+    root = str(body.get("root", "") or "").strip()
+    if root and root != "root":
+        ids = await _db.todo_descendants(root)
+    else:
+        ids = [p["id"] for p in await _db.todo_projects_all()]
+    model = await _analysis_model(body.get("model"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales LLM verfügbar – die Auswertung läuft standardmäßig lokal (Profil-Schalter „API-Modelle für vertrauliche Auswertungen“ erlaubt API-Modelle).")
+    data = await _db.todo_graph_data(ids)
+    # Anhang-Text pro Punkt (md_text) für tiefere Auswertung nachladen.
+    att_by_item: dict = {}
+    try:
+        for a in (await _db.todo_export()).get("attachments", []):
+            txt = (a.get("md_text") or "").strip()
+            if txt:
+                att_by_item.setdefault(a.get("item_id"), []).append(txt)
+    except Exception:
+        att_by_item = {}
+    # Pro Projekt einen Textblock: Aufgaben mit Status/Zuständigen/Frist/Notiz/Anhang + Kanten.
+    id2text = {}
+    for pr in data.get("projects", []):
+        for it in pr["items"]:
+            id2text[it["id"]] = it.get("text", "")
+    blocks, n_items, persons = [], 0, set()
+    for pr in data.get("projects", []):
+        if not pr["items"] and not pr["edges"]:
+            continue
+        lines = [f"### Projekt: {pr['title']}"]
+        for it in pr["items"]:
+            n_items += 1
+            asg = it.get("assignees") or []
+            for a in asg:
+                persons.add(a)
+            parts = [f"- [{it.get('status', 'offen')}] {it.get('text', '')}"]
+            if asg:
+                parts.append(f"(Zuständig: {', '.join(asg)})")
+            if (it.get("due") or "").strip():
+                parts.append(f"(Fällig: {it['due']})")
+            line = " ".join(parts)
+            if (it.get("detail") or "").strip():
+                line += f"\n    Notiz: {it['detail'].strip()[:600]}"
+            for txt in att_by_item.get(it["id"], []):
+                line += f"\n    Anhang: {txt[:600]}"
+            lines.append(line)
+        for e in pr["edges"]:
+            s = id2text.get(e["source"], ""); t = id2text.get(e["target"], "")
+            if s and t:
+                lines.append(f"- Abhängigkeit: „{s}“ {e.get('label', 'blockiert') or 'blockiert'} → „{t}“")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return {"answer": "Es sind keine Aufgaben im gewählten Bereich vorhanden.",
+                "tokens": {"in": 0, "out": 0}, "scope": root or "root"}
+    scope_hint = (f"{n_items} Aufgaben, {len(persons)} Personen"
+                  + (f", Zuständige: {', '.join(sorted(persons))}" if persons else ""))
+    num_ctx = _profile_num_ctx()
+    budget = max(2000, int(num_ctx * 3.2))
+    # Auf lokalen Modellen ist jede Generation langsam → Arbeitsmenge deckeln: höchstens
+    # MAX_GROUPS Map-Läufe. Passt der Bestand nicht in MAX_GROUPS*budget Zeichen, werden
+    # die überzähligen Bereiche weggelassen (mit Hinweis) statt dutzende langsame Aufrufe.
+    MAX_GROUPS = 6
+    truncated = False
+    joined_all = "\n\n".join(blocks)
+    cap = MAX_GROUPS * budget
+    if len(joined_all) > cap:
+        kept, acc = [], 0
+        for blk in blocks:
+            if acc + len(blk) > cap:
+                break
+            kept.append(blk); acc += len(blk)
+        blocks = kept or [joined_all[:budget]]
+        truncated = True
+    tin = tout = 0
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=300) as client:
+            async def _run(system: str, user: str):
+                r = await _llm.chat(client, {
+                    "model": model, "think": False, "stream": False,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    "options": {"num_ctx": num_ctx}, "keep_alive": KEEP_ALIVE,
+                })
+                r.raise_for_status()
+                jj = r.json()
+                a, b = _llm_tok(jj)
+                c = re.sub(r"<think>.*?</think>", "", jj.get("message", {}).get("content", ""), flags=re.DOTALL).strip()
+                return c, a, b
+            joined = "\n\n".join(blocks)
+            if len(joined) <= budget:
+                usr = (f"To-Do-Daten (Überblick: {scope_hint}):\n\n{joined}\n\nFrage: {question}")
+                answer, a, b = await _run(_TODO_ASK_SYSTEM, usr)
+                tin += a; tout += b
+            else:
+                # Map: Blöcke bis Budget bündeln, je Gruppe eine Teilantwort zur Frage.
+                groups, cur, cur_len = [], [], 0
+                for blk in blocks:
+                    if cur and cur_len + len(blk) > budget:
+                        groups.append("\n\n".join(cur)); cur, cur_len = [], 0
+                    cur.append(blk); cur_len += len(blk)
+                if cur:
+                    groups.append("\n\n".join(cur))
+                partials = []
+                map_sys = (_TODO_ASK_SYSTEM + " Dies ist NUR EIN TEIL der Daten – sammle die für "
+                           "die Frage relevanten Fakten aus diesem Teil (noch keine Endantwort).")
+                for g in groups:
+                    txt, a, b = await _run(map_sys, f"To-Do-Daten (Teil):\n\n{g}\n\nFrage: {question}")
+                    tin += a; tout += b
+                    if txt:
+                        partials.append(txt)
+                # Reduce: Teil-Befunde zur Endantwort zusammenführen.
+                reduce_usr = (f"Frage: {question}\n\nTeil-Befunde aus dem gesamten To-Do-Bestand "
+                              f"({scope_hint}):\n\n" + "\n\n---\n\n".join(partials)
+                              + "\n\nFasse dies zu EINER fundierten Endantwort auf die Frage zusammen.")
+                answer, a, b = await _run(_TODO_ASK_SYSTEM, reduce_usr)
+                tin += a; tout += b
+    except HTTPException:
+        raise
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        raise HTTPException(status_code=503, detail=f"Lokales LLM nicht erreichbar (läuft Ollama?): {e}") from e
+    except httpx.HTTPStatusError as e:
+        body = ""
+        try: body = e.response.text[:300]
+        except Exception: pass
+        raise HTTPException(status_code=502, detail=f"Das Modell „{model}“ hat die Auswertung abgelehnt (evtl. num_ctx zu groß / zu wenig VRAM / Modell nicht geladen). {body}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Auswertung fehlgeschlagen: {type(e).__name__}: {e}") from e
+    if truncated:
+        answer += ("\n\n---\n*Hinweis: Der Bestand ist sehr groß – es wurde nur ein Teil "
+                   "ausgewertet. Für vollständige Antworten ein einzelnes Projekt aktivieren (⚡) "
+                   "oder gezielter fragen.*")
+    return {"answer": answer, "tokens": {"in": tin, "out": tout}, "scope": root or "root"}
 
 
 # ── To-Do: Anlagen (Dokument -> Markdown in DB), Verschieben, Suche, Graph ────
@@ -13736,6 +13920,58 @@ async def todo_agenda(root: str = Query(""), person: str = Query("")):
     demn = [r for r in ready if r not in jetzt]
     return {"persons": sorted(persons), "jetzt": jetzt, "demnaechst": demn,
             "blocked": blocked, "scope_root": root or "root"}
+
+
+@app.get("/api/todo/export")
+async def todo_export():
+    """Kompletten To-Do-Bestand (Projekte, Punkte, Kanten, Anlagen) als JSON —
+    zum Sichern/Weitergeben. Frontend lädt es als Datei herunter."""
+    return await _db.todo_export()
+
+
+@app.post("/api/todo/import")
+async def todo_import(req: Request):
+    """To-Do-Bestand aus einer zuvor exportierten JSON-Datei einspielen. Vorhandene
+    Projekte mit gleicher ID werden ersetzt (Punkte/Kanten sauber, kein Duplikat).
+    Die Wurzel wird nicht überschrieben."""
+    dump = await req.json()
+    if not isinstance(dump, dict) or "projects" not in dump:
+        raise HTTPException(status_code=400, detail="Ungültige Datei – erwartet wird ein To-Do-Export (Felder projects/items/edges/attachments).")
+    await _db.todo_root_ensure(_todo_root_name())
+    # Wurzel-Projektzeile aus dem Import entfernen (Name/Struktur der eigenen Wurzel bleibt
+    # erhalten); Punkte, die direkt an der Wurzel hängen, werden weiterhin übernommen.
+    dump = {
+        "projects": [p for p in dump.get("projects", []) if p.get("id") != "root"],
+        "items": dump.get("items", []),
+        "edges": dump.get("edges", []),
+        "attachments": dump.get("attachments", []),
+    }
+    # Vorhandene Projekte gleicher ID zuerst kaskadierend löschen → sauberer Re-Import
+    # (Kanten haben keine stabile ID, sonst würden sie sich verdoppeln).
+    for p in dump["projects"]:
+        pid = p.get("id", "")
+        if pid and pid != "root":
+            await _db.todo_project_delete(pid)
+    await _db.todo_import(dump)
+    return {"projects": len(dump["projects"]), "items": len(dump["items"]),
+            "edges": len(dump["edges"]), "attachments": len(dump["attachments"])}
+
+
+@app.post("/api/todo/reset")
+async def todo_reset():
+    """Kompletten To-Do-Bestand leeren — mit AUTOMATISCHER Sicherung der alten Liste
+    (Zeitstempel-JSON unter data/todo_backups/), damit nichts unwiederbringlich verloren
+    geht. Danach ist nur noch die (leere) Wurzel übrig."""
+    from datetime import datetime
+    dump = await _db.todo_export()
+    backup_dir = DATA_DIR / "todo_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    fname = "todo_backup_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".json"
+    (backup_dir / fname).write_text(json.dumps(dump, ensure_ascii=False, indent=2), encoding="utf-8")
+    await _db.todo_wipe()
+    await _db.todo_root_ensure(_todo_root_name())
+    return {"backup": fname,
+            "removed": {"projects": len(dump.get("projects", [])), "items": len(dump.get("items", []))}}
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────
