@@ -18,8 +18,12 @@ const Todo = (() => {
   let _forceAll = false;
   let _connectMode = false, _connectFrom = null;
   let _fileInput = null, _attachTarget = null;
+  let _importInput = null;
   let _searchTimer = null;
+  let _graphPerson = '';           // Personenfilter im Wissensgraph
   const ACTIVE_KEY = 'ai_framework_thomas_todo_active';
+  const LAYOUT_KEY = 'ai_framework_thomas_todo_layout';   // Splitter/Collapse-Zustand
+  const _filters = { done: false, from: '', to: '', assign: '' };   // Punkte-Filter
 
   const STATUS = {
     offen: { color: '#9ca3af' }, laeuft: { color: '#3b82f6' }, erledigt: { color: '#22c55e' },
@@ -191,7 +195,7 @@ const Todo = (() => {
 
   // ── Ansichten / Header ─────────────────────────────────────────────────────
   function _showView(v) {
-    _el('todo-view-liste').style.display = (v === 'liste') ? 'block' : 'none';
+    _el('todo-view-liste').style.display = (v === 'liste') ? 'flex' : 'none';
     _el('todo-view-graph').style.display = (v === 'graph') ? 'block' : 'none';
     _el('todo-view-agenda').style.display = (v === 'agenda') ? 'block' : 'none';
     document.querySelectorAll('.todo-subtab').forEach(b => b.classList.toggle('active', b.dataset.view === v));
@@ -231,7 +235,9 @@ const Todo = (() => {
   function _renderItems() {
     const items = _data.items || [];
     const done = items.filter(it => it.status === 'erledigt').length;
-    _el('todo-count').textContent = items.length ? `(${done}/${items.length} erledigt)` : '';
+    const cntEl = _el('todo-count');
+    cntEl.dataset.base = items.length ? `(${done}/${items.length} erledigt)` : '';
+    cntEl.textContent = cntEl.dataset.base;
     const host = _el('todo-items');
     if (!items.length) { host.innerHTML = '<span class="planner-muted">Noch keine Punkte. Notiz schreiben und „🪄 To-Do-Liste ableiten" – oder „➕ Punkt".</span>'; return; }
     const id2text = {}; items.forEach(it => id2text[it.id] = it.text);
@@ -240,7 +246,7 @@ const Todo = (() => {
       const outs = (_data.edges || []).filter(e => e.source === it.id)
         .map(e => `<span class="todo-link">→ ${escHtml(id2text[e.target] || '?')}${e.label ? ' (' + escHtml(e.label) + ')' : ''}</span>`).join(' ');
       const atts = _attChips(it);
-      return `<div class="todo-item${isDone ? ' todo-done' : ''}" data-id="${it.id}">
+      return `<div class="todo-item${isDone ? ' todo-done' : ''}" data-id="${it.id}" data-status="${it.status || 'offen'}" data-due="${escHtml(it.due || '')}" data-assign="${escHtml((it.assignees || []).join(', ').toLowerCase())}">
         <span class="todo-reorder">
           <button class="todo-mini" data-act="up" data-id="${it.id}" ${idx === 0 ? 'disabled' : ''} title="nach oben">▲</button>
           <button class="todo-mini" data-act="down" data-id="${it.id}" ${idx === items.length - 1 ? 'disabled' : ''} title="nach unten">▼</button>
@@ -278,6 +284,68 @@ const Todo = (() => {
       _data.edges = (_data.edges || []).filter(ed => ed.source !== id && ed.target !== id);
       _renderItems(); _markGraphStale();
     }));
+    _populateAssignFilter(items);
+    _applyItemFilters();
+  }
+
+  // ── Punkte-Filter (erledigt / Datumsbereich / Zuständige) ───────────────────
+  function _populateAssignFilter(items) {
+    const sel = _el('todo-filter-assign'); if (!sel) return;
+    const names = Array.from(new Set((items || []).flatMap(it => it.assignees || []).map(s => s.trim()).filter(Boolean))).sort();
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">👤 alle</option>' + names.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+    sel.value = names.includes(cur) ? cur : '';
+    if (sel.value !== cur) _filters.assign = sel.value;
+  }
+
+  function _applyItemFilters() {
+    const from = _filters.from, to = _filters.to, asg = (_filters.assign || '').toLowerCase();
+    let shown = 0, total = 0;
+    document.querySelectorAll('#todo-items .todo-item').forEach(row => {
+      total++;
+      let ok = true;
+      if (_filters.done && row.dataset.status === 'erledigt') ok = false;
+      if (ok && (from || to)) {
+        const d = _parseDue(row.dataset.due);
+        if (!d) ok = false;                          // ohne Frist bei aktivem Datumsfilter ausblenden
+        else { if (from && d < from) ok = false; if (to && d > to) ok = false; }
+      }
+      if (ok && asg && !(row.dataset.assign || '').includes(asg)) ok = false;
+      row.classList.toggle('todo-filtered', !ok);
+      if (ok) shown++;
+    });
+    const active = _filters.done || _filters.from || _filters.to || _filters.assign;
+    const wrap = document.querySelector('.todo-filters');
+    if (wrap) wrap.classList.toggle('active', !!active);
+    const cnt = _el('todo-count');
+    if (cnt) cnt.textContent = (cnt.dataset.base || '') + (active && total ? ` · ${shown}/${total} sichtbar` : '');
+  }
+
+  // ISO-/DE-Datum grob nach YYYY-MM-DD normalisieren (für Bereichsvergleich als String)
+  function _parseDue(s) {
+    s = (s || '').trim(); if (!s) return '';
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if (m) return `${m[3]}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+    return '';
+  }
+
+  function _clearFilters() {
+    _filters.done = false; _filters.from = ''; _filters.to = ''; _filters.assign = '';
+    if (_el('todo-filter-done')) _el('todo-filter-done').checked = false;
+    if (_el('todo-filter-from')) _el('todo-filter-from').value = '';
+    if (_el('todo-filter-to')) _el('todo-filter-to').value = '';
+    if (_el('todo-filter-assign')) _el('todo-filter-assign').value = '';
+    _applyItemFilters();
+  }
+
+  function _populateGraphPerson(projects) {
+    const sel = _el('todo-graph-person'); if (!sel) return;
+    const names = Array.from(new Set((projects || []).flatMap(p => (p.items || []).flatMap(it => it.assignees || [])).map(s => s.trim()).filter(Boolean))).sort();
+    const cur = sel.value || _graphPerson;
+    sel.innerHTML = '<option value="">alle</option>' + names.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+    sel.value = names.includes(cur) ? cur : '';
+    _graphPerson = sel.value;
   }
 
   function _newId() { return 'i' + Math.random().toString(36).slice(2, 11); }
@@ -482,7 +550,42 @@ const Todo = (() => {
     try { g = await _api('GET', `/api/todo/graph?root=${encodeURIComponent(root)}`); }
     catch (e) { _status('Graph-Fehler: ' + e.message); _spin(false); return; }
     _spin(false);
-    const projects = (g.projects || []).filter(p => (p.items || []).length);
+    // Personen-Dropdown des Graphen befüllen (aus allen Zuständigen im Bereich)
+    _populateGraphPerson(g.projects || []);
+    let projects = (g.projects || []).filter(p => (p.items || []).length);
+    // Personenfilter: nur Punkte der gewählten Person (samt deren Kanten)
+    if (_graphPerson) {
+      const pl = _graphPerson.toLowerCase();
+      projects = projects.map(p => {
+        const items = (p.items || []).filter(it => (it.assignees || []).some(a => a.toLowerCase() === pl));
+        const ids = new Set(items.map(it => it.id));
+        const edges = (p.edges || []).filter(e => ids.has(e.source) && ids.has(e.target));
+        return { ...p, items, edges };
+      }).filter(p => p.items.length);
+    }
+    // Schutz vor dem Einfrieren des Browsers: sehr viele Knoten (z. B. Wurzel = alle
+    // Projekte im großen Demo) legen die Layout-Berechnung lahm. Ab einem Schwellwert
+    // erst nach Rückfrage bauen und zum Aktivieren eines Einzelprojekts (⚡) raten.
+    const nItems = projects.reduce((s, p) => s + (p.items || []).length, 0);
+    const LIMIT = 300;
+    if (nItems > LIMIT) {
+      const hint = _el('todo-graph-hint');
+      if (hint) hint.textContent = `${nItems} Punkte im Bereich – für den Graphen zu viel.`;
+      host.innerHTML = `<div class="dir-hint" style="margin:12px">
+        <strong>${nItems} Punkte</strong> im aktiven Bereich – ein Graph mit so vielen Knoten
+        kann den Browser einfrieren. Aktiviere links ein <strong>Einzelprojekt (⚡)</strong>
+        oder nutze den <strong>👤 Personenfilter</strong>, dann wird der Graph schlank.
+        <div style="margin-top:10px"><button id="todo-graph-force" class="export-btn">Trotzdem aufbauen (${nItems})</button></div>
+      </div>`;
+      const fb = _el('todo-graph-force');
+      if (fb) fb.addEventListener('click', () => { host.innerHTML = ''; _buildGraphForce(projects); });
+      return;
+    }
+    _buildGraphForce(projects);
+  }
+
+  function _buildGraphForce(projects) {
+    const host = _el('todo-graph');
     if (_cy) { _cy.destroy(); _cy = null; }
     const { nodes, edges, multi } = _graphElements(projects);
     _cy = cytoscape({
@@ -601,8 +704,194 @@ const Todo = (() => {
     setTimeout(() => { const el = document.querySelector(`.todo-item[data-id="${item}"]`); if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('todo-flash'); setTimeout(() => el.classList.remove('todo-flash'), 1600); } }, 200);
   }
 
+  // ── Daten-Chat: über den (aktiven) Bestand sprechen, auch Fragen zu Kollegen ─
+  function _scopeLabel() {
+    if (!_active || _active === 'root') return '(gesamter Bestand)';
+    const p = _flat.find(x => x.id === _active);
+    return p ? `(Bereich: ${p.title || p.name})` : '';
+  }
+
+  async function _ask() {
+    const inp = _el('todo-ask-input');
+    const q = (inp.value || '').trim();
+    if (!q) { inp.focus(); return; }
+    const box = _el('todo-ask-answer');
+    const out = _el('todo-ask-out');
+    const btn = _el('todo-ask-go');
+    _el('todo-ask-scope').textContent = _scopeLabel();
+    box.style.display = '';
+    out.innerHTML = '<span class="pf-spin"></span> Werte die To-Do-Daten aus… <span class="planner-muted">(lokale Modelle brauchen dafür etwas Zeit; ein aktiviertes Einzelprojekt ⚡ ist schneller)</span>';
+    btn.disabled = true; _spin(true);
+    try {
+      const res = await _api('POST', '/api/todo/ask', { question: q, root: _active, model: _model() });
+      _tok(res.tokens);
+      out.innerHTML = (typeof marked !== 'undefined')
+        ? marked.parse(res.answer || '') : _escapeHtml(res.answer || '');
+    } catch (e) {
+      out.innerHTML = '<span style="color:var(--danger,#ef4444)">Fehler: ' + _escapeHtml(e.message) + '</span>';
+    } finally {
+      btn.disabled = false; _spin(false);
+    }
+  }
+
+  function _escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // ── Vertikaler Splitter (Projektbaum ↔ Inhalt) ─────────────────────────────
+  const TREEW_KEY = 'ai_framework_thomas_todo_treew';
+  function _initSplitter() {
+    const sp = _el('todo-tree-splitter'), main = _el('todo-main'), pane = _el('todo-tree-pane');
+    if (!sp || !main || !pane) return;
+    try { const w = localStorage.getItem(TREEW_KEY); if (w) pane.style.width = parseInt(w, 10) + 'px'; } catch (_) {}
+    let drag = false;
+    const mv = e => {
+      if (!drag) return;
+      const r = main.getBoundingClientRect();
+      let w = Math.max(180, Math.min(r.width - 320, e.clientX - r.left));
+      pane.style.width = w + 'px';
+    };
+    sp.addEventListener('mousedown', e => { drag = true; e.preventDefault(); document.body.style.userSelect = 'none'; sp.classList.add('dragging'); });
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', () => {
+      if (!drag) return;
+      drag = false; document.body.style.userSelect = ''; sp.classList.remove('dragging');
+      try { localStorage.setItem(TREEW_KEY, parseInt(pane.style.width, 10)); } catch (_) {}
+      if (_cy) _cy.resize();
+    });
+  }
+
+  // ── Einklappbare + höhenverstellbare Abschnitte im Liste-Untertab ──────────
+  function _initVStack() {
+    document.querySelectorAll('.todo-sec-toggle').forEach(btn =>
+      btn.addEventListener('click', () => _toggleSec(btn.dataset.sec)));
+    document.querySelectorAll('.todo-hsplit').forEach(sp =>
+      sp.addEventListener('mousedown', e => _startVDrag(e, sp, 'todo-sec-' + sp.dataset.split)));
+    _applyLayout();
+  }
+
+  // Verstellt die Höhe des Abschnitts ÜBER dem Splitter (nicht des Rumpfes) und begrenzt
+  // sie so, dass „Punkte" und die übrigen Abschnitte ihren Mindestplatz behalten → kein
+  // Überlappen; der Rumpf (inkl. Notiz-Eingabefeld) füllt den Abschnitt via CSS flex:1.
+  function _startVDrag(e, sp, secId) {
+    const sec = _el(secId); if (!sec) return;
+    const view = _el('todo-view-liste');
+    e.preventDefault(); document.body.style.userSelect = 'none'; sp.classList.add('dragging');
+    const startY = e.clientY, startH = sec.getBoundingClientRect().height;
+    const headH = (sec.querySelector('.var-sec-head') || {}).offsetHeight || 28;
+    const grow = view.querySelector('.todo-sec-grow');
+    const mv = ev => {
+      // reservierter Platz: sichtbare Splitter + andere Abschnitte (Mindesthöhe) + „Punkte"
+      let reserved = 0;
+      view.querySelectorAll('.todo-hsplit:not(.hidden)').forEach(s => { reserved += s.offsetHeight; });
+      view.querySelectorAll('.todo-sec').forEach(s => {
+        if (s === sec) return;
+        if (s === grow) { reserved += 72; return; }
+        const hh = (s.querySelector('.var-sec-head') || {}).offsetHeight || 28;
+        reserved += s.classList.contains('collapsed') ? hh : Math.max(hh + 8, s.getBoundingClientRect().height);
+      });
+      const maxH = Math.max(headH + 12, view.clientHeight - reserved);
+      const h = Math.max(headH + 12, Math.min(maxH, startH + (ev.clientY - startY)));
+      sec.style.flex = '0 0 auto'; sec.style.height = h + 'px';
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up);
+      document.body.style.userSelect = ''; sp.classList.remove('dragging'); _saveLayout();
+    };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  }
+
+  function _toggleSec(sec) {
+    const el = _el('todo-sec-' + sec); if (!el) return;
+    el.classList.toggle('collapsed');
+    _updateSplitVisibility(); _saveLayout();
+  }
+
+  function _updateSplitVisibility() {
+    document.querySelectorAll('.todo-hsplit').forEach(sp => {
+      const sec = _el('todo-sec-' + sp.dataset.split);
+      sp.classList.toggle('hidden', !!(sec && sec.classList.contains('collapsed')));
+    });
+  }
+
+  function _saveLayout() {
+    const st = { collapsed: {}, heights: {} };
+    ['header', 'note', 'items'].forEach(s => { const el = _el('todo-sec-' + s); if (el && el.classList.contains('collapsed')) st.collapsed[s] = true; });
+    ['header', 'note'].forEach(s => { const el = _el('todo-sec-' + s); if (el && el.style.height) st.heights[s] = el.style.height; });
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(st)); } catch (_) {}
+  }
+
+  function _applyLayout() {
+    let st = {}; try { st = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); } catch (_) {}
+    ['header', 'note'].forEach(s => {
+      const el = _el('todo-sec-' + s);
+      if (el && st.heights && st.heights[s]) { el.style.flex = '0 0 auto'; el.style.height = st.heights[s]; }
+    });
+    ['header', 'note', 'items'].forEach(s => { const el = _el('todo-sec-' + s); if (el) el.classList.toggle('collapsed', !!(st.collapsed && st.collapsed[s])); });
+    _updateSplitVisibility();
+  }
+
+  // ── Projektliste als JSON exportieren / importieren / komplett zurücksetzen ──
+  async function _exportList() {
+    _spin(true); _status('Exportiere…');
+    try {
+      const dump = await _api('GET', '/api/todo/export');
+      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `todo_export_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      _status('📤 Projektliste exportiert.');
+    } catch (e) { _status('Export-Fehler: ' + e.message); }
+    finally { _spin(false); setTimeout(() => _status(''), 1500); }
+  }
+
+  function _importList() {
+    if (!_importInput) {
+      _importInput = document.createElement('input');
+      _importInput.type = 'file'; _importInput.accept = '.json,application/json'; _importInput.style.display = 'none';
+      _importInput.addEventListener('change', _doImport);
+      document.body.appendChild(_importInput);
+    }
+    _importInput.value = ''; _importInput.click();
+  }
+
+  async function _doImport() {
+    const f = _importInput.files && _importInput.files[0]; if (!f) return;
+    if (!confirm(`„${f.name}" importieren?\n\nProjekte mit gleicher Kennung werden ersetzt, andere hinzugefügt. Deine Wurzel bleibt erhalten.`)) return;
+    _spin(true); _status('Importiere…');
+    try {
+      const dump = JSON.parse(await f.text());
+      const res = await _api('POST', '/api/todo/import', dump);
+      await _loadTree(true);
+      _status(`📥 Import: ${res.projects} Projekte, ${res.items} Punkte.`);
+    } catch (e) { _status('Import-Fehler: ' + e.message); }
+    finally { _spin(false); setTimeout(() => _status(''), 2500); }
+  }
+
+  async function _resetList() {
+    if (!confirm('Wirklich die KOMPLETTE To-Do-Liste leeren?\n\nEs wird vorher automatisch eine Sicherung angelegt (data/todo_backups/). Danach bleibt nur die leere Wurzel.')) return;
+    _spin(true); _status('Leere Liste (mit Sicherung)…');
+    try {
+      const res = await _api('POST', '/api/todo/reset');
+      _pid = ''; _data = null; _el('todo-empty').style.display = 'block'; _showView(null);
+      _activate('root');
+      await _loadTree(true);
+      _status(`🗑 Geleert. Sicherung: ${res.backup}`);
+    } catch (e) { _status('Reset-Fehler: ' + e.message); }
+    finally { _spin(false); }
+  }
+
   function init() {
     _el('btn-todo-save').addEventListener('click', _save);
+    _el('btn-todo-export').addEventListener('click', _exportList);
+    _el('btn-todo-import').addEventListener('click', _importList);
+    _el('btn-todo-reset').addEventListener('click', _resetList);
+    _el('todo-ask-go').addEventListener('click', _ask);
+    _el('todo-ask-input').addEventListener('keydown', e => { if (e.key === 'Enter') _ask(); });
+    _el('todo-ask-close').addEventListener('click', () => { _el('todo-ask-answer').style.display = 'none'; });
     _el('btn-todo-add-sub').addEventListener('click', () => _createSub(_pid || _active || 'root'));
     _el('todo-new-name').addEventListener('keydown', e => { if (e.key === 'Enter') _createSub(_pid || _active || 'root'); });
     _el('todo-search').addEventListener('input', _searchSoon);
@@ -624,6 +913,16 @@ const Todo = (() => {
     _el('btn-todo-graph-layout').addEventListener('click', _layout);
     _el('todo-graph-hubs').addEventListener('change', e => { _showHubs = e.target.checked; if (_cy) _buildGraph(); });
     _el('todo-graph-all').addEventListener('change', e => { _forceAll = e.target.checked; if (_view === 'graph') _buildGraph(); });
+    _el('todo-graph-person').addEventListener('change', e => { _graphPerson = e.target.value; if (_view === 'graph') _buildGraph(); });
+    // Punkte-Filter
+    _el('todo-filter-done').addEventListener('change', e => { _filters.done = e.target.checked; _applyItemFilters(); });
+    _el('todo-filter-from').addEventListener('change', e => { _filters.from = e.target.value; _applyItemFilters(); });
+    _el('todo-filter-to').addEventListener('change', e => { _filters.to = e.target.value; _applyItemFilters(); });
+    _el('todo-filter-assign').addEventListener('change', e => { _filters.assign = e.target.value; _applyItemFilters(); });
+    _el('todo-filter-clear').addEventListener('click', _clearFilters);
+    // Splitter + einklappbare Abschnitte
+    _initSplitter();
+    _initVStack();
     _loadTree(true);
   }
 

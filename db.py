@@ -985,6 +985,17 @@ async def todo_import(dump: dict):
         await db.commit()
 
 
+async def todo_wipe():
+    """Kompletten To-Do-Bestand leeren: alle Punkte, Kanten, Anlagen und alle
+    Projekte AUSSER der Wurzel loeschen (Wurzel bleibt, aber leer)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM todo_attachments")
+        await db.execute("DELETE FROM todo_edges")
+        await db.execute("DELETE FROM todo_items")
+        await db.execute("DELETE FROM todo_projects WHERE id!='root'")
+        await db.commit()
+
+
 async def migrate_todo_json(todo_dir: Path, root_name: str):
     """Bestehende data/todo/<name>/list.json einmalig in die DB uebernehmen.
     Jede Altliste wird Kind der Wurzel; Anlagen-MD werden als md_text gespeichert."""

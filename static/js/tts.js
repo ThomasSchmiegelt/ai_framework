@@ -15,12 +15,12 @@
 
 const TTS = (function () {
   const PERSONA_VOICE = {
-    roboter:   { gender: null,     pitch: 0.35, rate: 0.9,  label: 'Roboter (synthetisch)' },
-    professor: { gender: 'male',   pitch: 0.7,  rate: 0.92, label: 'Herr Professor (älterer Mann)' },
-    doktor:    { gender: 'female', pitch: 0.82, rate: 0.95, label: 'Frau Doktor (ältere Frau)' },
-    felix:     { gender: 'male',   pitch: 1.18, rate: 1.06, label: 'Felix (junger Mann)' },
-    sandra:    { gender: 'female', pitch: 1.28, rate: 1.06, label: 'Sandra (junge Frau)' },
-    _default:  { gender: null,     pitch: 1.0,  rate: 1.0,  label: 'Standard' },
+    roboter:   { gender: null,     pitch: 0.7,  rate: 1.05, label: 'Roboter (synthetisch)' },
+    professor: { gender: 'male',   pitch: 0.92, rate: 1.08, label: 'Herr Professor (älterer Mann)' },
+    doktor:    { gender: 'female', pitch: 0.96, rate: 1.08, label: 'Frau Doktor (ältere Frau)' },
+    felix:     { gender: 'male',   pitch: 1.06, rate: 1.12, label: 'Felix (junger Mann)' },
+    sandra:    { gender: 'female', pitch: 1.1,  rate: 1.12, label: 'Sandra (junge Frau)' },
+    _default:  { gender: null,     pitch: 1.0,  rate: 1.05, label: 'Standard' },
   };
 
   const FEMALE_HINTS = /(female|frau|weib|hedda|katja|zira|helena|anna|marlene|petra|hazel|steffi|vicki|google deutsch|amelie|sonia)/i;
