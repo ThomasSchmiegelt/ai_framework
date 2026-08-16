@@ -21,8 +21,10 @@ const Todo = (() => {
   let _importInput = null;
   let _searchTimer = null;
   let _graphPerson = '';           // Personenfilter im Wissensgraph
+  let _graphMode = '2d';           // '2d' (Cytoscape) | '3d' (Canvas-Kugel)
   const ACTIVE_KEY = 'ai_framework_thomas_todo_active';
   const LAYOUT_KEY = 'ai_framework_thomas_todo_layout';   // Splitter/Collapse-Zustand
+  const GRAPH_MODE_KEY = 'ai_framework_thomas_todo_graphmode';
   const _filters = { done: false, from: '', to: '', assign: '' };   // Punkte-Filter
 
   const STATUS = {
@@ -199,7 +201,9 @@ const Todo = (() => {
     _el('todo-view-graph').style.display = (v === 'graph') ? 'block' : 'none';
     _el('todo-view-agenda').style.display = (v === 'agenda') ? 'block' : 'none';
     document.querySelectorAll('.todo-subtab').forEach(b => b.classList.toggle('active', b.dataset.view === v));
-    if (v === 'graph' && _cy) setTimeout(() => { _cy.resize(); _cy.fit(undefined, 30); }, 30);
+    if (v !== 'graph') { _graph3d.stop(); return; }   // 3D-Schleife nur im Graph-View laufen lassen
+    if (_graphMode === '3d') setTimeout(() => _graph3d.resize(), 30);
+    else if (_cy) setTimeout(() => { _cy.resize(); _cy.fit(undefined, 30); }, 30);
   }
 
   function _renderHeader() {
@@ -563,19 +567,36 @@ const Todo = (() => {
         return { ...p, items, edges };
       }).filter(p => p.items.length);
     }
-    // Schutz vor dem Einfrieren des Browsers: sehr viele Knoten (z. B. Wurzel = alle
-    // Projekte im großen Demo) legen die Layout-Berechnung lahm. Ab einem Schwellwert
-    // erst nach Rückfrage bauen und zum Aktivieren eines Einzelprojekts (⚡) raten.
     const nItems = projects.reduce((s, p) => s + (p.items || []).length, 0);
+
+    // 3D-Kugel: WebGL-freies Canvas-Rendering, rAF-basiert → blockiert nicht. Verträgt
+    // deutlich mehr Knoten als das synchrone 2D-Layout.
+    if (_graphMode === '3d') {
+      _updateGraphModeUI();
+      const LIMIT3D = 1500;
+      if (nItems > LIMIT3D) {
+        _el('todo-graph-hint').textContent = `${nItems} Punkte – bitte Einzelprojekt (⚡) oder 👤 Personenfilter.`;
+        return;
+      }
+      _graph3d.build(projects);
+      _el('btn-todo-graph-build').classList.remove('todo-stale');
+      _updateHint(projects, projects.length > 1);
+      return;
+    }
+
+    // 2D (Cytoscape): Schutz vor dem Einfrieren des Browsers – sehr viele Knoten legen
+    // das synchrone Layout lahm. Ab einem Schwellwert erst nach Rückfrage bauen und die
+    // 3D-Kugel bzw. ein Einzelprojekt (⚡) empfehlen.
+    _updateGraphModeUI();
     const LIMIT = 300;
     if (nItems > LIMIT) {
       const hint = _el('todo-graph-hint');
-      if (hint) hint.textContent = `${nItems} Punkte im Bereich – für den Graphen zu viel.`;
+      if (hint) hint.textContent = `${nItems} Punkte im Bereich – für den 2D-Graphen zu viel.`;
       host.innerHTML = `<div class="dir-hint" style="margin:12px">
-        <strong>${nItems} Punkte</strong> im aktiven Bereich – ein Graph mit so vielen Knoten
-        kann den Browser einfrieren. Aktiviere links ein <strong>Einzelprojekt (⚡)</strong>
-        oder nutze den <strong>👤 Personenfilter</strong>, dann wird der Graph schlank.
-        <div style="margin-top:10px"><button id="todo-graph-force" class="export-btn">Trotzdem aufbauen (${nItems})</button></div>
+        <strong>${nItems} Punkte</strong> im aktiven Bereich – ein 2D-Graph mit so vielen Knoten
+        kann den Browser einfrieren. Nutze die <strong>🔮 3D-Kugel</strong> (läuft flüssig),
+        aktiviere links ein <strong>Einzelprojekt (⚡)</strong> oder den <strong>👤 Personenfilter</strong>.
+        <div style="margin-top:10px"><button id="todo-graph-force" class="export-btn">Trotzdem als 2D aufbauen (${nItems})</button></div>
       </div>`;
       const fb = _el('todo-graph-force');
       if (fb) fb.addEventListener('click', () => { host.innerHTML = ''; _buildGraphForce(projects); });
@@ -591,18 +612,210 @@ const Todo = (() => {
     _cy = cytoscape({
       container: host, elements: [...nodes, ...edges], style: _graphStyle(),
       wheelSensitivity: 0.2, minZoom: 0.2, maxZoom: 3,
-      layout: { name: 'cose', animate: false, padding: 30, nodeRepulsion: 9000, idealEdgeLength: 130 },
+      // animate:true → das cose-Layout rechnet iterativ und gibt dem Browser zwischen
+      // den Schritten Kontrolle zurück (kein „Seite reagiert nicht" bei größeren Graphen).
+      layout: { name: 'cose', animate: true, animationThreshold: 60, numIter: 700,
+                padding: 30, nodeRepulsion: 9000, idealEdgeLength: 130 },
     });
     if (!multi) {
       _cy.on('tap', 'node', evt => _onNodeTap(evt.target));
       _cy.on('tap', 'edge', evt => _onEdgeTap(evt.target));
     }
-    setTimeout(() => { _cy.resize(); _cy.fit(undefined, 30); }, 20);
+    _cy.one('layoutstop', () => setTimeout(() => { _cy.resize(); _cy.fit(undefined, 30); }, 20));
     _el('btn-todo-graph-build').classList.remove('todo-stale');
     _updateHint(projects, multi);
   }
 
-  function _layout() { if (_cy) { _cy.layout({ name: 'cose', animate: false, padding: 30, nodeRepulsion: 9000, idealEdgeLength: 130 }).run(); setTimeout(() => _cy.fit(undefined, 30), 20); } else _buildGraph(); }
+  function _layout() {
+    if (_graphMode === '3d') { _graph3d.relayout(); return; }
+    if (_cy) { _cy.layout({ name: 'cose', animate: true, animationThreshold: 60, numIter: 700, padding: 30, nodeRepulsion: 9000, idealEdgeLength: 130 }).run(); }
+    else _buildGraph();
+  }
+
+  // Sichtbarkeit von 2D-Container vs. 3D-Canvas + Toggle-Buttons je Modus.
+  function _updateGraphModeUI() {
+    const is3d = _graphMode === '3d';
+    _el('todo-graph').style.display = is3d ? 'none' : 'block';
+    _el('todo-graph3d-wrap').style.display = is3d ? 'block' : 'none';
+    const b2 = _el('btn-todo-graph-2d'), b3 = _el('btn-todo-graph-3d');
+    if (b2) b2.classList.toggle('active', !is3d);
+    if (b3) b3.classList.toggle('active', is3d);
+    // Verbinden/Anordnen sind 2D-spezifisch
+    const c = _el('btn-todo-graph-connect'); if (c) c.style.display = is3d ? 'none' : '';
+  }
+
+  function _setGraphMode(mode) {
+    if (mode === _graphMode) return;
+    _graphMode = mode;
+    try { localStorage.setItem(GRAPH_MODE_KEY, mode); } catch (_) {}
+    if (mode !== '3d') _graph3d.stop();
+    _updateGraphModeUI();
+    if (_view === 'graph') _buildGraph();
+  }
+
+  // ── 3D-Kugel-Wissensgraph (eigenes leichtes Canvas-3D, keine Fremd-Dependency) ──
+  // Knoten werden auf einer Fibonacci-Kugel verteilt, per Perspektive projiziert und
+  // tiefensortiert gezeichnet; Drehung/Zoom/Klick über Pointer-Events. Die Zeichen-
+  // schleife läuft über requestAnimationFrame (nicht blockierend).
+  const _graph3d = (() => {
+    let canvas, ctx, raf = null, pts = [], links = [];
+    let rotX = -0.4, rotY = 0.6, autoRot = true, zoom = 1;
+    let dragging = false, lastX = 0, lastY = 0, moved = false;
+    let hoverIdx = -1, wired = false, R = 220;
+
+    function _ensure() {
+      canvas = _el('todo-graph3d');
+      if (!canvas) return false;
+      ctx = canvas.getContext('2d');
+      if (!wired) { _wire(); wired = true; }
+      return true;
+    }
+
+    function _resize() {
+      if (!canvas) return;
+      const wrap = _el('todo-graph3d-wrap');
+      const w = wrap.clientWidth || 600, h = wrap.clientHeight || 460;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      R = Math.min(w, h) * 0.42;
+    }
+
+    // Rohknoten aus denselben Elementen wie der 2D-Graph, auf die Kugel verteilen.
+    function build(projects) {
+      if (!_ensure()) return;
+      const { nodes, edges } = _graphElements(projects);
+      const idx = {}; pts = [];
+      const N = nodes.length || 1;
+      const golden = Math.PI * (3 - Math.sqrt(5));
+      nodes.forEach((n, i) => {
+        const y = 1 - (i / Math.max(1, N - 1)) * 2;          // 1 … -1
+        const r = Math.sqrt(Math.max(0, 1 - y * y));
+        const th = golden * i;
+        const isHub = n.data.kind === 'hub';
+        idx[n.data.id] = pts.length;
+        pts.push({
+          id: n.data.id, label: n.data.label || '', kind: n.data.kind,
+          color: n.data.color || '#9ca3af', border: n.data.border || null,
+          // Hubs etwas nach innen (0.72·R) → wirken als Zentren
+          bx: Math.cos(th) * r * (isHub ? 0.72 : 1),
+          by: y * (isHub ? 0.72 : 1),
+          bz: Math.sin(th) * r * (isHub ? 0.72 : 1),
+          rad: isHub ? 7 : 5,
+        });
+      });
+      links = [];
+      edges.forEach(e => {
+        const s = idx[e.data.source], t = idx[e.data.target];
+        if (s != null && t != null) links.push({ s, t, hub: e.data.kind === 'hub', color: e.data.color || null });
+      });
+      _resize();
+      autoRot = true;
+      start();
+    }
+
+    function _project(p) {
+      // Rotation um Y dann X
+      const cy = Math.cos(rotY), sy = Math.sin(rotY);
+      const cx = Math.cos(rotX), sx = Math.sin(rotX);
+      let x = p.bx * cy - p.bz * sy;
+      let z = p.bx * sy + p.bz * cy;
+      let y = p.by * cx - z * sx;
+      z = p.by * sx + z * cx;
+      const persp = 520 / (520 + z * R * 1.4);
+      const w = canvas.clientWidth || 600, h = canvas.clientHeight || 460;
+      return { x: w / 2 + x * R * zoom * persp, y: h / 2 + y * R * zoom * persp, z, scale: persp * zoom };
+    }
+
+    function _draw() {
+      if (!ctx) return;
+      const w = canvas.clientWidth || 600, h = canvas.clientHeight || 460;
+      ctx.clearRect(0, 0, w, h);
+      const proj = pts.map(_project);
+      // Kanten zuerst (hinten → vorne über mittlere Tiefe)
+      links.forEach(l => {
+        const a = proj[l.s], b = proj[l.t]; if (!a || !b) return;
+        const depth = (a.z + b.z) / 2;
+        ctx.strokeStyle = l.hub ? _rgba(l.color || '#a78bfa', 0.18 + 0.12 * (1 - depth))
+                                : _rgba('#8892a0', 0.22 + 0.18 * (1 - depth));
+        ctx.lineWidth = l.hub ? 0.8 : 1.1;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      });
+      // Knoten tiefensortiert (hinten zuerst)
+      const order = pts.map((_, i) => i).sort((i, j) => proj[i].z - proj[j].z);
+      order.forEach(i => {
+        const p = pts[i], pr = proj[i];
+        const rad = Math.max(1.5, p.rad * pr.scale);
+        const fade = 0.45 + 0.55 * (1 - (pr.z + 1) / 2);   // vorne heller
+        ctx.beginPath(); ctx.arc(pr.x, pr.y, rad, 0, Math.PI * 2);
+        ctx.fillStyle = _rgba(p.color, fade);
+        ctx.fill();
+        if (p.border) { ctx.lineWidth = 1.5; ctx.strokeStyle = _rgba(p.border, fade); ctx.stroke(); }
+        if (i === hoverIdx || p.kind === 'hub') {
+          const css = getComputedStyle(document.documentElement);
+          ctx.fillStyle = (css.getPropertyValue('--text') || '#e8e8e8').trim();
+          ctx.font = (p.kind === 'hub' ? 'bold ' : '') + Math.round(11 * Math.min(1.4, pr.scale)) + 'px sans-serif';
+          ctx.textAlign = 'center';
+          const lbl = p.label.length > 28 ? p.label.slice(0, 27) + '…' : p.label;
+          ctx.fillText(lbl, pr.x, pr.y - rad - 3);
+        }
+      });
+    }
+
+    function _loop() {
+      if (autoRot && !dragging) rotY += 0.0035;
+      _draw();
+      raf = requestAnimationFrame(_loop);
+    }
+
+    function start() { stop(); _resize(); raf = requestAnimationFrame(_loop); }
+    function stop() { if (raf) { cancelAnimationFrame(raf); raf = null; } }
+    function relayout() { rotX = -0.4; rotY = 0.6; zoom = 1; autoRot = true; }
+
+    function _hit(mx, my) {
+      let best = -1, bd = 14 * 14;
+      pts.forEach((p, i) => {
+        const pr = _project(p);
+        const d = (pr.x - mx) ** 2 + (pr.y - my) ** 2;
+        if (d < bd) { bd = d; best = i; }
+      });
+      return best;
+    }
+
+    function _wire() {
+      canvas.addEventListener('pointerdown', e => { dragging = true; moved = false; lastX = e.offsetX; lastY = e.offsetY; canvas.setPointerCapture(e.pointerId); });
+      canvas.addEventListener('pointermove', e => {
+        if (dragging) {
+          const dx = e.offsetX - lastX, dy = e.offsetY - lastY;
+          if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+          rotY += dx * 0.008; rotX += dy * 0.008;
+          rotX = Math.max(-1.5, Math.min(1.5, rotX));
+          lastX = e.offsetX; lastY = e.offsetY;
+        } else {
+          const h = _hit(e.offsetX, e.offsetY);
+          if (h !== hoverIdx) { hoverIdx = h; canvas.style.cursor = h >= 0 ? 'pointer' : 'grab'; }
+        }
+      });
+      canvas.addEventListener('pointerup', e => {
+        dragging = false;
+        if (!moved) {
+          const h = _hit(e.offsetX, e.offsetY);
+          if (h >= 0) { const it = _itemById(pts[h].id.split('::').pop()); if (it) _status(`${it.status === 'erledigt' ? '✅' : '🔲'} ${it.text}` + (it.assignees?.length ? ' · ' + it.assignees.join(', ') : '') + (it.due ? ' · Frist ' + it.due : '')); else _status('👥 ' + pts[h].label); }
+        }
+      });
+      canvas.addEventListener('dblclick', () => { autoRot = !autoRot; });
+      canvas.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(0.4, Math.min(3, zoom * (e.deltaY < 0 ? 1.1 : 0.9))); }, { passive: false });
+    }
+
+    function _rgba(hex, a) {
+      const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+      if (!m) return hex || `rgba(150,150,150,${a})`;
+      return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})`;
+    }
+
+    return { build, stop, relayout, resize: _resize };
+  })();
 
   function _onNodeTap(node) {
     if (node.data('kind') !== 'item') return;
@@ -911,6 +1124,10 @@ const Todo = (() => {
     _el('btn-todo-graph-build').addEventListener('click', _buildGraph);
     _el('btn-todo-graph-connect').addEventListener('click', _toggleConnect);
     _el('btn-todo-graph-layout').addEventListener('click', _layout);
+    try { _graphMode = localStorage.getItem(GRAPH_MODE_KEY) || '2d'; } catch (_) { _graphMode = '2d'; }
+    _el('btn-todo-graph-2d').addEventListener('click', () => _setGraphMode('2d'));
+    _el('btn-todo-graph-3d').addEventListener('click', () => _setGraphMode('3d'));
+    _updateGraphModeUI();
     _el('todo-graph-hubs').addEventListener('change', e => { _showHubs = e.target.checked; if (_cy) _buildGraph(); });
     _el('todo-graph-all').addEventListener('change', e => { _forceAll = e.target.checked; if (_view === 'graph') _buildGraph(); });
     _el('todo-graph-person').addEventListener('change', e => { _graphPerson = e.target.value; if (_view === 'graph') _buildGraph(); });

@@ -699,3 +699,75 @@ OS/Python/Packages/Ports/Ollama-Status nach `diagnose_report.txt`; `test_chat.ba
 **VRAM-Guard-Vorbehalt:** in `make_server` mit `workers > 1` koordiniert der
 Einzel-Modell-Guard nicht über Worker-Prozesse — auf ~6 GB VRAM `workers = 1`
 (dokumentiert in `docs/SERVER.md`).
+
+
+## 21. Variantenvergleich & To-Do-Wissensgraph (neuere Bausteine)
+
+Ergänzt die CLAUDE.md-Subsystemzeilen um die Implementierungsdetails.
+
+### 21.1 Varianten — Auto-Tabelle & Schnellvergleich
+
+**Auto-Tabelle** (`POST /api/varianten/auto-fill`, `varianten_auto_fill` in `main.py`):
+Ein Orchestrator, der aus einer Problembeschreibung die komplette Bewertungstabelle
+erzeugt, indem er die vorhandenen Einzelschritte hintereinander ausführt — jeweils über
+`_research_llm_json(model, system, prompt)` mit den bestehenden Prompts
+`_VAR_CRITERIA_SYSTEM` → `_VAR_PAIRWISE_SYSTEM` → `_VAR_VARIANTS_SYSTEM` →
+`_VAR_RATINGS_SYSTEM`. Wichtige Punkte:
+
+- **Modellwahl** `await _research_model(body.get("model"))` (lokal-bevorzugt, respektiert
+  „Web-Recherche lokal"/Geheim-Modus); `None` → HTTP 503.
+- **Web-Grounding** optional (`body["web"]`): `search_with_sources(query, 5)` aus
+  `tools/search.py` liefert `(sources, text)`; der Text (gekürzt) wird an die Prompts
+  gehängt und `sources` mit zurückgegeben. Nur der Web-Query ist extern — das LLM bleibt
+  im Geheim-Modus lokal. Fehler bei der Suche dürfen die Generierung **nicht** stoppen
+  (weiches `try/except`).
+- **Paarvergleich** wird als vollständige `nc×nc`-Matrix mit Reziprozität aufgebaut
+  (identisch zu `varianten_suggest_pairwise`).
+- **Robustheit Varianten:** Der Varianten-Schritt bekommt bewusst **nur die
+  Problembeschreibung** plus kompakte Kriterien-Kurznamen (nicht die volle, oft verbose
+  Kriterienliste) — sonst bläht der Prompt auf und kleine lokale Modelle verwerfen das
+  JSON (→ leere Varianten → leere Bewertungen). Bleibt die Liste trotzdem leer, folgt ein
+  **einmaliger Minimal-Rückfall** nur mit dem Problem. Tokens aller Teilaufrufe werden im
+  `tok`-Dict summiert (`_llm_tok`).
+- Rückgabe `{criteria, variants, pairwise, ratings, sources, tokens:{in,out}}` — **reine
+  Vorschläge**; Gewichte/Ranking rechnet weiterhin der PUT (`_var_compute`) deterministisch.
+
+Frontend `varianten.js` `_generateAll()`: optionales Interview über `Clarify.ask({task,
+domain:'varianten', mount:#var-gen-clarify})` (hängt Antworten an die Beschreibung), dann
+der eine `auto-fill`-Aufruf; Ergebnis in `_data` übernehmen → `_resizeMatrices()` →
+`_render()` → `_save()`. Bedienelemente: `#var-problem`, `#btn-var-generate`,
+`#var-gen-interview`, `#var-gen-web`, Quellenzeile `#var-gen-sources`.
+
+**Schnellvergleich (Wischtechnik)** rein Frontend (`_openSwipe`/`_renderSwipe`/
+`_swipeAnswer`/`_finishSwipe`, Overlay `#var-swipe`): iteriert die obere Dreiecksmatrix
+aller Kriterienpaare (i<j). Feste Stärke `_SWIPE_WIN = 3`: `ArrowLeft` → `pairwise[i][j]=3`
+(+ Reziprok `[j][i]=1/3`), `ArrowRight` → `1/3`, `ArrowUp` → `1`; zusätzlich Klick/Touch auf
+die Karten. Der `keydown`-Handler wird nur bei offenem Overlay am `document` registriert und
+beim Schließen wieder entfernt. Am Ende `_renderPairwise()` + `_save()` (Server rechnet
+Gewichte/CR neu). Wiederverwendung von `_data.pairwise`/`_nearestSaaty`.
+
+### 21.2 To-Do — 3D-Kugel-Wissensgraph & Anti-Freeze
+
+**3D-Kugel** (`todo.js`, internes IIFE-Modul `_graph3d`): eigenes **Canvas-3D ohne
+Fremd-Dependency** (keine three.js/WebGL-Lib — bleibt self-contained/offline/MIT). Speist
+sich aus demselben `_graphElements(projects)` wie der 2D-Graph:
+
+- **Platzierung:** Knoten auf einer **Fibonacci-Kugel** (goldener Winkel), Hubs
+  (Zuständige/Status) auf `0.72·R` nach innen → wirken als Zentren.
+- **Rendering:** 2D-Canvas mit Perspektiv-Projektion (Rotation um Y dann X), Kanten zuerst,
+  Knoten **tiefensortiert** (hinten zuerst), vorne heller (Fade über Tiefe); Labels nur für
+  Hubs und den gehoverten Knoten (Anti-Clutter). Zeichenschleife über
+  `requestAnimationFrame` → **nicht blockierend**.
+- **Interaktion:** Pointer-Drag dreht, Wheel zoomt, Klick (ohne Drag) → Trefferknoten →
+  Statuszeile wie im 2D-Pfad (`_itemById`), Doppelklick toggelt die Auto-Rotation.
+- **Modus & Steuerung:** `_graphMode` (`'2d'|'3d'`, localStorage `GRAPH_MODE_KEY`), Buttons
+  `#btn-todo-graph-2d`/`-3d`, `_setGraphMode`/`_updateGraphModeUI`. `_buildGraph` verzweigt
+  nach Modus; im 3D-Modus höheres Limit (`LIMIT3D = 1500`). Die Schleife läuft nur im
+  Graph-View (`_showView` ruft `_graph3d.stop()` beim Verlassen; der Rebuild beim Betreten
+  startet sie neu). Canvas `#todo-graph3d` braucht feste Höhe (`#todo-graph3d-wrap`).
+
+**Anti-Freeze** („Seite reagiert nicht" = blockierter Haupt-Thread): das 2D-Cytoscape-
+`cose`-Layout lief bisher **synchron** (`animate:false`) und blockierte bei vielen Knoten.
+Jetzt `animate:true` + `animationThreshold` + `numIter`, und das Fit passiert im
+`layoutstop`-Callback → der Browser bekommt zwischen den Iterationen Kontrolle zurück. Der
+300-Knoten-Guard bleibt für 2D und empfiehlt zusätzlich die (nicht blockierende) 3D-Kugel.

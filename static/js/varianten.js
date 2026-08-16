@@ -361,6 +361,107 @@ const Varianten = (() => {
     a.click();
   }
 
+  // ── Schnellvergleich (Wischtechnik) ────────────────────────────────────────
+  // Iteriert die obere Dreiecksmatrix der Kriterienpaare (i<j). Feste Stärke:
+  // ← linke wichtiger (Saaty 3), → rechte wichtiger (1/3), ↑ gleich (1).
+  const _SWIPE_WIN = 3;
+  let _swipePairs = [], _swipeIdx = 0, _swipeKeyHandler = null;
+
+  function _openSwipe() {
+    if (!_data || _data.criteria.length < 2) { _status('Mindestens zwei Kriterien nötig.'); return; }
+    _swipePairs = [];
+    for (let i = 0; i < _data.criteria.length; i++)
+      for (let j = i + 1; j < _data.criteria.length; j++) _swipePairs.push([i, j]);
+    _swipeIdx = 0;
+    _el('var-swipe').style.display = 'flex';
+    _swipeKeyHandler = (e) => {
+      if (e.key === 'ArrowLeft') { e.preventDefault(); _swipeAnswer('left'); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); _swipeAnswer('right'); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); _swipeAnswer('up'); }
+      else if (e.key === 'Escape') { e.preventDefault(); _closeSwipe(); }
+    };
+    document.addEventListener('keydown', _swipeKeyHandler);
+    _renderSwipe();
+  }
+
+  function _renderSwipe() {
+    const pair = _swipePairs[_swipeIdx];
+    if (!pair) { _finishSwipe(); return; }
+    const [i, j] = pair;
+    _el('var-swipe-a').textContent = _data.criteria[i].name || 'Kriterium ' + (i + 1);
+    _el('var-swipe-b').textContent = _data.criteria[j].name || 'Kriterium ' + (j + 1);
+    _el('var-swipe-progress').textContent = `${_swipeIdx + 1} / ${_swipePairs.length}`;
+  }
+
+  function _swipeAnswer(dir) {
+    const pair = _swipePairs[_swipeIdx];
+    if (!pair) return;
+    const [i, j] = pair;
+    let v = 1;                       // ↑ gleich
+    if (dir === 'left') v = _SWIPE_WIN;         // linke (i) wichtiger
+    else if (dir === 'right') v = 1 / _SWIPE_WIN; // rechte (j) wichtiger
+    _data.pairwise[i][j] = v;
+    _data.pairwise[j][i] = 1 / v;
+    _swipeIdx++;
+    _renderSwipe();
+  }
+
+  function _finishSwipe() {
+    _closeSwipe();
+    _renderPairwise();
+    _save();
+    _status('Schnellvergleich übernommen – Feinschliff in der Matrix möglich.');
+  }
+
+  function _closeSwipe() {
+    _el('var-swipe').style.display = 'none';
+    if (_swipeKeyHandler) { document.removeEventListener('keydown', _swipeKeyHandler); _swipeKeyHandler = null; }
+  }
+
+  // ── Problem → komplette Tabelle (Auto-Fill) ────────────────────────────────
+  async function _generateAll() {
+    const problem = (_el('var-problem').value || '').trim();
+    if (!problem) { _status('Bitte das Problem beschreiben.'); return; }
+    let description = problem;
+    const mount = _el('var-gen-clarify');
+    if (mount) mount.innerHTML = '';
+    _el('var-gen-sources').textContent = '';
+
+    // 1) Optionales Interview (Rückfragen) – hängt Antworten an die Beschreibung
+    if (_el('var-gen-interview').checked && typeof Clarify !== 'undefined') {
+      const c = await Clarify.ask({ task: problem, domain: 'varianten', model: _model(), mount });
+      if (c && c.augmentedTask) description = c.augmentedTask;
+      if (c && c.tokens) _tok(c.tokens, 'Variantenvergleich');
+    }
+
+    // 2) Ein Orchestrator-Aufruf: Kriterien → Paarvergleich → Varianten → Bewertungen
+    _spin(true); _status('KI erzeugt die Tabelle… (kann bei lokalen Modellen dauern)');
+    try {
+      const web = _el('var-gen-web').checked;
+      const res = await _api('POST', '/api/varianten/auto-fill', {
+        title: _data.title || problem.slice(0, 80), description, web, model: _model(),
+      });
+      _tok(res.tokens, 'Variantenvergleich');
+      if (res.criteria && res.criteria.length) _data.criteria = res.criteria;
+      if (res.variants && res.variants.length) _data.variants = res.variants;
+      _resizeMatrices();
+      if (Array.isArray(res.pairwise) && res.pairwise.length === _data.criteria.length) _data.pairwise = res.pairwise;
+      if (Array.isArray(res.ratings) && res.ratings.length === _data.variants.length) _data.ratings = res.ratings;
+      // Titel/Beschreibung übernehmen, falls noch leer
+      if (!_data.title) _data.title = problem.slice(0, 80);
+      if (!_data.description) _data.description = problem;
+      _render();
+      await _save();
+      const src = res.sources || [];
+      if (src.length) {
+        _el('var-gen-sources').innerHTML = '🌐 Belege: ' + src.slice(0, 5).map(s =>
+          `<a href="${escHtml(s.url || s.href || '#')}" target="_blank" rel="noopener">${escHtml((s.title || s.url || 'Quelle').slice(0, 40))}</a>`).join(' · ');
+      }
+      _status('Tabelle erzeugt – bitte prüfen und anpassen.');
+    } catch (e) { _status('KI-Fehler: ' + e.message); }
+    finally { _spin(false); }
+  }
+
   function init() {
     _el('var-project').addEventListener('change', e => _open(e.target.value));
     _el('btn-var-create').addEventListener('click', _create);
@@ -380,6 +481,15 @@ const Varianten = (() => {
     _el('btn-var-ai-pairwise').addEventListener('click', _aiPairwise);
     _el('btn-var-ai-ratings').addEventListener('click', _aiRatings);
     _el('btn-var-ai-explain').addEventListener('click', _aiExplain);
+    // Schnellvergleich (Wischtechnik)
+    _el('btn-var-swipe').addEventListener('click', _openSwipe);
+    _el('var-swipe-close').addEventListener('click', _closeSwipe);
+    _el('var-swipe-left').addEventListener('click', () => _swipeAnswer('left'));
+    _el('var-swipe-right').addEventListener('click', () => _swipeAnswer('right'));
+    _el('var-swipe-eq').addEventListener('click', () => _swipeAnswer('up'));
+    _el('var-swipe').addEventListener('click', e => { if (e.target.id === 'var-swipe') _closeSwipe(); });
+    // Problem → komplette Tabelle
+    _el('btn-var-generate').addEventListener('click', _generateAll);
     _loadList();
   }
 
