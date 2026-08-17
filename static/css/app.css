@@ -3348,6 +3348,20 @@ li.CodeMirror-hint-active { background: var(--accent); color: #fff; }
 #cw-chat { flex-shrink: 0; max-height: 130px; overflow-y: auto; padding: 4px 12px; }
 #cw-chat:empty { display: none; }
 
+/* Autonomer Coding-Agent (Agent-Harness) */
+#cw-agent-panel { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-input); }
+#cw-agent-panel textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--bg-card, var(--bg-sidebar)); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
+#cw-agent-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#cw-agent-log { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 1.45; }
+#cw-agent-log:empty { display: none; }
+.cw-agent-step { color: var(--text); padding: 1px 2px; white-space: pre-wrap; word-break: break-word; }
+.cw-agent-task  { color: var(--text); font-weight: 600; }
+.cw-agent-final { color: var(--text); }
+.cw-agent-repair { color: var(--accent); }
+.cw-agent-error { color: #ef4444; }
+.cw-file-row.cw-file-changed { position: relative; }
+.cw-file-row.cw-file-changed::after { content: "●"; color: var(--accent); margin-left: 6px; font-size: 10px; }
+
 #cw-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
 #cw-sidebar {
   flex: 0 0 200px; min-width: 120px; display: flex; flex-direction: column;

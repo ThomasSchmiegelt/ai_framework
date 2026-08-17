@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260815todoui3" />
+  <link rel="stylesheet" href="/css/app.css?v=20260817agent" />
 </head>
 <body>
 
@@ -1318,6 +1318,20 @@
             <button class="export-btn" id="cw-ex-leer">📄 Leere Vorlage</button>
           </div>
         </details>
+        <button id="cw-agent-toggle" class="export-btn" title="Autonomen Coding-Agenten ein-/ausblenden">🤖 Agent</button>
+      </div>
+
+      <!-- Autonomer Coding-Agent (Agent-Harness): plant, schreibt/ändert mehrere Dateien
+           selbst, prüft (Python-Sandkasten / Canvas) und korrigiert – bis fertig. -->
+      <div id="cw-agent-panel" style="display:none">
+        <textarea id="cw-agent-task" rows="2" placeholder="Aufgabe für den autonomen Agenten – er plant, schreibt/ändert mehrere Dateien selbst, prüft (Python-Sandkasten oder Canvas) und behebt Fehler. z. B. „Baue ein Snake-Spiel auf <canvas>“ oder „Lege utils.py + tests an und prüfe sie“"></textarea>
+        <div id="cw-agent-actions">
+          <button id="cw-agent-run" class="export-btn">🤖 Agent starten</button>
+          <button id="cw-agent-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
+          <button id="cw-agent-undo" class="export-btn" style="display:none" title="Alle Änderungen des letzten Agentenlaufs zurücknehmen">↩ Rückgängig</button>
+          <span class="planner-muted" style="font-size:11px">Modell: Rolle „Programmieren/Mathe" (fähiges Modell empfohlen).</span>
+        </div>
+        <div id="cw-agent-log"></div>
       </div>
 
       <!-- kompakter KI-Verlauf -->
@@ -3316,7 +3330,7 @@
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
 <script src="/js/logger.js?v=20260603"></script>
-<script src="/js/code_workspace.js?v=20260627pst1"></script>
+<script src="/js/code_workspace.js?v=20260817agent"></script>
 <script src="/js/onboarding.js?v=20260815stt"></script>
 <script src="/js/medizin.js?v=20260711docs2"></script>
 <script src="/js/mathe.js?v=20260622"></script>
