@@ -31,6 +31,7 @@
 - [Transkription — Sprache zu Text (🎙 Transkription)](#11i-transkription--sprache-zu-text--transkription)
 - [Geheim-Modus — alles lokal](#11j-geheim-modus--alles-lokal)
 - [Sprachausgabe — Antworten vorlesen (🔊)](#11k-sprachausgabe--antworten-vorlesen-)
+- [Bildgenerierung — Bilder aus Text (🎨)](#11l-bildgenerierung--bilder-aus-text-)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
 13. [Matrix-Recherche](#13-matrix-recherche)
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
@@ -221,6 +222,8 @@ Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
 | `/<Agentname> <Frage>` | **Schnell-Agent:** nur diese eine Frage läuft über den genannten Agenten (z. B. `/Mathe Löse x²−4=0`). Der Selektor bleibt unverändert. |
 | `/such <Begriff>` · `/suche` · `/finde` · `/search` | **Erweiterte Suche:** die KI erzeugt **alternative Suchbegriffe** (Synonyme, Fach-/Umgangssprache, engl. Begriffe) als anklickbare Chips, durchsucht damit das Web und fasst die Treffer **mit Quellen** zusammen. Hilfreich, wenn man den treffenden Fachbegriff nicht kennt. |
 | `/frag <Aufgabe>` | **Rückfragen-Maske:** die KI prüft, ob ihr Infos fehlen, und zeigt bei Bedarf eine **dynamische Eingabemaske** (Text-, Einfach- und Mehrfachauswahl). Deine Antworten werden an die Aufgabe gehängt und dann normal beantwortet. Auch in **Medizin** und **Mathe** verfügbar. |
+| `/bild <Beschreibung>` · `/image` | **Bildgenerierung:** erzeugt aus deiner Beschreibung ein Bild (lokaler Stable-Diffusion-Server oder ein API-Modell — siehe unten). Alternativ der **🎨 Bild**-Haken in der Toolbar: die nächste Nachricht wird dann als Bild-Prompt behandelt. |
+| `/bildhelp` · `/imagehelp` | **Geführter Bild-Dialog:** ein Formular fragt **Motiv, Stil, Kameraperspektive, Beleuchtung, Seitenverhältnis** und einen optionalen **Negativ-Prompt** ab und baut daraus den Prompt. |
 | `/dd[N] [Zusatz]` · `/deepdive[N]` | **Deepdive:** vertieft die letzte Antwort mit *N* Folgefragen (ohne Zahl = 5), nacheinander recherchiert & beantwortet. |
 | `/ddd[N] [Zusatz]` · `/deepdivedocument[N]` | Wie Deepdive, aber **als Dokument** (Vorwort + Kapitel) im Dokumente-Tab. |
 | `/plan[N] [Zusatz] [/Kürzel …]` | **Strategie & Einsatzplan-Orchestrator:** baut aus dem Gesprächsverlauf eine Vorschau (Strategie + Agenten + Plan + Jury). `N` = Aufgabenzahl (4–60, Standard 12). `/Kürzel` erzwingt vorhandene Agenten. |
@@ -1384,6 +1387,14 @@ Die Stimme richtet sich nach der gewählten **Antwortstil-Persona** (Profil → 
 | 🩺 **Frau Doktor** | ältere Frau |
 | 😎 **Felix** | junger Mann |
 | 😊 **Sandra** | junge Frau |
+| 🎖 **Gunnery Sergeant Hartman** | zackig, laut (tief & schnell) |
+
+> **🎖 Gunnery Sergeant Hartman** ist ein **Sondermodus**: Die Antworten werden **militärisch zackig**
+> (kurze Befehlssätze, forscher Ton) — der Drill ist aber nur der *Stil*, der Inhalt bleibt fachlich
+> korrekt und hilfreich (keine Beleidigungen). Zusätzlich schaltet dieser Modus einen
+> **Ausbildungs-/Lokal-Riegel** ein: es sind **nur lokale Modelle** nutzbar und **jede Websuche ist
+> gesperrt** — alles bleibt rein lokal. Der **🔒 Geheim-Button** bleibt davon unberührt (unabhängig
+> schaltbar).
 
 Im **Profil-Modal** kannst du die Stimme mit **🔊 Stimme testen** direkt anhören. Die Sprachausgabe
 nutzt standardmäßig die **im Betriebssystem/Browser installierten Stimmen** (Windows/Linux), läuft
@@ -1397,6 +1408,30 @@ dann werden die Antworten mit den **hochwertigeren Anbieter-Stimmen** vorgelesen
 beim Anbieter). Die Persona bestimmt weiterhin die Stimme. ⚠ Der Text geht dabei an den Anbieter.
 Im **Geheim-Modus** wird immer die **Browser-Ausgabe** genutzt; scheitert die API, wird automatisch
 auf den Browser zurückgefallen.
+
+---
+
+## 11l. Bildgenerierung — Bilder aus Text (🎨)
+
+Der Chat kann aus einer Beschreibung **Bilder erzeugen** — wahlweise **lokal** oder über ein **API-Modell**.
+Standardmäßig ist die Funktion **aus**; du wählst sie einmalig im **Profil** unter **🧠 Modelle → 🎨 Bildgenerierung**:
+
+- **Lokal · Stable Diffusion WebUI** — du betreibst einen eigenen Bild-Server
+  (**AUTOMATIC1111**, **Forge** o. Ä.), gestartet **mit `--api`**, und trägst dessen **Adresse**
+  ins Feld darunter ein (Standard `http://127.0.0.1:7860`). Nichts verlässt deinen Rechner.
+- **API** (`dall-e-3` / `gpt-image-1`) eines konfigurierten Anbieters — das Bild entsteht beim Anbieter.
+  ⚠ Deine Beschreibung geht dann nach außen. Im **Geheim-Modus** ist nur der lokale Weg erlaubt.
+
+**Bild erzeugen** — drei Wege im Chat:
+
+1. **🎨 Bild**-Haken in der Toolbar setzen → die **nächste Nachricht** wird als Bild-Prompt behandelt (danach automatisch wieder aus).
+2. Befehl **`/bild <Beschreibung>`** — z. B. `/bild ein roter Sportwagen bei Sonnenuntergang, Fotorealistisch`.
+3. **`/bildhelp`** öffnet einen **geführten Dialog**, der **Motiv, Stil, Kameraperspektive, Beleuchtung,
+   Seitenverhältnis** und optional einen **Negativ-Prompt** (was *nicht* im Bild sein soll) abfragt und
+   daraus den Prompt baut.
+
+Das fertige Bild erscheint in der Antwort mit einem **⬇ Speichern**-Link. Ist noch kein Bildmodell
+eingerichtet, weist ein Hinweis darauf hin.
 
 ---
 

@@ -386,6 +386,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Such-Toggle
   document.getElementById('btn-search-toggle').addEventListener('click', function() {
+    // Persona »Hartman«: Websuche gesperrt (alles rein lokal)
+    if (typeof Profile !== 'undefined' && Profile.isHartman && Profile.isHartman()) {
+      showToast('REKRUT, im Ausbildungsmodus läuft NICHTS nach draußen – KEINE Websuche!');
+      return;
+    }
+    this.classList.toggle('active');
+  });
+
+  // Bild-Modus-Toggle (🎨): nächste Nachricht wird zum Bild-Prompt (One-shot in sendMessage)
+  document.getElementById('btn-image-toggle')?.addEventListener('click', function() {
     this.classList.toggle('active');
   });
 

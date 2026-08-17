@@ -20,6 +20,7 @@ const TTS = (function () {
     doktor:    { gender: 'female', pitch: 0.96, rate: 1.08, label: 'Frau Doktor (ältere Frau)' },
     felix:     { gender: 'male',   pitch: 1.06, rate: 1.12, label: 'Felix (junger Mann)' },
     sandra:    { gender: 'female', pitch: 1.1,  rate: 1.12, label: 'Sandra (junge Frau)' },
+    hartman:   { gender: 'male',   pitch: 0.8,  rate: 1.28, label: 'Gunnery Sergeant (zackig, laut)' },
     _default:  { gender: null,     pitch: 1.0,  rate: 1.05, label: 'Standard' },
   };
 
@@ -41,6 +42,7 @@ const TTS = (function () {
     const m = (p.tts_model || '').trim();
     if (!m || m.indexOf('::') < 0) return '';
     if (p.local_only_mode) return '';   // Geheim-Modus → Browser
+    if (String(p.tone || '').toLowerCase() === 'hartman') return '';  // Ausbildungs-/Lokal-Riegel → Browser
     return m;
   }
 
