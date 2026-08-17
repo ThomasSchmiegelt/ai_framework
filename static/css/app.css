@@ -4827,6 +4827,17 @@ select.ob-input option {
 .research-log:empty { display: none; }
 .research-log-line { white-space: pre-wrap; word-break: break-word; }
 
+/* ── Arbeitsablauf (/workflow) ────────────────────────────────────────────── */
+.wf-step { margin: 4px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); overflow: hidden; }
+.wf-step > summary { cursor: pointer; padding: 6px 10px; font-size: 13px; font-weight: 600; color: var(--text); list-style: none; }
+.wf-step > summary::-webkit-details-marker { display: none; }
+.wf-step > summary::before { content: '▸ '; color: var(--text-muted); }
+.wf-step[open] > summary::before { content: '▾ '; }
+.wf-step-body { padding: 4px 12px 10px; font-size: 13.5px; border-top: 1px solid var(--border); }
+.wf-actions { display: flex; gap: 8px; margin: 10px 0 2px; flex-wrap: wrap; }
+.wf-action-btn { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.wf-action-btn:hover { border-color: var(--accent); filter: brightness(1.08); }
+
 /* ── To-Do (✅) ──────────────────────────────────────────────────────────────── */
 #todo-subtabs { display: flex; gap: 6px; padding: 8px 14px 0; border-bottom: 1px solid var(--border); background: var(--bg-sidebar); }
 .todo-subtab { background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); cursor: pointer; font-size: 13px; font-weight: 600; padding: 6px 12px 8px; border-radius: 6px 6px 0 0; }
