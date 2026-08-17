@@ -155,6 +155,8 @@ const Profile = (() => {
     }
     // Geheim-/Lokal-Modus-Badge nachziehen (Hartman erzwingt „an")
     if (typeof window.__reflectSecret === 'function') window.__reflectSecret();
+    // Assistent-Modus (nur Chat-Tab) nachziehen
+    if (typeof window.__reflectAssistant === 'function') window.__reflectAssistant();
   }
 
   async function load() {
@@ -240,6 +242,8 @@ const Profile = (() => {
     if (chatAgentEl) chatAgentEl.checked = !!_data.chat_code_interpreter;  // Standard: aus
     const deepResEl = document.getElementById('profile-deep-research');
     if (deepResEl) deepResEl.checked = _data.deep_research_offer !== false;  // Standard: an
+    const assistEl = document.getElementById('profile-assistant-mode');
+    if (assistEl) assistEl.checked = !!_data.assistant_mode;  // Standard: aus
     const confApiEl = document.getElementById('profile-confidential-api');
     if (confApiEl) confApiEl.checked = !!_data.confidential_allow_api;  // Standard: aus
     const localOnlyEl = document.getElementById('profile-local-only');
@@ -332,6 +336,7 @@ const Profile = (() => {
       research_local_only: !!document.getElementById('profile-research-local')?.checked,
       chat_code_interpreter: !!document.getElementById('profile-chat-agent')?.checked,
       deep_research_offer: document.getElementById('profile-deep-research')?.checked !== false,
+      assistant_mode: !!document.getElementById('profile-assistant-mode')?.checked,
       confidential_allow_api: !!document.getElementById('profile-confidential-api')?.checked,
       local_only_mode: !!document.getElementById('profile-local-only')?.checked,
       model_general:  document.getElementById('profile-model-general')?.value || '',

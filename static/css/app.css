@@ -343,6 +343,8 @@ html, body {
   row-gap: 2px;
   background: var(--bg-main);
 }
+/* 🧭 Assistent-Modus: nur der Chat-Tab bleibt sichtbar */
+body.assistant-mode #tab-bar .tab-btn:not([data-tab="chat"]) { display: none !important; }
 
 .tab-btn {
   padding: 8px 16px;

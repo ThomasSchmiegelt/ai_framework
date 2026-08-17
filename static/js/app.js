@@ -373,6 +373,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // 🧭 Assistent-Modus: nur Chat-Tab, das Modell wählt Werkzeuge selbst. Spiegelt sich in
+  // <body class="assistant-mode"> (blendet alle Tabs außer Chat aus) und im Badge.
+  const _assistBtn = document.getElementById('btn-assistant-mode');
+  function _reflectAssistant(on) {
+    document.body.classList.toggle('assistant-mode', !!on);
+    if (_assistBtn) {
+      _assistBtn.textContent = on ? '🧭 Assistent-Modus: an' : '🧭 Assistent-Modus: aus';
+      _assistBtn.classList.toggle('secret-on', !!on);
+    }
+    if (on && typeof switchTab === 'function') switchTab('chat');
+  }
+  window.__reflectAssistant = () => _reflectAssistant(!!((typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}).assistant_mode : _profile.assistant_mode));
+  _reflectAssistant(!!_profile.assistant_mode);
+  if (_assistBtn) {
+    _assistBtn.addEventListener('click', async () => {
+      _assistBtn.disabled = true;
+      try {
+        const cur = await (await fetch('/api/profile')).json();
+        cur.assistant_mode = !cur.assistant_mode;
+        await fetch('/api/profile', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cur),
+        });
+        _reflectAssistant(cur.assistant_mode);
+        if (typeof Profile !== 'undefined' && Profile.load) { try { await Profile.load(); } catch (_) {} }
+        if (typeof showToast === 'function') {
+          showToast(cur.assistant_mode
+            ? '🧭 Assistent-Modus an — nur Chat; das Modell wählt Werkzeuge selbst (fähiges Modell nötig).'
+            : '🧭 Assistent-Modus aus — alle Tabs wieder sichtbar.');
+        }
+      } catch (_) {
+      } finally { _assistBtn.disabled = false; }
+    });
+  }
+
   // Neues Gespräch
   document.getElementById('btn-new-chat').addEventListener('click', () => {
     Chat.newConversation();
