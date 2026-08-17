@@ -329,15 +329,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   // gehen) und spiegelt den Zustand ins Badge + <body>-Klasse.
   const _secretBtn = document.getElementById('btn-secret-mode');
   function _reflectSecret(on) {
-    document.body.classList.toggle('secret-mode', !!on);
+    // Die Persona »Hartman« erzwingt den Geheim-/Lokal-Modus → Badge zeigt „an" und
+    // der Button ist gesperrt (nicht umschaltbar), solange Hartman aktiv ist.
+    const hartman = (typeof Profile !== 'undefined' && Profile.isHartman && Profile.isHartman());
+    const eff = !!on || hartman;
+    document.body.classList.toggle('secret-mode', eff);
     if (_secretBtn) {
-      _secretBtn.textContent = on ? '🔒 Geheim-Modus: an' : '🔓 Geheim-Modus: aus';
-      _secretBtn.classList.toggle('secret-on', !!on);
+      _secretBtn.textContent = eff ? '🔒 Geheim-Modus: an' : '🔓 Geheim-Modus: aus';
+      _secretBtn.classList.toggle('secret-on', eff);
+      _secretBtn.disabled = hartman;
+      _secretBtn.title = hartman
+        ? 'Durch die Persona „Gunnery Sergeant Hartman" erzwungen — alles bleibt lokal'
+        : 'Geheim-/Lokal-Modus umschalten';
     }
   }
+  // Von der Persona-Umschaltung (profile.js) aufrufbar, um das Badge nachzuziehen.
+  window.__reflectSecret = () => _reflectSecret(!!((typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}).local_only_mode : _profile.local_only_mode));
   _reflectSecret(!!_profile.local_only_mode);
   if (_secretBtn) {
     _secretBtn.addEventListener('click', async () => {
+      if (typeof Profile !== 'undefined' && Profile.isHartman && Profile.isHartman()) {
+        if (typeof showToast === 'function') showToast('Durch die Persona „Gunnery Sergeant Hartman" erzwungen — bitte zuerst den Antwortstil wechseln.');
+        return;
+      }
       _secretBtn.disabled = true;
       try {
         const cur = await (await fetch('/api/profile')).json();

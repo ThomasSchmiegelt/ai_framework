@@ -129,8 +129,19 @@ const Profile = (() => {
   // (das Backend ignoriert web_search ohnehin; hier für sichtbares Feedback). Der
   // Geheim-Button bleibt dabei unverändert.
   function isHartman() { return String(_data.tone || '').toLowerCase() === 'hartman'; }
+  // Standard-Branding (wird bei Nicht-Hartman wiederhergestellt)
+  const _BRAND_DEFAULT = { wordmark: 'LOCAL AI', title: '🤖 LOCAL AI' };
+  const _BRAND_HARTMAN = { wordmark: '🎖 DRILL SERGEANT', title: '🎖 DRILL SERGEANT' };
   function _applyPersonaLock() {
     const lock = isHartman();
+    const b = lock ? _BRAND_HARTMAN : _BRAND_DEFAULT;
+    // Wortmarke (Seitenleiste), Willkommens-Überschrift und Fenstertitel anpassen
+    const wm = document.getElementById('sidebar-wordmark');
+    if (wm) wm.textContent = b.wordmark;
+    const wt = document.getElementById('welcome-title');
+    if (wt) wt.textContent = b.title;
+    document.title = b.title;
+    // Websuche im Chat sperren (das Backend ignoriert web_search ohnehin)
     const stb = document.getElementById('btn-search-toggle');
     if (stb) {
       if (lock) {
@@ -142,6 +153,8 @@ const Profile = (() => {
         stb.title = 'Websuche aktivieren/deaktivieren';
       }
     }
+    // Geheim-/Lokal-Modus-Badge nachziehen (Hartman erzwingt „an")
+    if (typeof window.__reflectSecret === 'function') window.__reflectSecret();
   }
 
   async function load() {
