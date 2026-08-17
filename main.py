@@ -6012,6 +6012,112 @@ async def presentation_slide_image(req: Request):
     return result
 
 
+# ── Arbeitsablauf im Chat (mehrstufig, Zwischenergebnisse) ────────────────────
+# Der Nutzer gibt nummerierte Schritte ein („1. … 2. …"). Jeder Schritt wird als
+# fokussierte Teilaufgabe ausgeführt; die bisherigen Ergebnisse fließen als
+# Kontext in den nächsten Schritt. Am Ende führt ein Synthese-Schritt alles zu
+# einem Gesamtergebnis zusammen. Rein LLM-basiert (robust auch für kleinere
+# Modelle, kein Werkzeug-Loop). Modellrolle „general", Geheim/Hartman → lokal.
+async def _workflow_generator(body: dict):
+    steps = [str(s).strip() for s in (body.get("steps") or []) if str(s).strip()]
+    steps = steps[:20]
+    goal = str(body.get("goal", "") or "").strip()
+    if not steps:
+        yield _sse({"type": "error", "message": "Keine Schritte angegeben."})
+        return
+    model = _pick_model(body.get("model"), _model_for("general"))
+    _ctx = _profile_num_ctx()
+    _tok = {"in": 0, "out": 0}
+    results = []  # [(step, result)]
+    # Zeichenbudget für den mitgeführten Kontext (an num_ctx gekoppelt).
+    _budget = max(2000, int((_ctx - 800) * 3.0))
+
+    yield _sse({"type": "workflow_start", "count": len(steps)})
+
+    async def _run(sys_prompt: str, user_prompt: str, num_predict: int):
+        async with _model_session(model), httpx.AsyncClient(timeout=600) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": sys_prompt},
+                             {"role": "user", "content": user_prompt}],
+                "options": {"num_ctx": _ctx, "num_predict": num_predict},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+        _c = (_j.get("message", {}) or {}).get("content", "") or ""
+        _c = re.sub(r"<think>.*?</think>", "", _c, flags=re.DOTALL).strip()
+        _ti, _to = _llm_tok(_j)
+        _tok["in"] += _ti
+        _tok["out"] += _to
+        return _c
+
+    try:
+        for i, step in enumerate(steps):
+            yield _sse({"type": "step_start", "index": i, "total": len(steps), "step": step})
+            prior = ""
+            if results:
+                _parts = [f"### Ergebnis Schritt {si + 1} ({s}):\n{r}" for si, (s, r) in enumerate(results)]
+                prior = "\n\n".join(_parts)
+                if len(prior) > _budget:
+                    prior = "…\n" + prior[-_budget:]
+            _sys = ("Du arbeitest einen mehrstufigen Arbeitsablauf ab. Löse NUR den "
+                    "AKTUELLEN Schritt präzise und vollständig und baue dabei auf den "
+                    "bisherigen Ergebnissen auf. Antworte fokussiert auf Deutsch in Markdown, "
+                    "ohne den Schritt bloß zu wiederholen.")
+            if goal:
+                _sys += f"\n\nÜbergeordnetes Ziel des Ablaufs: {goal}"
+            _user = ((f"Bisherige Ergebnisse:\n{prior}\n\n---\n" if prior else "")
+                     + f"AKTUELLER SCHRITT {i + 1}/{len(steps)}: {step}")
+            _res = await _run(_sys, _user, max(300, min(int(_ctx * 0.35), 1500)))
+            results.append((step, _res))
+            yield _sse({"type": "step_done", "index": i, "step": step, "result": _res})
+
+        # Abschluss-Synthese
+        yield _sse({"type": "synthesizing"})
+        _all = "\n\n".join(f"### Schritt {i + 1}: {s}\n{r}" for i, (s, r) in enumerate(results))
+        if len(_all) > _budget:
+            _all = "…\n" + _all[-_budget:]
+        _ssys = ("Du fasst die Ergebnisse eines mehrstufigen Arbeitsablaufs zu EINEM "
+                 "zusammenhängenden, gut strukturierten Gesamtergebnis zusammen (Markdown: "
+                 "## Überschriften, **Fett**, Aufzählungen/Tabellen wo sinnvoll). Führe die "
+                 "Teilergebnisse logisch zusammen, wiederhole nicht stumpf, sondern liefere ein "
+                 "kohärentes Endprodukt und schließe mit einem klaren Fazit ab.")
+        if goal:
+            _ssys += f"\n\nZiel des Ablaufs: {goal}"
+        _suser = f"Schritt-Ergebnisse:\n{_all}\n\n---\nErstelle das zusammenhängende Gesamtergebnis."
+        _final = await _run(_ssys, _suser, max(500, min(int(_ctx * 0.5), 2200)))
+    except httpx.ConnectError:
+        yield _sse({"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"})
+        return
+    except httpx.HTTPStatusError as e:
+        _sc = getattr(e.response, "status_code", 0) or 0
+        if _sc in (502, 503, 504):
+            _m = f"Der Anbieter hat nicht rechtzeitig geantwortet (HTTP {_sc}). Bitte weniger/kürzere Schritte oder ein lokales Modell."
+        else:
+            _m = f"Modell abgelehnt (num_ctx/VRAM?): HTTP {_sc}"
+        yield _sse({"type": "error", "message": _m})
+        return
+    except Exception as e:
+        yield _sse({"type": "error", "message": f"Arbeitsablauf fehlgeschlagen: {e}"})
+        return
+
+    for _i, _w in enumerate(_final.split(" ")):
+        yield _sse({"type": "text", "content": _w + (" " if _i < len(_final.split(' ')) - 1 else "")})
+        await asyncio.sleep(0.003)
+    yield _sse({"type": "done", "tokens": _tok,
+                "results": [{"step": s, "result": r} for s, r in results]})
+
+
+@app.post("/api/workflow")
+async def workflow(req: Request):
+    """Führt einen mehrstufigen Arbeitsablauf aus (SSE). Body: ``{steps:[…], goal?,
+    model?}``. Streamt ``workflow_start``/``step_start``/``step_done``/
+    ``synthesizing``/``text``/``done``/``error``. Token-Label „Arbeitsablauf"."""
+    body = await req.json()
+    return StreamingResponse(_workflow_generator(body), media_type="text/event-stream")
+
+
 @app.get("/api/downloads/{filename}")
 async def download_report(filename: str):
     # only alphanumeric + dot + dash to prevent path traversal

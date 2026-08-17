@@ -3037,6 +3037,18 @@ const Planner = (() => {
     if (typeof switchTab === 'function') switchTab('planner');
   }
 
-  return { init, openPlan };
+  // Öffentliche Übergabe: freien Text (z. B. Ergebnis eines Chat-Arbeitsablaufs)
+  // als Projektbeschreibung in den Planer übernehmen — nutzt denselben Weg wie
+  // „Dokument → Plan" (Text als .txt-Datei) und rendert den abgeleiteten Plan.
+  async function openFromText(text, name) {
+    text = String(text || '').trim();
+    if (!text) { showToast('Kein Text für die Planung'); return; }
+    if (typeof switchTab === 'function') switchTab('planner');
+    const f = new File([text], `${(name || 'arbeitsablauf').replace(/[^\w-]+/g, '_')}.txt`,
+                       { type: 'text/plain' });
+    await _importDocPlan(f);
+  }
+
+  return { init, openPlan, openFromText };
 
 })();

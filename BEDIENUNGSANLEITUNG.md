@@ -232,6 +232,7 @@ Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
 | `/such <Begriff>` · `/suche` · `/finde` · `/search` | **Erweiterte Suche:** die KI erzeugt **alternative Suchbegriffe** (Synonyme, Fach-/Umgangssprache, engl. Begriffe) als anklickbare Chips, durchsucht damit das Web und fasst die Treffer **mit Quellen** zusammen. Hilfreich, wenn man den treffenden Fachbegriff nicht kennt. |
 | `/recherche <Thema>` · `/deep` · `/tief` | **Tiefe Recherche:** fragt zuerst **Suchtiefe** (Anzahl Teilaspekte) und **Umfang** (Wortzahl) ab, zerlegt das Thema dann in mehrere Aspekte, durchsucht **je Aspekt** das Web und schreibt einen **ausführlichen, quellen-gestützten Bericht** der gewünschten Länge. Liefert längere und faktisch belastbarere Antworten. Bei breiten Fakten-/Kauffragen bietet der Chat das **automatisch** an (im Profil abschaltbar). |
 | `/frag <Aufgabe>` | **Rückfragen-Maske:** die KI prüft, ob ihr Infos fehlen, und zeigt bei Bedarf eine **dynamische Eingabemaske** (Text-, Einfach- und Mehrfachauswahl). Deine Antworten werden an die Aufgabe gehängt und dann normal beantwortet. Auch in **Medizin** und **Mathe** verfügbar. |
+| `/workflow 1. … 2. …` · `/ablauf` · `/flow` | **Arbeitsablauf:** gib mehrere **nummerierte Schritte** ein. Die KI arbeitet sie **nacheinander** ab, speichert jedes Zwischenergebnis und nutzt es als Grundlage für den nächsten Schritt; am Ende fasst sie alles zu einem **Gesamtergebnis** zusammen. Jeder Schritt ist zum Aufklappen, darunter Buttons **→ Präsentation** (öffnet das Ergebnis als Folien im Canvas) und **→ Planer** (leitet daraus einen Projektplan ab). Beispiel: `/workflow Ziel: Produktlaunch 1. Zielgruppe beschreiben 2. drei Kernbotschaften ableiten 3. Social-Media-Posts entwerfen`. |
 | `/bild <Beschreibung>` · `/image` | **Bildgenerierung:** erzeugt aus deiner Beschreibung ein Bild (lokaler Stable-Diffusion-Server oder ein API-Modell — siehe unten). Alternativ der **🎨 Bild**-Haken in der Toolbar: die nächste Nachricht wird dann als Bild-Prompt behandelt. |
 | `/bildhelp` · `/imagehelp` | **Geführter Bild-Dialog:** ein Formular fragt **Motiv, Stil, Kameraperspektive, Beleuchtung, Seitenverhältnis** und einen optionalen **Negativ-Prompt** ab und baut daraus den Prompt. |
 | `/dd[N] [Zusatz]` · `/deepdive[N]` | **Deepdive:** vertieft die letzte Antwort mit *N* Folgefragen (ohne Zahl = 5), nacheinander recherchiert & beantwortet. |
@@ -302,6 +303,12 @@ Die KI ruft diese Tools bei Bedarf selbstständig auf:
 Der Tab **🖼️ Canvas** zeigt erzeugte Präsentationen und Tabellen.
 
 - Navigation: **‹** / **›** zwischen Folien, Folienzähler zeigt die Position.
+- **🎨 KI-Bilder für Folien:** neben der Folien-Navigation erzeugen **🎨 Folie**
+  (aktuelle Folie) und **🎨 Alle** (alle Folien) aus dem jeweiligen Folientext ein
+  passendes Bild und stellen die Folie automatisch auf **Bild rechts, Text links**
+  um. Das Bild erscheint im Canvas **und** im PPTX-Export. Vorausgesetzt ist ein
+  im Profil gewähltes **Bildmodell** (lokaler Stable-Diffusion-Server oder API,
+  siehe *Bildgenerierung*); im **Geheim-Modus** nur der lokale Server.
 - Export: **📊 PPTX** bzw. **📋 XLSX** (sofortiger Download).
 - Präsentationen erscheinen im **Design des gewählten Modus** (Farben) mit den
   **im Profil hinterlegten Vorlagen**: Deckblatt-Hintergrund und Kopfzeilen-Banner.

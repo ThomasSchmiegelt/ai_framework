@@ -167,6 +167,18 @@ const Chat = (() => {
       return;
     }
 
+    // Arbeitsablauf: „/workflow" (Aliase /ablauf, /flow) führt die nummerierten
+    // Schritte nacheinander aus, speichert Zwischenergebnisse und präsentiert am
+    // Ende ein Gesamtergebnis (mit Buttons → Präsentation / → Planer).
+    const wf = _parseWorkflow(text);
+    if (wf) {
+      input.value = '';
+      autoResizeTextarea(input);
+      if (wf.steps.length) runWorkflow(wf.steps, wf.goal);
+      else showToast('Bitte nummerierte Schritte angeben, z. B. /workflow 1. … 2. …');
+      return;
+    }
+
     // Rückfragen: „/frag <Aufgabe>" erzeugt eine dynamische Eingabemaske (Text/
     // Auswahl), deren Antworten an die Aufgabe gehängt und normal gesendet werden.
     const fr = _parseFrag(text);
@@ -1705,6 +1717,155 @@ const Chat = (() => {
     }
   }
 
+  // ── /workflow — mehrstufiger Arbeitsablauf im Chat ──────────────────────────
+  // „/workflow" (Aliase /ablauf, /flow) + nummerierte Schritte. Die Schritte
+  // werden nacheinander ausgeführt, Zwischenergebnisse gespeichert und als
+  // Kontext an den nächsten Schritt gegeben; am Ende ein Gesamtergebnis mit
+  // Übergabe-Buttons (→ Präsentation / → Planer).
+  function _parseWorkflow(text) {
+    const m = text.match(/^\/(workflow|ablauf|flow)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    const body = (m[2] || '').trim();
+    const steps = [];
+    let goal = '';
+    // Nummerierte Marker „1." „2)" — inline ODER zeilenweise.
+    const re = /(?:^|\n|\s)(\d{1,2})[.)]\s+/g;
+    const marks = [];
+    let mm;
+    while ((mm = re.exec(body))) marks.push({ start: mm.index, contentStart: mm.index + mm[0].length });
+    if (marks.length) {
+      goal = body.slice(0, marks[0].start).trim();
+      for (let i = 0; i < marks.length; i++) {
+        const end = i + 1 < marks.length ? marks[i + 1].start : body.length;
+        const s = body.slice(marks[i].contentStart, end).trim();
+        if (s) steps.push(s);
+      }
+    } else {
+      // Rückfall: jede nicht-leere Zeile = ein Schritt.
+      body.split('\n').map(x => x.trim()).filter(Boolean).forEach(x => steps.push(x));
+    }
+    return { steps: steps.slice(0, 20), goal };
+  }
+
+  async function runWorkflow(steps, goal) {
+    steps = (steps || []).filter(Boolean);
+    goal = (goal || '').trim();
+    if (!steps.length) { showToast('Keine Schritte angegeben'); return; }
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    const head = '🔧 Arbeitsablauf' + (goal ? ': ' + goal : '') + ` (${steps.length} Schritte)`;
+    appendMessage('user', head + '\n' + steps.map((s, i) => `${i + 1}. ${s}`).join('\n'));
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const logEl = document.createElement('div'); logEl.className = 'research-log'; content.appendChild(logEl);
+    const workingEl = makeWorking('arbeitet Schritte ab'); content.appendChild(workingEl);
+    const stepsEl = document.createElement('div'); content.appendChild(stepsEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    const _log = (t) => { const d = document.createElement('div'); d.className = 'research-log-line'; d.textContent = t; logEl.appendChild(d); scrollToBottom(); };
+
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    const stepResults = [];
+    let answer = '', workingCleared = false;
+    const clearWorking = () => { if (!workingCleared) { workingCleared = true; workingEl.remove(); } };
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/workflow', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({ steps, goal, model }),
+      });
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'workflow_start') {
+            _log('🧭 ' + ev.count + ' Schritte');
+          } else if (ev.type === 'step_start') {
+            _log(`▶ Schritt ${ev.index + 1}/${ev.total}: ${(ev.step || '').slice(0, 80)}`);
+          } else if (ev.type === 'step_done') {
+            stepResults.push({ step: ev.step, result: ev.result });
+            const det = document.createElement('details'); det.className = 'wf-step';
+            const sum = document.createElement('summary');
+            sum.textContent = `✓ Schritt ${ev.index + 1}: ${(ev.step || '').slice(0, 70)}`;
+            det.appendChild(sum);
+            const bd = document.createElement('div'); bd.className = 'wf-step-body';
+            renderMarkdown(bd, ev.result || '');
+            det.appendChild(bd); stepsEl.appendChild(det); scrollToBottom();
+          } else if (ev.type === 'synthesizing') {
+            _log('📝 Gesamtergebnis wird zusammengeführt…');
+          } else if (ev.type === 'text') {
+            clearWorking();
+            answer += ev.content; textEl.textContent = answer; scrollToBottom();
+          } else if (ev.type === 'done') {
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Arbeitsablauf');
+          } else if (ev.type === 'error') {
+            clearWorking();
+            textEl.innerHTML = `<em style="color:#ef4444">Arbeitsablauf fehlgeschlagen: ${escHtml(ev.message || '')}</em>`;
+          }
+        }
+      }
+      if (answer && typeof marked !== 'undefined') {
+        if (window._ensureKatexMarked) window._ensureKatexMarked();
+        textEl.innerHTML = marked.parse(answer, { gfm: true, breaks: true });
+        textEl.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      }
+      // Gesamttext (Schritte + Zusammenführung) für die Übergabe.
+      const combined = (goal ? `# ${goal}\n\n` : '')
+        + stepResults.map((r, i) => `## Schritt ${i + 1}: ${r.step}\n\n${r.result}`).join('\n\n')
+        + (answer ? `\n\n## Gesamtergebnis\n\n${answer}` : '');
+      if (stepResults.length) {
+        const bar = document.createElement('div'); bar.className = 'wf-actions';
+        const bPres = document.createElement('button'); bPres.className = 'wf-action-btn';
+        bPres.textContent = '🖥️ → Präsentation';
+        bPres.onclick = () => _workflowToPresentation(combined);
+        const bPlan = document.createElement('button'); bPlan.className = 'wf-action-btn';
+        bPlan.textContent = '🗂️ → Planer';
+        bPlan.onclick = () => { if (typeof Planner !== 'undefined' && Planner.openFromText) Planner.openFromText(combined, goal || 'Arbeitsablauf'); else showToast('Planer nicht verfügbar'); };
+        bar.appendChild(bPres); bar.appendChild(bPlan); content.appendChild(bar);
+      }
+      if (answer || stepResults.length) {
+        messages.push({ role: 'user', content: head });
+        messages.push({ role: 'assistant', content: combined });
+        loadConversationList();
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') textEl.innerHTML = `<em style="color:#ef4444">Arbeitsablauf fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      clearWorking();
+      abortController = null;
+      isStreaming = false;
+      setBtnSendState(true);
+    }
+  }
+
+  async function _workflowToPresentation(text) {
+    if (!text) { showToast('Kein Ergebnis'); return; }
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    showToast('🖥️ Präsentation wird erstellt…');
+    try {
+      const r = await fetch('/api/presentation/from-text', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, model }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.status);
+      const data = await r.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Arbeitsablauf');
+      delete data.tokens;
+      if (typeof CanvasRenderer !== 'undefined') CanvasRenderer.render(data);
+      if (typeof switchTab === 'function') switchTab('canvas');
+      showToast('✓ Präsentation im Canvas erstellt');
+    } catch (e) { showToast('Präsentation fehlgeschlagen: ' + e.message); }
+  }
+
   // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────
   // „/bildhelp" (Aliase /imagehelp, /imghelp) öffnet den geführten Dialog; „/bild
   // <Beschreibung>" erzeugt direkt. Ein leeres „/bild" öffnet ebenfalls den Dialog.
@@ -2309,6 +2470,7 @@ const Chat = (() => {
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },
+    { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander, Ergebnis → Chat/Präsentation/Planer' },
     { key: '/+',    ins: '/+ ',    cmd: '/+ …',    desc: 'Verbesserungsidee ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/-',    ins: '/- ',    cmd: '/- …',    desc: 'Fehler/Problem ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/',     ins: '/',      cmd: '/<Agent>', desc: 'Agent nur für diese Nachricht (z. B. /datenschutz_berater)', info: true },
