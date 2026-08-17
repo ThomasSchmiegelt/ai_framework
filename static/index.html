@@ -2798,12 +2798,14 @@
         <input type="text" id="profile-sd-url" placeholder="http://127.0.0.1:7860"
           style="margin-top:6px" />
         <span class="planner-muted" style="font-size:11px;display:block;margin-top:4px">Standard =
-          <strong>aus</strong>. <strong>Lokal</strong> = eigener
-          <strong>Stable-Diffusion-WebUI</strong>-Server (AUTOMATIC1111/Forge, mit
-          <code>--api</code> gestartet) unter obiger URL. <strong>API</strong> = OpenAI-kompatibel
-          (<code>dall-e-3</code> / <code>gpt-image-1</code>) eines konfigurierten Anbieters. Im
-          <strong>Geheim-Modus</strong> nur lokal. Nutzung im Chat per 🎨-Haken oder
-          <code>/bild</code> / <code>/bildhelp</code>.</span>
+          <strong>aus</strong>. Die Auswahl listet — genau wie die Rollen-Modelle oben — die Modelle
+          deiner unter <strong>☁ KI-Anbieter</strong> eingetragenen Anbieter (z. B.
+          <code>dall-e-3</code>, <code>gpt-image-1</code> oder <code>z-image-turbo</code>). Den
+          <strong>Anbieter selbst (Base-URL + API-Schlüssel) trägst du dort ein</strong> — hier wählst
+          du nur das Modell. Das obige URL-Feld ist <strong>ausschließlich</strong> für den
+          <strong>lokalen</strong> Stable-Diffusion-WebUI-Server (AUTOMATIC1111/Forge, mit
+          <code>--api</code> gestartet). Im <strong>Geheim-Modus</strong> sind API-Modelle gesperrt
+          (nur lokal). Nutzung im Chat per 🎨-Haken oder <code>/bild</code> / <code>/bildhelp</code>.</span>
       </div>
     </div>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
@@ -2853,7 +2855,8 @@
     <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
       Optional zusätzlich zu lokalem Ollama einen OpenAI-kompatiblen Anbieter
       (OpenRouter, OpenAI, Groq, Together …) einbinden. Dessen Modelle erscheinen oben
-      in den Rollen-Listen. <strong>Der API-Schlüssel bleibt lokal</strong> (nicht in
+      in den Rollen-Listen, bei der Sprachausgabe (TTS) <strong>und der Bildgenerierung</strong>
+      (z. B. <code>z-image-turbo</code>). <strong>Der API-Schlüssel bleibt lokal</strong> (nicht in
       Backup/Git). Hinweis: Remote-Aufrufe verlassen den Rechner und belegen kein VRAM.
     </p>
     <div id="provider-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>

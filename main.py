@@ -4204,13 +4204,24 @@ async def image_config():
         {"value": "local::sd", "label": "Lokal · Stable Diffusion WebUI"},
     ]
     if not _secret_local():
+        # Einheitlich wie die Rollen-Modelle: die unter „☁ KI-Anbieter" konfigurierten
+        # Anbieter samt ihrer Modell-Liste (z. B. z-image-turbo). Der Anbieter (URL +
+        # Schlüssel) wird dort eingetragen; hier wird nur das Modell gewählt.
         for p in _llm.load_providers():
             pid = p.get("id")
             if not pid:
                 continue
             pname = p.get("name") or pid
+            seen = set()
+            for mdl in (p.get("models") or []):
+                val = f"{pid}::{mdl}"
+                seen.add(val)
+                options.append({"value": val, "label": f"{pname} · {mdl}"})
+            # Gängige Bildmodelle zusätzlich anbieten, falls der Anbieter sie nicht listet.
             for im in ("dall-e-3", "gpt-image-1"):
-                options.append({"value": f"{pid}::{im}", "label": f"{pname} · {im}"})
+                val = f"{pid}::{im}"
+                if val not in seen:
+                    options.append({"value": val, "label": f"{pname} · {im}"})
     # aktuelle Auswahl immer wählbar halten
     if m and not any(o["value"] == m for o in options):
         options.append({"value": m, "label": m})
