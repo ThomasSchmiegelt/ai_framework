@@ -238,6 +238,8 @@ const Profile = (() => {
     if (researchLocalEl) researchLocalEl.checked = !!_data.research_local_only;  // Standard: aus
     const chatAgentEl = document.getElementById('profile-chat-agent');
     if (chatAgentEl) chatAgentEl.checked = !!_data.chat_code_interpreter;  // Standard: aus
+    const deepResEl = document.getElementById('profile-deep-research');
+    if (deepResEl) deepResEl.checked = _data.deep_research_offer !== false;  // Standard: an
     const confApiEl = document.getElementById('profile-confidential-api');
     if (confApiEl) confApiEl.checked = !!_data.confidential_allow_api;  // Standard: aus
     const localOnlyEl = document.getElementById('profile-local-only');
@@ -329,6 +331,7 @@ const Profile = (() => {
       math_autoroute: document.getElementById('profile-math-autoroute')?.checked !== false,
       research_local_only: !!document.getElementById('profile-research-local')?.checked,
       chat_code_interpreter: !!document.getElementById('profile-chat-agent')?.checked,
+      deep_research_offer: document.getElementById('profile-deep-research')?.checked !== false,
       confidential_allow_api: !!document.getElementById('profile-confidential-api')?.checked,
       local_only_mode: !!document.getElementById('profile-local-only')?.checked,
       model_general:  document.getElementById('profile-model-general')?.value || '',

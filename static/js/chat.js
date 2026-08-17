@@ -156,6 +156,17 @@ const Chat = (() => {
       return;
     }
 
+    // Tiefe Recherche: „/recherche <Thema>" (Aliase /deep, /tief) öffnet die Rückfrage
+    // (Tiefe + Umfang) und startet dann die mehrstufige Web-Recherche.
+    const dr = _parseDeepResearch(text);
+    if (dr) {
+      input.value = '';
+      autoResizeTextarea(input);
+      if (dr.topic) _openResearchForm(dr.topic);
+      else showToast('Bitte nach „/recherche" ein Thema angeben');
+      return;
+    }
+
     // Rückfragen: „/frag <Aufgabe>" erzeugt eine dynamische Eingabemaske (Text/
     // Auswahl), deren Antworten an die Aufgabe gehängt und normal gesendet werden.
     const fr = _parseFrag(text);
@@ -165,6 +176,17 @@ const Chat = (() => {
       runFrag(fr.task);
       return;
     }
+
+    // Automatisches Angebot einer tiefen Recherche bei breiten Fakten-/Recherchefragen
+    // (Profil-Häkchen, Web erlaubt, kein Agent/keine Datei). Fragt Tiefe+Umfang ab.
+    if (!_bypassResearchOffer && pendingFiles.length === 0 && _researchOfferEnabled()
+        && _looksLikeResearch(text)) {
+      input.value = '';
+      autoResizeTextarea(input);
+      _offerResearch(text);
+      return;
+    }
+    _bypassResearchOffer = false;
 
     // Slash-Agent: führendes „/Name" wählt nur für DIESE Nachricht einen Agenten
     let slashAgent = null;
@@ -1508,6 +1530,179 @@ const Chat = (() => {
     }
   }
 
+  // ── Tiefe Recherche (gesteuert: Tiefe + Umfang, mit Auto-Angebot) ───────────
+  let _bypassResearchOffer = false;
+
+  function _parseDeepResearch(text) {
+    const m = text.match(/^\/(recherche|deepresearch|deep|tief)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { topic: (m[2] || '').trim() };
+  }
+
+  function _researchOfferEnabled() {
+    try {
+      const p = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}) : {};
+      if (p.deep_research_offer === false) return false;
+      // Im Hartman-/Ausbildungsmodus ist Web gesperrt → kein Angebot
+      if (String(p.tone || '').toLowerCase() === 'hartman') return false;
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // Heuristik: sieht die Nachricht nach einer breiten Recherche-/Fakten-/Kauffrage aus?
+  const _RESEARCH_RE = /(alles über|recherchier|ausführlich|informationen (über|zu)|erzähl.*über|was wei(ß|ss)t du über|vergleich|kaufberatung|welche.*gibt es|worauf.*achten|suche (einen|eine|ein|nach)|finde (einen|eine|ein)|gebrauchte|gebrauchten|test(bericht)?|erfahrungen mit)/i;
+  function _looksLikeResearch(text) {
+    const t = (text || '').trim();
+    if (t.length < 12 || t.startsWith('/')) return false;
+    const words = t.split(/\s+/).length;
+    if (words < 3) return false;
+    return _RESEARCH_RE.test(t);
+  }
+
+  // Dezentes Angebot statt sofortiger Normalantwort
+  function _offerResearch(topic) {
+    showWelcome(false);
+    const row = appendMessage('assistant', '', [], true);
+    const c = row.querySelector('.bubble-content');
+    const box = document.createElement('div');
+    box.className = 'research-offer';
+    box.innerHTML = '🔬 Möchtest du dazu eine <b>ausführliche Recherche</b> mit mehreren Quellen '
+      + '(Tiefe &amp; Umfang wählbar)? '
+      + '<button class="research-offer-yes">Tiefe &amp; Umfang wählen</button> '
+      + '<button class="research-offer-no">Normal antworten</button>';
+    c.appendChild(box);
+    box.querySelector('.research-offer-yes').addEventListener('click', () => { row.remove(); _openResearchForm(topic); });
+    box.querySelector('.research-offer-no').addEventListener('click', () => {
+      row.remove();
+      const inp = document.getElementById('message-input');
+      inp.value = topic;
+      _bypassResearchOffer = true;
+      sendMessage();
+    });
+    scrollToBottom();
+  }
+
+  // Rückfrage-Formular: Tiefe (Aspekte) + Umfang (Wörter) + optionaler Fokus
+  const _RES_DEPTH = [{ label: 'kurz', n: 4 }, { label: 'mittel', n: 8 }, { label: 'tief', n: 12 }];
+  const _RES_WORDS = [{ label: 'kompakt (~400)', n: 400 }, { label: 'ausführlich (~1000)', n: 1000 }, { label: 'umfassend (~2500)', n: 2500 }];
+  let _resFormWired = false;
+  function _resChips(host, items, defIdx) {
+    host.innerHTML = '';
+    items.forEach((it, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'bild-chip'; b.textContent = it.label; b.dataset.n = it.n;
+      if (i === defIdx) b.classList.add('active');
+      b.addEventListener('click', () => { host.querySelectorAll('.bild-chip').forEach(x => x.classList.remove('active')); b.classList.add('active'); });
+      host.appendChild(b);
+    });
+  }
+  function _resSelected(host) { const a = host.querySelector('.bild-chip.active'); return a ? +a.dataset.n : 0; }
+
+  function _openResearchForm(topic) {
+    const ov = document.getElementById('research-ask');
+    if (!ov) { runDeepResearch(topic, { depth: 8, words: 1000 }); return; }
+    _resChips(document.getElementById('res-depth'), _RES_DEPTH, 1);
+    _resChips(document.getElementById('res-words'), _RES_WORDS, 1);
+    const topicEl = document.getElementById('res-topic');
+    if (topicEl) topicEl.textContent = topic;
+    document.getElementById('res-focus').value = '';
+    if (!_resFormWired) {
+      _resFormWired = true;
+      const close = () => { ov.style.display = 'none'; };
+      document.getElementById('res-close').addEventListener('click', close);
+      document.getElementById('res-cancel').addEventListener('click', close);
+      ov.addEventListener('click', e => { if (e.target === ov) close(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && ov.style.display !== 'none') close(); });
+      document.getElementById('res-go').addEventListener('click', () => {
+        const depth = _resSelected(document.getElementById('res-depth')) || 8;
+        const words = _resSelected(document.getElementById('res-words')) || 1000;
+        const focus = document.getElementById('res-focus').value.trim();
+        const t = (document.getElementById('res-topic')?.textContent || '').trim();
+        close();
+        runDeepResearch(t, { depth, words, focus });
+      });
+    }
+    ov.style.display = 'flex';
+  }
+
+  async function runDeepResearch(topic, opts) {
+    topic = (topic || '').trim();
+    opts = opts || {};
+    if (!topic) { showToast('Kein Thema für die Recherche'); return; }
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    appendMessage('user', '🔬 Recherche: ' + topic);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const logEl = document.createElement('div'); logEl.className = 'research-log'; content.appendChild(logEl);
+    const workingEl = makeWorking('recherchiert'); content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    const _log = (t) => { const d = document.createElement('div'); d.className = 'research-log-line'; d.textContent = t; logEl.appendChild(d); scrollToBottom(); };
+
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    let answer = '', workingCleared = false;
+    const clearWorking = () => { if (!workingCleared) { workingCleared = true; workingEl.remove(); } };
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/deepresearch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({ topic, depth: opts.depth || 8, words: opts.words || 1000, focus: opts.focus || '', model }),
+      });
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'aspects') {
+            _log('🧭 ' + (ev.aspects || []).length + ' Aspekte: ' + (ev.aspects || []).join(' · '));
+          } else if (ev.type === 'search_done') {
+            _log('🔎 recherchiert: ' + ev.aspect);
+          } else if (ev.type === 'synthesizing') {
+            _log('📝 Bericht wird geschrieben…');
+          } else if (ev.type === 'text') {
+            clearWorking();
+            answer += ev.content; textEl.textContent = answer; scrollToBottom();
+          } else if (ev.type === 'sources') {
+            const flat = [];
+            for (const grp of (ev.data || [])) for (const s of (grp.sources || [])) flat.push(s);
+            _renderSearchSources(content, flat);
+          } else if (ev.type === 'done') {
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Tiefe Recherche');
+          } else if (ev.type === 'error') {
+            clearWorking();
+            textEl.innerHTML = `<em style="color:#ef4444">Recherche fehlgeschlagen: ${escHtml(ev.message || '')}</em>`;
+          }
+        }
+      }
+      if (answer && typeof marked !== 'undefined') {
+        if (window._ensureKatexMarked) window._ensureKatexMarked();
+        textEl.innerHTML = marked.parse(answer, { gfm: true, breaks: true });
+        textEl.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      }
+      if (answer) {
+        messages.push({ role: 'user', content: '🔬 Recherche: ' + topic });
+        messages.push({ role: 'assistant', content: answer });
+        loadConversationList();
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') textEl.innerHTML = `<em style="color:#ef4444">Recherche fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      clearWorking();
+      abortController = null;
+      isStreaming = false;
+      setBtnSendState(true);
+    }
+  }
+
   // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────
   // „/bildhelp" (Aliase /imagehelp, /imghelp) öffnet den geführten Dialog; „/bild
   // <Beschreibung>" erzeugt direkt. Ein leeres „/bild" öffnet ebenfalls den Dialog.
@@ -2105,6 +2300,7 @@ const Chat = (() => {
   // verfügbaren Slash-Befehle. Auswahl per Klick, Tab oder ↑/↓+Tab; Esc schließt.
   const SLASH_COMMANDS = [
     { key: '/such', ins: '/such ', cmd: '/such …', desc: 'Alternative Suchbegriffe finden + Web durchsuchen (auch /suche, /finde)' },
+    { key: '/recherche', ins: '/recherche ', cmd: '/recherche …', desc: 'Tiefe Recherche: mehrere Aspekte im Web, steuerbare Tiefe & Länge (auch /deep, /tief)' },
     { key: '/frag', ins: '/frag ', cmd: '/frag …', desc: 'Rückfragen-Maske: fehlende Infos per Formular ergänzen, dann antworten' },
     { key: '/bild', ins: '/bild ', cmd: '/bild …', desc: 'Bild aus Beschreibung erzeugen (lokal SD-WebUI oder API)' },
     { key: '/bildhelp', ins: '/bildhelp', cmd: '/bildhelp', desc: 'Geführter Bild-Dialog: Motiv, Stil, Perspektive, Beleuchtung, Format' },

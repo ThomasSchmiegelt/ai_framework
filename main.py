@@ -1646,6 +1646,152 @@ async def _research_generator(request: ResearchRequest):
     yield _sse({"type": "done", "tokens": {"in": _r_ti, "out": _r_to}})
 
 
+# ── Tiefe Recherche (Chat): Thema → automatische Teilaspekte → Websuche je Aspekt →
+# quellen-gestützter Bericht mit steuerbarer Tiefe (Aspektzahl) und Länge (Wortzahl).
+# Nutzt dieselben Bausteine wie /api/research (search_with_sources + Synthese), leitet
+# die Aspekte aber selbst aus dem Thema ab. Web-Gate + „Web-Recherche lokal" gelten.
+
+class DeepResearchRequest(BaseModel):
+    topic: str
+    depth: int = 6
+    words: int = 1000
+    focus: Optional[str] = None
+    model: Optional[str] = None
+
+
+@app.post("/api/deepresearch")
+async def deep_research(request: DeepResearchRequest):
+    return StreamingResponse(
+        _deepresearch_generator(request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _deepresearch_generator(request: DeepResearchRequest):
+    import re
+    from tools.search import search_with_sources
+
+    topic = (request.topic or "").strip()
+    if not topic:
+        yield _sse({"type": "error", "message": "Kein Thema angegeben."})
+        return
+    if not _web_search_allowed():
+        yield _sse({"type": "error", "message": "Im aktuellen Modus ist die Websuche gesperrt "
+                                                 "(z. B. Ausbildungs-/Hartman-Modus) — Tiefe "
+                                                 "Recherche nicht möglich."})
+        return
+    depth = max(3, min(int(request.depth or 6), 12))
+    target_words = max(200, min(int(request.words or 1000), 4000))
+    focus = (request.focus or "").strip()
+
+    _r_model, _r_err = await _research_model(request.model)
+    if _r_err:
+        yield _sse({"type": "error", "message": _r_err})
+        return
+
+    _tok = {"in": 0, "out": 0}
+
+    # 1) Teilaspekte automatisch ableiten (robustes JSON)
+    _focus_line = f"\nSchwerpunkt/Fokus: {focus}" if focus else ""
+    _aspect_prompt = (
+        f"Thema: \"{topic}\"{_focus_line}\n\n"
+        f"Zerlege das Thema in genau {depth} prägnante, sich ergänzende Teilaspekte/Unterfragen "
+        f"für eine gründliche Web-Recherche (je 2–6 Wörter, deutsch, ohne Nummerierung).\n"
+        f'Antworte NUR mit JSON: {{"aspects":["…","…"]}}.'
+    )
+    aspects: list = []
+    try:
+        async with _model_session(_r_model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": _r_model, "think": False, "stream": False, "format": "json",
+                "messages": [{"role": "user", "content": _aspect_prompt}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _aj = resp.json()
+        _ti, _to = _llm_tok(_aj)
+        _tok["in"] += _ti
+        _tok["out"] += _to
+        _d = _parse_llm_json(_aj.get("message", {}).get("content", "")) or {}
+        aspects = [str(a).strip() for a in (_d.get("aspects") or []) if str(a).strip()][:depth]
+    except httpx.ConnectError:
+        yield _sse({"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"})
+        return
+    except Exception:
+        aspects = []
+    if not aspects:
+        aspects = ["Überblick", "technische Daten", "Geschichte / Hintergrund",
+                   "Varianten / Modelle", "Preise / Markt", "Besonderheiten / Bewertung",
+                   "Vor- und Nachteile", "Alternativen"][:depth]
+    yield _sse({"type": "aspects", "aspects": aspects, "topic": topic})
+
+    # 2) je Aspekt Websuche (parallel)
+    tasks = [search_with_sources(f"{topic} {a}", 5) for a in aspects]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    aspect_data = []
+    all_sources = []
+    for a, r in zip(aspects, raw_results):
+        if isinstance(r, Exception):
+            sources, text = [], f"Suchfehler: {r}"
+        else:
+            sources, text = r
+        yield _sse({"type": "search_done", "aspect": a})
+        aspect_data.append((a, text))
+        all_sources.append({"aspect": a, "sources": sources})
+    yield _sse({"type": "sources", "data": all_sources})
+    yield _sse({"type": "synthesizing"})
+
+    # 3) quellen-gestützte Synthese mit Längenziel + Anti-Halluzinations-Auflage
+    _parts = [f"Thema: {topic}\n"]
+    if focus:
+        _parts.append(f"Schwerpunkt: {focus}\n")
+    for a, t in aspect_data:
+        _parts.append(f"### Suchergebnisse – {a}\n{t[:2500]}\n")
+    _synth = "\n".join(_parts) + (
+        f"\n\nSchreibe daraus einen AUSFÜHRLICHEN, gut strukturierten Recherchebericht über "
+        f"**{topic}** von **ca. {target_words} Wörtern** auf Deutsch (Markdown: ## Überschriften, "
+        f"**Fett**, Aufzählungen, bei Kennwerten gern eine Tabelle). Gliederung: kurze Übersicht, "
+        f"je ein Abschnitt pro Aspekt, abschließend ein Fazit. WICHTIG: Stütze JEDE konkrete "
+        f"Angabe (Zahlen, technische Daten, Baujahre, Preise, Eigennamen) AUSSCHLIESSLICH auf die "
+        f"obigen Suchergebnisse. Ist etwas nicht belegt oder widersprüchlich, kennzeichne es "
+        f"ausdrücklich als unsicher — erfinde nichts."
+    )
+    try:
+        _sys = "\n\n".join(p for p in (_SCIENCE_PROMPT,
+                                       _augment_prefix(topic + " " + " ".join(a for a, _ in aspect_data))) if p)
+        _msgs = ([{"role": "system", "content": _sys}] if _sys else []) + \
+                [{"role": "user", "content": _synth}]
+        async with _model_session(_r_model), httpx.AsyncClient(timeout=600) as client:
+            resp = await _llm.chat(client, {
+                "model": _r_model, "think": False, "stream": False,
+                "messages": _msgs, "options": {"num_ctx": _profile_num_ctx()},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+    except httpx.ConnectError:
+        yield _sse({"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"})
+        return
+    except httpx.HTTPStatusError as e:
+        yield _sse({"type": "error", "message": f"Modell abgelehnt (num_ctx/VRAM?): HTTP {e.response.status_code}"})
+        return
+    except Exception as e:
+        yield _sse({"type": "error", "message": f"Synthese fehlgeschlagen: {e}"})
+        return
+
+    content = (_j.get("message", {}) or {}).get("content", "") or ""
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    _ti, _to = _llm_tok(_j)
+    _tok["in"] += _ti
+    _tok["out"] += _to
+    _words = content.split(" ")
+    for _i, _w in enumerate(_words):
+        yield _sse({"type": "text", "content": _w + (" " if _i < len(_words) - 1 else "")})
+        await asyncio.sleep(0.003)
+    yield _sse({"type": "done", "tokens": _tok})
+
+
 # ── Erweiterte Suche („/such"): alternative Suchbegriffe + Websuche + Zusammenfassung ──
 # Der Nutzer kennt oft den treffenden (Fach-)Begriff nicht. Diese Funktion lässt das
 # LLM alternative Suchbegriffe für dasselbe Anliegen erzeugen (Synonyme, Fach-/
@@ -9370,6 +9516,9 @@ async def save_profile(req: Request):
     # Erweiterte Chat-Werkzeuge: Code-Interpreter (run_python) + autonome Web-Recherche
     # im Chat-Werkzeug-Loop (Standard: aus — kleine Modelle sind damit überfordert)
     profile["chat_code_interpreter"] = bool(body.get("chat_code_interpreter", False))
+    # Automatisches Angebot einer tiefen Recherche bei breiten Fakten-/Rechercheanfragen
+    # (rein Frontend-Steuerung; Standard: an)
+    profile["deep_research_offer"] = bool(body.get("deep_research_offer", True))
     # Vertrauliche Auswertungen (Verzeichnis-Analyse, Postfach) dürfen API-Modelle
     # nutzen, wenn explizit eines gewählt ist (Standard: aus — alles bleibt lokal)
     profile["confidential_allow_api"] = bool(body.get("confidential_allow_api", False))
