@@ -698,8 +698,92 @@ const CanvasRenderer = (() => {
     area.appendChild(container);
   }
 
+  // ── KI-Bilder für Folien erzeugen ──────────────────────────────────
+  // Leitet aus dem Folientext einen Bild-Prompt ab, erzeugt ein Bild über das
+  // im Profil gewählte Bildmodell (lokal SD-WebUI / API) und hängt es als
+  // image_right an die Folie (Layout two-column) — Canvas UND PPTX rendern das.
+  let _imgBusy = false;
+
+  function _slideTextFields(slide) {
+    let bullets = Array.isArray(slide.bullets) ? slide.bullets.slice() : [];
+    if (!bullets.length && slide.left) bullets = slide.left.split('\n').filter(Boolean);
+    return { title: slide.title || '', bullets, content: slide.content || slide.subtitle || '' };
+  }
+
+  async function _makeSlideImage(slide) {
+    const f = _slideTextFields(slide);
+    const preset = Profile && Profile.imageSize ? Profile.imageSize() : 'square';
+    const resp = await fetch('/api/presentation/slide-image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: f.title, bullets: f.bullets, content: f.content, preset }),
+    });
+    if (!resp.ok) {
+      let msg = 'HTTP ' + resp.status;
+      try { const e = await resp.json(); if (e.detail) msg = e.detail; } catch (_) {}
+      throw new Error(msg);
+    }
+    const data = await resp.json();
+    if (data.tokens && typeof TokenMeter !== 'undefined')
+      TokenMeter.add(data.tokens, 'Präsentationsbild');
+    // Text in die linke Spalte übernehmen, Bild rechts, Layout umstellen.
+    if (!slide.left) {
+      slide.left = f.bullets.length ? f.bullets.join('\n') : f.content;
+    }
+    slide.image_right = data.image;
+    slide.image = data.image;     // Persistenz/Exporter-Rückfall
+    slide.layout = 'two-column';
+    return data;
+  }
+
+  async function generateSlideImage() {
+    if (_imgBusy) return;
+    if (!currentData || currentData.type !== 'presentation') {
+      if (typeof showToast === 'function') showToast('Keine Präsentation im Canvas.');
+      return;
+    }
+    const slide = currentData.slides[currentSlide];
+    if (!slide) return;
+    _imgBusy = true;
+    if (typeof showToast === 'function') showToast(`🎨 Bild für Folie ${currentSlide + 1} wird erzeugt…`);
+    try {
+      await _makeSlideImage(slide);
+      rerender();
+      if (_onChange) _onChange(currentData);
+      if (typeof showToast === 'function') showToast(`✓ Bild für Folie ${currentSlide + 1} erstellt.`);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Bild fehlgeschlagen: ' + e.message);
+    } finally { _imgBusy = false; }
+  }
+
+  async function generateAllImages() {
+    if (_imgBusy) return;
+    if (!currentData || currentData.type !== 'presentation') {
+      if (typeof showToast === 'function') showToast('Keine Präsentation im Canvas.');
+      return;
+    }
+    const slides = currentData.slides || [];
+    _imgBusy = true;
+    let ok = 0, fail = 0;
+    for (let i = 0; i < slides.length; i++) {
+      if (typeof showToast === 'function') showToast(`🎨 Bild ${i + 1}/${slides.length} …`);
+      try { await _makeSlideImage(slides[i]); ok++; goToSlide(i); }
+      catch (e) {
+        fail++;
+        if (typeof showToast === 'function') showToast(`Folie ${i + 1}: ${e.message}`);
+        // Bei Konfigurations-/Geheim-Fehlern (kein Bildmodell) abbrechen — sonst N gleiche Fehler.
+        if (/konfiguriert|Geheim|SD-WebUI|400|409/.test(e.message)) break;
+      }
+    }
+    rerender();
+    if (_onChange) _onChange(currentData);
+    _imgBusy = false;
+    if (typeof showToast === 'function')
+      showToast(`Fertig: ${ok} Bild(er) erzeugt${fail ? `, ${fail} fehlgeschlagen` : ''}.`);
+  }
+
   return {
     render, nextSlide, prevSlide, getCurrentData,
+    generateSlideImage, generateAllImages,
     // Editor-API
     setOnChange, getEditRegions, getCanvasEl, getDims,
     getCurrentSlide, getCurrentSlideIndex, goToSlide,

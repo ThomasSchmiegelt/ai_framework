@@ -5930,6 +5930,88 @@ async def presentation_from_text(req: Request):
     return data
 
 
+async def _slide_image_prompt(title: str, bullets: list, content: str,
+                              model: str, style: str = "") -> tuple:
+    """Leitet aus dem Folientext EINEN kompakten, visuellen Bild-Prompt ab
+    (ein kurzer LLM-Aufruf; robuster deterministischer Rückfall). Der Prompt
+    beschreibt eine *Szene/Illustration* zum Folienthema – KEIN Text-im-Bild,
+    keine Aufzählung. Token-sparsam. Gibt ``(prompt, tok_in, tok_out)`` zurück.
+
+    Geheim-/Hartman-Modus: ``model`` ist bereits lokal gecoerct (Aufrufer nutzt
+    ``_model_for('general')``), daher rein lokal."""
+    _txt = " · ".join([str(title or "")] +
+                      [str(b) for b in (bullets or [])] +
+                      ([str(content)] if content else [])).strip(" ·")
+    _style = str(style or "").strip()
+    # Deterministischer Rückfall (falls LLM scheitert / kein Modell): Thema + Stil.
+    _fallback = (f"{title or _txt[:80]}, professionelle Illustration"
+                 + (f", {_style}" if _style else ", moderner Business-Stil")
+                 + ", hochwertig, keine Schrift, kein Text").strip()
+    if not model or not _txt:
+        return _fallback, 0, 0
+    _sys = ("Du bist Prompt-Designer für ein Text-zu-Bild-Modell. Formuliere aus "
+            "dem Folieninhalt EINEN einzigen, bildhaften englischen ODER deutschen "
+            "Prompt (max. ~40 Wörter) für EIN illustratives Bild zur Folie: eine "
+            "konkrete Szene/Metapher/Illustration, KEINE Aufzählung, KEIN Text im "
+            "Bild. Nur den Prompt ausgeben, ohne Anführungszeichen."
+            + (f" Stil: {_style}." if _style else ""))
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": _sys},
+                             {"role": "user", "content": _txt[:1200]}],
+                "options": {"num_ctx": _profile_num_ctx(), "num_predict": 120},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+        _p = (_j.get("message", {}) or {}).get("content", "") or ""
+        _p = re.sub(r"<think>.*?</think>", "", _p, flags=re.DOTALL).strip().strip('"').strip()
+        _ti, _to = _llm_tok(_j)
+        if _p and len(_p) > 8:
+            if _style and _style.lower() not in _p.lower():
+                _p = f"{_p}, {_style}"
+            return _p[:600], _ti, _to
+        return _fallback, _ti, _to
+    except Exception:
+        return _fallback, 0, 0
+
+
+@app.post("/api/presentation/slide-image")
+async def presentation_slide_image(req: Request):
+    """Erzeugt EIN KI-Bild für eine Präsentationsfolie: leitet aus dem Folientext
+    einen Bild-Prompt ab und ruft die konfigurierte Bildgenerierung (lokal SD-WebUI
+    oder API-Bildmodell). Antwort: ``{image, prompt}`` (data-URI). Frontend setzt es
+    als ``image_right`` + Layout ``two-column``. Geheim-/Hartman-Modus: nur lokal
+    (siehe ``_generate_image_core``, sonst 409). Bild ≠ Token-Strom, aber die
+    Prompt-Ableitung meldet Tokens im Feld ``tokens`` (Label „Präsentationsbild")."""
+    body = await req.json()
+    title = str(body.get("title", "") or "")
+    bullets = body.get("bullets") or []
+    if isinstance(bullets, str):
+        bullets = [b for b in bullets.split("\n") if b.strip()]
+    content = str(body.get("content", "") or "")
+    preset = str(body.get("preset", "square") or "square")
+    style = str(body.get("style", "") or "")
+    given = str(body.get("prompt", "") or "").strip()
+
+    _tok = {"in": 0, "out": 0}
+    if given:
+        prompt = given
+    else:
+        # Prompt-Ableitung mit lokal-gecoerctem Textmodell (Geheim/Hartman-fest).
+        _pm = _pick_model(_model_for("general"))
+        prompt, _ti, _to = await _slide_image_prompt(title, bullets, content, _pm, style)
+        _tok["in"] += _ti
+        _tok["out"] += _to
+
+    result = await _generate_image_core(prompt, "", preset, str(body.get("model", "") or ""))
+    result["prompt"] = prompt
+    result["tokens"] = _tok
+    return result
+
+
 @app.get("/api/downloads/{filename}")
 async def download_report(filename: str):
     # only alphanumeric + dot + dash to prevent path traversal

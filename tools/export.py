@@ -433,7 +433,7 @@ def to_pptx(data: dict) -> Path:
 
                 left  = slide_data.get("left")
                 right = slide_data.get("right")
-                img_r = slide_data.get("image_right")
+                img_r = slide_data.get("image_right") or slide_data.get("image")
 
                 if left and (right or img_r):
                     # Zweispaltig
@@ -448,6 +448,16 @@ def to_pptx(data: dict) -> Path:
                         _add_bullets(slide, _to_lines(right),
                                      Inches(7.1), body_top, Inches(5.9), body_h,
                                      C_DEEP, C_GRAY)
+                elif img_r and bullets:
+                    # KI-Bild rechts, Aufzählung links (Layout two-column)
+                    _add_bullets(slide, bullets,
+                                 Inches(0.4), body_top, Inches(5.9), body_h,
+                                 C_DARK, C_GRAY)
+                    _embed_b64_image(slide, img_r,
+                                     Inches(7.1), body_top, Inches(5.8), body_h)
+                elif img_r:
+                    _embed_b64_image(slide, img_r,
+                                     Inches(2.5), body_top, Inches(8.3), body_h)
                 elif bullets:
                     _add_bullets(slide, bullets,
                                  Inches(0.6), body_top, Inches(12.13), body_h,
