@@ -5,7 +5,7 @@
 // WICHTIG: Cache-Version bei jedem Release anheben — der Browser erkennt die
 // geänderte sw.js, aktiviert sie sofort (skipWaiting) und löscht alte Caches,
 // damit Updates statischer Dateien ohne Hard-Reload durchschlagen.
-const CACHE = 'localai-v23';
+const CACHE = 'localai-v24';
 
 self.addEventListener('install', () => self.skipWaiting());
 

@@ -219,6 +219,12 @@ const Chat = (() => {
     if (slashAgent) insertAgentNote(bubbleContent, textEl, slashAgent);
     let fullText = '';
 
+    // Sichtbare „arbeitet…"-Anzeige (Sanduhr), bis der erste Inhalt kommt
+    const workingEl = makeWorking('arbeitet');
+    bubbleContent.insertBefore(workingEl, textEl);
+    let _workingCleared = false;
+    const clearWorking = () => { if (!_workingCleared) { _workingCleared = true; workingEl.remove(); } };
+
     // Tool-Status-Element
     let toolStatusEl = null;
 
@@ -259,6 +265,8 @@ const Chat = (() => {
           try {
             const event = JSON.parse(line.slice(6));
             handleStreamEvent(event, textEl, fullText, (t) => { fullText = t; });
+            // Sobald echter Inhalt kommt, die „arbeitet…"-Anzeige entfernen
+            if (['text', 'image', 'map', 'canvas', 'diagram', 'done', 'error'].includes(event.type)) clearWorking();
             if (event.type === 'tool_start') {
               toolStatusEl = showToolStatus(assistantRow, event.tool, event.args);
             } else if (event.type === 'tool_done') {
@@ -292,6 +300,7 @@ const Chat = (() => {
         textEl.innerHTML = `<em style="color:#ef4444">Fehler: ${e.message}</em>`;
       }
     }
+    clearWorking();
 
     // Cursor entfernen, Markdown rendern (nur das Textelement, Medien bleiben erhalten)
     const cursor = textEl.querySelector('.cursor');
@@ -497,6 +506,15 @@ const Chat = (() => {
     container.appendChild(card);
     _renderMermaid(diagramEl, data.definition);
     scrollToBottom();
+  }
+
+  // Sichtbare „arbeitet…"-Anzeige (Sanduhr + Spinner + laufende Punkte) für Chat & Bilderstellung
+  function makeWorking(label) {
+    const el = document.createElement('div');
+    el.className = 'chat-working';
+    el.innerHTML = `<span class="hourglass">⏳</span><span class="spinner"></span>`
+      + `<span>${escHtml(label || 'arbeitet')}</span><span class="cw-dots"></span>`;
+    return el;
   }
 
   function showToolStatus(row, toolName, args) {
@@ -1520,7 +1538,7 @@ const Chat = (() => {
     const content = row.querySelector('.bubble-content');
     const textEl = document.createElement('div');
     textEl.className = 'bubble-text';
-    textEl.innerHTML = '<em>🎨 Bild wird erzeugt… (das kann etwas dauern)</em>';
+    textEl.appendChild(makeWorking('🎨 Bild wird erzeugt (das kann etwas dauern)'));
     content.appendChild(textEl);
     scrollToBottom();
 
