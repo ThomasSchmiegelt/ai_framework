@@ -1647,6 +1647,21 @@ vorgeben. Beispielcode hinterlegst du beim Agenten (Tab **🤖 Agenten** → Fel
 **Beispielcode**). Agenten der Kategorie *Programmieren* bzw. mit Beispielcode (📎) stehen
 oben in der Liste.
 
+**🤖 Autonomer Agent (Agent-Harness):** Der Knopf **🤖 Agent** öffnet ein Aufgabenfeld für
+einen **selbstständig arbeitenden** Coding-Agenten (wie Aider/Claude-Code). Du beschreibst nur
+das Ziel — der Agent **plant, legt/ändert mehrere Dateien selbst an, prüft sein Ergebnis**
+(Python im Sandkasten bzw. HTML/JS im **Canvas**) **und behebt Fehler** in mehreren Schritten,
+bis es läuft. Das **Schritt-Protokoll** läuft live mit; mit **⏹ Stopp** brichst du ab, mit
+**↩ Rückgängig** nimmst du alle Änderungen des Laufs zurück. Für **Web-/Canvas-Aufgaben**
+(z. B. *„Baue ein Snake-Spiel auf `<canvas>`"*) rendert er das Ergebnis direkt und repariert
+erkannte Konsolenfehler automatisch (bis zu 2 Runden).
+
+> **Wichtig:** Der Agent braucht **zuverlässiges Werkzeug-Verhalten** — stelle unter
+> **Profil → 🧠 Modelle → „Programmieren / Mathe"** ein **fähiges** Modell ein (ein starkes
+> lokales oder ein API-Modell). Das kleine Standardmodell `ministral-3:3b` schafft einfache
+> Aufgaben, größere nur eingeschränkt. Ausgeführt wird ausschließlich in der **Python-Sandbox**
+> bzw. im Browser-Canvas — **keine** echten Shell-/Systembefehle.
+
 **Adaptiv:** Mit dem Häkchen **„adaptiv"** analysiert die KI die Begrifflichkeiten der
 Aufgabe und wertet dein **Profil** (Position, Abteilung, Firma, Fachmodus) aus, um eine
 passende Experten-Rolle abzuleiten — auch ohne expliziten Agenten.
