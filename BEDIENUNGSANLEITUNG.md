@@ -144,6 +144,14 @@ Modellwissen (alle Daten bleiben lokal). Einmal anklicken aktiviert die Suche, d
 recherchiert die KI bei Bedarf selbstständig. Der Schalter bleibt nur für die laufende
 Sitzung aktiv und startet bei jedem Neuladen wieder ausgeschaltet.
 
+**🧪 Erweiterte Chat-Werkzeuge (Code ausführen & Web-Recherche)** — im **Profil** aktivierbar
+(Häkchen unter *🧠 Modelle*). Ist es an, kann die KI **komplexe Aufgaben lösen, indem sie
+selbst Python-Code ausführt** (Berechnungen, Datenanalyse, Diagramme) und **bei Bedarf im Web
+recherchiert** — alles als Werkzeuge im Antwort-Loop, das Ergebnis fließt in die Antwort ein.
+Der Code läuft in einer **Sandbox** (kein Datei-/Netzzugriff). **Standard: aus** — der
+Werkzeug-Loop **überfordert kleine Modelle**; sinnvoll nur mit einem **fähigen** Allgemein-Modell
+(stark lokal oder API). Im **Hartman-Modus** bleibt die Web-Recherche gesperrt.
+
 Während der Antwort werden Tool-Aufrufe angezeigt (Suche, Berechnung,
 Präsentation …).
 
