@@ -636,7 +636,12 @@ def _profile_num_ctx() -> int:
 _BASE_GUARD = (
     "Erfinde niemals Fakten, Zahlen, Normen (z. B. DIN/VDI), Quellen oder technische "
     "Daten. Stütze dich ausschließlich auf gesichertes Wissen und auf die Ergebnisse "
-    "aufgerufener Tools. Fehlt dir eine Information, sage das offen – rate nicht."
+    "aufgerufener Tools. Fehlt dir eine Information, sage das offen – rate nicht. "
+    "WICHTIG: Konkrete Detailangaben (genaue PS-/kW-Werte, Baujahre, Maße, Gewichte, "
+    "Preise, Datumsangaben, Eigennamen) aus dem Gedächtnis sind oft unzuverlässig. Wenn "
+    "ein Recherche-Werkzeug (web_search) verfügbar ist, belege solche Angaben damit; ist "
+    "keines verfügbar, kennzeichne sie ausdrücklich als ungefähr/ohne Gewähr, statt sie "
+    "als gesicherte Fakten zu behaupten."
 )
 
 # Formeln/Gleichungen als LaTeX mit Formelzeichen ausgeben (im Frontend gerendert)
@@ -2877,16 +2882,20 @@ async def _chat_generator(request: ChatRequest):
     messages: list = []
     _sci = _SCIENCE_PROMPT if request.science else ""
     _agent_hint = ""
-    if _agent_tools_on:
-        _hint_parts = []
-        if ALLOW_PYTHON_EXEC:
-            _hint_parts.append("Für rechen-/datenlastige oder komplexe Aufgaben schreibe und "
-                               "führe Python über das Werkzeug run_python aus, statt selbst zu "
-                               "rechnen; nutze das Ergebnis für deine Antwort.")
-        if _web_search_allowed():
-            _hint_parts.append("Für aktuelle oder unbekannte Fakten nutze web_search.")
-        if _hint_parts:
-            _agent_hint = "Du hast erweiterte Werkzeuge: " + " ".join(_hint_parts)
+    if _agent_tools_on and ALLOW_PYTHON_EXEC:
+        _agent_hint = ("Du hast einen Code-Interpreter: Für rechen-/datenlastige oder komplexe "
+                       "Aufgaben schreibe und führe Python über das Werkzeug run_python aus, "
+                       "statt selbst zu rechnen; nutze das Ergebnis für deine Antwort.")
+
+    # Ist die Websuche verfügbar (per 🔍-Schalter, Wissenschaftsmodus oder erweiterte
+    # Werkzeuge), konkrete/überprüfbare Angaben AKTIV recherchieren statt aus dem
+    # Gedächtnis zu raten (Detaildaten sind dort oft falsch).
+    _web_hint = ""
+    if any(t["function"]["name"] == "web_search" for t in active_tools):
+        _web_hint = ("Für KONKRETE, überprüfbare Angaben (technische Daten wie Leistung/PS, "
+                     "Baujahre, Maße, Preise, Eigennamen, aktuelle Fakten) nutze web_search und "
+                     "stütze dich auf die gefundenen Quellen — verlasse dich NICHT auf dein "
+                     "Gedächtnis, das bei solchen Detaildaten häufig falsch liegt.")
 
     # Mathematische/rechnerische Fragen VORZUGSWEISE per Code lösen (vermeidet Rechenfehler
     # kleiner Modelle): run_python, falls der Code-Interpreter aktiv ist, sonst das
@@ -2902,7 +2911,7 @@ async def _chat_generator(request: ChatRequest):
                 f"Antwort auf das berechnete Ergebnis, statt im Kopf zu rechnen. Nenne dem "
                 f"Nutzer das Ergebnis klar und knapp erklärt."
             )
-    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt, _agent_hint, _math_hint) if p)
+    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt, _agent_hint, _web_hint, _math_hint) if p)
     if _sys:
         messages.append({"role": "system", "content": _sys})
 
