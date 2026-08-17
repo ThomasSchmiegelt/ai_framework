@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260817working" />
+  <link rel="stylesheet" href="/css/app.css?v=20260817research" />
 </head>
 <body>
 
@@ -279,6 +279,25 @@
         <div class="bild-actions">
           <button id="bild-cancel" class="bild-btn-sec">Abbrechen</button>
           <button id="bild-go" class="bild-btn-go">🎨 Erzeugen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Gesteuerte Tiefe Recherche (Rückfrage: Tiefe + Umfang) ────────── -->
+    <div id="research-ask" class="bild-overlay" style="display:none">
+      <div class="bild-card">
+        <div class="bild-close" id="res-close" title="Schließen (Esc)">✕</div>
+        <div class="bild-title">🔬 Tiefe Recherche</div>
+        <div class="planner-muted" style="font-size:12px;margin-bottom:8px">Thema: „<span id="res-topic"></span>“</div>
+        <label class="bild-lbl">Suchtiefe <span class="planner-muted">(wie viele Teilaspekte im Web recherchiert werden)</span></label>
+        <div class="bild-chips" id="res-depth"></div>
+        <label class="bild-lbl">Umfang der Antwort</label>
+        <div class="bild-chips" id="res-words"></div>
+        <label class="bild-lbl">Schwerpunkt / Fokus <span class="planner-muted">(optional – z. B. „nur Technik“, „Kaufberatung“)</span></label>
+        <input type="text" id="res-focus" placeholder="optional" />
+        <div class="bild-actions">
+          <button id="res-cancel" class="bild-btn-sec">Abbrechen</button>
+          <button id="res-go" class="bild-btn-go">🔎 Recherche starten</button>
         </div>
       </div>
     </div>
@@ -2879,6 +2898,16 @@
       </span>
     </label>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-deep-research" style="width:auto;margin-top:2px" />
+      <span>🔬 <strong>Tiefe Recherche automatisch anbieten</strong>
+        <span class="planner-muted">— erkennt der Chat eine breite Fakten-/Kauf-/Recherchefrage,
+        bietet er eine <strong>ausführliche Web-Recherche</strong> an (Tiefe &amp; Umfang wählbar):
+        mehrere Aspekte werden im Web gesucht und quellen-gestützt zusammengefasst — das liefert
+        längere und faktisch belastbarere Antworten. Der Befehl <code>/recherche &lt;Thema&gt;</code>
+        geht immer. Standard: an. Im Hartman-Modus deaktiviert.</span>
+      </span>
+    </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
       <input type="checkbox" id="profile-math-autoroute" style="width:auto;margin-top:2px" />
       <span>Matheaufgaben automatisch ans Mathe-Modell weiterreichen
         <span class="planner-muted">— greift nur, solange im Chat das schwache Standardmodell
@@ -3420,13 +3449,13 @@
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
 <script src="/js/tts.js?v=20260817hartman"></script>
-<script src="/js/chat.js?v=20260817working"></script>
+<script src="/js/chat.js?v=20260817research"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260721"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260817chatagent"></script>
+<script src="/js/profile.js?v=20260817research"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
