@@ -106,8 +106,8 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | ⚖️ Patente | Patent-Recherche, Fallakten & KI-Analyse *(optional)* |
 | 🧾 Angebot / Rechnung | Angebote & Rechnungen mit exakter Betragsrechnung (§14 UStG) *(optional)* |
 | 📜 Zeugnisse | Qualifizierte Arbeitszeugnisse in Zeugnissprache *(optional)* |
-| 🧮 Varianten | Gewichteter Variantenvergleich (Paarvergleich/AHP) mit KI-Hilfe *(optional)* |
-| ✅ To-Do | KI-Aufgabenliste (Besprechung/Projekt) mit Wissensgraph *(optional)* |
+| 🧮 Varianten | Gewichteter Variantenvergleich (Paarvergleich/AHP) mit KI-Hilfe, Schnellvergleich (Wischtechnik) & Auto-Tabelle aus Problembeschreibung *(optional)* |
+| ✅ To-Do | KI-Aufgabenliste (Besprechung/Projekt) mit Wissensgraph (2D & rotierende 3D-Kugel) *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
 > **Optionale Tabs:** Die Tabs **RAG**, **Code**, **Medizin**, **Mathe**, **Verzeichnis**,
@@ -1198,10 +1198,17 @@ zu entscheiden (gewichtete Nutzwertanalyse nach dem **Paarvergleichs-Verfahren /
 **Rechnung ist deterministisch** — Gewichte und Ranking kommen vom Server, **nie vom KI-Modell**.
 Die KI unterstützt nur beim Ausfüllen.
 
+**🪄 Ganze Tabelle automatisch erzeugen:** Ganz oben im Vergleich kannst du im Feld
+**„Problem beschreiben"** einfach dein Entscheidungsproblem in eigenen Worten eintippen und auf
+**🪄 Tabelle automatisch erzeugen** klicken — die KI füllt dann **Kriterien, Paarvergleich, Varianten
+und Bewertungen** in einem Durchlauf. Optional stellt sie vorab ein paar **Rückfragen (Interview)** und
+nutzt eine **Webrecherche** (Häkchen setzen). Danach nur noch prüfen und anpassen. (Die Zahlen bleiben
+Vorschläge; Gewichte und Ranking rechnet weiterhin der Server. Im Geheim-Modus bleibt das Modell lokal.)
+
 **Ablauf (fünf Schritte, oben nach unten):**
 
 1. **Vergleich anlegen** — oben einen Namen eingeben und **➕ Anlegen**. Titel und Beschreibung der
-   Entscheidung eintragen.
+   Entscheidung eintragen. (Oder direkt den 🪄-Weg oben nutzen.)
 2. **Kriterien** — die Entscheidungskriterien auflisten (z. B. Kosten, Qualität, Lieferzeit). Je
    Kriterium wählst du, ob ein **hoher Wert gut** („höher = besser") oder **schlecht** ist
    („höher = schlechter", z. B. Preis). **🤖 vorschlagen** lässt die KI passende Kriterien finden.
@@ -1209,7 +1216,10 @@ Die KI unterstützt nur beim Ausfüllen.
    dem anderen ist (Skala 1 = gleich wichtig … 9 = extrem wichtiger; Kehrwerte für die Gegenrichtung).
    Daraus errechnet der Server die **Gewichte** und die **Konsistenz (CR)** — eine grüne Anzeige
    (CR ≤ 0,10) bedeutet, dass deine Urteile widerspruchsarm sind; wird sie gelb, solltest du einzelne
-   Vergleiche überdenken. **🤖 Vorschlag** füllt den Paarvergleich vor.
+   Vergleiche überdenken. **🤖 Vorschlag** füllt den Paarvergleich vor. **🎚 Schnellvergleich** blendet
+   die Paare nacheinander als große Karten ein: mit **Pfeil ←** ist die linke, mit **Pfeil →** die rechte
+   Seite wichtiger, mit **Pfeil ↑** sind beide gleich wichtig (auch per Klick/Wischen; **Esc** schließt).
+   So klickst du dich in Sekunden durch alle Paare; die Feinjustierung ist danach in der Matrix möglich.
 4. **Varianten & Bewertung** — die Alternativen eintragen (**🤖 vorschlagen** möglich) und in der
    Bewertungsmatrix je Kriterium mit **1–10** benoten (10 = am besten, auch bei Kosten). **🤖 bewerten**
    schätzt die Werte aus den Variantenbeschreibungen (und optional aus hinterlegten Quellen).
@@ -1275,9 +1285,15 @@ Eintrag springt zum Punkt.
 vorschlagen, **🤖 Nächste Schritte** nennt das Nächstliegende und Blockaden. Umfasst der Bereich mehrere
 Projekte (Wurzel aktiv oder Umschalter **🌐 Alle Projekte**), erscheinen sie in **einem** Graphen —
 je Projekt eine eigene Rahmenfarbe, verbunden über gemeinsame Zuständige. **Bei sehr vielen Punkten**
-(z. B. der ganze Bestand des großen Demos) warnt der Graph und baut erst nach Bestätigung auf, damit
-der Browser nicht einfriert — dann besser ein **Einzelprojekt aktivieren (⚡)** oder den **👤 Personenfilter**
-nutzen.
+(z. B. der ganze Bestand des großen Demos) warnt der flache 2D-Graph und baut erst nach Bestätigung auf,
+damit der Browser nicht einfriert — dann besser ein **Einzelprojekt aktivieren (⚡)**, den
+**👤 Personenfilter** nutzen oder die **🔮 3D-Kugel** wählen.
+
+**🔮 2D / 3D-Kugel:** Mit dem Umschalter **🕸 2D / 🔮 3D-Kugel** wechselst du zwischen dem flachen Graphen
+und einer **rotierenden 3D-Kugel**. In der Kugel liegen die Punkte auf einer Kugeloberfläche, die
+Zuständigen-Hubs im Inneren. **Ziehen dreht** die Kugel, das **Mausrad zoomt**, ein **Klick** zeigt die
+Punktdetails, ein **Doppelklick** schaltet die automatische Drehung an/aus. Die 3D-Ansicht läuft flüssig
+und **friert auch bei sehr vielen Punkten nicht ein** — ideal, um den ganzen Bestand auf einmal zu sehen.
 
 **🧩 Ansicht anpassen (Splitter, Ein-/Ausklappen, Filter):** Die **Trennlinie** zwischen Projektbaum
 und Inhalt lässt sich **ziehen** (Breite bleibt gespeichert). Im Untertab **Liste** sind die drei

@@ -13375,6 +13375,126 @@ async def varianten_explain(req: Request):
     return {"text": text, "tokens": {"in": ti, "out": to}}
 
 
+@app.post("/api/varianten/auto-fill")
+async def varianten_auto_fill(req: Request):
+    """Aus einer Problembeschreibung die KOMPLETTE Bewertungstabelle erzeugen.
+
+    Orchestriert die vorhandenen Einzelschritte (Kriterien → Paarvergleich →
+    Varianten → Bewertungen) in einem Durchlauf, optional mit Web-Grounding.
+    Reine Vorschläge; Gewichte/Ranking rechnet weiterhin der PUT (``_var_compute``)
+    deterministisch. Lokal-bevorzugt über ``_research_model`` (respektiert
+    „Web-Recherche lokal"/Geheim-Modus)."""
+    body = await req.json()
+    title = str(body.get("title", "")).strip()[:200]
+    description = str(body.get("description", "")).strip()[:4000]
+    if not (title or description):
+        raise HTTPException(status_code=400, detail="Bitte das Problem beschreiben.")
+    model, err = await _research_model(body.get("model"))
+    if err:
+        raise HTTPException(status_code=503, detail=err)
+
+    tok = {"in": 0, "out": 0}
+
+    def _add(a, b):
+        tok["in"] += a
+        tok["out"] += b
+
+    base = (f"Entscheidung: {title}\n" if title else "") + \
+           (f"Beschreibung: {description}\n" if description else "")
+
+    # 1) Optionale Web-Recherche als Grounding (nur der Web-Query ist extern; das LLM
+    #    bleibt bei Geheim-Modus lokal). Fehler dürfen die Generierung nicht stoppen.
+    ground = ""
+    sources: list = []
+    if body.get("web"):
+        try:
+            from tools.search import search_with_sources
+            q = (title + " " + description).strip()[:200]
+            src, text = await search_with_sources(q, 5)
+            sources = src or []
+            if text:
+                ground = f"\n\nBelegkontext aus Web-Recherche:\n{text[:2800]}"
+        except Exception:
+            pass   # ohne Grounding weiter
+
+    # 2) Kriterien
+    data, ti, to, _ = await _research_llm_json(model, _VAR_CRITERIA_SYSTEM, base + ground)
+    _add(ti, to)
+    criteria = []
+    for c in (data.get("criteria") or []):
+        nm = str((c or {}).get("name", "")).strip()[:120]
+        if nm:
+            d = (c or {}).get("direction")
+            criteria.append({"name": nm, "direction": d if d in ("benefit", "cost") else "benefit"})
+    nc = len(criteria)
+
+    # 3) Paarvergleich (vollständige nc×nc-Matrix mit Reziprozität)
+    pairwise = [[1.0] * nc for _ in range(nc)]
+    if nc >= 2:
+        clist = "\n".join(f"{i}: {c['name']}" for i, c in enumerate(criteria))
+        pdata, ti, to, _ = await _research_llm_json(
+            model, _VAR_PAIRWISE_SYSTEM, base + "\nKriterien:\n" + clist)
+        _add(ti, to)
+        for pr in (pdata.get("pairs") or []):
+            try:
+                i, j = int(pr.get("i")), int(pr.get("j"))
+                val = float(pr.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < nc and 0 <= j < nc and i != j and val > 0:
+                val = max(1.0 / 9.0, min(9.0, val))
+                pairwise[i][j] = val
+                pairwise[j][i] = 1.0 / val
+
+    # 4) Varianten — aus der Problembeschreibung (NICHT an die evtl. lange, verbose
+    #    Kriterienliste gekoppelt: das blähte den Prompt auf und ließ kleine Modelle
+    #    das JSON verwerfen). Nur kompakte Kriterien-Kurznamen als Kontext.
+    crit_hint = ", ".join(c["name"].split("(")[0].strip()[:40] for c in criteria[:8])
+    def _parse_variants(vd):
+        out = []
+        for v in (vd.get("variants") or []):
+            nm = str((v or {}).get("name", "")).strip()[:120]
+            if nm:
+                out.append({"name": nm, "description": str((v or {}).get("description", "")).strip()[:2000]})
+        return out
+    vprompt = base + (f"\nKriterien (nur Kontext): {crit_hint}" if crit_hint else "") + ground
+    vdata, ti, to, _ = await _research_llm_json(model, _VAR_VARIANTS_SYSTEM, vprompt)
+    _add(ti, to)
+    variants = _parse_variants(vdata)
+    if not variants:   # Rückfall: minimaler Prompt (nur Problem), einmalig
+        vdata, ti, to, _ = await _research_llm_json(model, _VAR_VARIANTS_SYSTEM, base)
+        _add(ti, to)
+        variants = _parse_variants(vdata)
+    nv = len(variants)
+
+    # 5) Bewertungen (nv×nc, 1–10; Standard 5)
+    ratings = [[5.0] * nc for _ in range(nv)]
+    if nc and nv:
+        clist = "\n".join(f"{i}: {c['name']}" for i, c in enumerate(criteria))
+        vlist = "\n".join(f"{i}: {v['name']} — {v['description'][:400]}" for i, v in enumerate(variants))
+        rdata, ti, to, _ = await _research_llm_json(
+            model, _VAR_RATINGS_SYSTEM,
+            base + f"\nKriterien:\n{clist}\n\nVarianten:\n{vlist}" + ground)
+        _add(ti, to)
+        for rv in (rdata.get("ratings") or []):
+            try:
+                vi = int(rv.get("variant"))
+            except (TypeError, ValueError):
+                continue
+            if not (0 <= vi < nv):
+                continue
+            for sc in (rv.get("scores") or []):
+                try:
+                    ci, val = int(sc.get("criterion")), float(sc.get("value"))
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= ci < nc:
+                    ratings[vi][ci] = max(1.0, min(10.0, val))
+
+    return {"criteria": criteria, "variants": variants, "pairwise": pairwise,
+            "ratings": ratings, "sources": sources, "tokens": tok}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # KI-To-Do-Listen mit Wissensgraph
 # ══════════════════════════════════════════════════════════════════════════════

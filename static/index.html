@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260815todoui3" />
+  <link rel="stylesheet" href="/css/app.css?v=20260816graph3d" />
 </head>
 <body>
 
@@ -2200,6 +2200,18 @@
           Gewichte und Ranking rechnet der Server deterministisch.
         </div>
         <div id="var-editor" style="display:none">
+          <div class="var-sec var-gen-sec">
+            <div class="var-sec-head">🪄 Problem beschreiben → Tabelle automatisch erzeugen</div>
+            <textarea id="var-problem" class="var-input" rows="2" placeholder="Beschreibe die Entscheidung/das Problem – die KI füllt Kriterien, Paarvergleich, Varianten und Bewertungen automatisch."></textarea>
+            <div class="var-gen-opts">
+              <label class="mathe-inline-opt"><input type="checkbox" id="var-gen-interview" /> ❓ Rückfragen (Interview)</label>
+              <label class="mathe-inline-opt" title="Web-Query via DuckDuckGo als Beleg (das Modell bleibt im Geheim-Modus lokal)"><input type="checkbox" id="var-gen-web" /> 🌐 Webrecherche</label>
+              <button id="btn-var-generate" class="export-btn var-ai">🪄 Tabelle automatisch erzeugen</button>
+            </div>
+            <div id="var-gen-clarify"></div>
+            <div id="var-gen-sources" class="planner-muted" style="font-size:11px;margin-top:4px"></div>
+          </div>
+
           <div class="var-sec">
             <label class="var-lbl">Titel &amp; Beschreibung der Entscheidung</label>
             <input type="text" id="var-title" class="var-input" placeholder="z. B. Auswahl Antriebskonzept" />
@@ -2216,6 +2228,7 @@
 
           <div class="var-sec">
             <div class="var-sec-head">2 · Paarvergleich der Kriterien
+              <button id="btn-var-swipe" class="export-btn" title="Kriterien paarweise per Tastatur/Wischen vergleichen">🎚 Schnellvergleich</button>
               <button id="btn-var-ai-pairwise" class="export-btn var-ai">🤖 Vorschlag</button>
               <span id="var-cr" class="var-cr"></span>
             </div>
@@ -2247,6 +2260,29 @@
             <div id="var-result"></div>
             <div id="var-explain" class="var-explain"></div>
           </div>
+        </div>
+      </div>
+      <!-- Schnellvergleich-Overlay (Wischtechnik) -->
+      <div id="var-swipe" class="var-swipe-overlay" style="display:none">
+        <div class="var-swipe-card">
+          <div class="var-swipe-close" id="var-swipe-close" title="Schließen (Esc)">✕</div>
+          <div class="var-swipe-progress" id="var-swipe-progress"></div>
+          <div class="var-swipe-q">Was ist wichtiger?</div>
+          <div class="var-swipe-pair">
+            <button class="var-swipe-side" id="var-swipe-left" data-dir="left">
+              <span class="var-swipe-key">←</span>
+              <span class="var-swipe-name" id="var-swipe-a">A</span>
+            </button>
+            <div class="var-swipe-vs">
+              <button class="var-swipe-eq" id="var-swipe-eq" data-dir="up"><span class="var-swipe-key">↑</span> gleich</button>
+              <span class="var-swipe-vs-x">vs.</span>
+            </div>
+            <button class="var-swipe-side" id="var-swipe-right" data-dir="right">
+              <span class="var-swipe-key">→</span>
+              <span class="var-swipe-name" id="var-swipe-b">B</span>
+            </button>
+          </div>
+          <div class="var-swipe-hint planner-muted">← linke wichtiger · → rechte wichtiger · ↑ gleich wichtig · Esc schließt</div>
         </div>
       </div>
     </div><!-- /varianten-panel -->
@@ -2388,6 +2424,10 @@
         <div id="todo-view-graph" class="todo-view" style="display:none">
           <div id="todo-graph-toolbar">
             <button id="btn-todo-graph-build" class="export-btn">▶ Graph aufbauen</button>
+            <span class="todo-graph-mode">
+              <button id="btn-todo-graph-2d" class="export-btn todo-graph-mode-btn active" title="Flacher 2D-Graph">🕸 2D</button>
+              <button id="btn-todo-graph-3d" class="export-btn todo-graph-mode-btn" title="Rotierende 3D-Kugel (flüssig auch bei vielen Knoten)">🔮 3D-Kugel</button>
+            </span>
             <button id="btn-todo-graph-connect" class="export-btn" title="Zwei Aufgaben verbinden">🔗 Verbinden</button>
             <label class="mathe-inline-opt"><input type="checkbox" id="todo-graph-hubs" checked /> 👥 Zuständige/Status</label>
             <label class="mathe-inline-opt" title="Punkte aus allen Projekten zusammen zeigen"><input type="checkbox" id="todo-graph-all" /> 🌐 Alle Projekte</label>
@@ -2398,6 +2438,10 @@
             <span id="todo-graph-hint" class="planner-muted" style="font-size:11.5px;margin-left:auto"></span>
           </div>
           <div id="todo-graph"></div>
+          <div id="todo-graph3d-wrap" style="display:none">
+            <canvas id="todo-graph3d"></canvas>
+            <div id="todo-graph3d-tip" class="planner-muted">🔮 Ziehen = drehen · Mausrad = zoomen · Klick = Punktdetails · Doppelklick = Auto-Rotation</div>
+          </div>
         </div>
 
         <div id="todo-view-agenda" class="todo-view" style="display:none">
@@ -3326,8 +3370,8 @@
 <script src="/js/rechnung.js?v=20260714"></script>
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
-<script src="/js/varianten.js?v=20260814b"></script>
-<script src="/js/todo.js?v=20260815todobig"></script>
+<script src="/js/varianten.js?v=20260816autofill"></script>
+<script src="/js/todo.js?v=20260816graph3d"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/app.js?v=20260815tts"></script>
