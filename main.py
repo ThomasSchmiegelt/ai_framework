@@ -12142,6 +12142,242 @@ async def run_python_code(req: Request):
     return await asyncio.to_thread(_run_python_code, code, t)
 
 
+# ── Autonomer Coding-Agent (Agent-Harness im Code-Tab) ────────────────────────
+# Aider-/Claude-Code-artiger Loop: eine Aufgabe → das Modell nutzt Werkzeuge
+# (Dateien auflisten/lesen/schreiben, Python im Sandkasten prüfen), iteriert selbst
+# bis fertig. Die Dateien liegen im Client (Workspace) und werden mitgeschickt; der
+# Agent arbeitet auf einer In-Memory-Kopie und liefert am Ende den neuen Stand.
+# HTML/JS-Ergebnisse werden im Client-Canvas gerendert (nicht hier ausgeführt).
+
+_CODE_AGENT_SYSTEM = (
+    "Du bist ein autonomer Coding-Agent in einer Entwickler-Werkbank. Löse die Aufgabe des "
+    "Nutzers eigenständig in kleinen, überprüfbaren Schritten mit den bereitgestellten "
+    "Werkzeugen:\n"
+    "- list_files(): vorhandene Dateien auflisten\n"
+    "- read_file(path): eine Datei lesen\n"
+    "- write_file(path, content): eine Datei anlegen oder KOMPLETT überschreiben — immer den "
+    "VOLLSTÄNDIGEN Dateiinhalt angeben (keine Auslassungen, kein „…“)\n"
+    "- run_python(code): Python im Sandkasten ausführen, um Python-Ergebnisse zu PRÜFEN "
+    "(liefert stdout/stderr; kein Datei- oder Netzzugriff)\n"
+    "Arbeite iterativ: schreibe/ändere Dateien, prüfe, korrigiere Fehler. Für WEB-/CANVAS-"
+    "Aufgaben schreibe selbstständig lauffähiges HTML/JS (z. B. eine index.html mit allem "
+    "inline, ohne Server) — die Anzeige erfolgt im Browser-Canvas; nutze dafür NICHT "
+    "run_python. Werden dir Konsolenfehler gemeldet, behebe sie. "
+    "Wenn die Aufgabe erledigt ist, antworte mit einer KURZEN Zusammenfassung (1–3 Sätze) und "
+    "OHNE weiteren Werkzeugaufruf."
+)
+
+
+def _code_agent_tools(allow_py: bool) -> list:
+    tools = [
+        {"type": "function", "function": {
+            "name": "list_files",
+            "description": "Listet die vorhandenen Dateien (Pfade) im Arbeitsbereich.",
+            "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {
+            "name": "read_file",
+            "description": "Liest den vollständigen Inhalt einer Datei.",
+            "parameters": {"type": "object", "properties": {
+                "path": {"type": "string", "description": "Relativer Dateipfad"}},
+                "required": ["path"]}}},
+        {"type": "function", "function": {
+            "name": "write_file",
+            "description": "Legt eine Datei an oder überschreibt sie KOMPLETT. Immer den "
+                           "vollständigen Dateiinhalt angeben.",
+            "parameters": {"type": "object", "properties": {
+                "path": {"type": "string"}, "content": {"type": "string"}},
+                "required": ["path", "content"]}}},
+    ]
+    if allow_py:
+        tools.append({"type": "function", "function": {
+            "name": "run_python",
+            "description": "Führt Python-Code im Sandkasten aus und liefert stdout/stderr. "
+                           "Zum Prüfen von Python-Ergebnissen — NICHT für HTML/JS.",
+            "parameters": {"type": "object", "properties": {
+                "code": {"type": "string"}}, "required": ["code"]}}})
+    return tools
+
+
+def _extract_file_blocks(text: str) -> list:
+    """Best-effort-Fallback (wenn ein Modell keine Tool-Aufrufe macht): gefencte
+    Codeblöcke mit Datei-Hinweis aus Fließtext ziehen. Rückgabe [(path, content)]."""
+    out = []
+    for m in re.finditer(r"```([^\n`]*)\n(.*?)```", text, flags=re.DOTALL):
+        info = (m.group(1) or "").strip()
+        code = m.group(2)
+        path = ""
+        mm = re.search(r"([\w./-]+\.\w{1,5})", info)
+        if mm:
+            path = mm.group(1)
+        else:
+            pre = text[:m.start()].rstrip().split("\n")[-1] if m.start() else ""
+            m2 = re.search(r"([\w./-]+\.\w{1,5})", pre)
+            if m2:
+                path = m2.group(1)
+            else:
+                path = {"html": "index.html", "js": "main.js", "javascript": "main.js",
+                        "python": "main.py", "py": "main.py"}.get(info.lower(), "")
+        p = _safe_relpath(path)
+        if p and code.strip():
+            out.append((p, code.rstrip("\n")))
+    return out
+
+
+async def _code_agent_generator(body: dict):
+    task = str(body.get("task", "") or "").strip()
+    if not task:
+        yield _sse({"type": "error", "message": "Keine Aufgabe angegeben."})
+        return
+
+    files: dict = {}
+    for f in (body.get("files") or []):
+        p = _safe_relpath((f or {}).get("path", ""))
+        if p:
+            files[p] = str((f or {}).get("content", "") or "")
+
+    model = _pick_model(body.get("model"), _model_for("coding"))
+    num_ctx = _profile_num_ctx()
+    try:
+        max_steps = int(body.get("max_steps") or 12)
+    except Exception:
+        max_steps = 12
+    max_steps = max(1, min(max_steps, 20))
+    allow_py = bool(ALLOW_PYTHON_EXEC)
+    changed: set = set()
+
+    def _apply_write(path, content):
+        p = _safe_relpath(path)
+        if not p:
+            return None
+        files[p] = str(content or "")
+        changed.add(p)
+        return p
+
+    filelist = "\n".join(f"- {p}" for p in files) or "(leer)"
+    system = _CODE_AGENT_SYSTEM + ("" if allow_py else
+             "\n\nHINWEIS: Python-Ausführung ist in dieser Installation deaktiviert — "
+             "run_python steht NICHT zur Verfügung.")
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"Aufgabe:\n{task}\n\nVorhandene Dateien:\n{filelist}"},
+    ]
+    tools = _code_agent_tools(allow_py)
+    tok = {"in": 0, "out": 0}
+
+    try:
+        for _step in range(max_steps):
+            async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+                resp = await _llm.chat(client, {
+                    "model": model, "think": False, "stream": False,
+                    "messages": messages, "tools": tools,
+                    "options": {"num_ctx": num_ctx}, "keep_alive": KEEP_ALIVE,
+                })
+                resp.raise_for_status()
+            result = resp.json()
+            _ti, _to = _llm_tok(result)
+            tok["in"] += _ti
+            tok["out"] += _to
+            msg = result.get("message", {}) or {}
+            content_raw = msg.get("content", "") or ""
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                inline = _extract_inline_tool_calls(content_raw)
+                if inline:
+                    tool_calls = inline
+                    content_raw = _strip_inline_tool_calls(content_raw)
+            content_raw = re.sub(r"<think>.*?</think>", "", content_raw, flags=re.DOTALL).strip()
+
+            if not tool_calls:
+                # Fertig — oder weiches Fallback: Datei-Blöcke aus dem Text übernehmen
+                for p, c in _extract_file_blocks(content_raw):
+                    if _apply_write(p, c):
+                        yield _sse({"type": "step", "tool": "write_file", "arg": p,
+                                    "result": "aus Text übernommen"})
+                yield _sse({"type": "text", "content": content_raw or "Fertig."})
+                break
+
+            messages.append({"role": "assistant", "content": content_raw, "tool_calls": tool_calls})
+            for tc in tool_calls:
+                fn = (tc.get("function") or {}).get("name", "")
+                args = (tc.get("function") or {}).get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                args = args or {}
+
+                if fn == "list_files":
+                    res = "\n".join(files.keys()) or "(keine Dateien)"
+                    yield _sse({"type": "step", "tool": "list_files", "arg": "",
+                                "result": f"{len(files)} Datei(en)"})
+                elif fn == "read_file":
+                    p = _safe_relpath(args.get("path", ""))
+                    if p in files:
+                        res = files[p]
+                        yield _sse({"type": "step", "tool": "read_file", "arg": p,
+                                    "result": f"{len(res)} Zeichen"})
+                    else:
+                        res = f"FEHLER: Datei '{p}' existiert nicht."
+                        yield _sse({"type": "step", "tool": "read_file", "arg": p,
+                                    "result": "nicht gefunden"})
+                elif fn == "write_file":
+                    p = _apply_write(args.get("path", ""), args.get("content", ""))
+                    if p:
+                        res = f"Datei '{p}' geschrieben ({len(files[p])} Zeichen)."
+                        yield _sse({"type": "step", "tool": "write_file", "arg": p,
+                                    "result": "geschrieben"})
+                    else:
+                        res = "FEHLER: Ungültiger Pfad."
+                        yield _sse({"type": "step", "tool": "write_file",
+                                    "arg": str(args.get("path", "")), "result": "Fehler"})
+                elif fn == "run_python" and allow_py:
+                    code = str(args.get("code", "") or "")
+                    out = await asyncio.to_thread(_run_python_code, code, 15.0)
+                    res = ""
+                    if out.get("output"):
+                        res += "STDOUT:\n" + out["output"]
+                    if out.get("error"):
+                        res += "\nSTDERR:\n" + out["error"]
+                    res = (res.strip() or "(keine Ausgabe)")[:4000]
+                    yield _sse({"type": "step", "tool": "run_python", "arg": code[:60],
+                                "result": "Fehler" if out.get("error") else "ok"})
+                else:
+                    res = f"Werkzeug '{fn}' ist nicht verfügbar."
+                    yield _sse({"type": "step", "tool": fn or "?", "arg": "", "result": "n/a"})
+
+                messages.append({"role": "tool", "content": res[:6000]})
+        else:
+            yield _sse({"type": "text",
+                        "content": f"Maximale Schrittzahl ({max_steps}) erreicht — "
+                                   f"Zwischenstand wird übernommen."})
+    except httpx.ConnectError:
+        yield _sse({"type": "error", "message": "Ollama nicht erreichbar — läuft der lokale Server?"})
+    except httpx.HTTPStatusError as e:
+        yield _sse({"type": "error",
+                    "message": f"Modell abgelehnt (num_ctx/VRAM?): HTTP {e.response.status_code}"})
+    except Exception as e:
+        yield _sse({"type": "error", "message": f"Agent-Fehler: {type(e).__name__}: {e}"})
+
+    yield _sse({"type": "files",
+                "files": [{"path": p, "content": c} for p, c in files.items()],
+                "changed": sorted(changed)})
+    yield _sse({"type": "done", "tokens": tok})
+
+
+@app.post("/api/code/agent")
+async def code_agent(req: Request):
+    """Autonomer Coding-Agent (SSE): löst eine Aufgabe eigenständig über einen
+    Werkzeug-Loop (Dateien lesen/schreiben, Python-Sandkasten). Liefert Schritt-Frames
+    (`step`), finalen Text, den neuen Dateistand (`files`) und `done` mit Tokens."""
+    body = await req.json()
+    return StreamingResponse(
+        _code_agent_generator(body),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ── Jury-Dokumente (Werkbank im Jury-Tab: anzeigen, bearbeiten, speichern) ──────
 
 def _jury_doc_path_by_id(doc_id: str) -> Optional[Path]:

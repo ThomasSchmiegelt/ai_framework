@@ -136,6 +136,10 @@ if (!_drawFn) { _resize(); }
 </body>
 </html>`;
 
+  // Konsole-/Fehler-Weiterleitung an das Eltern-Fenster (für vollständige HTML-Dokumente,
+  // die der Agent erzeugt und die NICHT ins Canvas-Framework eingebettet werden).
+  const _CONSOLE_HOOK = `<script>(function(){var fwd=function(level,args){window.parent.postMessage({type:'console',level:level,text:args.map(function(a){return typeof a==='object'?JSON.stringify(a):String(a);}).join(' ')},'*');};console.log=function(){fwd('log',[].slice.call(arguments));};console.warn=function(){fwd('warn',[].slice.call(arguments));};console.error=function(){fwd('error',[].slice.call(arguments));};window.onerror=function(msg,_s,line){window.parent.postMessage({type:'console',level:'error',text:'Zeile '+line+': '+msg},'*');return false;};})();<\/script>`;
+
   /* ── Persistenz (localStorage) ───────────────────────────────── */
   function _wsSave() {
     if (_active >= 0 && _cm) _files[_active].content = _cm.getValue();
@@ -263,13 +267,31 @@ if (!_drawFn) { _resize(); }
     _files[_active].content = _cm ? _cm.getValue() : _files[_active].content;
     if (_lang === 'py') return _runPython();
     if (_lang === 'json') { _validateJson(true); return; }
-    const code = (_files[_active].content || '').trim();
+    _renderPreview();
+    if (typeof Logger !== 'undefined') Logger.log('cw_run', { path: _files[_active].path, len: (_files[_active].content || '').length });
+  }
+
+  // Rendert die aktive Datei im Canvas-iframe. Ein vollständiges HTML-Dokument (vom Agenten)
+  // wird direkt gerendert (nur Konsole-Hook eingeschleust); ein reines JS-/Canvas-Snippet
+  // läuft im bestehenden Framework (mit ai_framework_thomas_run/ctx-Helfern).
+  function _renderPreview() {
     const frame = _preview(), cons = _console();
-    if (!frame) return;
+    if (!frame || _active < 0) return;
+    const f = _files[_active];
+    const content = (f.content || '');
     _showPyOutput(false);
     if (cons) cons.innerHTML = '';
     _lastErrors = [];
     if ($('cw-repair')) $('cw-repair').style.display = 'none';
+    const isFullHtml = /\.html?$/i.test(f.path) && /<html[\s>]|<!doctype/i.test(content);
+    if (isFullHtml) {
+      let doc = content;
+      if (/<head[\s>]/i.test(doc))      doc = doc.replace(/<head([^>]*)>/i, '<head$1>' + _CONSOLE_HOOK);
+      else if (/<html[\s>]/i.test(doc)) doc = doc.replace(/<html([^>]*)>/i, '<html$1>' + _CONSOLE_HOOK);
+      else                              doc = _CONSOLE_HOOK + doc;
+      frame.srcdoc = doc;
+      return;
+    }
     const cs = getComputedStyle(document.documentElement);
     const cv = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
     const tokens = {
@@ -281,8 +303,7 @@ if (!_drawFn) { _resize(); }
     };
     let fw = _IFRAME_FRAMEWORK;
     for (const [k, val] of Object.entries(tokens)) fw = fw.split(k).join(val);
-    frame.srcdoc = fw + code + _IFRAME_CLOSE;
-    if (typeof Logger !== 'undefined') Logger.log('cw_run', { path: _files[_active].path, len: code.length });
+    frame.srcdoc = fw + content.trim() + _IFRAME_CLOSE;
   }
 
   async function _runPython() {
@@ -462,6 +483,151 @@ if (!_drawFn) { _resize(); }
     _lastErrors = [];
     if ($('cw-repair')) $('cw-repair').style.display = 'none';
     _assist(`Behebe den Fehler in der aktuellen Datei. Gib die vollständige korrigierte Datei zurück.\n\nFehlermeldung:\n${err}`, '', true);
+  }
+
+  /* ── Autonomer Coding-Agent (Agent-Harness) ──────────────────── */
+  let _agentAbort = null;
+  let _agentSnapshot = null;   // Workspace-Stand vor dem Agentenlauf (für Undo)
+  let _agentRepairRounds = 0;
+  const _AGENT_ICON = { list_files: '📁', read_file: '📖', write_file: '✏️', run_python: '▶️', delete_file: '🗑' };
+
+  function _agentLog(kind, text) {
+    const host = $('cw-agent-log'); if (!host) return;
+    const row = document.createElement('div');
+    row.className = 'cw-agent-step cw-agent-' + kind;
+    row.textContent = text;
+    host.appendChild(row); host.scrollTop = host.scrollHeight;
+  }
+
+  function _toggleAgentPanel() {
+    const p = $('cw-agent-panel'); if (!p) return;
+    const show = p.style.display === 'none' || !p.style.display;
+    p.style.display = show ? '' : 'none';
+    $('cw-agent-toggle')?.classList.toggle('active', show);
+    if (show) $('cw-agent-task')?.focus();
+  }
+
+  function _markChanged(changed) {
+    const set = new Set(changed || []);
+    document.querySelectorAll('#cw-tree .cw-file-row').forEach(row => {
+      const i = +row.dataset.idx;
+      const p = _files[i] && _files[i].path;
+      row.classList.toggle('cw-file-changed', set.has(p));
+    });
+  }
+
+  function _applyAgentFiles(newFiles, changed) {
+    const savedBy = {};
+    _files.forEach(f => { if (f.savedId) savedBy[f.path] = f.savedId; });
+    _files = (newFiles || []).map(nf => {
+      const o = { path: nf.path, content: nf.content };
+      if (savedBy[nf.path]) o.savedId = savedBy[nf.path];
+      return o;
+    });
+    if (!_files.length) _active = -1;
+    else if (_active < 0 || _active >= _files.length) _active = 0;
+    _wsSave();
+    _renderTree();
+    if (_active >= 0) _setActive(_active, { noStash: true });
+    _markChanged(changed);
+  }
+
+  // Bestimmt die anzuzeigende Einstiegsdatei und rendert sie; bei HTML/JS anschließend
+  // Konsolenfehler prüfen und ggf. eine Auto-Reparatur-Runde starten (max. 2).
+  function _agentPreviewAndRepair(changed) {
+    if (!_files.length) return;
+    const find = pred => _files.findIndex(pred);
+    let idx = find(f => /(^|\/)index\.html?$/i.test(f.path));
+    if (idx < 0) idx = find(f => /\.html?$/i.test(f.path));
+    if (idx < 0) idx = find(f => /\.(js|mjs)$/i.test(f.path));
+    if (idx < 0) idx = find(f => /\.py$/i.test(f.path));
+    if (idx < 0) idx = _active >= 0 ? _active : 0;
+    _setActive(idx);
+    _run();
+    if (_lang === 'js') {
+      setTimeout(() => {
+        if (_generating) return;                       // läuft bereits wieder
+        if (_lastErrors.length && _agentRepairRounds < 2) {
+          _agentRepairRounds++;
+          const err = _lastErrors.join('\n').slice(0, 1500);
+          _agentLog('repair', `🔧 ${_agentRepairRounds}. Auto-Reparatur — Konsolenfehler erkannt`);
+          _runAgent('Behebe diese Laufzeit-/Konsolenfehler im Canvas-Programm und gib die '
+                  + 'vollständigen korrigierten Dateien zurück.\n\nFehler:\n' + err, true);
+        }
+      }, 1300);
+    }
+  }
+
+  function _stopAgent() { if (_agentAbort) _agentAbort.abort(); }
+
+  function _agentUndo() {
+    if (!_agentSnapshot) return;
+    _files = JSON.parse(JSON.stringify(_agentSnapshot));
+    _active = _files.length ? 0 : -1;
+    _wsSave(); _renderTree();
+    if (_active >= 0) _setActive(0, { noStash: true });
+    _agentSnapshot = null;
+    $('cw-agent-undo').style.display = 'none';
+    _agentLog('final', '↩ Änderungen des Agenten rückgängig gemacht.');
+  }
+
+  async function _runAgent(task, isRepair) {
+    if (_generating) return;
+    task = (task || (isRepair ? '' : $('cw-agent-task')?.value) || '').trim();
+    if (!task) { $('cw-agent-task')?.focus(); return; }
+    if (!isRepair) {
+      _agentSnapshot = JSON.parse(JSON.stringify(_files));
+      _agentRepairRounds = 0;
+      const log = $('cw-agent-log'); if (log) log.innerHTML = '';
+      $('cw-agent-undo').style.display = 'none';
+    }
+    _setGenerating(true);
+    $('cw-agent-run').style.display = 'none';
+    $('cw-agent-stop').style.display = '';
+    _agentLog('task', (isRepair ? '🔧 Reparatur' : '🤖 Aufgabe') + ': ' + task.slice(0, 140));
+    _agentAbort = new AbortController();
+    let changed = [];
+    try {
+      const resp = await fetch('/api/code/agent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: _agentAbort.signal,
+        body: JSON.stringify({ task, files: _files, model: _model() }),
+      });
+      if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'step') {
+            const ic = _AGENT_ICON[ev.tool] || '•';
+            _agentLog('step', `${ic} ${ev.tool}${ev.arg ? ' ' + ev.arg : ''}${ev.result ? ' — ' + ev.result : ''}`);
+          } else if (ev.type === 'text') {
+            _agentLog('final', '✅ ' + ev.content);
+          } else if (ev.type === 'files') {
+            _applyAgentFiles(ev.files, ev.changed || []);
+            changed = ev.changed || [];
+          } else if (ev.type === 'done') {
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Code-Agent');
+          } else if (ev.type === 'error') {
+            _agentLog('error', '⚠ ' + (ev.message || ev.detail || 'Fehler'));
+          }
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') _agentLog('error', '⚠ ' + (e.message || e));
+    } finally {
+      _setGenerating(false);
+      $('cw-agent-run').style.display = '';
+      $('cw-agent-stop').style.display = 'none';
+      if (_agentSnapshot) $('cw-agent-undo').style.display = '';
+      const aborted = _agentAbort && _agentAbort.signal.aborted;
+      _agentAbort = null;
+      if (!aborted) _agentPreviewAndRepair(changed);
+    }
   }
 
   /* ── KI: ganze Projektstruktur erzeugen ──────────────────────── */
@@ -653,6 +819,13 @@ if (!_drawFn) { _resize(); }
     $('cw-project')?.addEventListener('click', _project);
     $('cw-prompt')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && (e.ctrlKey || e.metaKey)) { e.preventDefault(); _send(); } });
     $('cw-repair')?.addEventListener('click', _autoRepair);
+
+    // Autonomer Coding-Agent
+    $('cw-agent-toggle')?.addEventListener('click', _toggleAgentPanel);
+    $('cw-agent-run')?.addEventListener('click', () => _runAgent(null, false));
+    $('cw-agent-stop')?.addEventListener('click', _stopAgent);
+    $('cw-agent-undo')?.addEventListener('click', _agentUndo);
+    $('cw-agent-task')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && (e.ctrlKey || e.metaKey)) { e.preventDefault(); _runAgent(null, false); } });
 
     // Datei-Aktionen
     $('cw-new')?.addEventListener('click', () => _addFile('neu.js', ''));
