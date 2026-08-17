@@ -1666,6 +1666,8 @@ const Chat = (() => {
             _log('🧭 ' + (ev.aspects || []).length + ' Aspekte: ' + (ev.aspects || []).join(' · '));
           } else if (ev.type === 'search_done') {
             _log('🔎 recherchiert: ' + ev.aspect);
+          } else if (ev.type === 'notice') {
+            _log('ℹ ' + (ev.message || ''));
           } else if (ev.type === 'synthesizing') {
             _log('📝 Bericht wird geschrieben…');
           } else if (ev.type === 'text') {

@@ -1629,9 +1629,13 @@ async def _research_generator(request: ResearchRequest):
 
     yield _sse({"type": "synthesizing"})
 
+    # Kontext-Budget: Textmenge je Aspekt an num_ctx anpassen, sonst wird bei vielen
+    # Aspekten das Fenster gefüllt und der Bericht abgeschnitten (siehe _deepresearch).
+    _rc = _profile_num_ctx()
+    _r_per_aspect = max(400, min(2500, int((_rc * 0.55) * 3.3) // max(1, len(aspect_data))))
     synthesis_parts = [f"Thema: {request.topic}\n"]
     for aspect, result in aspect_data:
-        synthesis_parts.append(f"### Suchergebnisse – {aspect}\n{result[:2500]}\n")
+        synthesis_parts.append(f"### Suchergebnisse – {aspect}\n{result[:_r_per_aspect]}\n")
 
     synthesis_prompt = "\n".join(synthesis_parts) + (
         f"\n\nErstelle jetzt einen strukturierten, informativen Recherchebericht über **{request.topic}** "
@@ -1656,7 +1660,7 @@ async def _research_generator(request: ResearchRequest):
                 "think": False,
                 "messages": _r_msgs,
                 "stream": False,
-                "options": {"num_ctx": _profile_num_ctx()},
+                "options": {"num_ctx": _rc, "num_predict": max(600, int(_rc * 0.45))},
                 "keep_alive": KEEP_ALIVE,
             })
             resp.raise_for_status()
@@ -1773,17 +1777,34 @@ async def _deepresearch_generator(request: DeepResearchRequest):
     yield _sse({"type": "sources", "data": all_sources})
     yield _sse({"type": "synthesizing"})
 
-    # 3) quellen-gestützte Synthese mit Längenziel + Anti-Halluzinations-Auflage
+    # 3) quellen-gestützte Synthese mit Längenziel + Anti-Halluzinations-Auflage.
+    # Kontext-Budget: 12 Aspekte × 2500 Zeichen füllen ein 8k-Fenster komplett und
+    # schneiden die Antwort ab. Deshalb Textmenge JE ASPEKT und Ziellänge an num_ctx
+    # anpassen (grobe Schätzung ~3.3 Zeichen/Token für Deutsch) und die Ausgabe-Tokens
+    # (num_predict) begrenzen, damit der Bericht sauber endet statt mittendrin abzubrechen.
+    _ctx = _profile_num_ctx()
+    _out_reserve_tok = max(400, min(int(target_words * 1.7), int(_ctx * 0.5)))
+    _in_budget_chars = max(2500, int((_ctx - _out_reserve_tok - 700) * 3.3))
+    _per_aspect = max(400, min(2500, _in_budget_chars // max(1, len(aspect_data))))
+    _eff_words = max(250, min(target_words, int(_out_reserve_tok / 1.7)))
+    _shortened = _eff_words < int(target_words * 0.85)
+    if _shortened:
+        yield _sse({"type": "notice", "message":
+                    f"Hinweis: Bericht auf ~{_eff_words} statt ~{target_words} Wörter begrenzt, "
+                    f"damit er ins Kontextfenster ({_ctx} Tokens) passt. Für längere Berichte im "
+                    f"Profil das Kontextfenster erhöhen oder weniger Aspekte (Tiefe) wählen."})
+
     _parts = [f"Thema: {topic}\n"]
     if focus:
         _parts.append(f"Schwerpunkt: {focus}\n")
     for a, t in aspect_data:
-        _parts.append(f"### Suchergebnisse – {a}\n{t[:2500]}\n")
+        _parts.append(f"### Suchergebnisse – {a}\n{t[:_per_aspect]}\n")
     _synth = "\n".join(_parts) + (
         f"\n\nSchreibe daraus einen AUSFÜHRLICHEN, gut strukturierten Recherchebericht über "
-        f"**{topic}** von **ca. {target_words} Wörtern** auf Deutsch (Markdown: ## Überschriften, "
+        f"**{topic}** von **ca. {_eff_words} Wörtern** auf Deutsch (Markdown: ## Überschriften, "
         f"**Fett**, Aufzählungen, bei Kennwerten gern eine Tabelle). Gliederung: kurze Übersicht, "
-        f"je ein Abschnitt pro Aspekt, abschließend ein Fazit. WICHTIG: Stütze JEDE konkrete "
+        f"je ein Abschnitt pro Aspekt, abschließend ein Fazit. Halte die Ziellänge ein und schließe "
+        f"mit einem vollständigen Fazit ab (nicht mitten im Satz enden). WICHTIG: Stütze JEDE konkrete "
         f"Angabe (Zahlen, technische Daten, Baujahre, Preise, Eigennamen) AUSSCHLIESSLICH auf die "
         f"obigen Suchergebnisse. Ist etwas nicht belegt oder widersprüchlich, kennzeichne es "
         f"ausdrücklich als unsicher — erfinde nichts."
@@ -1796,7 +1817,8 @@ async def _deepresearch_generator(request: DeepResearchRequest):
         async with _model_session(_r_model), httpx.AsyncClient(timeout=600) as client:
             resp = await _llm.chat(client, {
                 "model": _r_model, "think": False, "stream": False,
-                "messages": _msgs, "options": {"num_ctx": _profile_num_ctx()},
+                "messages": _msgs,
+                "options": {"num_ctx": _ctx, "num_predict": _out_reserve_tok + 200},
                 "keep_alive": KEEP_ALIVE,
             })
             resp.raise_for_status()
