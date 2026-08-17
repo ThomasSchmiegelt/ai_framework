@@ -2722,6 +2722,35 @@ def _extract_plot_request(text: str):
     return ";".join(cleaned[:4]), x_min, x_max
 
 
+async def _force_answer(messages: list, model: str, num_ctx: int) -> tuple:
+    """Rettungsaufruf, wenn der Werkzeug-Loop endet, ohne sichtbaren Text zu liefern
+    (Reasoning-Modell steckt alles ins »Denken«, oder Max-Iterationen bei tiefer
+    Web-Recherche erreicht). Erzwingt EINE finale Antwort ohne Werkzeuge/Denken aus dem
+    bereits gesammelten Kontext (inkl. der Tool-Ergebnisse). Gibt (text, tok_in, tok_out)."""
+    msgs = list(messages) + [{
+        "role": "user",
+        "content": ("Beantworte jetzt die ursprüngliche Frage VOLLSTÄNDIG und direkt auf "
+                    "Deutsch – nutze die bereits gesammelten Informationen/Suchergebnisse. "
+                    "KEINE weiteren Werkzeugaufrufe, KEIN internes Nachdenken (<think>), "
+                    "sondern unmittelbar die ausformulierte Antwort."),
+    }]
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": msgs, "options": {"num_ctx": num_ctx}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        j = resp.json()
+        ti, to = _llm_tok(j)
+        txt = ((j.get("message", {}) or {}).get("content", "") or "")
+        txt = re.sub(r"<think>.*?</think>", "", txt, flags=re.DOTALL)
+        txt = re.sub(r"</?think>", "", txt).strip()
+        return txt, ti, to
+    except Exception:
+        return "", 0, 0
+
+
 async def _chat_generator(request: ChatRequest):
     system_prompt: Optional[str] = None
     active_tools = TOOL_DEFS
@@ -3027,20 +3056,27 @@ async def _chat_generator(request: ChatRequest):
         if not tool_calls:
             content = content_raw
 
-            # Leere Antwort des Modells: nicht stumm bleiben, sondern erklären.
-            # (Häufig bei kleinen Modellen, die nichts oder nur einen Tool-Call ohne
-            #  Text liefern – sonst sähe der Nutzer „keine Antwort" ohne Hinweis.)
+            # Leere sichtbare Antwort (häufig: Reasoning-Modell steckt alles ins »Denken«,
+            # oder kleines Modell liefert nur Tool-Calls). Vor der Fehlermeldung EINEN
+            # Rettungsaufruf ohne Werkzeuge/Denken versuchen → aus dem gesammelten Kontext
+            # (inkl. Web-Ergebnissen) doch noch eine Antwort formulieren.
             if not (content or "").strip():
-                _hinweis = (
-                    f"Das Modell '{model}' hat eine leere Antwort geliefert"
-                    + (" (nach Tool-Aufrufen)." if _tools_called else ".")
-                    + " Bitte erneut senden oder ein anderes Modell wählen."
-                )
-                yield _sse({"type": "error", "message": _hinweis})
-                _write_log({"type": "empty_response", "model": model,
-                            "tools_called": _tools_called})
-                yield _sse({"type": "done"})
-                return
+                _fa, _fti, _fto = await _force_answer(messages, model, _num_ctx)
+                _tok_in += _fti
+                _tok_out += _fto
+                if _fa.strip():
+                    content = _fa   # weiter unten normal streamen/speichern
+                else:
+                    _hinweis = (
+                        f"Das Modell '{model}' hat eine leere Antwort geliefert"
+                        + (" (nach Tool-Aufrufen)." if _tools_called else ".")
+                        + " Bitte erneut senden oder ein anderes Modell wählen."
+                    )
+                    yield _sse({"type": "error", "message": _hinweis})
+                    _write_log({"type": "empty_response", "model": model,
+                                "tools_called": _tools_called})
+                    yield _sse({"type": "done"})
+                    return
 
             # Canvas-Daten extrahieren falls vorhanden
             canvas_data = _extract_canvas_json(content)
@@ -3223,7 +3259,27 @@ async def _chat_generator(request: ChatRequest):
 
             messages.append({"role": "tool", "content": tool_result})
 
-    yield _sse({"type": "error", "message": "Maximale Iterationen erreicht"})
+    # Werkzeug-Loop erschöpft (z. B. tiefe Web-Recherche mit vielen Suchschritten): statt
+    # aufzugeben eine finale Antwort ohne Werkzeuge aus dem gesammelten Kontext erzwingen.
+    _fa, _fti, _fto = await _force_answer(messages, model, _num_ctx)
+    _tok_in += _fti
+    _tok_out += _fto
+    if _fa.strip():
+        _words = _fa.split(" ")
+        for _i, _w in enumerate(_words):
+            yield _sse({"type": "text", "content": _w + (" " if _i < len(_words) - 1 else "")})
+            await asyncio.sleep(0.004)
+        if request.conversation_id:
+            messages.append({"role": "assistant", "content": _fa})
+            await _db.save_conversation(request.conversation_id, messages,
+                                        model=model, agent_id=request.agent_id)
+        yield _sse({"type": "done", "tokens": {"in": _tok_in, "out": _tok_out}})
+        return
+
+    yield _sse({"type": "error", "message":
+                "Die Recherche brauchte zu viele Schritte und lieferte keine finale Antwort. "
+                "Bitte die Frage etwas eingrenzen oder ein stärkeres Modell wählen."})
+    yield _sse({"type": "done", "tokens": {"in": _tok_in, "out": _tok_out}})
 
 
 def _sse(data: dict) -> str:
