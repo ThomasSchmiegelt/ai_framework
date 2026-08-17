@@ -16,7 +16,7 @@ title AI_Framework_Thomas - Update (nur Systemdateien)
 ::
 ::  ERSETZT werden:
 ::    main.py, db.py, requirements.txt, test_chat.py, VERSION,
-::    static\, tools\, docs\, scripts\, samples\, bilder\,
+::    static\, tools\, docs\, scripts\, samples\, bilder\, defaults\,
 ::    *.md, *.ps1, *.bat Startskripte, LICENSE
 ::
 ::  AUFRUF
@@ -144,6 +144,7 @@ robocopy "%DSTCODE%" "%BKP%" main.py db.py requirements.txt test_chat.py VERSION
 robocopy "%DSTCODE%\static" "%BKP%\static" /E /XD __pycache__ /XF *.pyc /NJH /NJS /NFL /NDL /NP >nul
 robocopy "%DSTCODE%\tools"  "%BKP%\tools"  /E /XD __pycache__ /XF *.pyc /NJH /NJS /NFL /NDL /NP >nul
 robocopy "%DSTCODE%\docs"   "%BKP%\docs"   /E /NJH /NJS /NFL /NDL /NP >nul
+robocopy "%DSTCODE%\defaults" "%BKP%\defaults" /E /NJH /NJS /NFL /NDL /NP >nul
 call :log "      gesichert: %BKP%"
 
 :: --- 2) Systemdateien austauschen (data\, config.json, ollama\ bleiben unberuehrt) ---
@@ -161,6 +162,7 @@ call :copydir docs
 call :copydir scripts
 call :copydir samples
 call :copydir bilder
+call :copydir defaults
 
 if "%RCERR%"=="1" (
   call :log "[X] Beim Kopieren ist ein Fehler aufgetreten. Vorherige Version: %BKP%"
