@@ -525,6 +525,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Folien-Navigation
   document.getElementById('btn-prev-slide').addEventListener('click', () => CanvasRenderer.prevSlide());
   document.getElementById('btn-next-slide').addEventListener('click', () => CanvasRenderer.nextSlide());
+  document.getElementById('btn-slide-image')?.addEventListener('click', () => CanvasRenderer.generateSlideImage());
+  document.getElementById('btn-slides-images')?.addEventListener('click', () => CanvasRenderer.generateAllImages());
 
   // Export-Buttons
   document.getElementById('btn-export-pptx').addEventListener('click', () => exportCanvas('pptx'));
