@@ -473,12 +473,20 @@ def _web_search_allowed() -> bool:
     return not _hartman()
 
 
+def _assistant_mode() -> bool:
+    """Profil-Flag »🧭 Assistent-Modus«: eine einzige Gesprächsfläche (nur Chat-Tab), in der
+    das Modell **selbst entscheidet**, welches Werkzeug es zieht (Code, Web-/Tiefe-Recherche,
+    Bild, Diagramm, Präsentation …). Impliziert die erweiterten Chat-Werkzeuge und schaltet das
+    Bild-Werkzeug frei. Standard aus — braucht ein fähiges Modell (kleine Modelle → Std-Modus)."""
+    return bool(_load_profile().get("assistant_mode", False))
+
+
 def _chat_agent_tools() -> bool:
     """Profil-Häkchen »Erweiterte Chat-Werkzeuge«: bietet dem Chat-Modell zusätzlich einen
     **Code-Interpreter** (``run_python``, serverseitige Sandbox) und **autonome Web-Recherche**
     an, damit es komplexe Aufgaben rechnend/recherchierend löst. Standard aus — kleine Modelle
-    sind mit dem Werkzeug-Loop oft überfordert."""
-    return bool(_load_profile().get("chat_code_interpreter", False))
+    sind mit dem Werkzeug-Loop oft überfordert. Der **Assistent-Modus** impliziert dies."""
+    return bool(_load_profile().get("chat_code_interpreter", False)) or _assistant_mode()
 
 
 def _confidential_api_allowed() -> bool:
@@ -1327,6 +1335,29 @@ _RUN_PYTHON_TOOL_DEF = {
             "type": "object",
             "properties": {"code": {"type": "string", "description": "Auszuführender Python-Code"}},
             "required": ["code"],
+        },
+    },
+}
+
+# Bild-Werkzeug für den Chat — nur im Assistent-Modus angeboten (und nur wenn ein
+# Bildmodell konfiguriert ist). Erzeugt ein Bild direkt aus der Unterhaltung.
+_GENERATE_IMAGE_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "generate_image",
+        "description": (
+            "Erzeugt ein BILD aus einer Text-Beschreibung (Foto, Illustration, Konzept, Logo …). "
+            "Verwende es, wenn der Nutzer ein Bild/eine Grafik/ein Motiv erzeugt haben möchte. "
+            "Formuliere eine anschauliche englische oder deutsche Prompt-Beschreibung."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Bildbeschreibung"},
+                "size": {"type": "string", "enum": ["square", "landscape", "portrait"],
+                         "description": "Seitenverhältnis (Standard square)"},
+            },
+            "required": ["prompt"],
         },
     },
 }
@@ -3024,9 +3055,39 @@ async def _chat_generator(request: ChatRequest):
             if _web_def:
                 active_tools = active_tools + [_web_def]
 
+    # Assistent-Modus: Bild-Werkzeug freischalten, wenn ein Bildmodell konfiguriert ist,
+    # damit das Modell auf Wunsch selbst ein Bild erzeugen kann.
+    _assist_on = _assistant_mode()
+    if _assist_on and _image_model() and not any(t["function"]["name"] == "generate_image" for t in active_tools):
+        active_tools = active_tools + [_GENERATE_IMAGE_TOOL_DEF]
+
     # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
     messages: list = []
     _sci = _SCIENCE_PROMPT if request.science else ""
+    # Assistent-Modus: Intent-Router als Systemhinweis – das Modell entscheidet selbst,
+    # welche Fähigkeit es nutzt.
+    _router_hint = ""
+    if _assist_on:
+        _caps = []
+        if any(t["function"]["name"] == "run_python" for t in active_tools):
+            _caps.append("Rechnen/Code/Datenanalyse → run_python")
+        if any(t["function"]["name"] == "web_search" for t in active_tools):
+            _caps.append("aktuelle Fakten/Recherche → web_search")
+        if any(t["function"]["name"] == "generate_image" for t in active_tools):
+            _caps.append("Bild/Grafik/Motiv erzeugen → generate_image")
+        if any(t["function"]["name"] == "create_diagram" for t in active_tools):
+            _caps.append("Ablauf/Architektur/Beziehungen → create_diagram (Mermaid)")
+        if any(t["function"]["name"] == "create_presentation" for t in active_tools):
+            _caps.append("Folien/Präsentation → create_presentation")
+        if any(t["function"]["name"] == "create_spreadsheet" for t in active_tools):
+            _caps.append("Tabelle/Kalkulation → create_spreadsheet")
+        if any(t["function"]["name"] == "route_planner" for t in active_tools):
+            _caps.append("Route/Fahrtzeit → route_planner")
+        _router_hint = ("ASSISTENT-MODUS: Du bist ein universeller Assistent und entscheidest "
+                        "SELBST, welches Werkzeug eine Aufgabe am besten löst — rufe es dann "
+                        "eigenständig auf, statt nur zu beschreiben. Verfügbare Fähigkeiten: "
+                        + "; ".join(_caps) + ". Für einfache Wissens-/Gesprächsfragen antworte "
+                        "direkt ohne Werkzeug.")
     _agent_hint = ""
     if _agent_tools_on and ALLOW_PYTHON_EXEC:
         _agent_hint = ("Du hast einen Code-Interpreter: Für rechen-/datenlastige oder komplexe "
@@ -3057,7 +3118,7 @@ async def _chat_generator(request: ChatRequest):
                 f"Antwort auf das berechnete Ergebnis, statt im Kopf zu rechnen. Nenne dem "
                 f"Nutzer das Ergebnis klar und knapp erklärt."
             )
-    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt, _agent_hint, _web_hint, _math_hint) if p)
+    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt, _router_hint, _agent_hint, _web_hint, _math_hint) if p)
     if _sys:
         messages.append({"role": "system", "content": _sys})
 
@@ -3427,6 +3488,20 @@ async def _chat_generator(request: ChatRequest):
                 except Exception:
                     pass
 
+            # Assistent-Modus: erzeugtes Bild sofort anzeigen, dem Modell nur eine Notiz geben
+            if fn == "generate_image":
+                try:
+                    _imd = json.loads(tool_result)
+                    if _imd.get("ok") and _imd.get("image"):
+                        yield _sse({"type": "image", "data": _imd["image"]})
+                        image_emitted = True
+                        tool_result = ("Das Bild wurde erzeugt und wird dem Nutzer bereits "
+                                       "angezeigt. Beschreibe es kurz in 1–2 Sätzen.")
+                    else:
+                        tool_result = "Bildgenerierung fehlgeschlagen: " + str(_imd.get("error", "unbekannt"))
+                except Exception:
+                    pass
+
             messages.append({"role": "tool", "content": tool_result})
 
     # Werkzeug-Loop erschöpft (z. B. tiefe Web-Recherche mit vielen Suchschritten): statt
@@ -3480,6 +3555,18 @@ async def _execute_tool(name: str, args: dict) -> str:
         # JSON-Umschlag: der Loop trennt Bilder (→ anzeigen) vom Text (→ ans Modell)
         return json.dumps({"text": (txt.strip() or "(keine Ausgabe)")[:6000],
                            "images": out.get("images") or []}, ensure_ascii=False)
+
+    if name == "generate_image":
+        # Bild-Werkzeug (Assistent-Modus): erzeugt ein Bild; der Loop streamt es als image-Frame.
+        try:
+            r = await _generate_image_core(str(args.get("prompt", "") or ""), "",
+                                           str(args.get("size", "square") or "square"))
+            return json.dumps({"ok": True, "image": r.get("image", ""),
+                               "prompt": r.get("prompt", "")}, ensure_ascii=False)
+        except HTTPException as e:
+            return json.dumps({"ok": False, "error": str(e.detail)}, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
 
     if name in ("create_presentation", "create_spreadsheet"):
         canvas_type = name.replace("create_", "")
@@ -4547,21 +4634,28 @@ async def image_config():
 
 @app.post("/api/image/generate")
 async def image_generate(req: Request):
-    """Erzeugt ein Bild aus einem Prompt – lokal (SD-WebUI) oder über eine
-    OpenAI-kompatible Bild-API. Antwort: ``{image: data-URI, model, prompt}``.
-
-    Geheim-Modus: ein Remote-Modell wird auf den lokalen SD-Server umgeleitet; ist
-    keiner eingerichtet → **HTTP 409** (keine Cloud-Anfrage)."""
+    """Erzeugt ein Bild aus einem Prompt (HTTP-Endpoint, siehe _generate_image_core)."""
     body = await req.json()
-    prompt = str(body.get("prompt", "") or "").strip()
+    return await _generate_image_core(body.get("prompt", ""), body.get("negative_prompt", ""),
+                                      body.get("size", "square"), body.get("model", ""))
+
+
+async def _generate_image_core(prompt: str, negative: str = "", preset: str = "square",
+                               model: Optional[str] = None) -> dict:
+    """Kern der Bildgenerierung – lokal (SD-WebUI) oder OpenAI-kompatible Bild-API.
+    Genutzt vom Endpoint ``/api/image/generate`` UND dem Chat-Werkzeug ``generate_image``
+    (Assistent-Modus). Antwort: ``{image: data-URI/URL, model, prompt}``; wirft
+    HTTPException bei Fehlern. Geheim-/Hartman-Modus: Remote-Modell → lokaler SD-Server;
+    ist keiner eingerichtet → **HTTP 409** (keine Cloud-Anfrage)."""
+    prompt = str(prompt or "").strip()
     if not prompt:
         raise HTTPException(400, "Kein Bild-Prompt angegeben.")
-    negative = str(body.get("negative_prompt", "") or "").strip()
-    preset = str(body.get("size", "") or "square").strip().lower()
+    negative = str(negative or "").strip()
+    preset = str(preset or "square").strip().lower()
     if preset not in _IMAGE_SIZES:
         preset = "square"
 
-    model = str(body.get("model", "") or "").strip() or _image_model()
+    model = str(model or "").strip() or _image_model()
     if not model or model in _MODEL_PLACEHOLDERS:
         raise HTTPException(400, "Keine Bildgenerierung konfiguriert – im Profil ein "
                                  "Bildmodell (lokal SD-WebUI oder API) wählen.")
@@ -9519,6 +9613,8 @@ async def save_profile(req: Request):
     # Automatisches Angebot einer tiefen Recherche bei breiten Fakten-/Rechercheanfragen
     # (rein Frontend-Steuerung; Standard: an)
     profile["deep_research_offer"] = bool(body.get("deep_research_offer", True))
+    # 🧭 Assistent-Modus: nur Chat-Tab, Modell wählt Werkzeuge selbst (Standard: aus)
+    profile["assistant_mode"] = bool(body.get("assistant_mode", False))
     # Vertrauliche Auswertungen (Verzeichnis-Analyse, Postfach) dürfen API-Modelle
     # nutzen, wenn explizit eines gewählt ist (Standard: aus — alles bleibt lokal)
     profile["confidential_allow_api"] = bool(body.get("confidential_allow_api", False))

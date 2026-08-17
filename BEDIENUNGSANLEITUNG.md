@@ -30,6 +30,7 @@
 - [To-Do mit Wissensgraph (✅ To-Do)](#11h-to-do-mit-wissensgraph--to-do)
 - [Transkription — Sprache zu Text (🎙 Transkription)](#11i-transkription--sprache-zu-text--transkription)
 - [Geheim-Modus — alles lokal](#11j-geheim-modus--alles-lokal)
+- [🧭 Assistent-Modus — eine Gesprächsfläche für alles](#11j-2-🧭-assistent-modus--eine-gesprächsfläche-für-alles)
 - [Sprachausgabe — Antworten vorlesen (🔊)](#11k-sprachausgabe--antworten-vorlesen-)
 - [Bildgenerierung — Bilder aus Text (🎨)](#11l-bildgenerierung--bilder-aus-text-)
 12. [Planer (Netzplan / CPM)](#12-planer-netzplan--cpm)
@@ -1394,6 +1395,26 @@ Auswertungen, Transkription). So bleibt garantiert **alles auf diesem Rechner**.
 **in beide Richtungen**: schaltest du ihn wieder **aus**, gelten deine gespeicherten (ggf.
 Remote-)Modelle sofort wieder. Bei aktivem Modus zeigt die Marke oben **🔒 lokal**. Denselben
 Schalter findest du auch im **Profil-Modal** („🔒 Geheim-Modus — alles lokal").
+
+---
+
+## 11j-2. 🧭 Assistent-Modus — eine Gesprächsfläche für alles
+
+Direkt unter dem Geheim-Modus (Sidebar) und im Profil gibt es den Umschalter **🧭 Assistent-Modus**.
+Ist er **an**, wird die Oberfläche auf **nur den Chat-Tab** reduziert — alle anderen Tabs sind
+ausgeblendet. Im Chat **entscheidet das Modell dann selbst**, welche Funktion es für deine Anfrage
+braucht, und ruft sie autonom auf:
+
+- **Rechnen/Datenanalyse** → führt Python-Code aus,
+- **aktuelle Fakten / breite Fragen** → recherchiert im Web,
+- **„erstelle ein Bild von …"** → erzeugt ein Bild (sofern im Profil ein Bildmodell eingerichtet ist),
+- **Abläufe/Architektur** → zeichnet ein Diagramm, **Folien** → Präsentation, **Route** → Karte usw.
+
+Die Ergebnisse landen wie gewohnt in der **Verlaufsliste links**. Ausschalten bringt alle Tabs zurück.
+
+> ⚠️ **Nur für fähige Modelle:** Das Selbst-Entscheiden verlangt ein starkes Modell unter „Allgemein"
+> (stark lokal oder API). Das kleine Standardmodell `ministral-3:3b` trifft die Werkzeugwahl oft nicht
+> — dann lieber im **Standard-Modus** mit den normalen Tabs arbeiten.
 
 ---
 

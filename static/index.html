@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260817research" />
+  <link rel="stylesheet" href="/css/app.css?v=20260817assist" />
 </head>
 <body>
 
@@ -109,6 +109,8 @@
       <button id="btn-profile" class="btn-sidebar-action" style="width:100%">👤 Profil bearbeiten</button>
       <button id="btn-secret-mode" class="btn-sidebar-action" style="width:100%"
               title="Geheim-Modus: sämtliche Modell-Rollen zwingend lokal. Klick schaltet um.">🔓 Geheim-Modus: aus</button>
+      <button id="btn-assistant-mode" class="btn-sidebar-action" style="width:100%"
+              title="Assistent-Modus: nur der Chat-Tab, das Modell wählt Werkzeuge (Code, Recherche, Bild, Diagramme …) selbst. Braucht ein fähiges Modell. Klick schaltet um.">🧭 Assistent-Modus: aus</button>
       <div id="token-meter" title="Tokens dieser Sitzung. Klick öffnet die Aufschlüsselung nach Vorgang. Preis je 1.000 Tokens im Profil hinterlegen."
            style="display:none;margin-top:8px;font-size:11px;opacity:.85;cursor:pointer;line-height:1.5;position:relative;
                   border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--bg-input)">
@@ -2908,6 +2910,17 @@
       </span>
     </label>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-assistant-mode" style="width:auto;margin-top:2px" />
+      <span>🧭 <strong>Assistent-Modus</strong> (eine Gesprächsfläche für alles)
+        <span class="planner-muted">— blendet <strong>alle Tabs außer Chat</strong> aus; das Modell
+        <strong>entscheidet selbst</strong>, welche Funktion es zieht (Code ausführen, Web-/Tiefe-
+        Recherche, <strong>Bild erzeugen</strong>, Diagramme, Präsentationen …) und ruft sie autonom
+        auf. Ergebnisse landen wie gewohnt in der History links. <strong>Nur für fähige Modelle</strong>
+        — kleine Modelle (<code>ministral-3:3b</code>) treffen die Werkzeugwahl oft nicht; dann besser
+        aus. Standard: aus. Auch als Schnellschalter in der Seitenleiste (🧭).</span>
+      </span>
+    </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
       <input type="checkbox" id="profile-math-autoroute" style="width:auto;margin-top:2px" />
       <span>Matheaufgaben automatisch ans Mathe-Modell weiterreichen
         <span class="planner-muted">— greift nur, solange im Chat das schwache Standardmodell
@@ -3455,7 +3468,7 @@
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260817research"></script>
+<script src="/js/profile.js?v=20260817assist"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
@@ -3477,7 +3490,7 @@
 <script src="/js/todo.js?v=20260816graph3d"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260817hartman2"></script>
+<script src="/js/app.js?v=20260817assist"></script>
 
 </body>
 </html>
