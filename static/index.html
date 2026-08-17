@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260816graph3d" />
+  <link rel="stylesheet" href="/css/app.css?v=20260817agent" />
 </head>
 <body>
 
@@ -164,7 +164,7 @@
       <div id="messages">
         <!-- Welcome-Screen -->
         <div id="welcome">
-          <h2>🤖 LOCAL AI</h2>
+          <h2 id="welcome-title">🤖 LOCAL AI</h2>
           <p>Dein lokaler KI-Assistent auf Basis von Ollama.<br/>
              Stelle eine Frage, lade eine Datei hoch oder aktiviere die Websuche.</p>
 
@@ -228,6 +228,9 @@
               <!-- Custom-Dropdown ersetzt nativen <select multiple> -->
               <div id="rag-chat-panel" style="display:none"></div>
             </div>
+            <button id="btn-image-toggle" class="tool-toggle" title="Bild-Modus: die nächste Nachricht erzeugt ein Bild (auch /bild … oder /bildhelp)">
+              🎨 Bild
+            </button>
             <button id="btn-thinking-toggle" class="tool-toggle" title="Denkprozess des Modells im rechten Panel anzeigen">
               🧠 Denkprozess
             </button>
@@ -252,6 +255,30 @@
 
         <div style="margin-top:6px;font-size:11.5px;color:var(--text-muted);text-align:center">
           LOCAL AI · Lokal &amp; privat · Ctrl+K = Neues Gespräch
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Geführte Bildgenerierung (/bildhelp) ─────────────────────────── -->
+    <div id="bild-help" class="bild-overlay" style="display:none">
+      <div class="bild-card">
+        <div class="bild-close" id="bild-close" title="Schließen (Esc)">✕</div>
+        <div class="bild-title">🎨 Bild beschreiben</div>
+        <label class="bild-lbl">Motiv / Beschreibung</label>
+        <textarea id="bild-motiv" rows="2" placeholder="z. B. ein Leuchtturm auf einer Klippe im Sturm"></textarea>
+        <label class="bild-lbl">Stil</label>
+        <div class="bild-chips" id="bild-stil"></div>
+        <label class="bild-lbl">Kameraperspektive</label>
+        <div class="bild-chips" id="bild-perspektive"></div>
+        <label class="bild-lbl">Beleuchtung</label>
+        <div class="bild-chips" id="bild-licht"></div>
+        <label class="bild-lbl">Seitenverhältnis</label>
+        <div class="bild-chips" id="bild-size"></div>
+        <label class="bild-lbl">Negativ-Prompt <span class="planner-muted">(optional – was NICHT im Bild sein soll)</span></label>
+        <input type="text" id="bild-negativ" placeholder="z. B. Text, Wasserzeichen, unscharf" />
+        <div class="bild-actions">
+          <button id="bild-cancel" class="bild-btn-sec">Abbrechen</button>
+          <button id="bild-go" class="bild-btn-go">🎨 Erzeugen</button>
         </div>
       </div>
     </div>
@@ -1318,6 +1345,20 @@
             <button class="export-btn" id="cw-ex-leer">📄 Leere Vorlage</button>
           </div>
         </details>
+        <button id="cw-agent-toggle" class="export-btn" title="Autonomen Coding-Agenten ein-/ausblenden">🤖 Agent</button>
+      </div>
+
+      <!-- Autonomer Coding-Agent (Agent-Harness): plant, schreibt/ändert mehrere Dateien
+           selbst, prüft (Python-Sandkasten / Canvas) und korrigiert – bis fertig. -->
+      <div id="cw-agent-panel" style="display:none">
+        <textarea id="cw-agent-task" rows="2" placeholder="Aufgabe für den autonomen Agenten – er plant, schreibt/ändert mehrere Dateien selbst, prüft (Python-Sandkasten oder Canvas) und behebt Fehler. z. B. „Baue ein Snake-Spiel auf <canvas>“ oder „Lege utils.py + tests an und prüfe sie“"></textarea>
+        <div id="cw-agent-actions">
+          <button id="cw-agent-run" class="export-btn">🤖 Agent starten</button>
+          <button id="cw-agent-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
+          <button id="cw-agent-undo" class="export-btn" style="display:none" title="Alle Änderungen des letzten Agentenlaufs zurücknehmen">↩ Rückgängig</button>
+          <span class="planner-muted" style="font-size:11px">Modell: Rolle „Programmieren/Mathe" (fähiges Modell empfohlen).</span>
+        </div>
+        <div id="cw-agent-log"></div>
       </div>
 
       <!-- kompakter KI-Verlauf -->
@@ -2742,11 +2783,16 @@
           <option value="doktor">🩺 Frau Doktor (Sie, korrekt-distanziert)</option>
           <option value="felix">😎 Felix (Du, kumpelhaft)</option>
           <option value="sandra">😊 Sandra (Du, sehr korrekt & kumpelhaft)</option>
+          <option value="hartman">🎖 Gunnery Sergeant Hartman (militärisch zackig · nur lokal)</option>
         </select>
         <span class="planner-muted" style="font-size:11px;display:block;margin-top:4px">Jede Persona
           erhält im Chat eine passende <strong>Sprachausgabe</strong> (🔊 an der Antwort): Roboter =
           synthetisch, Herr Professor = älterer Mann, Frau Doktor = ältere Frau, Felix = junger Mann,
-          Sandra = junge Frau. Die Ausgabe entsteht live im Browser (nichts wird gespeichert).</span>
+          Sandra = junge Frau, Gunnery Sergeant = zackig/laut. Die Ausgabe entsteht live im Browser
+          (nichts wird gespeichert).<br><strong>🎖 Gunnery Sergeant Hartman</strong> antwortet
+          <strong>militärisch zackig</strong> und aktiviert einen <strong>Ausbildungs-/Lokal-Riegel</strong>:
+          es sind <strong>nur lokale Modelle</strong> nutzbar und die <strong>Websuche ist gesperrt</strong>
+          (alles rein lokal). Der Geheim-Button bleibt davon unberührt.</span>
       </div>
     </div>
 
@@ -2804,7 +2850,34 @@
           das Audio wird dann beim Anbieter erzeugt. Im <strong>Geheim-Modus</strong> wird immer der
           Browser genutzt. Die Persona bestimmt die Stimme.</span>
       </div>
+      <div class="form-group">
+        <label>🎨 Bildgenerierung <span class="planner-muted" style="font-size:11px">Bilder aus Text</span></label>
+        <select id="profile-image-model" class="sidebar-select"></select>
+        <input type="text" id="profile-sd-url" placeholder="http://127.0.0.1:7860"
+          style="margin-top:6px" />
+        <span class="planner-muted" style="font-size:11px;display:block;margin-top:4px">Standard =
+          <strong>aus</strong>. Die Auswahl listet — genau wie die Rollen-Modelle oben — die Modelle
+          deiner unter <strong>☁ KI-Anbieter</strong> eingetragenen Anbieter (z. B.
+          <code>dall-e-3</code>, <code>gpt-image-1</code> oder <code>z-image-turbo</code>). Den
+          <strong>Anbieter selbst (Base-URL + API-Schlüssel) trägst du dort ein</strong> — hier wählst
+          du nur das Modell. Das obige URL-Feld ist <strong>ausschließlich</strong> für den
+          <strong>lokalen</strong> Stable-Diffusion-WebUI-Server (AUTOMATIC1111/Forge, mit
+          <code>--api</code> gestartet). Im <strong>Geheim-Modus</strong> sind API-Modelle gesperrt
+          (nur lokal). Nutzung im Chat per 🎨-Haken oder <code>/bild</code> / <code>/bildhelp</code>.</span>
+      </div>
     </div>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-chat-agent" style="width:auto;margin-top:2px" />
+      <span>🧪 Erweiterte Chat-Werkzeuge: <strong>Code ausführen &amp; Web-Recherche</strong>
+        <span class="planner-muted">— erlaubt dem Chat, komplexe Aufgaben zu lösen, indem es
+        selbst <strong>Python-Code ausführt</strong> (Berechnungen, Datenanalyse, Diagramme) und
+        bei Bedarf <strong>im Web recherchiert</strong> — als Werkzeuge im Antwort-Loop.
+        <strong>Nur für fähige Modelle</strong> (Rolle „Allgemein" oben): kleine Modelle wie
+        <code>ministral-3:3b</code> sind mit dem Werkzeug-Loop überfordert. Standard: aus.
+        Code läuft in der Sandbox (kein Datei-/Netzzugriff); im Hartman-Modus bleibt die
+        Web-Recherche gesperrt.</span>
+      </span>
+    </label>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
       <input type="checkbox" id="profile-math-autoroute" style="width:auto;margin-top:2px" />
       <span>Matheaufgaben automatisch ans Mathe-Modell weiterreichen
@@ -2852,7 +2925,8 @@
     <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
       Optional zusätzlich zu lokalem Ollama einen OpenAI-kompatiblen Anbieter
       (OpenRouter, OpenAI, Groq, Together …) einbinden. Dessen Modelle erscheinen oben
-      in den Rollen-Listen. <strong>Der API-Schlüssel bleibt lokal</strong> (nicht in
+      in den Rollen-Listen, bei der Sprachausgabe (TTS) <strong>und der Bildgenerierung</strong>
+      (z. B. <code>z-image-turbo</code>). <strong>Der API-Schlüssel bleibt lokal</strong> (nicht in
       Backup/Git). Hinweis: Remote-Aufrufe verlassen den Rechner und belegen kein VRAM.
     </p>
     <div id="provider-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
@@ -3345,14 +3419,14 @@
 <script src="/js/agents.js?v=20260611merge"></script>
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
-<script src="/js/tts.js?v=20260815tts3"></script>
-<script src="/js/chat.js?v=20260815tts"></script>
+<script src="/js/tts.js?v=20260817hartman"></script>
+<script src="/js/chat.js?v=20260817bild"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260721"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260815tts2"></script>
+<script src="/js/profile.js?v=20260817chatagent"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
@@ -3360,7 +3434,7 @@
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
 <script src="/js/logger.js?v=20260603"></script>
-<script src="/js/code_workspace.js?v=20260627pst1"></script>
+<script src="/js/code_workspace.js?v=20260817agent"></script>
 <script src="/js/onboarding.js?v=20260815stt"></script>
 <script src="/js/medizin.js?v=20260711docs2"></script>
 <script src="/js/mathe.js?v=20260622"></script>
@@ -3374,7 +3448,7 @@
 <script src="/js/todo.js?v=20260816graph3d"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260815tts"></script>
+<script src="/js/app.js?v=20260817hartman2"></script>
 
 </body>
 </html>

@@ -134,6 +134,28 @@ const Chat = (() => {
       return;
     }
 
+    // Bildgenerierung: „/bild <Beschreibung>" erzeugt direkt ein Bild, „/bildhelp"
+    // (oder leeres „/bild") öffnet den geführten Dialog.
+    const bi = _parseBild(text);
+    if (bi) {
+      input.value = '';
+      autoResizeTextarea(input);
+      if (bi.help) runBildHelp(bi.prompt);
+      else runBild(bi.prompt);
+      return;
+    }
+
+    // Bild-Modus per Toolbar-Haken (🎨): die nächste normale Nachricht wird zum
+    // Bild-Prompt. One-shot – der Haken wird danach zurückgesetzt.
+    const imgToggle = document.getElementById('btn-image-toggle');
+    if (imgToggle && imgToggle.classList.contains('active') && pendingFiles.length === 0) {
+      imgToggle.classList.remove('active');
+      input.value = '';
+      autoResizeTextarea(input);
+      runBild(text);
+      return;
+    }
+
     // Rückfragen: „/frag <Aufgabe>" erzeugt eine dynamische Eingabemaske (Text/
     // Auswahl), deren Antworten an die Aufgabe gehängt und normal gesendet werden.
     const fr = _parseFrag(text);
@@ -403,10 +425,13 @@ const Chat = (() => {
     }
 
     const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'margin:10px 0';
+    // Definite Breite: die Assistenten-Blase ist ein schrumpfendes Flex-Item
+    // (align-items:flex-start) und das Leaflet-div hat keine intrinsische Breite –
+    // ohne feste Breite kollabiert die Karte schmal. calc(100vw-…) bleibt responsiv.
+    wrapper.style.cssText = 'margin:10px 0;width:min(680px,calc(100vw - 60px));max-width:100%';
 
     const mapEl = document.createElement('div');
-    mapEl.style.cssText = 'height:360px;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px #0006';
+    mapEl.style.cssText = 'height:360px;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px #0006';
     wrapper.appendChild(mapEl);
 
     const info = document.createElement('div');
@@ -1465,6 +1490,157 @@ const Chat = (() => {
     }
   }
 
+  // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────
+  // „/bildhelp" (Aliase /imagehelp, /imghelp) öffnet den geführten Dialog; „/bild
+  // <Beschreibung>" erzeugt direkt. Ein leeres „/bild" öffnet ebenfalls den Dialog.
+  function _parseBild(text) {
+    const help = text.match(/^\/(bild|image|img)help\b\s*([\s\S]*)$/i);
+    if (help) return { help: true, prompt: (help[2] || '').trim() };
+    const m = text.match(/^\/(bild|image|img)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    const p = (m[2] || '').trim();
+    return p ? { help: false, prompt: p } : { help: true, prompt: '' };
+  }
+
+  // Erzeugt ein Bild und zeigt es im Verlauf an (außerhalb der LLM-Historie, wie
+  // runSearch). opts = { size, negative }.
+  async function runBild(prompt, opts) {
+    prompt = (prompt || '').trim();
+    opts = opts || {};
+    if (!prompt) { showToast('Bitte eine Bildbeschreibung angeben'); return; }
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    appendMessage('user', '🎨 ' + prompt);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const textEl = document.createElement('div');
+    textEl.className = 'bubble-text';
+    textEl.innerHTML = '<em>🎨 Bild wird erzeugt… (das kann etwas dauern)</em>';
+    content.appendChild(textEl);
+    scrollToBottom();
+
+    const model = (typeof Profile !== 'undefined' ? Profile.imageModel?.() : '') || undefined;
+    try {
+      const resp = await fetch('/api/image/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          size: opts.size || 'square',
+          negative_prompt: opts.negative || '',
+          model,
+        }),
+      });
+      if (!resp.ok) {
+        let detail = 'HTTP ' + resp.status;
+        try { detail = (await resp.json()).detail || detail; } catch (_) {}
+        textEl.innerHTML = `<em style="color:#ef4444">Bildgenerierung fehlgeschlagen: ${escHtml(detail)}</em>`;
+        return;
+      }
+      const data = await resp.json();
+      textEl.remove();
+      insertImage(content, data.image);
+      // Bildunterschrift + Speichern-Link
+      const cap = document.createElement('div');
+      cap.style.cssText = 'font-size:12px;color:var(--text-muted);margin-top:2px';
+      const dl = document.createElement('a');
+      dl.href = data.image;
+      dl.download = 'bild_' + Date.now() + '.png';
+      dl.textContent = '⬇ Speichern';
+      dl.style.cssText = 'color:var(--accent, #3b76ba);text-decoration:none;margin-left:8px';
+      cap.appendChild(document.createTextNode('🎨 ' + prompt));
+      cap.appendChild(dl);
+      content.appendChild(cap);
+      scrollToBottom();
+    } catch (e) {
+      textEl.innerHTML = `<em style="color:#ef4444">Bildgenerierung fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      isStreaming = false;
+      setBtnSendState(true);
+    }
+  }
+
+  // Geführter Bild-Dialog (/bildhelp): festes Formular, komponiert den Prompt
+  // deterministisch (kein LLM → auch im Geheim-Modus nutzbar).
+  const _BILD_STIL = ['Fotorealistisch', 'Illustration', '3D-Render', 'Aquarell',
+    'Ölgemälde', 'Anime', 'Technische Zeichnung'];
+  const _BILD_PERSP = ['Nahaufnahme / Makro', 'Halbtotale', 'Totale / Weitwinkel',
+    'Vogelperspektive', 'Froschperspektive', 'Isometrisch'];
+  const _BILD_LICHT = ['Tageslicht', 'Goldene Stunde', 'Studiolicht', 'Neon',
+    'Kerzenlicht', 'Dramatisch / Chiaroscuro'];
+  const _BILD_SIZE = [
+    { value: 'square', label: 'Quadrat (1:1)' },
+    { value: 'landscape', label: 'Quer (16:9)' },
+    { value: 'portrait', label: 'Hoch (9:16)' },
+  ];
+
+  function _bildChips(host, items, single) {
+    host.innerHTML = '';
+    items.forEach((it, i) => {
+      const val = typeof it === 'string' ? it : it.value;
+      const lab = typeof it === 'string' ? it : it.label;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bild-chip';
+      b.textContent = lab;
+      b.dataset.val = val;
+      if (single && i === 0) b.classList.add('active');
+      b.addEventListener('click', () => {
+        if (single) host.querySelectorAll('.bild-chip').forEach(c => c.classList.remove('active'));
+        b.classList.toggle('active');
+      });
+      host.appendChild(b);
+    });
+  }
+
+  function _bildSelected(host) {
+    const a = host.querySelector('.bild-chip.active');
+    return a ? a.dataset.val : '';
+  }
+
+  let _bildWired = false;
+  function runBildHelp(prefill) {
+    const ov = document.getElementById('bild-help');
+    if (!ov) return;
+    _bildChips(document.getElementById('bild-stil'), _BILD_STIL, true);
+    _bildChips(document.getElementById('bild-perspektive'), _BILD_PERSP, true);
+    _bildChips(document.getElementById('bild-licht'), _BILD_LICHT, true);
+    _bildChips(document.getElementById('bild-size'), _BILD_SIZE, true);
+    const motiv = document.getElementById('bild-motiv');
+    motiv.value = prefill || '';
+    document.getElementById('bild-negativ').value = '';
+
+    if (!_bildWired) {
+      _bildWired = true;
+      const close = () => { ov.style.display = 'none'; };
+      document.getElementById('bild-close').addEventListener('click', close);
+      document.getElementById('bild-cancel').addEventListener('click', close);
+      ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && ov.style.display !== 'none') close();
+      });
+      document.getElementById('bild-go').addEventListener('click', () => {
+        const m = document.getElementById('bild-motiv').value.trim();
+        if (!m) { showToast('Bitte ein Motiv beschreiben'); return; }
+        const parts = [m,
+          _bildSelected(document.getElementById('bild-stil')),
+          _bildSelected(document.getElementById('bild-perspektive')),
+          _bildSelected(document.getElementById('bild-licht'))].filter(Boolean);
+        const size = _bildSelected(document.getElementById('bild-size')) || 'square';
+        const negative = document.getElementById('bild-negativ').value.trim();
+        close();
+        runBild(parts.join(', '), { size, negative });
+      });
+    }
+    ov.style.display = 'flex';
+    setTimeout(() => motiv.focus(), 50);
+  }
+
   // ── /frag — Dynamische Rückfragen (Eingabemaske) ────────────────────────────
   function _parseFrag(text) {
     const m = text.match(/^\/frag\b\s*([\s\S]*)$/i);
@@ -1912,6 +2088,8 @@ const Chat = (() => {
   const SLASH_COMMANDS = [
     { key: '/such', ins: '/such ', cmd: '/such …', desc: 'Alternative Suchbegriffe finden + Web durchsuchen (auch /suche, /finde)' },
     { key: '/frag', ins: '/frag ', cmd: '/frag …', desc: 'Rückfragen-Maske: fehlende Infos per Formular ergänzen, dann antworten' },
+    { key: '/bild', ins: '/bild ', cmd: '/bild …', desc: 'Bild aus Beschreibung erzeugen (lokal SD-WebUI oder API)' },
+    { key: '/bildhelp', ins: '/bildhelp', cmd: '/bildhelp', desc: 'Geführter Bild-Dialog: Motiv, Stil, Perspektive, Beleuchtung, Format' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },

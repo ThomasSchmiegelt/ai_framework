@@ -14,6 +14,9 @@ const Profile = (() => {
     return m || 'ministral-3:3b';
   }
 
+  // Im Profil gewähltes Bildmodell (local::sd / anbieter::modell) oder leer.
+  function imageModel() { return String(_data.image_model || '').trim(); }
+
   // Modell-Auswahllisten im Profil aus allen installierten Ollama-Modellen UND den
   // konfigurierten externen API-Anbietern befüllen. Remote-Modelle tragen das Präfix
   // "<provider_id>::<model>" und werden mit ihrem Anbieter beschriftet.
@@ -80,6 +83,30 @@ const Profile = (() => {
     sel.value = current;
   }
 
+  // Bild-Auswahl (Bildgenerierung): „Aus" + „Lokal SD-WebUI" + API-Vorschläge je Anbieter.
+  async function _fillImageSelect() {
+    const sel = document.getElementById('profile-image-model');
+    if (!sel) return;
+    let cfg = null;
+    try { cfg = await (await fetch('/api/image/config')).json(); } catch (_) {}
+    const current = _data.image_model || '';
+    const options = (cfg && cfg.options) || [{ value: '', label: 'Aus (keine Bildgenerierung)' }];
+    sel.innerHTML = '';
+    for (const o of options) {
+      const opt = document.createElement('option');
+      opt.value = o.value; opt.textContent = o.label;
+      sel.appendChild(opt);
+    }
+    if (current && !options.some(o => o.value === current)) {
+      const opt = document.createElement('option');
+      opt.value = current; opt.textContent = current;
+      sel.appendChild(opt);
+    }
+    sel.value = current;
+    const urlEl = document.getElementById('profile-sd-url');
+    if (urlEl) urlEl.value = _data.sd_webui_url || '';
+  }
+
   function applyTabVisibility(hiddenTabs) {
     hiddenTabs = hiddenTabs || [];
     const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'postfach', 'patente', 'rechnung', 'zeugnis', 'morph', 'jury'];
@@ -98,6 +125,38 @@ const Profile = (() => {
     }
   }
 
+  // Persona »Hartman« = Ausbildungs-/Lokal-Riegel: Websuche im Chat gesperrt
+  // (das Backend ignoriert web_search ohnehin; hier für sichtbares Feedback). Der
+  // Geheim-Button bleibt dabei unverändert.
+  function isHartman() { return String(_data.tone || '').toLowerCase() === 'hartman'; }
+  // Standard-Branding (wird bei Nicht-Hartman wiederhergestellt)
+  const _BRAND_DEFAULT = { wordmark: 'LOCAL AI', title: '🤖 LOCAL AI' };
+  const _BRAND_HARTMAN = { wordmark: '🎖 DRILL SERGEANT', title: '🎖 DRILL SERGEANT' };
+  function _applyPersonaLock() {
+    const lock = isHartman();
+    const b = lock ? _BRAND_HARTMAN : _BRAND_DEFAULT;
+    // Wortmarke (Seitenleiste), Willkommens-Überschrift und Fenstertitel anpassen
+    const wm = document.getElementById('sidebar-wordmark');
+    if (wm) wm.textContent = b.wordmark;
+    const wt = document.getElementById('welcome-title');
+    if (wt) wt.textContent = b.title;
+    document.title = b.title;
+    // Websuche im Chat sperren (das Backend ignoriert web_search ohnehin)
+    const stb = document.getElementById('btn-search-toggle');
+    if (stb) {
+      if (lock) {
+        stb.classList.remove('active');
+        stb.classList.add('tool-disabled');
+        stb.title = 'Ausbildungsmodus (Gunnery Sergeant Hartman): Websuche gesperrt – alles rein lokal';
+      } else {
+        stb.classList.remove('tool-disabled');
+        stb.title = 'Websuche aktivieren/deaktivieren';
+      }
+    }
+    // Geheim-/Lokal-Modus-Badge nachziehen (Hartman erzwingt „an")
+    if (typeof window.__reflectSecret === 'function') window.__reflectSecret();
+  }
+
   async function load() {
     try {
       const resp = await fetch('/api/profile');
@@ -106,6 +165,7 @@ const Profile = (() => {
       _data = {};
     }
     applyMode(_data.mode);
+    _applyPersonaLock();
     applyTabVisibility(_data.hidden_tabs || []);
     // Installer-Flag: API-Anbieter-Abschnitt nur zeigen, wenn aktiviert (Default: an)
     const provSec = document.getElementById('provider-section');
@@ -182,6 +242,7 @@ const Profile = (() => {
     if (localOnlyEl) localOnlyEl.checked = !!_data.local_only_mode;  // Standard: aus
     _fillModelSelects();
     _fillTtsSelect();
+    _fillImageSelect();
     _loadProviders();
     _refreshPreviews();
     // Tab-Sichtbarkeit: ein Häkchen kann mehrere Tabs steuern (data-tabs="ide,mathe").
@@ -272,6 +333,8 @@ const Profile = (() => {
       model_science:  document.getElementById('profile-model-science')?.value || '',
       model_medical:  document.getElementById('profile-model-medical')?.value || '',
       tts_model:      document.getElementById('profile-tts-model')?.value || '',
+      image_model:    document.getElementById('profile-image-model')?.value || '',
+      sd_webui_url:   document.getElementById('profile-sd-url')?.value.trim() || '',
       hidden_tabs: [...new Set(
         Array.from(document.querySelectorAll('#profile-tab-vis input[type="checkbox"]'))
           .filter(cb => !cb.checked)
@@ -289,6 +352,7 @@ const Profile = (() => {
       });
       _data = await resp.json();
       applyMode(_data.mode);
+      _applyPersonaLock();
       applyTabVisibility(_data.hidden_tabs || []);
       if (typeof I18n !== 'undefined') I18n.setLang(_data.lang || 'de');
       showToast(typeof I18n !== 'undefined' ? I18n.t('Profil gespeichert') : 'Profil gespeichert');
@@ -345,6 +409,7 @@ const Profile = (() => {
       await _loadProviders();
       await _fillModelSelects();   // neue Remote-Modelle in den Rollen-Listen anzeigen
       await _fillTtsSelect();      // neuer Anbieter → TTS-Vorschläge aktualisieren
+      await _fillImageSelect();    // neuer Anbieter → Bild-Vorschläge aktualisieren
     } catch (e) {
       msg.textContent = 'Fehler: ' + e.message;
     }
@@ -357,6 +422,7 @@ const Profile = (() => {
       await _loadProviders();
       await _fillModelSelects();
       await _fillTtsSelect();
+      await _fillImageSelect();
     } catch (_) {}
   }
 
@@ -417,5 +483,5 @@ const Profile = (() => {
     load();
   }
 
-  return { init, load, get, openModal, closeModal, applyMode, modelFor, applyTabVisibility };
+  return { init, load, get, openModal, closeModal, applyMode, modelFor, imageModel, isHartman, applyTabVisibility };
 })();

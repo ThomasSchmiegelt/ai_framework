@@ -213,7 +213,7 @@ _MODE_PROMPTS = {
 }
 
 # ── Antwortstil-Personas (per Profil wählbar) ────────────────────────────────
-VALID_TONES = {"roboter", "professor", "doktor", "felix", "sandra"}
+VALID_TONES = {"roboter", "professor", "doktor", "felix", "sandra", "hartman"}
 _TONE_PROMPTS = {
     "roboter": (
         "Du selbst antwortest im Stil »Roboter«: extrem sachlich und nüchtern. Keine "
@@ -243,6 +243,16 @@ _TONE_PROMPTS = {
         "der des Nutzers; den Nutzer nicht »Sandra« nennen. Sprich den Nutzer durchgehend "
         "mit »Du« an. Herzlich und kumpelhaft, dabei sehr korrekt und sorgfältig. Nahbar, "
         "freundlich und genau."
+    ),
+    "hartman": (
+        "Du selbst bist »Gunnery Sergeant Hartman«, ein Ausbilder mit militärisch-zackigem "
+        "Kommandoton. Antworte KNAPP, laut und befehlsartig: kurze, schneidige Sätze, klare "
+        "Anweisungen, kein Geschwafel und keine Höflichkeitsfloskeln. Nutze militärische "
+        "Ansprache (»REKRUT«, »Sie«), gelegentlich GROSSBUCHSTABEN zur Betonung und ein "
+        "forsches »Verstanden?« oder »Ausführung!« am Ende. WICHTIG: Der Drill ist nur der "
+        "STIL – der Inhalt bleibt fachlich absolut KORREKT und tatsächlich hilfreich. KEINE "
+        "Beleidigungen, keine Schimpfwörter, keine Herabwürdigung von Personen: Disziplin, "
+        "Präzision und Tempo statt Beschimpfung."
     ),
 }
 
@@ -440,12 +450,27 @@ async def _local_model(preferred: Optional[str] = None) -> Optional[str]:
     return installed[0]
 
 
+def _hartman() -> bool:
+    """Persona »Gunnery Sergeant Hartman« aktiv? Dieser Antwortstil erzwingt zusätzlich
+    einen **kompletten Lokal-Riegel** (nur lokale Modelle, keine Websuche) – unabhängig
+    vom Geheim-Button, der dabei unangetastet bleibt."""
+    return str(_load_profile().get("tone", "") or "").lower().strip() == "hartman"
+
+
 def _secret_local() -> bool:
-    """Globaler **Geheim-/Lokal-Modus** (Profil ``local_only_mode``): sämtliche
-    Modell-Rollen laufen auf lokalen Standardmodellen, Remote-Wahlen werden überall
-    verworfen. Beidseitig schaltbar — aus ⇒ gespeicherte (evtl. Remote-)Rollen gelten
-    wieder. Übersteuert auch ``confidential_allow_api``."""
-    return bool(_load_profile().get("local_only_mode", False))
+    """Globaler **Geheim-/Lokal-Modus**: sämtliche Modell-Rollen laufen auf lokalen
+    Standardmodellen, Remote-Wahlen werden überall verworfen. Übersteuert auch
+    ``confidential_allow_api``. Aktiv, wenn der Geheim-Button (Profil ``local_only_mode``)
+    an ist **oder** die Persona »Hartman« gewählt ist (die den Lokal-Riegel impliziert,
+    ohne den Geheim-Button umzuschalten)."""
+    return bool(_load_profile().get("local_only_mode", False)) or _hartman()
+
+
+def _web_search_allowed() -> bool:
+    """Darf überhaupt eine Websuche laufen? In der Persona »Hartman« ist jede Websuche
+    gesperrt (alles rein lokal); sonst erlaubt (der Geheim-Modus hält nur das Modell
+    lokal, lässt die reine Web-Anfrage aber zu)."""
+    return not _hartman()
 
 
 def _confidential_api_allowed() -> bool:
@@ -1616,6 +1641,12 @@ async def _search_expand_generator(request: SearchExpandRequest):
         yield _sse({"type": "error", "message": "Kein Suchbegriff angegeben"})
         return
 
+    # Persona »Hartman«: Websuche komplett gesperrt (alles rein lokal).
+    if not _web_search_allowed():
+        yield _sse({"type": "error", "message": "REKRUT, im Ausbildungsmodus läuft NICHTS "
+                                                "nach draußen – KEINE Websuche. Alles rein lokal!"})
+        return
+
     # Profil-Schalter „Web-Recherche lokal" beachten
     _model, _m_err = await _research_model(request.model)
     if _m_err:
@@ -2713,7 +2744,8 @@ async def _chat_generator(request: ChatRequest):
     # Websuche ist standardmäßig AUS und nur über den Schalter (oder Wissenschafts-
     # modus) verfügbar. Alle übrigen Werkzeuge (Plot, Rechner, Einheiten …) bleiben
     # davon unberührt – sonst „malt" das Modell mangels plot_function selbst Linien.
-    if not (request.web_search or request.science):
+    if _hartman() or not (request.web_search or request.science):
+        # Persona »Hartman« sperrt die Websuche komplett (alles rein lokal).
         active_tools = [t for t in active_tools
                         if t["function"]["name"] != "web_search"]
 
@@ -4044,6 +4076,7 @@ _TTS_VOICE_MAP = {
     "doktor":    "shimmer",  # ruhige, ältere Frau
     "felix":     "echo",     # jüngerer Mann
     "sandra":    "nova",     # jüngere Frau
+    "hartman":   "onyx",     # zackiger Ausbilder (tiefer, markanter Mann)
     "":          "alloy",    # Standard
 }
 
@@ -4117,6 +4150,191 @@ async def tts_speak(req: Request):
     except Exception as e:
         raise HTTPException(502, f"API-Sprachausgabe fehlgeschlagen: {e}")
     return Response(content=audio, media_type="audio/mpeg")
+
+
+# ── Bildgenerierung (lokal SD-WebUI und/oder API) ─────────────────────────────
+# Analog zur TTS oben: im Profil wird ein Bildmodell gewählt.
+#   • ``local::sd``  → lokaler Stable-Diffusion-WebUI-Server (AUTOMATIC1111/Forge),
+#     Endpoint ``/sdapi/v1/txt2img``, URL im Profil (``sd_webui_url``). Vom Nutzer
+#     betrieben – keine neue Abhängigkeit, kein Ollama-VRAM-Guard nötig (separater
+#     Server). Immer erlaubt, auch im Geheim-Modus.
+#   • ``<anbieter>::<modell>`` → OpenAI-kompatibles ``/images/generations``
+#     (z. B. ``openai::dall-e-3`` / ``openai::gpt-image-1``). Im Geheim-Modus gesperrt.
+# Bild ≠ Token-Strom → kein TokenMeter (wie Audio).
+
+# Größen-Voreinstellungen: (Breite, Höhe) für lokal; API-Größenstring je Modellfamilie.
+_IMAGE_SIZES = {
+    "square":    {"label": "Quadrat (1:1)",  "wh": (1024, 1024)},
+    "landscape": {"label": "Quer (16:9)",    "wh": (1792, 1024)},
+    "portrait":  {"label": "Hoch (9:16)",    "wh": (1024, 1792)},
+}
+
+
+def _image_model() -> str:
+    """Im Profil gewähltes Bildmodell (``local::sd`` / ``anbieter::modell``) oder leer."""
+    m = str(_load_profile().get("image_model", "") or "").strip()
+    return "" if m in _MODEL_PLACEHOLDERS else m
+
+
+def _sd_url() -> str:
+    """URL des lokalen Stable-Diffusion-WebUI-Servers (Profil)."""
+    return str(_load_profile().get("sd_webui_url", "") or "").strip().rstrip("/")
+
+
+def _api_image_size(real_model: str, preset: str) -> str:
+    """Größen-String für die OpenAI-kompatible Bild-API je Modellfamilie."""
+    if preset not in _IMAGE_SIZES:
+        preset = "square"
+    if "gpt-image" in (real_model or "").lower():
+        # gpt-image-1 kennt nur 1024x1024 / 1536x1024 / 1024x1536
+        return {"square": "1024x1024", "landscape": "1536x1024",
+                "portrait": "1024x1536"}[preset]
+    # DALL·E 3 (und die meisten Kompatiblen): 1024er / 1792er
+    w, h = _IMAGE_SIZES[preset]["wh"]
+    return f"{w}x{h}"
+
+
+@app.get("/api/image/config")
+async def image_config():
+    """UI-Info analog ``/api/tts/config``: aktives Bildmodell, SD-URL, Presets und
+    die wählbaren Optionen (aus = leer, lokal SD, je Anbieter DALL·E/gpt-image)."""
+    m = _image_model()
+    options = [
+        {"value": "", "label": "Aus (keine Bildgenerierung)"},
+        {"value": "local::sd", "label": "Lokal · Stable Diffusion WebUI"},
+    ]
+    if not _secret_local():
+        # Einheitlich wie die Rollen-Modelle: die unter „☁ KI-Anbieter" konfigurierten
+        # Anbieter samt ihrer Modell-Liste (z. B. z-image-turbo). Der Anbieter (URL +
+        # Schlüssel) wird dort eingetragen; hier wird nur das Modell gewählt.
+        for p in _llm.load_providers():
+            pid = p.get("id")
+            if not pid:
+                continue
+            pname = p.get("name") or pid
+            seen = set()
+            for mdl in (p.get("models") or []):
+                val = f"{pid}::{mdl}"
+                seen.add(val)
+                options.append({"value": val, "label": f"{pname} · {mdl}"})
+            # Gängige Bildmodelle zusätzlich anbieten, falls der Anbieter sie nicht listet.
+            for im in ("dall-e-3", "gpt-image-1"):
+                val = f"{pid}::{im}"
+                if val not in seen:
+                    options.append({"value": val, "label": f"{pname} · {im}"})
+    # aktuelle Auswahl immer wählbar halten
+    if m and not any(o["value"] == m for o in options):
+        options.append({"value": m, "label": m})
+    return {
+        "image_model": m,
+        "sd_url": _sd_url(),
+        "secret": _secret_local(),
+        "enable_api": bool(_CONFIG.get("enable_api", True)),
+        "sizes": [{"value": k, "label": v["label"]} for k, v in _IMAGE_SIZES.items()],
+        "options": options,
+    }
+
+
+@app.post("/api/image/generate")
+async def image_generate(req: Request):
+    """Erzeugt ein Bild aus einem Prompt – lokal (SD-WebUI) oder über eine
+    OpenAI-kompatible Bild-API. Antwort: ``{image: data-URI, model, prompt}``.
+
+    Geheim-Modus: ein Remote-Modell wird auf den lokalen SD-Server umgeleitet; ist
+    keiner eingerichtet → **HTTP 409** (keine Cloud-Anfrage)."""
+    body = await req.json()
+    prompt = str(body.get("prompt", "") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Kein Bild-Prompt angegeben.")
+    negative = str(body.get("negative_prompt", "") or "").strip()
+    preset = str(body.get("size", "") or "square").strip().lower()
+    if preset not in _IMAGE_SIZES:
+        preset = "square"
+
+    model = str(body.get("model", "") or "").strip() or _image_model()
+    if not model or model in _MODEL_PLACEHOLDERS:
+        raise HTTPException(400, "Keine Bildgenerierung konfiguriert – im Profil ein "
+                                 "Bildmodell (lokal SD-WebUI oder API) wählen.")
+
+    # Geheim-Modus: Remote-API nicht zulassen → auf lokal umleiten.
+    secret = _secret_local()
+    is_local = model.startswith("local::") or not _llm.is_remote(model)
+    if secret and not is_local:
+        if _sd_url():
+            model, is_local = "local::sd", True
+        else:
+            raise HTTPException(409, "Im Geheim-Modus ist nur lokale Bildgenerierung "
+                                     "erlaubt – bitte SD-WebUI-URL im Profil eintragen.")
+
+    w, h = _IMAGE_SIZES[preset]["wh"]
+
+    # ── Lokal: Stable Diffusion WebUI (AUTOMATIC1111/Forge) ──────────────────
+    if is_local:
+        base = _sd_url()
+        if not base:
+            raise HTTPException(400, "Keine SD-WebUI-URL im Profil hinterlegt.")
+        payload = {
+            "prompt": prompt,
+            "negative_prompt": negative,
+            "width": w, "height": h,
+            "steps": 28, "cfg_scale": 6.5,
+            "sampler_name": "DPM++ 2M",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(f"{base}/sdapi/v1/txt2img", json=payload)
+            if resp.status_code >= 400:
+                raise HTTPException(502, f"SD-WebUI-Fehler (HTTP {resp.status_code}): "
+                                         f"{resp.text[:300]}")
+            data = resp.json()
+        except HTTPException:
+            raise
+        except httpx.ConnectError:
+            raise HTTPException(503, f"SD-WebUI nicht erreichbar unter {base} – läuft der "
+                                     f"Server (mit --api)?")
+        except Exception as e:
+            raise HTTPException(502, f"Lokale Bildgenerierung fehlgeschlagen: {e}")
+        imgs = data.get("images") or []
+        if not imgs:
+            raise HTTPException(502, "SD-WebUI lieferte kein Bild zurück.")
+        b64 = imgs[0]
+        if "," in b64 and b64.strip().startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        return {"image": f"data:image/png;base64,{b64}", "model": model, "prompt": prompt}
+
+    # ── API: OpenAI-kompatibles /images/generations ──────────────────────────
+    provider, real = _llm.resolve(model)
+    if not provider:
+        raise HTTPException(400, "Unbekannter API-Anbieter für die Bildgenerierung.")
+    base = (provider.get("base_url") or "").rstrip("/")
+    headers = {"Authorization": f"Bearer {provider.get('api_key', '')}",
+               "Content-Type": "application/json"}
+    payload = {"model": real, "prompt": prompt, "n": 1,
+               "size": _api_image_size(real, preset), "response_format": "b64_json"}
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(f"{base}/images/generations", headers=headers,
+                                     json=payload)
+        if resp.status_code >= 400:
+            raise HTTPException(502, f"Bild-API fehlgeschlagen (HTTP {resp.status_code}): "
+                                     f"{resp.text[:300]}")
+        data = resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Bild-API fehlgeschlagen: {e}")
+    items = data.get("data") or []
+    if not items:
+        raise HTTPException(502, "Bild-API lieferte kein Bild zurück.")
+    first = items[0] or {}
+    b64 = first.get("b64_json")
+    if b64:
+        src = f"data:image/png;base64,{b64}"
+    elif first.get("url"):
+        src = first["url"]   # manche Anbieter liefern nur eine URL
+    else:
+        raise HTTPException(502, "Bild-API-Antwort ohne Bilddaten.")
+    return {"image": src, "model": model, "prompt": prompt}
 
 
 # ── Globale Kapazitätsliste ───────────────────────────────────────────────────
@@ -8993,6 +9211,10 @@ async def save_profile(req: Request):
     # Optionales API-TTS-Modell (anbieter::modell) für die Sprachausgabe; leer = Browser
     _ttsm = str(body.get("tts_model", "") or "").strip()
     profile["tts_model"] = "" if _ttsm in _MODEL_PLACEHOLDERS else _ttsm
+    # Bildgenerierung: gewähltes Modell (local::sd / anbieter::modell) + lokale SD-URL
+    _imgm = str(body.get("image_model", "") or "").strip()
+    profile["image_model"] = "" if _imgm in _MODEL_PLACEHOLDERS else _imgm
+    profile["sd_webui_url"] = str(body.get("sd_webui_url", "") or "").strip()
     # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
     profile["auto_compress"] = bool(body.get("auto_compress", False))
     try:
