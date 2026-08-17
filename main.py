@@ -2887,7 +2887,22 @@ async def _chat_generator(request: ChatRequest):
             _hint_parts.append("Für aktuelle oder unbekannte Fakten nutze web_search.")
         if _hint_parts:
             _agent_hint = "Du hast erweiterte Werkzeuge: " + " ".join(_hint_parts)
-    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt, _agent_hint) if p)
+
+    # Mathematische/rechnerische Fragen VORZUGSWEISE per Code lösen (vermeidet Rechenfehler
+    # kleiner Modelle): run_python, falls der Code-Interpreter aktiv ist, sonst das
+    # immer verfügbare calculate-Werkzeug.
+    _math_hint = ""
+    if _looks_like_math(_last_user):
+        _tnames = {t["function"]["name"] for t in active_tools}
+        _mtool = "run_python" if "run_python" in _tnames else ("calculate" if "calculate" in _tnames else "")
+        if _mtool:
+            _math_hint = (
+                f"Diese Frage ist mathematisch/rechnerisch: Löse sie VORZUGSWEISE mit dem "
+                f"Code-Werkzeug »{_mtool}« — führe die Rechnung als Code aus und stütze deine "
+                f"Antwort auf das berechnete Ergebnis, statt im Kopf zu rechnen. Nenne dem "
+                f"Nutzer das Ergebnis klar und knapp erklärt."
+            )
+    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt, _agent_hint, _math_hint) if p)
     if _sys:
         messages.append({"role": "system", "content": _sys})
 
