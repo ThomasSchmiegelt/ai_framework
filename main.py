@@ -448,6 +448,14 @@ def _secret_local() -> bool:
     return bool(_load_profile().get("local_only_mode", False))
 
 
+def _chat_agent_tools() -> bool:
+    """Profil-Häkchen »Erweiterte Chat-Werkzeuge«: bietet dem Chat-Modell zusätzlich einen
+    **Code-Interpreter** (``run_python``, serverseitige Sandbox) und **autonome Web-Recherche**
+    an, damit es komplexe Aufgaben rechnend/recherchierend löst. Standard aus — kleine Modelle
+    sind mit dem Werkzeug-Loop oft überfordert."""
+    return bool(_load_profile().get("chat_code_interpreter", False))
+
+
 def _confidential_api_allowed() -> bool:
     """Profil-Schalter: dürfen die vertraulichen Auswertungen (Verzeichnis-Analyse,
     Postfach) auch API-Modelle nutzen? Standard: aus — Inhalte bleiben lokal.
@@ -1269,6 +1277,29 @@ TOOL_DEFS = [
 ]
 
 ALL_TOOL_NAMES = {t["function"]["name"] for t in TOOL_DEFS}
+
+# Code-Interpreter-Tool für den Chat — bewusst NICHT in TOOL_DEFS, damit es nur dann
+# angeboten wird, wenn das Profil-Häkchen »Erweiterte Chat-Werkzeuge« gesetzt ist
+# (und die serverseitige Ausführung erlaubt ist). Führt Python in derselben Sandbox
+# wie der Code-Tab aus (stdout/stderr + matplotlib-Bilder).
+_RUN_PYTHON_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "run_python",
+        "description": (
+            "Führt Python-Code in einer sicheren Sandbox aus, um eine Aufgabe rechnerisch zu "
+            "LÖSEN oder zu PRÜFEN (Berechnungen, Datenanalyse, Simulationen, Diagramme mit "
+            "matplotlib). Liefert stdout/stderr; erzeugte Plots werden dem Nutzer angezeigt. "
+            "Nutze es bei komplexen/zahlenlastigen Fragen statt selbst zu rechnen. Kein Datei- "
+            "oder Netzzugriff."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"code": {"type": "string", "description": "Auszuführender Python-Code"}},
+            "required": ["code"],
+        },
+    },
+}
 
 
 # ── Pydantic-Modelle ──────────────────────────────────────────────────────────
@@ -2766,10 +2797,36 @@ async def _chat_generator(request: ChatRequest):
         active_tools = [t for t in active_tools
                         if t["function"]["name"] != "plot_function"]
 
+    # Erweiterte Chat-Werkzeuge (Profil-Häkchen): Code-Interpreter (run_python) + autonome
+    # Web-Recherche, damit das Modell komplexe Aufgaben rechnend/recherchierend löst.
+    # Standard aus — kleine Modelle sind mit dem Werkzeug-Loop oft überfordert.
+    _agent_tools_on = _chat_agent_tools()
+    if _agent_tools_on:
+        _names = {t["function"]["name"] for t in active_tools}
+        # Code-Interpreter nur, wenn serverseitige Python-Ausführung erlaubt ist
+        if ALLOW_PYTHON_EXEC and "run_python" not in _names:
+            active_tools = active_tools + [_RUN_PYTHON_TOOL_DEF]
+        # Web-Recherche autonom anbieten (unabhängig vom 🔍-Schalter), sofern erlaubt
+        if _web_search_allowed() and "web_search" not in _names:
+            _web_def = next((t for t in TOOL_DEFS if t["function"]["name"] == "web_search"), None)
+            if _web_def:
+                active_tools = active_tools + [_web_def]
+
     # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
     messages: list = []
     _sci = _SCIENCE_PROMPT if request.science else ""
-    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt) if p)
+    _agent_hint = ""
+    if _agent_tools_on:
+        _hint_parts = []
+        if ALLOW_PYTHON_EXEC:
+            _hint_parts.append("Für rechen-/datenlastige oder komplexe Aufgaben schreibe und "
+                               "führe Python über das Werkzeug run_python aus, statt selbst zu "
+                               "rechnen; nutze das Ergebnis für deine Antwort.")
+        if _web_search_allowed():
+            _hint_parts.append("Für aktuelle oder unbekannte Fakten nutze web_search.")
+        if _hint_parts:
+            _agent_hint = "Du hast erweiterte Werkzeuge: " + " ".join(_hint_parts)
+    _sys = "\n\n".join(p for p in (_sci, _augment_prefix(_last_user), system_prompt, _agent_hint) if p)
     if _sys:
         messages.append({"role": "system", "content": _sys})
 
@@ -3119,6 +3176,19 @@ async def _chat_generator(request: ChatRequest):
                 except Exception:
                     pass
 
+            # Code-Interpreter: erzeugte Diagramme sofort anzeigen, dem Modell nur den Text geben
+            if fn == "run_python":
+                try:
+                    _pyd = json.loads(tool_result)
+                    for _img in (_pyd.get("images") or []):
+                        yield _sse({"type": "image", "data": _img})
+                        image_emitted = True
+                    tool_result = _pyd.get("text", "") or "(keine Ausgabe)"
+                    if _pyd.get("images"):
+                        tool_result += "\n(Das/die Diagramm(e) werden dem Nutzer bereits angezeigt.)"
+                except Exception:
+                    pass
+
             messages.append({"role": "tool", "content": tool_result})
 
     yield _sse({"type": "error", "message": "Maximale Iterationen erreicht"})
@@ -3138,6 +3208,20 @@ async def _execute_tool(name: str, args: dict) -> str:
 
     if name == "calculate":
         return _safe_exec(args.get("code", ""))
+
+    if name == "run_python":
+        # Code-Interpreter (Chat, per Profil-Häkchen): dieselbe Sandbox wie der Code-Tab.
+        if not ALLOW_PYTHON_EXEC:
+            return "Python-Ausführung ist in dieser Installation deaktiviert."
+        out = await asyncio.to_thread(_run_python_code, str(args.get("code", "") or ""), 15.0)
+        txt = ""
+        if out.get("output"):
+            txt += "STDOUT:\n" + out["output"]
+        if out.get("error"):
+            txt += "\nSTDERR:\n" + out["error"]
+        # JSON-Umschlag: der Loop trennt Bilder (→ anzeigen) vom Text (→ ans Modell)
+        return json.dumps({"text": (txt.strip() or "(keine Ausgabe)")[:6000],
+                           "images": out.get("images") or []}, ensure_ascii=False)
 
     if name in ("create_presentation", "create_spreadsheet"):
         canvas_type = name.replace("create_", "")
@@ -8985,6 +9069,9 @@ async def save_profile(req: Request):
     profile["math_autoroute"] = bool(body.get("math_autoroute", True))
     # Recherche (Matrix + Recherche-Tab) zwingend lokal ausführen (Standard: aus)
     profile["research_local_only"] = bool(body.get("research_local_only", False))
+    # Erweiterte Chat-Werkzeuge: Code-Interpreter (run_python) + autonome Web-Recherche
+    # im Chat-Werkzeug-Loop (Standard: aus — kleine Modelle sind damit überfordert)
+    profile["chat_code_interpreter"] = bool(body.get("chat_code_interpreter", False))
     # Vertrauliche Auswertungen (Verzeichnis-Analyse, Postfach) dürfen API-Modelle
     # nutzen, wenn explizit eines gewählt ist (Standard: aus — alles bleibt lokal)
     profile["confidential_allow_api"] = bool(body.get("confidential_allow_api", False))

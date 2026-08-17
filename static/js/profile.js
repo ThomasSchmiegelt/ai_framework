@@ -176,6 +176,8 @@ const Profile = (() => {
     if (mathRouteEl) mathRouteEl.checked = _data.math_autoroute !== false;  // Standard: an
     const researchLocalEl = document.getElementById('profile-research-local');
     if (researchLocalEl) researchLocalEl.checked = !!_data.research_local_only;  // Standard: aus
+    const chatAgentEl = document.getElementById('profile-chat-agent');
+    if (chatAgentEl) chatAgentEl.checked = !!_data.chat_code_interpreter;  // Standard: aus
     const confApiEl = document.getElementById('profile-confidential-api');
     if (confApiEl) confApiEl.checked = !!_data.confidential_allow_api;  // Standard: aus
     const localOnlyEl = document.getElementById('profile-local-only');
@@ -265,6 +267,7 @@ const Profile = (() => {
       currency:                (document.getElementById('profile-currency')?.value || '€').trim() || '€',
       math_autoroute: document.getElementById('profile-math-autoroute')?.checked !== false,
       research_local_only: !!document.getElementById('profile-research-local')?.checked,
+      chat_code_interpreter: !!document.getElementById('profile-chat-agent')?.checked,
       confidential_allow_api: !!document.getElementById('profile-confidential-api')?.checked,
       local_only_mode: !!document.getElementById('profile-local-only')?.checked,
       model_general:  document.getElementById('profile-model-general')?.value || '',

@@ -2762,6 +2762,18 @@
       </div>
     </div>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-chat-agent" style="width:auto;margin-top:2px" />
+      <span>🧪 Erweiterte Chat-Werkzeuge: <strong>Code ausführen &amp; Web-Recherche</strong>
+        <span class="planner-muted">— erlaubt dem Chat, komplexe Aufgaben zu lösen, indem es
+        selbst <strong>Python-Code ausführt</strong> (Berechnungen, Datenanalyse, Diagramme) und
+        bei Bedarf <strong>im Web recherchiert</strong> — als Werkzeuge im Antwort-Loop.
+        <strong>Nur für fähige Modelle</strong> (Rolle „Allgemein" oben): kleine Modelle wie
+        <code>ministral-3:3b</code> sind mit dem Werkzeug-Loop überfordert. Standard: aus.
+        Code läuft in der Sandbox (kein Datei-/Netzzugriff); im Hartman-Modus bleibt die
+        Web-Recherche gesperrt.</span>
+      </span>
+    </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
       <input type="checkbox" id="profile-math-autoroute" style="width:auto;margin-top:2px" />
       <span>Matheaufgaben automatisch ans Mathe-Modell weiterreichen
         <span class="planner-muted">— greift nur, solange im Chat das schwache Standardmodell
@@ -3308,7 +3320,7 @@
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260815tts2"></script>
+<script src="/js/profile.js?v=20260817chatagent"></script>
 <script src="/js/projects.js?v=20260603"></script>
 <script src="/js/planner.js?v=20260714b"></script>
 <script src="/js/matrix_research.js?v=20260626del1"></script>
