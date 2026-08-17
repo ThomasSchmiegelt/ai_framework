@@ -171,9 +171,16 @@ class LLMResponse(dict):
 
     def raise_for_status(self):
         if self._status >= 400:
+            # Ein echtes ``httpx.Response`` mitgeben, damit Aufrufstellen wie
+            # ``except httpx.HTTPStatusError as e: … e.response.status_code`` NICHT
+            # an ``NoneType`` scheitern (z. B. Remote-Anbieter liefert 504 → früher
+            # AttributeError im Fehler-Handler statt sauberer Fehlermeldung).
+            _req = httpx.Request("POST", "http://llm/local")
+            _resp = httpx.Response(self._status, request=_req,
+                                   text=str(self.get("error", "") or ""))
             raise httpx.HTTPStatusError(
                 f"LLM HTTP {self._status}: {self.get('error', '')}",
-                request=None, response=None)
+                request=_req, response=_resp)
         return None
 
 
