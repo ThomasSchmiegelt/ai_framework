@@ -1827,7 +1827,14 @@ async def _deepresearch_generator(request: DeepResearchRequest):
         yield _sse({"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"})
         return
     except httpx.HTTPStatusError as e:
-        yield _sse({"type": "error", "message": f"Modell abgelehnt (num_ctx/VRAM?): HTTP {e.response.status_code}"})
+        _sc = getattr(e.response, "status_code", 0) or 0
+        if _sc in (502, 503, 504):
+            _m = (f"Der Anbieter hat nicht rechtzeitig geantwortet (HTTP {_sc}). "
+                  f"Bei tiefer Recherche mit vielen Aspekten kann die Synthese lange dauern — "
+                  f"bitte weniger Tiefe/Umfang wählen oder ein lokales Modell verwenden.")
+        else:
+            _m = f"Modell abgelehnt (num_ctx/VRAM?): HTTP {_sc}"
+        yield _sse({"type": "error", "message": _m})
         return
     except Exception as e:
         yield _sse({"type": "error", "message": f"Synthese fehlgeschlagen: {e}"})
