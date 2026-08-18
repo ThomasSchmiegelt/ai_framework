@@ -4627,6 +4627,22 @@ def _sd_url() -> str:
     return str(_load_profile().get("sd_webui_url", "") or "").strip().rstrip("/")
 
 
+async def _sd_reachable() -> bool:
+    """Ist der lokale Bild-Server (SD-WebUI / Z-Image-Brücke) erreichbar? Für eine
+    Vorab-Prüfung, damit z. B. der Präsentationsassistent nicht je Folie einzeln an
+    einem fehlenden Server scheitert. Jede HTTP-Antwort (auch 404) = erreichbar; nur
+    Verbindungsfehler/Timeout = nicht erreichbar."""
+    base = _sd_url()
+    if not base:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            await client.get(f"{base}/health")
+        return True
+    except Exception:
+        return False
+
+
 def _api_image_size(real_model: str, preset: str) -> str:
     """Größen-String für die OpenAI-kompatible Bild-API je Modellfamilie."""
     if preset not in _IMAGE_SIZES:
@@ -6574,6 +6590,17 @@ async def _guided_presentation_generator(body: dict):
     yield _sse({"type": "pres_start", "topic": topic})
     if want_web and not _web_search_allowed():
         yield _sse({"type": "notice", "message": "Websuche gesperrt (Hartman-Modus) – Inhalte ohne Recherche."})
+
+    # Vorab-Prüfung: Bildgenerierung lokal (local::sd), aber Server nicht erreichbar?
+    # Dann EINMAL klar melden und Bilder überspringen (statt je Folie zu scheitern).
+    if image_mode != "none":
+        _im = image_model or _image_model()
+        _is_local_img = _im == "local::sd" or (bool(_im) and not _llm.is_remote(_im))
+        if _is_local_img and not await _sd_reachable():
+            yield _sse({"type": "notice", "message":
+                        "Bild-Server nicht erreichbar – bitte z-image/sd_server.bat starten "
+                        "(Adresse im Profil: " + (_sd_url() or "—") + "). Die Folien werden ohne Bilder erstellt."})
+            image_mode = "none"
 
     # 1. Struktur / Inhaltsverzeichnis
     try:
