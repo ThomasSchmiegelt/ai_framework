@@ -88,6 +88,11 @@ packaging/wix/out/
 packaging/wix/payload/
 packaging/wix/AppFiles.wxs
 
+# Z-Image-Turbo (lokales Bildmodell): venv/Ausgaben nicht versionieren.
+# (venv/ und *.log sind bereits oben global ignoriert; hier nur die Bilder.)
+z-image/outputs/
+z-image/venv/
+
 # Betriebssystem / Editor
 Thumbs.db
 .DS_Store

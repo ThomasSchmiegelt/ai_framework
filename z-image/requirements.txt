@@ -1,0 +1,13 @@
+# Z-Image-Turbo – Python-Abhängigkeiten (ohne PyTorch, das wird im Installer mit
+# passendem CUDA-Index installiert: siehe install_zimage.ps1 / .sh).
+#
+# diffusers muss AUS DEM QUELLCODE kommen: die Z-Image-Unterstützung
+# (ZImagePipeline) ist noch nicht Teil eines veröffentlichten Releases.
+git+https://github.com/huggingface/diffusers.git
+transformers
+accelerate
+safetensors
+sentencepiece
+protobuf
+Pillow
+huggingface_hub

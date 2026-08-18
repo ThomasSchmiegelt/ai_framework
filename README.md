@@ -95,6 +95,11 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Dialog `/bildhelp`; wahlweise lokal über einen eigenen **Stable-Diffusion-WebUI**-Server
   oder ein **API-Bildmodell** (z. B. `dall-e-3`). Zusätzlich **KI-Bilder je Präsentationsfolie**
   (aus dem Folientext) direkt im Canvas
+- 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug
+  im Ordner [`z-image/`](z-image/README.md): erzeugt Bilder **komplett lokal auf der GPU**
+  (Alibaba Tongyi, 6B, Apache-2.0, ~8 Schritte) über `diffusers`, getrennt vom Backend.
+  Eigener Installer (Windows/Linux) + VRAM-Schutz (entlädt vor dem Lauf automatisch geladene
+  Ollama-Modelle, weicht bei Knappheit auf CPU-Offload aus)
 - 🎙 **Transkription** — Audio (Mikrofon oder Datei) → Text, **lokal** via faster-whisper
   oder per **API**; Ergebnis mit Zeitmarken, Übergabe an Chat/RAG/To-Do
 - 📈 **Funktion plotten** — nennst du eine Funktion (`f(x)=x^2`, `sin(x)`, `sqrt(x)`)
@@ -366,6 +371,7 @@ AI_Framework_Thomas/
 │   └── plans/              enthält ein 100-Aufgaben-Beispielprojekt
 ├── samples/                Beispiel-Ressourcenliste (CSV, importierbar)
 ├── scripts/                Hilfsskripte (Demo-Plan erzeugen, Release-ZIP bauen)
+├── z-image/                Optionales lokales Bildmodell Z-Image-Turbo (eigene venv, eigener Installer)
 └── docs/                   INSTALL · PORTABLE · SERVER · ENTWICKLUNG · …
 ```
 
