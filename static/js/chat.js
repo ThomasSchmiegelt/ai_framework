@@ -179,6 +179,27 @@ const Chat = (() => {
       return;
     }
 
+    // Illustrierter Präsentationsassistent: „/praesentation [alle|keine|N] <Thema>"
+    // erzeugt eine Präsentation zum Thema samt KI-Bildern (Standard: Titel + Abschnitte).
+    const pr = _parseIllustratedPres(text);
+    if (pr) {
+      input.value = '';
+      autoResizeTextarea(input);
+      if (pr.topic) runIllustratedPresentation(pr.topic, pr.images);
+      else showToast('Bitte nach „/praesentation" ein Thema angeben');
+      return;
+    }
+
+    // Bild → Prompt: „/bildprompt [Stil]" öffnet einen Bild-Picker und leitet daraus
+    // einen Text-zu-Bild-Prompt ab (Vision-Modell).
+    const ip = _parseBildPrompt(text);
+    if (ip) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runBildPrompt(ip.style);
+      return;
+    }
+
     // Rückfragen: „/frag <Aufgabe>" erzeugt eine dynamische Eingabemaske (Text/
     // Auswahl), deren Antworten an die Aufgabe gehängt und normal gesendet werden.
     const fr = _parseFrag(text);
@@ -1959,6 +1980,152 @@ const Chat = (() => {
     } catch (e) { showToast('Präsentation fehlgeschlagen: ' + e.message); }
   }
 
+  // ── /praesentation — illustrierter Präsentationsassistent ───────────────────
+  // „/praesentation [alle|keine|<Zahl>] <Thema>" (Aliase /präsentation, /vortrag,
+  // /slides): Thema → Folien + KI-Bilder (Standard: nur Titel- + Abschnittsfolien).
+  function _parseIllustratedPres(text) {
+    const m = text.match(/^\/(praesentation|präsentation|presentation|vortrag|slides)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    let body = (m[2] || '').trim();
+    let images = 'sections';
+    const d = body.match(/^(alle|all|keine|ohne|kein|none|\d{1,2})\b\s*([\s\S]*)$/i);
+    if (d) {
+      const tok = d[1].toLowerCase();
+      if (/^\d+$/.test(tok)) images = parseInt(tok, 10);
+      else if (tok === 'alle' || tok === 'all') images = 'all';
+      else images = 'none';   // keine/ohne/kein/none
+      body = (d[2] || '').trim();
+    }
+    return { topic: body, images };
+  }
+
+  async function runIllustratedPresentation(topic, images) {
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false); isStreaming = true; setBtnSendState(false);
+    const label = images === 'all' ? 'alle Folien'
+                : images === 'none' ? 'ohne Bilder'
+                : (typeof images === 'number' ? images + ' Bilder' : 'Titel + Abschnitte');
+    appendMessage('user', `🖼️ Illustrierte Präsentation: ${topic}  [${label}]`);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const logEl = document.createElement('div'); logEl.className = 'research-log'; content.appendChild(logEl);
+    const workingEl = makeWorking('Präsentation wird erstellt'); content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    const _log = (t) => { const d = document.createElement('div'); d.className = 'research-log-line'; d.textContent = t; logEl.appendChild(d); scrollToBottom(); };
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    let presentation = null;
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/presentation/illustrated', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({ topic, images, model }),
+      });
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'pres_start') _log('🧭 Entwurf wird erstellt…');
+          else if (ev.type === 'structure') _log(`📑 ${ev.count} Folien${ev.title ? ': ' + ev.title : ''}`);
+          else if (ev.type === 'slide_image_start') _log(`🖼 Bild ${ev.n}/${ev.total} — Folie „${(ev.title || '').slice(0, 50)}"…`);
+          else if (ev.type === 'slide_image_done') _log(`  ✓ Bild ${ev.n} fertig`);
+          else if (ev.type === 'notice') { const d = document.createElement('div'); d.className = 'research-log-line'; d.style.opacity = '.7'; d.textContent = '  ℹ ' + (ev.message || ''); logEl.appendChild(d); scrollToBottom(); }
+          else if (ev.type === 'done') { presentation = ev.presentation; if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Präsentationsassistent'); }
+          else if (ev.type === 'error') { textEl.innerHTML = `<em style="color:#ef4444">${escHtml(ev.message || 'Fehlgeschlagen')}</em>`; }
+        }
+      }
+      workingEl.remove();
+      if (presentation && typeof CanvasRenderer !== 'undefined') {
+        CanvasRenderer.render(presentation);
+        if (typeof switchTab === 'function') switchTab('canvas');
+        textEl.textContent = `✓ Präsentation „${presentation.title || topic}" mit ${(presentation.slides || []).length} Folien im Canvas erstellt.`;
+        const bar = document.createElement('div'); bar.className = 'wf-actions';
+        const b = document.createElement('button'); b.className = 'wf-action-btn'; b.textContent = '🖥️ zum Canvas';
+        b.onclick = () => switchTab('canvas'); bar.appendChild(b); content.appendChild(bar);
+        messages.push({ role: 'user', content: `Illustrierte Präsentation: ${topic}` });
+        messages.push({ role: 'assistant', content: `Präsentation „${presentation.title || topic}" im Canvas erstellt.` });
+        loadConversationList();
+      } else if (!textEl.innerHTML) {
+        textEl.innerHTML = `<em style="color:#ef4444">Präsentation fehlgeschlagen.</em>`;
+      }
+    } catch (e) {
+      workingEl.remove();
+      if (e.name !== 'AbortError') textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      abortController = null; isStreaming = false; setBtnSendState(true);
+    }
+  }
+
+  // ── /bildprompt — Bild → Text-zu-Bild-Prompt (Vision) ───────────────────────
+  // „/bildprompt [Stil]" öffnet einen Bild-Picker; das Vision-Modell macht daraus
+  // einen Prompt, den man direkt an /bild weiterreichen kann.
+  function _parseBildPrompt(text) {
+    const m = text.match(/^\/(bildprompt|img2prompt|bild2prompt|imageprompt)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { style: (m[2] || '').trim() };
+  }
+
+  function runBildPrompt(style) {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      const file = inp.files && inp.files[0];
+      inp.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => _doBildPrompt(String(reader.result || ''), file.name, style);
+      reader.readAsDataURL(file);
+    });
+    inp.click();
+  }
+
+  async function _doBildPrompt(dataUrl, filename, style) {
+    if (!dataUrl) return;
+    showWelcome(false);
+    appendMessage('user', `🔍 Bild → Prompt${style ? ' (' + style + ')' : ''}: ${filename || 'Bild'}`);
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    insertImage(content, dataUrl);
+    const workingEl = makeWorking('Prompt wird aus dem Bild abgeleitet'); content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    try {
+      const resp = await fetch('/api/image-to-prompt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl, style, model }),
+      });
+      workingEl.remove();
+      if (!resp.ok) {
+        let m = 'HTTP ' + resp.status; try { m = (await resp.json()).detail || m; } catch (_) {}
+        textEl.innerHTML = `<em style="color:#ef4444">${escHtml(m)}</em>`; return;
+      }
+      const data = await resp.json();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Bild→Prompt');
+      const prompt = data.prompt || '';
+      const box = document.createElement('div');
+      box.style.cssText = 'white-space:pre-wrap;background:#0003;padding:8px 10px;border-radius:8px;margin:6px 0';
+      box.textContent = prompt;
+      content.appendChild(box);
+      const bar = document.createElement('div'); bar.className = 'wf-actions';
+      const bGen = document.createElement('button'); bGen.className = 'wf-action-btn'; bGen.textContent = '🎨 Bild daraus erzeugen';
+      bGen.onclick = () => runBild(prompt);
+      const bCopy = document.createElement('button'); bCopy.className = 'wf-action-btn'; bCopy.textContent = '📋 kopieren';
+      bCopy.onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(prompt); showToast('Prompt kopiert'); };
+      bar.appendChild(bGen); bar.appendChild(bCopy); content.appendChild(bar);
+      messages.push({ role: 'user', content: 'Bild → Prompt' });
+      messages.push({ role: 'assistant', content: prompt });
+    } catch (e) {
+      workingEl.remove();
+      textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    }
+  }
+
   // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────
   // „/bildhelp" (Aliase /imagehelp, /imghelp) öffnet den geführten Dialog; „/bild
   // <Beschreibung>" erzeugt direkt. Ein leeres „/bild" öffnet ebenfalls den Dialog.
@@ -2560,6 +2727,8 @@ const Chat = (() => {
     { key: '/frag', ins: '/frag ', cmd: '/frag …', desc: 'Rückfragen-Maske: fehlende Infos per Formular ergänzen, dann antworten' },
     { key: '/bild', ins: '/bild ', cmd: '/bild …', desc: 'Bild aus Beschreibung erzeugen (lokal SD-WebUI oder API)' },
     { key: '/bildhelp', ins: '/bildhelp', cmd: '/bildhelp', desc: 'Geführter Bild-Dialog: Motiv, Stil, Perspektive, Beleuchtung, Format' },
+    { key: '/bildprompt', ins: '/bildprompt ', cmd: '/bildprompt [Stil]', desc: 'Bild → Prompt: Bild auswählen, Vision-Modell leitet einen Text-zu-Bild-Prompt ab (→ „🎨 Bild daraus erzeugen")' },
+    { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Illustrierter Präsentationsassistent: Thema → Folien + KI-Bilder (Standard Titel + Abschnitte; „/praesentation alle …", „keine" oder eine Zahl steuern den Bild-Umfang) → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },

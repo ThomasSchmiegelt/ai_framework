@@ -6012,6 +6012,189 @@ async def presentation_slide_image(req: Request):
     return result
 
 
+# ── Illustrierter Präsentationsassistent (Thema → Folien + KI-Bilder) ─────────
+# Chat-Befehl /praesentation: erzeugt aus einem Thema eine komplette Präsentation
+# UND je nach Umfang KI-Bilder (über den im Profil gewählten Bildgenerator, z. B.
+# die lokale Z-Image-Brücke). Baut auf vorhandenen Bausteinen auf: _text_to_presentation,
+# _slide_image_prompt, _generate_image_core. Bild-Umfang standardmäßig „nur Titel- und
+# Abschnittsfolien", per Anweisung „alle"/„keine"/Zahl steuerbar.
+
+
+async def _presentation_draft(topic: str, model: str) -> tuple:
+    """Aus einem Thema einen Markdown-Präsentationsentwurf ableiten (ein LLM-Aufruf).
+    Gibt ``(text, tok_in, tok_out)`` zurück. Der deterministische Parser
+    ``_parse_prose_presentation`` macht daraus später Folien (Abschnitts-Trennfolien
+    = bloße ``##``-Überschriften ohne Stichpunkte)."""
+    _sys = "Du erstellst prägnante Präsentationsentwürfe auf Deutsch als reines Markdown."
+    _user = (
+        f"Erstelle einen Präsentationsentwurf über: {topic}\n\n"
+        "Format als Markdown, NUR die Gliederung, ohne Erklärungen/Codeblöcke:\n"
+        "# <Gesamttitel>\n"
+        "Danach 6–9 Folien. Gliedere in 2–3 Abschnitte: jeder Abschnitt beginnt mit einer "
+        "eigenen Trennfolie als bloße Überschrift OHNE Stichpunkte (## <Abschnittstitel>). "
+        "Inhaltsfolien: ## <Folientitel> gefolgt von 3–5 kurzen Stichpunkten (- …)."
+    )
+    async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "stream": False,
+            "messages": [{"role": "system", "content": _sys},
+                         {"role": "user", "content": _user}],
+            "options": {"num_ctx": _profile_num_ctx(), "num_predict": 1200},
+            "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+    _j = resp.json()
+    _c = (_j.get("message", {}) or {}).get("content", "") or ""
+    _c = re.sub(r"<think>.*?</think>", "", _c, flags=re.DOTALL).strip()
+    _ti, _to = _llm_tok(_j)
+    return _c, _ti, _to
+
+
+def _select_image_slides(slides: list, images) -> list:
+    """Indizes der Folien, die ein Bild bekommen. ``images``: 'sections' (Standard =
+    Titel+Abschnitte), 'all'/'alle', 'none'/'keine', oder eine Zahl N (wichtigste
+    zuerst: Titel/Abschnitte, dann Inhaltsfolien)."""
+    n = len(slides)
+    if not n:
+        return []
+    secs = [i for i, s in enumerate(slides)
+            if str(s.get("layout", "")).lower() in ("title", "section")]
+    others = [i for i in range(n) if i not in secs]
+    val = images
+    if isinstance(val, str):
+        v = val.strip().lower()
+        if v.isdigit():
+            val = int(v)
+        elif v in ("all", "alle"):
+            return list(range(n))
+        elif v in ("none", "keine", "ohne", "kein"):
+            return []
+        else:
+            return secs if secs else [0]
+    if isinstance(val, bool):
+        return secs if secs else [0]
+    if isinstance(val, (int, float)):
+        k = max(0, min(int(val), n))
+        return sorted((secs + others)[:k])
+    return secs if secs else [0]
+
+
+async def _illustrated_presentation_generator(body: dict):
+    topic = str(body.get("topic", "") or "").strip()
+    if not topic:
+        yield _sse({"type": "error", "message": "Kein Thema angegeben."})
+        return
+    images = body.get("images", "sections")
+    style = str(body.get("style", "") or "").strip()
+    model = _pick_model(body.get("model"), _model_for("general"))
+    image_model = str(body.get("image_model", "") or "")
+    tok = {"in": 0, "out": 0}
+    yield _sse({"type": "pres_start", "topic": topic})
+    # 1. Entwurf zum Thema
+    try:
+        draft, _ti, _to = await _presentation_draft(topic, model)
+        tok["in"] += _ti
+        tok["out"] += _to
+    except httpx.ConnectError:
+        yield _sse({"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"})
+        return
+    except httpx.HTTPStatusError as e:
+        yield _sse({"type": "error", "message": f"Modell abgelehnt (num_ctx/VRAM?): HTTP {getattr(e.response,'status_code',0)}"})
+        return
+    except Exception as e:
+        yield _sse({"type": "error", "message": f"Entwurf fehlgeschlagen: {e}"})
+        return
+    data = await _text_to_presentation(draft, model, tok=tok)
+    if not data or not data.get("slides"):
+        yield _sse({"type": "error", "message": "Konnte aus dem Thema keine Folien ableiten."})
+        return
+    slides = data["slides"]
+    yield _sse({"type": "structure", "count": len(slides), "title": data.get("title", "")})
+
+    # 2. Bilder erzeugen (sequenziell – die lokale Brücke arbeitet ohnehin seriell).
+    sel = _select_image_slides(slides, images)
+    if sel:
+        _pm = _pick_model(_model_for("general"))
+        for _n, idx in enumerate(sel):
+            slide = slides[idx]
+            yield _sse({"type": "slide_image_start", "index": idx, "n": _n + 1,
+                        "total": len(sel), "title": slide.get("title", "")})
+            try:
+                _bul = slide.get("bullets") or (
+                    [l for l in str(slide.get("left", "")).split("\n") if l.strip()]
+                    if slide.get("left") else [])
+                _cnt = slide.get("content") or slide.get("subtitle") or ""
+                _ip, _pi, _po = await _slide_image_prompt(slide.get("title", ""), _bul, _cnt, _pm, style)
+                tok["in"] += _pi
+                tok["out"] += _po
+                _img = await _generate_image_core(_ip, "", "square", image_model)
+                _im = _img.get("image", "")
+                if not slide.get("left"):
+                    slide["left"] = "\n".join(_bul) if _bul else _cnt
+                slide["image_right"] = _im
+                slide["image"] = _im
+                slide["layout"] = "two-column"
+                yield _sse({"type": "slide_image_done", "index": idx, "n": _n + 1})
+            except HTTPException as he:
+                yield _sse({"type": "notice", "message": f"Folie {idx + 1}: Bild nicht erzeugt – {he.detail}"})
+            except Exception as e:
+                yield _sse({"type": "notice", "message": f"Folie {idx + 1}: Bild nicht erzeugt – {e}"})
+
+    data["tokens"] = tok
+    yield _sse({"type": "done", "presentation": data, "tokens": tok, "images_done": len(sel)})
+
+
+@app.post("/api/presentation/illustrated")
+async def presentation_illustrated(req: Request):
+    """Illustrierter Präsentationsassistent (SSE). Body ``{topic, images?, style?,
+    model?, image_model?}``; ``images`` = 'sections' (Standard = Titel+Abschnitte) /
+    'all' / 'none' / Zahl N. Streamt ``pres_start``/``structure``/``slide_image_start``/
+    ``slide_image_done``/``notice``/``done`` (``done.presentation`` = fertiges Canvas-JSON
+    mit ``image_right`` je Bildfolie). Bilder über ``_generate_image_core`` (Profil-Bildmodell,
+    Geheim/Hartman → lokal). Token-Label „Präsentationsassistent"."""
+    body = await req.json()
+    return StreamingResponse(_illustrated_presentation_generator(body), media_type="text/event-stream")
+
+
+@app.post("/api/image-to-prompt")
+async def image_to_prompt(req: Request):
+    """Bild → Text-zu-Bild-Prompt (Vision-Modell). Body ``{image (base64/Data-URI),
+    model?, style?}`` → ``{prompt, tokens}``. Nutzt dieselbe Vision-Plumbing wie
+    ``/api/analyze-image``; lokal-fähig (Geheim/Hartman: ``_pick_model`` coerct lokal)."""
+    from tools.imaging import downscale
+    body = await req.json()
+    image_b64 = body.get("image") or ""
+    if not image_b64:
+        raise HTTPException(400, "Kein Bild übergeben")
+    style = str(body.get("style", "") or "").strip()
+    _model = _pick_model(body.get("model"))
+    small = downscale(image_b64)
+    _sys = ("Du bist Prompt-Designer für Text-zu-Bild-Modelle. Beschreibe das gezeigte Bild "
+            "als EINEN kompakten, bildhaften Prompt (Motiv, Stil/Medium, Komposition/Perspektive, "
+            "Licht, Farben, Stimmung, Detailgrad), mit dem ein Text-zu-Bild-Modell ein ähnliches "
+            "Bild erzeugen könnte. KEINE Aufzählung, kein Vorspann, nur den Prompt (max. ~60 Wörter).")
+    _user = "Erzeuge den Bild-Prompt für dieses Bild." + (f" Zielstil: {style}." if style else "")
+    _tok = {"in": 0, "out": 0}
+    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": _model, "think": False, "stream": False,
+            "messages": [{"role": "system", "content": _sys},
+                         {"role": "user", "content": _user, "images": [small]}],
+            "options": {"num_ctx": _profile_num_ctx(), "num_predict": 220},
+            "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+    _j = resp.json()
+    _p = (_j.get("message", {}) or {}).get("content", "") or ""
+    _p = re.sub(r"<think>.*?</think>", "", _p, flags=re.DOTALL).strip().strip('"').strip()
+    _ti, _to = _llm_tok(_j)
+    _tok["in"] += _ti
+    _tok["out"] += _to
+    if not _p:
+        raise HTTPException(502, "Kein Prompt erzeugt (Vision-Modell lieferte nichts).")
+    return {"prompt": _p[:800], "tokens": _tok}
+
+
 # ── Arbeitsablauf im Chat (mehrstufig, Zwischenergebnisse) ────────────────────
 # Der Nutzer gibt nummerierte Schritte ein („1. … 2. …"). Jeder Schritt wird als
 # fokussierte Teilaufgabe ausgeführt; die bisherigen Ergebnisse fließen als
