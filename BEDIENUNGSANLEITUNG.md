@@ -1489,6 +1489,29 @@ Standardmäßig ist die Funktion **aus**; du wählst sie einmalig im **Profil** 
 Das fertige Bild erscheint in der Antwort mit einem **⬇ Speichern**-Link. Ist noch kein Bildmodell
 eingerichtet, weist ein Hinweis darauf hin.
 
+### Z-Image-Turbo — starkes lokales Bildmodell (optional, separat)
+
+Neben dem Weg im Chat gibt es ein **eigenständiges** Kommandozeilen-Werkzeug im Ordner **`z-image/`**,
+das das Modell **Z-Image-Turbo** (Alibaba Tongyi, Apache-2.0) **komplett lokal auf deiner NVIDIA-GPU**
+ausführt — ohne Cloud, ohne API-Schlüssel, ohne eigenen Server. Es läuft **getrennt** vom Framework in
+einer eigenen Umgebung.
+
+- **Voraussetzung:** NVIDIA-GPU mit **≥16 GB VRAM** (getestet: RTX 3090, 24 GB), Python 3.10–3.12,
+  ~30 GB Plattenplatz (Bibliotheken + einmalig ~20 GB Modellgewichte).
+- **Installation:** im Ordner `z-image` einmalig `install_zimage.bat` (Windows) bzw. `./install_zimage.sh`
+  (Linux) ausführen. Details siehe [`z-image/README.md`](z-image/README.md).
+- **Bild erzeugen:** `bild.bat "ein roter Sportwagen im Sonnenuntergang, Fotorealismus"` (Windows) bzw.
+  `./bild.sh "…"` (Linux). Fertige Bilder landen in `z-image/outputs/`.
+- **VRAM-Automatik:** Vor jedem Lauf entlädt das Werkzeug **automatisch geladene Ollama-Modelle**
+  (`ollama stop`), damit der Speicher der GPU nicht überläuft, und weicht bei Knappheit selbsttätig auf
+  einen langsameren, aber absturzsicheren **CPU-Offload** aus. Willst du Chat und Bildgenerierung
+  **gleichzeitig** offen halten, starte mit `--offload`; sollen die Chat-Modelle geladen bleiben, mit
+  `--keep-ollama`.
+
+> Das ist unabhängig von der 🎨-Bildfunktion im Chat oben (die weiterhin einen Stable-Diffusion-Server
+> oder ein API-Modell nutzt). Z-Image-Turbo ist die kräftigere lokale Alternative für den, der nur die
+> Kommandozeile braucht.
+
 ---
 
 ## 12. Planer (Netzplan / CPM)
