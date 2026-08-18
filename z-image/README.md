@@ -44,6 +44,26 @@ Release enthalten) samt `transformers`, `accelerate`, `safetensors`,
 Die **Modellgewichte** werden nicht beim Installieren, sondern beim **ersten
 Bildlauf** automatisch geladen (~20 GB, danach im Cache).
 
+### Optional: Hugging-Face-Token (schnellere Downloads)
+
+Ohne Token lädt das Modell trotzdem — nur **langsamer und gedrosselt**
+(unauthentifizierte Anfragen sind rate-limitiert). Ein kostenloser **Read-Token**
+(https://huggingface.co/settings/tokens) hebt das Limit an und beschleunigt den
+einmaligen ~20-GB-Download deutlich. Drei Wege, alle optional:
+
+- **Beim Installieren angeben:** `install_zimage.ps1 -HfToken "hf_xxx"` bzw.
+  `./install_zimage.sh --hf-token hf_xxx` (oder `HF_TOKEN=hf_xxx ./install_zimage.sh`).
+  Läuft der Installer interaktiv, fragt er den Token einmal ab (Überspringen mit Enter).
+- **Umgebungsvariable:** `HF_TOKEN` setzen — wird automatisch erkannt und hat Vorrang.
+- **Lokale Datei:** den Token in **`z-image/hf_token.txt`** legen (eine Zeile).
+
+Der Token ist ein **Geheimnis**: Er wird in `hf_token.txt` gespeichert, ist per
+`.gitignore` vom Repo ausgeschlossen und wird **nie** ausgegeben oder geloggt.
+
+> **MIT-konform:** Der Token ist reine Zugangs-Konfiguration, **keine neue
+> Abhängigkeit**. Gelesen wird er von `huggingface_hub` (Apache-2.0), das ohnehin
+> installiert ist — es kommt kein Copyleft und kein zusätzliches Paket hinzu.
+
 ## Benutzung
 
 ```bash

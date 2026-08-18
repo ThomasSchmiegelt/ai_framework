@@ -26,6 +26,27 @@ from datetime import datetime
 MODEL_ID = "Tongyi-MAI/Z-Image-Turbo"
 
 
+def _load_hf_token():
+    """Optionalen Hugging-Face-Token bereitstellen (beschleunigt Downloads, hebt
+    Rate-Limits an). Vorrang hat eine bereits gesetzte Umgebungsvariable
+    (HF_TOKEN / HUGGING_FACE_HUB_TOKEN); sonst wird eine lokale Datei
+    'hf_token.txt' NEBEN diesem Skript gelesen (per .gitignore nicht im Repo).
+    Der Token ist ein Geheimnis und wird NICHT ausgegeben. Rückgabe: 'env',
+    'file' oder None."""
+    if os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"):
+        return "env"
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hf_token.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tok = f.readline().strip()
+    except Exception:
+        return None
+    if tok:
+        os.environ["HF_TOKEN"] = tok
+        return "file"
+    return None
+
+
 def _ollama_loaded():
     """Namen der aktuell in den VRAM geladenen Ollama-Modelle (leer, wenn Ollama
     nicht läuft oder nichts geladen ist)."""
@@ -82,6 +103,10 @@ def main():
     if not prompt:
         print("Kein Prompt angegeben. Beispiel:\n  python generate.py \"ein roter Sportwagen im Sonnenuntergang\"")
         sys.exit(1)
+
+    # Optionalen HF-Token laden (vor dem ersten Modell-Download wirksam).
+    if _load_hf_token() == "file":
+        print("Hugging-Face-Token aus hf_token.txt geladen (schnellere Downloads).")
 
     # Import erst hier, damit --help ohne geladene Bibliotheken funktioniert.
     import torch
