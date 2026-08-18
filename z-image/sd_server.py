@@ -39,6 +39,16 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# stdout/stderr auf UTF-8 zwingen. Wichtig: wird der Server mit umgeleitetem stdout
+# gestartet (Auto-Start durchs Backend, DEVNULL/Logdatei), nutzt Windows sonst cp1252
+# und ein Emoji/Umlaut in einer print()-Zeile (Startmeldung, Prompt-Log) lässt den
+# Prozess mit UnicodeEncodeError abstürzen, BEVOR serve_forever() läuft.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _GEN = os.path.join(_HERE, "generate.py")
 _lock = threading.Lock()   # eine Erzeugung zur Zeit (eine GPU)

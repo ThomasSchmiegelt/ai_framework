@@ -23,6 +23,14 @@ import sys
 import time
 from datetime import datetime
 
+# stdout/stderr auf UTF-8 (falls von einem Elternprozess umgeleitet – sonst cp1252 →
+# UnicodeEncodeError bei Umlauten/Sonderzeichen in den Fortschrittsmeldungen).
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 MODEL_ID = "Tongyi-MAI/Z-Image-Turbo"
 
 
