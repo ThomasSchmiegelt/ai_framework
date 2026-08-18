@@ -1526,6 +1526,11 @@ einer eigenen Umgebung.
 
 ## 12. Planer (Netzplan / CPM)
 
+> **Direkt aus dem Chat:** Sag im Chat z. B. *„erstelle einen Plan zum Bau eines Lasers und verwende den
+> Planer-Tab"*. Nach der Antwort fragt ein Fenster nach dem **Plan-Namen** und leitet daraus einen
+> **Projektplan** (Vorgänge, Abhängigkeiten, kritischer Pfad) ab, der direkt im Planer-Tab geöffnet wird.
+> Das geht auch mit **jeder** Antwort über den Knopf **🗂 Planer** direkt unter der Nachricht.
+
 Tab **🗂️ Planer** — Projektplanung nach der Methode des **Kritischen Pfades**.
 
 > **Zum Ausprobieren** ist ein **100-Aufgaben-Beispielprojekt** („Lokale KI im
