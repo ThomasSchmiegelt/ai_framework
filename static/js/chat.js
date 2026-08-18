@@ -306,7 +306,7 @@ const Chat = (() => {
 
     // Tab-übergreifend: Wunsch „… in die To-Do-Liste / in den Planer" merken, um nach
     // der Antwort die Übernahme-Rückfrage anzubieten (die Antwort erzeugt das Modell normal).
-    _tabHandoffPending = _planIntent(text) ? 'planner' : (_todoIntent(text) ? 'todo' : '');
+    _tabHandoffPending = _planIntent(text) ? 'planner' : (_todoIntent(text) ? 'todo' : _tabIntent(text));
 
     // SSE-Stream starten (abbrechbar über AbortController)
     abortController = new AbortController();
@@ -402,8 +402,7 @@ const Chat = (() => {
     // und dann wirklich übernehmen (To-Do: neu/ergänzen; Planer: als Projektplan).
     if (_tabHandoffPending && fullText.trim() && !wasAborted) {
       const _t = _tabHandoffPending; _tabHandoffPending = '';
-      if (_t === 'planner') _openPlanHandoff(fullText);
-      else _openTodoHandoff(fullText);
+      _handoffToTab(_t, fullText);
     }
 
     abortController = null;
@@ -753,26 +752,17 @@ const Chat = (() => {
         });
         saveBar.appendChild(ttsBtn);
       }
-      // 📥 Diese Antwort (Liste) in die To-Do-Liste übernehmen (Rückfrage: neu/ergänzen).
-      const todoBtn = document.createElement('button');
-      todoBtn.textContent = '📥 To-Do';
-      todoBtn.title = 'Punkte dieser Antwort in die To-Do-Liste übernehmen';
-      todoBtn.addEventListener('click', () => {
+      // ↪ Diese Antwort an einen anderen Tab übergeben (To-Do, Planer, Code, Mathe,
+      // Medizin, Varianten, Morph-Kasten, Patente, Anfrage, Rechnung, Zeugnis).
+      const sendBtn = document.createElement('button');
+      sendBtn.textContent = '↪ senden an…';
+      sendBtn.title = 'Diese Antwort in einen anderen Tab übernehmen';
+      sendBtn.addEventListener('click', () => {
         const raw = (bubbleContent._rawMd || bubbleContent.textContent || '').trim();
         if (!raw) { if (typeof showToast === 'function') showToast('Nichts zu übernehmen'); return; }
-        _openTodoHandoff(raw);
+        _openHandoffMenu(raw, sendBtn);
       });
-      saveBar.appendChild(todoBtn);
-      // 🗂 Diese Antwort als Projektplan in den Planer übernehmen.
-      const planBtn = document.createElement('button');
-      planBtn.textContent = '🗂 Planer';
-      planBtn.title = 'Diese Antwort als Projektplan in den Planer übernehmen';
-      planBtn.addEventListener('click', () => {
-        const raw = (bubbleContent._rawMd || bubbleContent.textContent || '').trim();
-        if (!raw) { if (typeof showToast === 'function') showToast('Nichts zu übernehmen'); return; }
-        _openPlanHandoff(raw);
-      });
-      saveBar.appendChild(planBtn);
+      saveBar.appendChild(sendBtn);
       bubble.appendChild(saveBar);
     }
 
@@ -2725,6 +2715,88 @@ const Chat = (() => {
       } else showToast('Planer nicht verfügbar');
     };
     setTimeout(() => { const t = ov.querySelector('#ph-name'); if (t) { t.focus(); t.select(); } }, 30);
+  }
+
+  // Ziel-Tabs für die Übernahme. To-Do/Planer haben eigene Rückfragen; Code lädt in die
+  // Code-Werkstatt; die übrigen füllen ihr Haupteingabefeld vor (bzw. legen den Text in die
+  // Zwischenablage, wenn der Tab formularbasiert ist) und wechseln dorthin. Keys = `data-tab`.
+  const _HANDOFF_TARGETS = [
+    { key: 'todo', label: '✅ To-Do' },
+    { key: 'planner', label: '🗂 Planer' },
+    { key: 'ide', label: '💻 Code' },
+    { key: 'mathe', label: '🧮 Mathe', input: 'mathe-input' },
+    { key: 'medizin', label: '🩺 Medizin', input: 'medizin-input' },
+    { key: 'varianten', label: '⚖ Varianten', input: 'var-problem' },
+    { key: 'morph', label: '🧩 Morph-Kasten', input: 'morph-problem' },
+    { key: 'patente', label: '📜 Patente', input: 'pat-search-term' },
+    { key: 'rfq', label: '📩 Anfrage', input: 'rfq-chat-input' },
+    { key: 'rechnung', label: '🧾 Rechnung', copy: true },
+    { key: 'zeugnis', label: '📄 Zeugnis', copy: true },
+  ];
+
+  function _handoffToTab(key, md) {
+    const text = String(md || '').trim();
+    if (!text) { showToast('Nichts zu übernehmen'); return; }
+    if (key === 'todo') return _openTodoHandoff(text);
+    if (key === 'planner') return _openPlanHandoff(text);
+    const t = _HANDOFF_TARGETS.find(x => x.key === key);
+    const name = t ? t.label.replace(/^\S+\s/, '') : key;
+    if (key === 'ide') {
+      if (typeof CodeIDE !== 'undefined' && CodeIDE.loadFromChat) CodeIDE.loadFromChat(text, 'chat');
+      else if (typeof CodeWorkspace !== 'undefined' && CodeWorkspace.loadFromChat) CodeWorkspace.loadFromChat(text, 'chat');
+      if (typeof switchTab === 'function') switchTab('ide');
+      showToast('✓ in den Code-Tab übernommen'); return;
+    }
+    if (typeof switchTab === 'function') switchTab(key);
+    if (t && t.copy) {
+      if (navigator.clipboard) { try { navigator.clipboard.writeText(text); } catch (_) {} }
+      showToast(`${name}-Tab geöffnet – Antwort liegt in der Zwischenablage (ins passende Feld einfügen)`);
+      return;
+    }
+    const el = t && t.input ? document.getElementById(t.input) : null;
+    if (el) {
+      el.value = text;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      try { el.focus(); } catch (_) {}
+      showToast(`✓ in den ${name}-Tab übernommen`);
+    } else {
+      showToast(`${name}-Tab geöffnet`);
+    }
+  }
+
+  function _openHandoffMenu(md, anchor) {
+    const old = document.getElementById('handoff-menu'); if (old) old.remove();
+    const menu = document.createElement('div'); menu.id = 'handoff-menu';
+    const r = anchor.getBoundingClientRect();
+    menu.style.cssText = `position:fixed;z-index:10000;left:${Math.round(r.left)}px;top:${Math.round(r.bottom + 4)}px;background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:10px;box-shadow:0 8px 30px #000a;padding:6px;max-height:60vh;overflow:auto;min-width:190px`;
+    _HANDOFF_TARGETS.forEach(t => {
+      const b = document.createElement('button');
+      b.textContent = t.label; b.type = 'button';
+      b.style.cssText = 'display:block;width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:inherit;cursor:pointer;border-radius:6px;font-size:.95em';
+      b.onmouseenter = () => { b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff'; };
+      b.onmouseleave = () => { b.style.background = 'transparent'; b.style.color = 'inherit'; };
+      b.onclick = () => { menu.remove(); _handoffToTab(t.key, md); };
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    setTimeout(() => {
+      const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
+      document.addEventListener('click', close);
+    }, 10);
+  }
+
+  // Generischer Tab-Intent: „<Tab>-Tab" (z. B. „mathe-tab", „code tab") → Ziel-Key.
+  function _tabIntent(text) {
+    const m = String(text || '').match(/\b(code|mathe|medizin|varianten|morph\w*|patent\w*|anfrage|rechnung|angebot|zeugnis\w*)[-\s]?tab\b/i);
+    if (!m) return '';
+    const w = m[1].toLowerCase();
+    if (w.startsWith('code')) return 'ide';
+    if (w.startsWith('patent')) return 'patente';
+    if (w.startsWith('morph')) return 'morph';
+    if (w === 'anfrage') return 'rfq';
+    if (w === 'angebot' || w === 'rechnung') return 'rechnung';
+    if (w.startsWith('zeugnis')) return 'zeugnis';
+    return w;   // mathe, medizin, varianten
   }
 
   // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────

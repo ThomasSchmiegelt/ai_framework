@@ -1441,6 +1441,14 @@ Antworten lassen sich **vorlesen**. Über jeder Assistenten-Antwort im Chat ersc
 **🔊-Knopf** (neben „⬇ .md") — Klick liest die Antwort vor, ein weiterer Klick stoppt. Auch im
 **Transkriptions-Tab** gibt es **🔊 Vorlesen**.
 
+> **↪ senden an… — Antwort in einen anderen Tab übernehmen:** Unter jeder Antwort gibt es das Menü
+> **„↪ senden an…"**. Damit übergibst du das Ergebnis direkt an einen anderen Tab: **To-Do** (mit Rückfrage
+> „neues Projekt oder bestehendes ergänzen?"), **Planer** (als Projektplan), **Code** (in die Code-Werkstatt),
+> **Mathe, Medizin, Varianten, Morph-Kasten, Patente, Anfrage** (füllt dort das Eingabefeld vor und wechselt
+> hin) sowie **Rechnung/Zeugnis** (legt den Text in die Zwischenablage, weil das Formulare sind). Das geht
+> auch per Sprache im Chat: z. B. *„… und stell es in die To-Do-Liste"*, *„… verwende den Planer-Tab"* oder
+> *„… im Mathe-Tab"*.
+
 Die Stimme richtet sich nach der gewählten **Antwortstil-Persona** (Profil → *Antwortstil*):
 
 | Persona | Stimme |
