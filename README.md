@@ -110,10 +110,11 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 🔍 **Upscaling** — `/upscale`: Bild hochskalieren (2×, max 2048). **KI-Detail** ergänzt echte
   Schärfe lokal über Z-Image (img2img mit niedriger Stärke), **Schnell** vergrößert sofort per
   Lanczos (Pillow). Keine neue Abhängigkeit; bei fehlendem lokalem Server Rückfall auf Lanczos
-- ✅ **Chat → To-Do / Planer übernehmen** — sag im Chat „… und stell es in die To-Do-Liste" bzw.
-  „… erstelle einen Plan und verwende den Planer-Tab" (oder Knöpfe **📥 To-Do** / **🗂 Planer** an jeder
-  Antwort): eine **Rückfrage** klärt „neues Projekt oder bestehendes ergänzen?" (To-Do) bzw. den
-  Plan-Namen (Planer) — das Ergebnis landet dann wirklich im jeweiligen Tab
+- ↪ **Chat → anderer Tab** — jede Antwort hat ein Menü **„↪ senden an…"**: übernimm das Ergebnis in
+  **To-Do** (Rückfrage neu/ergänzen), **Planer** (als Projektplan), **Code**, **Mathe**, **Medizin**,
+  **Varianten**, **Morph-Kasten**, **Patente**, **Anfrage** (füllt das Eingabefeld vor) oder
+  **Rechnung/Zeugnis** (Text in die Zwischenablage). Auch per Sprache: „… verwende den Planer-Tab",
+  „… in die To-Do-Liste", „… im Mathe-Tab"
 - 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug
   im Ordner [`z-image/`](z-image/README.md): erzeugt Bilder **komplett lokal auf der GPU**
   (Alibaba Tongyi, 6B, Apache-2.0, ~8 Schritte) über `diffusers`, getrennt vom Backend.
