@@ -6024,15 +6024,42 @@ async def presentation_slide_image(req: Request):
 # auch nackte Strings (Tag im Text) und normalisieren beides.
 _WF_TAG_RE = re.compile(r"^\s*\[([^\]]{1,40})\]\s*(.*)$", re.DOTALL)
 
+# Ein Schritt kann statt Text auch ein Bild erzeugen ODER eine Sprachnachricht
+# (Text wird vorgelesen). Erkennung über Tags ([bild]/[sprache]) ODER natürliche
+# Sprache im Schritttext.
+_WF_IMG_RE = re.compile(
+    r"\b(erzeuge|erstelle|generiere|male|zeichne|entwirf|visualisiere|rendere|render|"
+    r"generate|create|draw)\b[^.\n]{0,40}\b(bild|bilder|foto|photo|illustration|grafik|"
+    r"grafiken|zeichnung|logo|poster|cover|image|picture)\b", re.I)
+_WF_VOICE_RE = re.compile(
+    r"\b(sprachnachricht|sprachausgabe|vertone|vorlesen|lies\b[^.\n]{0,30}\bvor|"
+    r"als\s+(?:sprache|audio)|voice[- ]?message|read\s+aloud|text[- ]?to[- ]?speech|tts)\b", re.I)
+# Imperativ-Vorspann eines Bild-Schritts entfernen -> übrig bleibt das Motiv als Prompt.
+_WF_IMG_STRIP = re.compile(
+    r"^\s*(?:bitte\s+)?(?:erzeuge|erstelle|generiere|male|zeichne|entwirf|visualisiere|"
+    r"rendere|render|generate|create|draw)\b\s*(?:mir\s+)?(?:bitte\s+)?(?:ein(?:e|en)?\s+)?"
+    # Nur generische „Bild"-Wörter als Vorspann entfernen. Logo/Poster/Cover sind
+    # meist das Motiv selbst -> stehen lassen (nicht in dieser Liste).
+    r"(?:bild|foto|photo|illustration|grafik|zeichnung|image|picture)s?\b"
+    r"\s*(?:von|vom|of|mit|zu|:|,)?\s*", re.I)
+
+
+def _wf_image_prompt(text: str) -> str:
+    """Aus einem Bild-Schritt („generiere ein Bild von X") das Motiv X als Prompt."""
+    p = _WF_IMG_STRIP.sub("", text or "").strip(" .:-–—")
+    return p if len(p) >= 3 else (text or "").strip()
+
 
 def _wf_normalize_step(s) -> dict:
-    """Ein Schritt → ``{text, mode, web}`` (``mode`` ∈ '' / 'local' / 'api')."""
+    """Ein Schritt → ``{text, mode, web, kind}`` (``mode`` ∈ '' / 'local' / 'api';
+    ``kind`` ∈ '' / 'image' / 'voice')."""
     if isinstance(s, dict):
         text = str(s.get("text", "") or "").strip()
         mode = str(s.get("mode", "") or "").strip().lower()
         web = bool(s.get("web", False))
+        kind = str(s.get("kind", "") or "").strip().lower()
     else:
-        text, mode, web = str(s or "").strip(), "", False
+        text, mode, web, kind = str(s or "").strip(), "", False, ""
     m = _WF_TAG_RE.match(text)
     if m:  # Tag im Text (Fallback, falls das Frontend nicht geparst hat)
         toks = re.split(r"[,\s/+]+", m.group(1).lower())
@@ -6044,9 +6071,20 @@ def _wf_normalize_step(s) -> dict:
                 mode = "api"
             elif t in ("web", "recherche", "suche", "search", "internet"):
                 web = True
+            elif t in ("bild", "image", "img", "foto"):
+                kind = "image"
+            elif t in ("sprache", "stimme", "tts", "voice", "audio", "vorlesen"):
+                kind = "voice"
+    if kind not in ("image", "voice"):  # sonst aus dem Text ableiten
+        if _WF_IMG_RE.search(text):
+            kind = "image"
+        elif _WF_VOICE_RE.search(text):
+            kind = "voice"
+        else:
+            kind = ""
     if mode not in ("local", "api"):
         mode = ""
-    return {"text": text, "mode": mode, "web": web}
+    return {"text": text, "mode": mode, "web": web, "kind": kind}
 
 
 async def _workflow_generator(body: dict):
@@ -6106,12 +6144,35 @@ async def _workflow_generator(body: dict):
     try:
         for i, step in enumerate(steps):
             _txt = step["text"]
+            _kind = step.get("kind") or ""
             _model, _note = _resolve_model(step["mode"])
             yield _sse({"type": "step_start", "index": i, "total": len(steps),
-                        "step": _txt, "model": _model,
+                        "step": _txt, "model": _model, "kind": _kind,
                         "remote": _llm.is_remote(_model), "web": step["web"]})
             if _note:
                 yield _sse({"type": "notice", "index": i, "message": _note})
+
+            # ── Bild-Schritt: das eingestellte Bildmodell erzeugen lassen ────────
+            # Nutzt den GEMEINSAMEN Kern _generate_image_core (wie Chat-🎨). Fehler
+            # (kein Modell / Server aus) beenden den Ablauf NICHT, sondern werden als
+            # Hinweis gemeldet; der Ablauf läuft weiter.
+            if _kind == "image":
+                _iprompt = _wf_image_prompt(_txt)
+                yield _sse({"type": "generating_image", "index": i, "prompt": _iprompt})
+                try:
+                    _img = await _generate_image_core(_iprompt, preset="square")
+                    yield _sse({"type": "image", "index": i,
+                                "prompt": _iprompt, "image": _img.get("image", "")})
+                    _rnote = f"🖼 Bild erzeugt: {_iprompt}"
+                except HTTPException as _he:
+                    _rnote = f"⚠ Bild nicht erzeugt: {_he.detail}"
+                    yield _sse({"type": "notice", "index": i, "message": _rnote})
+                except Exception as _e:
+                    _rnote = f"⚠ Bild nicht erzeugt: {_e}"
+                    yield _sse({"type": "notice", "index": i, "message": _rnote})
+                results.append((_txt, _rnote))
+                yield _sse({"type": "step_done", "index": i, "step": _txt, "result": _rnote})
+                continue
 
             # Optionale Websuche für diesen Schritt (typisch: lokales Recherche-Modell
             # holt Quellen, die dann als Zwischenergebnis an ein API-Modell weitergehen).
@@ -6153,6 +6214,10 @@ async def _workflow_generator(body: dict):
             _res = await _run(_model, _sys, _user, max(300, min(int(_ctx * 0.35), 1500)))
             results.append((_txt, _res))
             yield _sse({"type": "step_done", "index": i, "step": _txt, "result": _res})
+            # Sprach-Schritt: den erzeugten Text im Browser vorlesen lassen (TTS,
+            # GPU-frei). Das eigentliche Sprechen macht das Frontend.
+            if _kind == "voice":
+                yield _sse({"type": "speak", "index": i, "text": _res})
 
         # Abschluss-Synthese: bevorzugt das API-Modell (größeres Kontextfenster für die
         # gesammelten Teilergebnisse), sonst das Basismodell.
@@ -6196,12 +6261,17 @@ async def _workflow_generator(body: dict):
 @app.post("/api/workflow")
 async def workflow(req: Request):
     """Führt einen mehrstufigen Arbeitsablauf aus (SSE). Body: ``{steps:[…], goal?,
-    model?, api_model?}``; ``steps`` sind Strings ODER Objekte ``{text, mode, web}``
-    (``mode`` '' / 'local' / 'api', ``web`` = Websuche für den Schritt). Pro Schritt
-    wählbares Modell (lokal recherchiert/zwischenspeichert → API-Modell verarbeitet weiter),
-    die Synthese läuft bevorzugt auf dem API-Modell. Streamt ``workflow_start``/
-    ``step_start``/``searching``/``search_done``/``notice``/``step_done``/
-    ``synthesizing``/``text``/``done``/``error``. Token-Label „Arbeitsablauf"."""
+    model?, api_model?}``; ``steps`` sind Strings ODER Objekte ``{text, mode, web, kind}``
+    (``mode`` '' / 'local' / 'api', ``web`` = Websuche für den Schritt, ``kind`` ''
+    /'image'/'voice'). Pro Schritt wählbares Modell (lokal recherchiert/zwischenspeichert →
+    API-Modell verarbeitet weiter), die Synthese läuft bevorzugt auf dem API-Modell.
+    **Bild-Schritt** (``kind='image'``, Tag ``[bild]`` oder „generiere ein Bild …") ruft
+    den gemeinsamen Kern ``_generate_image_core`` → ``image``-Frame; **Sprach-Schritt**
+    (``kind='voice'``, Tag ``[sprache]`` oder „… als Sprachnachricht/vorlesen") lässt den
+    erzeugten Text vom Frontend vorlesen → ``speak``-Frame. Streamt ``workflow_start``/
+    ``step_start``/``searching``/``search_done``/``notice``/``generating_image``/``image``/
+    ``step_done``/``speak``/``synthesizing``/``text``/``done``/``error``. Token-Label
+    „Arbeitsablauf" (Bild/Sprache erzeugen keine Chat-Tokens)."""
     body = await req.json()
     return StreamingResponse(_workflow_generator(body), media_type="text/event-stream")
 

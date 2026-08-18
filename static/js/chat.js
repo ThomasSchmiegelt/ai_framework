@@ -1725,7 +1725,7 @@ const Chat = (() => {
   // Ein Schritt darf mit einer Tag-Angabe beginnen: [lokal] / [api] / [web] bzw.
   // Kombis wie [lokal,web]. → { text, mode, web } (mode '' | 'local' | 'api').
   function _wfParseTags(s) {
-    let mode = '', web = false, text = String(s || '').trim();
+    let mode = '', web = false, kind = '', text = String(s || '').trim();
     const m = text.match(/^\s*\[([^\]]{1,40})\]\s*([\s\S]*)$/);
     if (m) {
       text = (m[2] || '').trim();
@@ -1733,14 +1733,23 @@ const Chat = (() => {
         if (t === 'lokal' || t === 'local') mode = 'local';
         else if (t === 'api' || t === 'remote' || t === 'cloud') mode = 'api';
         else if (['web', 'recherche', 'suche', 'search', 'internet'].includes(t)) web = true;
+        else if (['bild', 'image', 'img', 'foto'].includes(t)) kind = 'image';
+        else if (['sprache', 'stimme', 'tts', 'voice', 'audio', 'vorlesen'].includes(t)) kind = 'voice';
       }
     }
-    return { text, mode, web };
+    // Ohne Tag: Bild-/Sprach-Absicht aus dem Schritttext ableiten.
+    if (!kind) {
+      if (/\b(erzeuge|erstelle|generiere|male|zeichne|entwirf|visualisiere|rendere|render|generate|create|draw)\b[^.\n]{0,40}\b(bild|bilder|foto|photo|illustration|grafik|grafiken|zeichnung|logo|poster|cover|image|picture)\b/i.test(text)) kind = 'image';
+      else if (/\b(sprachnachricht|sprachausgabe|vertone|vorlesen|lies\b[^.\n]{0,30}\bvor|als\s+(sprache|audio)|voice[- ]?message|read\s+aloud|text[- ]?to[- ]?speech|tts)\b/i.test(text)) kind = 'voice';
+    }
+    return { text, mode, web, kind };
   }
 
   // Kurzes Label für die Anzeige eines Schritt-Tags.
   function _wfBadge(st) {
     const bits = [];
+    if (st.kind === 'image') bits.push('🖼 Bild');
+    else if (st.kind === 'voice') bits.push('🔊 Sprache');
     if (st.mode === 'local') bits.push('💻 lokal');
     else if (st.mode === 'api') bits.push('☁ API');
     if (st.web) bits.push('🌐 Web');
@@ -1846,6 +1855,29 @@ const Chat = (() => {
             _log(`  🔎 Websuche: ${(ev.query || '').slice(0, 70)}…`);
           } else if (ev.type === 'search_done') {
             _log(`  ✓ ${ev.count || 0} Quellen gefunden`);
+          } else if (ev.type === 'generating_image') {
+            _log(`  🖼 Bild wird erzeugt: ${(ev.prompt || '').slice(0, 70)}…`);
+          } else if (ev.type === 'image') {
+            clearWorking();
+            const wrap = document.createElement('div'); wrap.className = 'wf-image';
+            wrap.style.cssText = 'margin:10px 0';
+            if (ev.prompt) {
+              const cap = document.createElement('div');
+              cap.style.cssText = 'font-size:.85em;opacity:.7;margin-bottom:4px';
+              cap.textContent = '🖼 ' + ev.prompt;
+              wrap.appendChild(cap);
+            }
+            insertImage(wrap, ev.image);
+            stepsEl.appendChild(wrap); scrollToBottom();
+          } else if (ev.type === 'speak') {
+            clearWorking();
+            const tone = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get().tone || '') : '';
+            if (typeof TTS !== 'undefined' && TTS.speak) TTS.speak(ev.text || '', tone);
+            const b = document.createElement('button'); b.className = 'wf-action-btn';
+            b.textContent = '🔊 nochmal vorlesen';
+            b.onclick = () => { if (typeof TTS !== 'undefined' && TTS.speak) TTS.speak(ev.text || '', tone); };
+            const bwrap = document.createElement('div'); bwrap.style.cssText = 'margin:6px 0';
+            bwrap.appendChild(b); stepsEl.appendChild(bwrap); scrollToBottom();
           } else if (ev.type === 'notice') {
             const d = document.createElement('div'); d.className = 'research-log-line';
             d.style.opacity = '.7'; d.textContent = '  ℹ ' + (ev.message || ''); logEl.appendChild(d); scrollToBottom();
@@ -2531,7 +2563,7 @@ const Chat = (() => {
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },
-    { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander. Pro Schritt Tags [lokal] [api] [web] (z. B. „1. [lokal,web] recherchiere … 2. [api] verarbeite …"). Ergebnis → Chat/Präsentation/Planer' },
+    { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander. Pro Schritt Tags [lokal] [api] [web] [bild] [sprache] (z. B. „1. [lokal,web] recherchiere … 2. [api] verarbeite … 3. [bild] erzeuge ein Bild von … 4. [sprache] fasse es als Sprachnachricht"). Ergebnis → Chat/Präsentation/Planer' },
     { key: '/+',    ins: '/+ ',    cmd: '/+ …',    desc: 'Verbesserungsidee ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/-',    ins: '/- ',    cmd: '/- …',    desc: 'Fehler/Problem ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/',     ins: '/',      cmd: '/<Agent>', desc: 'Agent nur für diese Nachricht (z. B. /datenschutz_berater)', info: true },
