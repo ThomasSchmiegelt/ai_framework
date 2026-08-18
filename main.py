@@ -4770,6 +4770,135 @@ async def _generate_image_core(prompt: str, negative: str = "", preset: str = "s
     return {"image": src, "model": model, "prompt": prompt}
 
 
+async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
+                           preset: str = "square", model: Optional[str] = None) -> dict:
+    """Bildbearbeitung (img2img): vorhandenes Bild + Anweisung → verändertes Bild.
+    Lokal über SD-WebUI/Z-Image-Brücke (``/sdapi/v1/img2img``) oder OpenAI-kompatible
+    Bild-Edits-API (``/images/edits``; **nur Modelle, die das können** – sonst klare
+    Fehlermeldung). Antwort wie ``_generate_image_core``: ``{image, model, prompt}``.
+    ``strength`` = wie stark verändert wird (0.1 wenig … 0.95 stark). Geheim/Hartman:
+    nur lokal (Remote → lokaler SD-Server; ohne SD-URL 409)."""
+    prompt = str(prompt or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Keine Änderungsanweisung angegeben.")
+    if not image_b64:
+        raise HTTPException(400, "Kein Bild übergeben.")
+    try:
+        strength = float(strength)
+    except Exception:
+        strength = 0.55
+    strength = max(0.1, min(strength, 0.95))
+    preset = str(preset or "square").strip().lower()
+    if preset not in _IMAGE_SIZES:
+        preset = "square"
+    model = str(model or "").strip() or _image_model()
+    if not model or model in _MODEL_PLACEHOLDERS:
+        raise HTTPException(400, "Keine Bildgenerierung konfiguriert – im Profil ein "
+                                 "Bildmodell (lokal SD-WebUI oder API) wählen.")
+
+    # Rohe base64 (ohne data:-Präfix) bereitstellen.
+    raw_b64 = image_b64
+    if "," in raw_b64 and raw_b64.strip().startswith("data:"):
+        raw_b64 = raw_b64.split(",", 1)[1]
+
+    secret = _secret_local()
+    is_local = model.startswith("local::") or not _llm.is_remote(model)
+    if secret and not is_local:
+        if _sd_url():
+            model, is_local = "local::sd", True
+        else:
+            raise HTTPException(409, "Im Geheim-Modus ist nur lokale Bildbearbeitung "
+                                     "erlaubt – bitte SD-WebUI-URL im Profil eintragen.")
+
+    w, h = _IMAGE_SIZES[preset]["wh"]
+
+    # ── Lokal: SD-WebUI / Z-Image-Brücke img2img ────────────────────────────
+    if is_local:
+        base = _sd_url()
+        if not base:
+            raise HTTPException(400, "Keine SD-WebUI-URL im Profil hinterlegt.")
+        payload = {
+            "init_images": [raw_b64], "prompt": prompt,
+            "denoising_strength": strength, "width": w, "height": h,
+            "steps": 28, "cfg_scale": 6.5, "sampler_name": "DPM++ 2M",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(f"{base}/sdapi/v1/img2img", json=payload)
+            if resp.status_code >= 400:
+                raise HTTPException(502, f"SD-WebUI-Fehler (HTTP {resp.status_code}): "
+                                         f"{resp.text[:300]}")
+            data = resp.json()
+        except HTTPException:
+            raise
+        except httpx.ConnectError:
+            raise HTTPException(503, f"SD-WebUI nicht erreichbar unter {base} – läuft der "
+                                     f"Server (mit --api)?")
+        except Exception as e:
+            raise HTTPException(502, f"Lokale Bildbearbeitung fehlgeschlagen: {e}")
+        imgs = data.get("images") or []
+        if not imgs:
+            raise HTTPException(502, "SD-WebUI lieferte kein Bild zurück.")
+        b64 = imgs[0]
+        if "," in b64 and b64.strip().startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        return {"image": f"data:image/png;base64,{b64}", "model": model, "prompt": prompt}
+
+    # ── API: OpenAI-kompatibles /images/edits (multipart) ───────────────────
+    provider, real = _llm.resolve(model)
+    if not provider:
+        raise HTTPException(400, "Unbekannter API-Anbieter für die Bildbearbeitung.")
+    base = (provider.get("base_url") or "").rstrip("/")
+    headers = {"Authorization": f"Bearer {provider.get('api_key', '')}"}
+    try:
+        img_bytes = base64.b64decode(raw_b64)
+    except Exception:
+        raise HTTPException(400, "Bild konnte nicht dekodiert werden.")
+    files = {"image": ("image.png", img_bytes, "image/png")}
+    form = {"model": real, "prompt": prompt, "n": "1",
+            "size": _api_image_size(real, preset)}
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(f"{base}/images/edits", headers=headers,
+                                     data=form, files=files)
+        if resp.status_code >= 400:
+            raise HTTPException(502, f"Bild-Edit-API fehlgeschlagen (HTTP {resp.status_code}) – "
+                                     f"unterstützt „{real}“ Bildbearbeitung? {resp.text[:250]}")
+        data = resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Bild-Edit-API fehlgeschlagen: {e}")
+    items = data.get("data") or []
+    if not items:
+        raise HTTPException(502, "Bild-Edit-API lieferte kein Bild zurück.")
+    first = items[0] or {}
+    b64 = first.get("b64_json")
+    if b64:
+        src = f"data:image/png;base64,{b64}"
+    elif first.get("url"):
+        src = first["url"]
+    else:
+        raise HTTPException(502, "Bild-Edit-API-Antwort ohne Bilddaten.")
+    return {"image": src, "model": model, "prompt": prompt}
+
+
+@app.post("/api/image/edit")
+async def image_edit(req: Request):
+    """Bildbearbeitung (img2img). Body ``{image (base64/Data-URI), prompt (Anweisung),
+    strength?, preset?, model?}`` → ``{image, model, prompt}``. Lokal (SD-WebUI /
+    Z-Image-Brücke) oder API-Edits (nur fähige Modelle). Bild ≠ Token-Strom → kein
+    TokenMeter (wie Bildgenerierung)."""
+    body = await req.json()
+    return await _edit_image_core(
+        str(body.get("prompt", "") or ""),
+        str(body.get("image", "") or ""),
+        body.get("strength", 0.55),
+        str(body.get("preset", "square") or "square"),
+        str(body.get("model", "") or ""),
+    )
+
+
 # ── Globale Kapazitätsliste ───────────────────────────────────────────────────
 # Tab-übergreifende Liste von Ressourcen/Partnern auf Basis des Planer-Schemas
 # ({kind,name,rate}), erweitert um Land/Region, freie Kapazität (h) und Skills.

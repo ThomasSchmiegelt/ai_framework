@@ -45,9 +45,10 @@ _lock = threading.Lock()   # eine Erzeugung zur Zeit (eine GPU)
 _cfg = None                # argparse-Namespace
 
 
-def _run_generate(prompt, negative, width, height):
-    """generate.py in einem frischen Unterprozess ausführen -> base64-PNG.
-    Wirft RuntimeError bei Fehler/Timeout (der Server bleibt am Leben)."""
+def _run_generate(prompt, negative, width, height, init_b64=None, strength=None):
+    """generate.py in einem frischen Unterprozess ausführen -> base64-PNG. Mit
+    ``init_b64`` = Bildbearbeitung (img2img). Wirft RuntimeError bei Fehler/Timeout
+    (der Server bleibt am Leben)."""
     with _lock:
         with tempfile.TemporaryDirectory() as td:
             out = os.path.join(td, "img.png")
@@ -58,6 +59,15 @@ def _run_generate(prompt, negative, width, height):
                    "--min-free", str(_cfg.min_free)]
             if negative:
                 cmd += ["--negative", negative]
+            if init_b64:
+                raw = init_b64
+                if "," in raw and raw.strip().startswith("data:"):
+                    raw = raw.split(",", 1)[1]
+                init_path = os.path.join(td, "init.png")
+                with open(init_path, "wb") as _f:
+                    _f.write(base64.b64decode(raw))
+                cmd += ["--init", init_path, "--strength",
+                        str(strength if strength is not None else 0.55)]
             if not _cfg.full_gpu:
                 cmd.append("--offload")          # niedriger Spitzen-VRAM (Standard: sicher)
             if _cfg.keep_ollama:
@@ -100,9 +110,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path.rstrip("/") != "/sdapi/v1/txt2img":
+        _path = self.path.rstrip("/")
+        if _path not in ("/sdapi/v1/txt2img", "/sdapi/v1/img2img"):
             self._send_json(404, {"error": "not found"})
             return
+        is_edit = _path.endswith("img2img")
         try:
             n = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(n) or b"{}")
@@ -119,9 +131,23 @@ class _Handler(BaseHTTPRequestHandler):
             height = max(256, min(2048, int(req.get("height") or 1024)))
         except Exception:
             width = height = 1024
-        print(f"txt2img: \"{prompt[:70]}\" {width}x{height}")
+        init_b64, strength = None, None
+        if is_edit:
+            inits = req.get("init_images") or []
+            if not inits:
+                self._send_json(400, {"error": "img2img ohne init_images"})
+                return
+            init_b64 = inits[0]
+            try:
+                strength = float(req.get("denoising_strength", 0.55))
+            except Exception:
+                strength = 0.55
+            print(f"img2img: \"{prompt[:70]}\" {width}x{height} strength={strength}")
+        else:
+            print(f"txt2img: \"{prompt[:70]}\" {width}x{height}")
         try:
-            b64 = _run_generate(prompt, negative, width, height)
+            b64 = _run_generate(prompt, negative, width, height,
+                                init_b64=init_b64, strength=strength)
         except Exception as e:
             print(f"  FEHLER: {e}")
             self._send_json(500, {"error": str(e)})

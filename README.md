@@ -102,6 +102,10 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Inhaltsfolien zweispaltig (halb Text, halb Bild) — alles direkt im Canvas
 - 🔍 **Bild → Prompt** — `/bildprompt`: ein Bild auswählen, das **Vision-Modell** leitet daraus
   einen Text-zu-Bild-Prompt ab (mit „🎨 Bild daraus erzeugen")
+- ✏️ **Bild bearbeiten (img2img)** — `/bildedit`: ein Bild hochladen und sagen, wie es verändert
+  werden soll (z. B. „Himmel bei Sonnenuntergang", „im Aquarellstil"), mit wählbarer **Stärke**.
+  Lokal über **Z-Image** (crash-sichere Brücke) oder ein **fähiges API-Bildmodell** (z. B.
+  `gpt-image-1`; nicht jedes Modell kann Bildbearbeitung)
 - 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug
   im Ordner [`z-image/`](z-image/README.md): erzeugt Bilder **komplett lokal auf der GPU**
   (Alibaba Tongyi, 6B, Apache-2.0, ~8 Schritte) über `diffusers`, getrennt vom Backend.
