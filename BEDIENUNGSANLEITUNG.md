@@ -1530,6 +1530,13 @@ einer eigenen Umgebung.
 > oder ein API-Modell nutzt). Z-Image-Turbo ist die kräftigere lokale Alternative für den, der nur die
 > Kommandozeile braucht.
 
+> **Bild-Server im Chat startet automatisch:** Wenn dein Profil-Bildmodell **Lokal · Z-Image** ist und der
+> Server (die „Brücke") gerade nicht läuft, **startet das Framework ihn beim ersten Bild selbst** (auch für
+> `/praesentation`, `/bildedit`, `/upscale`). Du musst `sd_server.bat` also nicht mehr von Hand starten. Der
+> erste Aufruf dauert dadurch etwas länger (Server hochfahren). Abschaltbar über das Profil-Flag
+> **„Bild-Server automatisch starten"** (`sd_autostart`); den Ordner kannst du bei Bedarf über `sd_server_dir`
+> festlegen, sonst wird er automatisch gefunden (`z-image/` oder `~/z-image`).
+
 ---
 
 ## 12. Planer (Netzplan / CPM)

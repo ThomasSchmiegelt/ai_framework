@@ -94,7 +94,8 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 🎨 **Bildgenerierung** — im Chat per 🎨-Umschalter, `/bild <Beschreibung>` oder geführtem
   Dialog `/bildhelp`; wahlweise lokal über einen eigenen **Stable-Diffusion-WebUI**-Server
   oder ein **API-Bildmodell** (z. B. `dall-e-3`). Zusätzlich **KI-Bilder je Präsentationsfolie**
-  (aus dem Folientext) direkt im Canvas
+  (aus dem Folientext) direkt im Canvas. Den lokalen Z-Image-Bildserver **startet das Framework bei
+  Bedarf selbst** (Profil `sd_autostart`, Standard an)
 - 🖼️ **Geführter Präsentationsassistent** — `/praesentation <Thema>` startet ein kurzes
   **Interview** (Zielgruppe, Ziel, Umfang, Bilder) und erstellt dann eine schlüssige
   **Gliederung mit Inhaltsverzeichnis**, **recherchiert je Punkt im Web**, fasst das als

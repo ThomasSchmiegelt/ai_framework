@@ -4643,6 +4643,86 @@ async def _sd_reachable() -> bool:
         return False
 
 
+def _sd_server_python(d: str) -> Optional[str]:
+    """venv-Python der Z-Image-Brücke im Ordner ``d`` (Windows/Linux)."""
+    for rel in ("venv/Scripts/python.exe", "venv/bin/python"):
+        p = os.path.join(d, *rel.split("/"))
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _sd_server_dir() -> Optional[str]:
+    """Ordner mit ``sd_server.py`` + eigener venv der Z-Image-Brücke. Reihenfolge:
+    Profil ``sd_server_dir`` → Repo-Ordner ``z-image`` → ``~/z-image`` (Standalone)."""
+    cands = []
+    cfg = str(_load_profile().get("sd_server_dir", "") or "").strip()
+    if cfg:
+        cands.append(cfg)
+    cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "z-image"))
+    cands.append(os.path.join(os.path.expanduser("~"), "z-image"))
+    for c in cands:
+        try:
+            if c and os.path.exists(os.path.join(c, "sd_server.py")) and _sd_server_python(c):
+                return c
+        except Exception:
+            pass
+    return None
+
+
+def _url_port(url: str) -> Optional[int]:
+    m = re.search(r":(\d{2,5})(?:/|$)", url or "")
+    return int(m.group(1)) if m else None
+
+
+def _launch_detached(cmd: list, cwd: Optional[str] = None) -> None:
+    """Prozess losgelöst starten (überlebt den Request; keine Konsole/Handles)."""
+    import subprocess
+    kwargs = dict(cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                  stdin=subprocess.DEVNULL)
+    if sys.platform == "win32":
+        kwargs["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    subprocess.Popen(cmd, **kwargs)
+
+
+_sd_launch_lock = asyncio.Lock()
+
+
+async def _ensure_sd_server() -> bool:
+    """Stellt sicher, dass der lokale Bild-Server läuft – **startet ihn bei Bedarf
+    selbst** (crash-sichere Z-Image-Brücke, torch-frei, ~1 s Start; Modell lädt erst
+    pro Bild). Nur wenn eine lokale SD-URL gesetzt ist und Profil ``sd_autostart``
+    (Standard an) nicht abgeschaltet wurde. Rückgabe True, wenn (jetzt) erreichbar."""
+    if await _sd_reachable():
+        return True
+    if not _sd_url():
+        return False
+    if not bool(_load_profile().get("sd_autostart", True)):
+        return False
+    d = _sd_server_dir()
+    if not d:
+        return False
+    py = _sd_server_python(d)
+    script = os.path.join(d, "sd_server.py")
+    if not (py and os.path.exists(script)):
+        return False
+    port = _url_port(_sd_url()) or 7860
+    async with _sd_launch_lock:
+        if await _sd_reachable():        # während des Wartens von anderer Stelle gestartet
+            return True
+        try:
+            _launch_detached([py, script, "--port", str(port)], cwd=d)
+        except Exception:
+            return False
+        for _ in range(30):              # torch-frei -> i. d. R. < 2 s
+            await asyncio.sleep(0.5)
+            if await _sd_reachable():
+                return True
+    return False
+
+
 def _api_image_size(real_model: str, preset: str) -> str:
     """Größen-String für die OpenAI-kompatible Bild-API je Modellfamilie."""
     if preset not in _IMAGE_SIZES:
@@ -4742,6 +4822,7 @@ async def _generate_image_core(prompt: str, negative: str = "", preset: str = "s
         base = _sd_url()
         if not base:
             raise HTTPException(400, "Keine SD-WebUI-URL im Profil hinterlegt.")
+        await _ensure_sd_server()   # Bild-Server bei Bedarf selbst starten (Z-Image-Brücke)
         payload = {
             "prompt": prompt,
             "negative_prompt": negative,
@@ -4859,6 +4940,7 @@ async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
         base = _sd_url()
         if not base:
             raise HTTPException(400, "Keine SD-WebUI-URL im Profil hinterlegt.")
+        await _ensure_sd_server()   # Bild-Server bei Bedarf selbst starten
         payload = {
             "init_images": [raw_b64], "prompt": prompt,
             "denoising_strength": strength, "width": w, "height": h,
@@ -6591,16 +6673,20 @@ async def _guided_presentation_generator(body: dict):
     if want_web and not _web_search_allowed():
         yield _sse({"type": "notice", "message": "Websuche gesperrt (Hartman-Modus) – Inhalte ohne Recherche."})
 
-    # Vorab-Prüfung: Bildgenerierung lokal (local::sd), aber Server nicht erreichbar?
-    # Dann EINMAL klar melden und Bilder überspringen (statt je Folie zu scheitern).
+    # Vorab-Prüfung: Bildgenerierung lokal (local::sd)? Server bei Bedarf selbst starten
+    # (Z-Image-Brücke). Klappt das nicht, EINMAL klar melden und Bilder überspringen
+    # (statt je Folie zu scheitern).
     if image_mode != "none":
         _im = image_model or _image_model()
         _is_local_img = _im == "local::sd" or (bool(_im) and not _llm.is_remote(_im))
-        if _is_local_img and not await _sd_reachable():
-            yield _sse({"type": "notice", "message":
-                        "Bild-Server nicht erreichbar – bitte z-image/sd_server.bat starten "
-                        "(Adresse im Profil: " + (_sd_url() or "—") + "). Die Folien werden ohne Bilder erstellt."})
-            image_mode = "none"
+        if _is_local_img:
+            yield _sse({"type": "notice", "message": "Prüfe/­starte den lokalen Bild-Server…"})
+            if not await _ensure_sd_server():
+                yield _sse({"type": "notice", "message":
+                            "Bild-Server nicht erreichbar und Auto-Start nicht möglich – bitte "
+                            "z-image/sd_server.bat starten (Profil-Adresse: " + (_sd_url() or "—")
+                            + "). Die Folien werden ohne Bilder erstellt."})
+                image_mode = "none"
 
     # 1. Struktur / Inhaltsverzeichnis
     try:
@@ -10716,6 +10802,10 @@ async def save_profile(req: Request):
     _imgm = str(body.get("image_model", "") or "").strip()
     profile["image_model"] = "" if _imgm in _MODEL_PLACEHOLDERS else _imgm
     profile["sd_webui_url"] = str(body.get("sd_webui_url", "") or "").strip()
+    if "sd_autostart" in body:
+        profile["sd_autostart"] = bool(body.get("sd_autostart"))
+    if "sd_server_dir" in body:
+        profile["sd_server_dir"] = str(body.get("sd_server_dir", "") or "").strip()
     # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
     profile["auto_compress"] = bool(body.get("auto_compress", False))
     try:

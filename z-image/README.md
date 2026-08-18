@@ -125,6 +125,13 @@ Dann **einmal im Framework-Profil** unter **🧠 Modelle → 🎨 Bildgenerierun
 2. als Adresse **`http://127.0.0.1:7860`** eintragen (bzw. `--host`/`--port` des Servers),
 3. speichern.
 
+> **Auto-Start:** Läuft der Server nicht, **startet das Framework ihn bei Bedarf selbst**
+> (beim Erzeugen/Bearbeiten von Bildern und beim Präsentationsassistenten). Es sucht den
+> Ordner in dieser Reihenfolge: Profil `sd_server_dir` → `z-image/` im Repo → `~/z-image`
+> (Standalone) — jeweils mit eigener `venv`. Abschaltbar über das Profil-Flag
+> `sd_autostart` (Standard an). Manuell starten (`sd_server.bat`) bleibt jederzeit möglich
+> und hält den Server unabhängig offen.
+
 Danach erzeugen `/bild …`, `/bildhelp`, der 🎨-Haken **und `[bild]`-Schritte im
 `/workflow`** die Bilder **lokal über Z-Image**. Der Server ignoriert die vom Framework fest
 gesendeten `steps=28`/`cfg=6.5` und nutzt die Turbo-Werte (8 Schritte, guidance 0).
