@@ -107,6 +107,9 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Lokal über **Z-Image** (crash-sichere Brücke) oder ein **fähiges API-Bildmodell** (z. B.
   `gpt-image-1`; nicht jedes Modell kann Bildbearbeitung). Optional **„🖌 Bereich markieren"
   (Inpainting)** — nur den aufgemalten Bereich ändern (reiner Canvas-Pinsel, keine Abhängigkeit)
+- 🔍 **Upscaling** — `/upscale`: Bild hochskalieren (2×, max 2048). **KI-Detail** ergänzt echte
+  Schärfe lokal über Z-Image (img2img mit niedriger Stärke), **Schnell** vergrößert sofort per
+  Lanczos (Pillow). Keine neue Abhängigkeit; bei fehlendem lokalem Server Rückfall auf Lanczos
 - 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug
   im Ordner [`z-image/`](z-image/README.md): erzeugt Bilder **komplett lokal auf der GPU**
   (Alibaba Tongyi, 6B, Apache-2.0, ~8 Schritte) über `diffusers`, getrennt vom Backend.

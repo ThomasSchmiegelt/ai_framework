@@ -4924,6 +4924,106 @@ async def image_edit(req: Request):
     )
 
 
+_UPSCALE_PROMPT = ("hochauflösend, gestochen scharf, feine Details, klare Konturen, "
+                   "hohe Bildqualität")
+_UPSCALE_MAX_AI = 2048      # Deckel lange Seite beim KI-Weg (VRAM-Schutz)
+_UPSCALE_MAX_FAST = 4096    # Deckel lange Seite beim Lanczos-Weg
+
+
+async def _upscale_image_core(image_b64: str, factor: float = 2.0,
+                              mode: str = "ai", model: Optional[str] = None) -> dict:
+    """Bild hochskalieren. ``mode='fast'`` = Lanczos (Pillow, kein VRAM, keine neuen
+    Details); ``mode='ai'`` = Detail-Upscale via Z-Image-img2img (niedrige Stärke)
+    über die lokale Brücke → ergänzt echte Details. **Kein Absturz**: fehlt der lokale
+    Server / ist das Modell remote / scheitert die Brücke, wird auf Lanczos
+    zurückgefallen (Feld ``note``). Deckel lange Seite 2048 (ai) / 4096 (fast).
+    Antwort ``{image, mode, width, height, note?}``. Alles MIT (diffusers/Pillow)."""
+    if not image_b64:
+        raise HTTPException(400, "Kein Bild übergeben.")
+    try:
+        factor = float(factor)
+    except Exception:
+        factor = 2.0
+    factor = max(1.1, min(factor, 4.0))
+    mode = str(mode or "ai").lower().strip()
+    raw = image_b64
+    if "," in raw and raw.strip().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    import io as _io
+    from PIL import Image as _Img, ImageFilter as _F
+    try:
+        _src = _Img.open(_io.BytesIO(base64.b64decode(raw))).convert("RGB")
+    except Exception:
+        raise HTTPException(400, "Bild konnte nicht gelesen werden.")
+    ow, oh = _src.size
+    cap = _UPSCALE_MAX_FAST if mode == "fast" else _UPSCALE_MAX_AI
+    tw, th = int(ow * factor), int(oh * factor)
+    _long = max(tw, th)
+    if _long > cap:
+        _s = cap / _long
+        tw, th = int(tw * _s), int(th * _s)
+    tw -= tw % 16
+    th -= th % 16
+    tw, th = max(256, tw), max(256, th)
+
+    def _lanczos(note: str = "") -> dict:
+        _rs = getattr(_Img, "Resampling", _Img)
+        _up = _src.resize((tw, th), getattr(_rs, "LANCZOS", 1))
+        try:
+            _up = _up.filter(_F.UnsharpMask(radius=2, percent=80, threshold=2))
+        except Exception:
+            pass
+        _b = _io.BytesIO(); _up.save(_b, "PNG")
+        out = {"image": "data:image/png;base64," + base64.b64encode(_b.getvalue()).decode(),
+               "mode": "fast", "width": tw, "height": th}
+        if note:
+            out["note"] = note
+        return out
+
+    if mode == "fast":
+        return _lanczos()
+
+    # KI-Detail-Upscale nur lokal über die Z-Image-Brücke (sonst Lanczos-Rückfall).
+    _m = str(model or "").strip() or _image_model()
+    is_local = _m.startswith("local::") or (bool(_m) and not _llm.is_remote(_m)) or _secret_local()
+    sd = _sd_url()
+    if not (is_local and sd):
+        return _lanczos("KI-Upscale nur lokal über Z-Image (SD-URL im Profil nötig) – "
+                        "schnelle Vergrößerung genutzt.")
+    payload = {"init_images": [raw], "prompt": _UPSCALE_PROMPT,
+               "denoising_strength": 0.30, "width": tw, "height": th,
+               "steps": 28, "cfg_scale": 6.5, "sampler_name": "DPM++ 2M"}
+    try:
+        async with httpx.AsyncClient(timeout=360) as client:
+            resp = await client.post(f"{sd}/sdapi/v1/img2img", json=payload)
+        if resp.status_code >= 400:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:150]}")
+        imgs = (resp.json().get("images") or [])
+        if not imgs:
+            raise RuntimeError("kein Bild")
+        b64 = imgs[0]
+        if "," in b64 and b64.strip().startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        return {"image": f"data:image/png;base64,{b64}", "mode": "ai",
+                "width": tw, "height": th}
+    except Exception as e:
+        return _lanczos(f"KI-Upscale nicht möglich ({e}) – schnelle Vergrößerung genutzt.")
+
+
+@app.post("/api/image/upscale")
+async def image_upscale(req: Request):
+    """Bild hochskalieren. Body ``{image (base64/Data-URI), factor?, mode?, model?}``
+    → ``{image, mode, width, height, note?}``. ``mode`` 'ai' (Z-Image-Detail-Upscale,
+    lokal; Rückfall Lanczos) / 'fast' (Lanczos). Bild ≠ Token-Strom → kein TokenMeter."""
+    body = await req.json()
+    return await _upscale_image_core(
+        str(body.get("image", "") or ""),
+        body.get("factor", 2.0),
+        str(body.get("mode", "ai") or "ai"),
+        str(body.get("model", "") or ""),
+    )
+
+
 # ── Globale Kapazitätsliste ───────────────────────────────────────────────────
 # Tab-übergreifende Liste von Ressourcen/Partnern auf Basis des Planer-Schemas
 # ({kind,name,rate}), erweitert um Land/Region, freie Kapazität (h) und Skills.
