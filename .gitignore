@@ -95,6 +95,9 @@ z-image/venv/
 # Hugging-Face-Token (GEHEIM!) — niemals versionieren
 z-image/hf_token.txt
 
+# Musik-Generator: erzeugte Audiodateien nicht versionieren
+z-music/outputs/
+
 # Betriebssystem / Editor
 Thumbs.db
 .DS_Store
