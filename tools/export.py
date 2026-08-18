@@ -367,6 +367,31 @@ def to_pptx(data: dict) -> Path:
                     size=Pt(20), bold=False, color=C_DIM_TXT, align=PP_ALIGN.LEFT
                 )
 
+        # ── KI-Deckblatt/Abschluss: erzeugtes Bild FLÄCHIG + Titelband ────────
+        elif layout == "title" and slide_data.get("image"):
+            import base64 as _b64m, io as _iom
+            try:
+                _hdr, _b64 = str(slide_data["image"]).split(",", 1)
+                slide.shapes.add_picture(_iom.BytesIO(_b64m.b64decode(_b64)),
+                                         0, 0, _SLIDE_W, _SLIDE_H)   # vollflächig
+            except Exception:
+                pass
+            band = slide.shapes.add_shape(1, 0, _SLIDE_H - Inches(2.3), _SLIDE_W, Inches(2.3))
+            band.fill.solid(); band.fill.fore_color.rgb = C_DEEP
+            band.line.fill.background()
+            _add_text_run(
+                slide, title,
+                l=Inches(0.8), t=_SLIDE_H - Inches(1.9), w=_SLIDE_W - Inches(1.6), h=Inches(1.1),
+                size=Pt(38), bold=True, color=C_WHITE, align=PP_ALIGN.CENTER
+            )
+            _cover_sub = slide_data.get("content", "")
+            if _cover_sub:
+                _add_text_run(
+                    slide, _cover_sub,
+                    l=Inches(1.2), t=_SLIDE_H - Inches(0.85), w=_SLIDE_W - Inches(2.4), h=Inches(0.7),
+                    size=Pt(20), bold=False, color=C_DIM_TXT, align=PP_ALIGN.CENTER
+                )
+
         # ── Inhaltsfolie (alle anderen) ───────────────────────────────────────
         else:
             # Weißer Hintergrund

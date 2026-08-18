@@ -95,9 +95,11 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Dialog `/bildhelp`; wahlweise lokal über einen eigenen **Stable-Diffusion-WebUI**-Server
   oder ein **API-Bildmodell** (z. B. `dall-e-3`). Zusätzlich **KI-Bilder je Präsentationsfolie**
   (aus dem Folientext) direkt im Canvas
-- 🖼️ **Illustrierter Präsentationsassistent** — `/praesentation <Thema>` erzeugt eine komplette
-  Präsentation **samt KI-Bildern** und öffnet sie im Canvas. Bild-Umfang steuerbar: Standard
-  Titel- + Abschnittsfolien, `/praesentation alle …`, `… keine …` oder eine Zahl
+- 🖼️ **Geführter Präsentationsassistent** — `/praesentation <Thema>` startet ein kurzes
+  **Interview** (Zielgruppe, Ziel, Umfang, Bilder) und erstellt dann eine schlüssige
+  **Gliederung mit Inhaltsverzeichnis**, **recherchiert je Punkt im Web**, fasst das als
+  Folieninhalt zusammen und bebildert automatisch: **flächiges Deckblatt & Abschlussbild**,
+  Inhaltsfolien zweispaltig (halb Text, halb Bild) — alles direkt im Canvas
 - 🔍 **Bild → Prompt** — `/bildprompt`: ein Bild auswählen, das **Vision-Modell** leitet daraus
   einen Text-zu-Bild-Prompt ab (mit „🎨 Bild daraus erzeugen")
 - 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug

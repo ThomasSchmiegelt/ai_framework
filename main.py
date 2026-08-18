@@ -6195,6 +6195,236 @@ async def image_to_prompt(req: Request):
     return {"prompt": _p[:800], "tokens": _tok}
 
 
+# ── Geführter, recherche-gestützter Präsentationsassistent ────────────────────
+# Interview (Zielgruppe/Ziel/Umfang) → schlüssige Gliederung + Inhaltsverzeichnis →
+# je Gliederungspunkt eine Webrecherche, zusammengefasst als Folieninhalt → Bilder:
+# flächiges Deckblatt + Abschlussfolie mit Bild; Inhaltsfolien bekommen ein Bild,
+# wenn die KI es für sinnvoll hält (mit Zufallskomponente) → dann zweispaltig.
+
+
+async def _pres_structure(topic: str, audience: str, goal: str, count: int,
+                          model: str, tok: dict) -> dict:
+    """LLM → schlüssige Gliederung als JSON: ``{title, subtitle, sections:[{title,
+    illustrate}], closing:{title, subtitle}}``."""
+    _sys = "Du planst schlüssige, logisch aufgebaute Präsentationen. Antworte NUR mit JSON."
+    _user = (
+        f"Plane eine Präsentation.\nThema: {topic}\n"
+        + (f"Zielgruppe: {audience}\n" if audience else "")
+        + (f"Ziel/Zweck: {goal}\n" if goal else "")
+        + f"Erzeuge eine schlüssige Gliederung mit genau {count} Inhaltsabschnitten, die "
+        "logisch aufeinander aufbauen. Antworte NUR mit JSON in diesem Format:\n"
+        '{"title":"Haupttitel","subtitle":"knapper Untertitel",'
+        '"sections":[{"title":"Abschnittstitel","illustrate":true}],'
+        '"closing":{"title":"Abschlusstitel","subtitle":"Kernbotschaft/Ausblick"}}\n'
+        'Setze illustrate=true nur, wenn ein illustratives Bild den Punkt sinnvoll '
+        'unterstützt (anschauliche/konkrete Themen) – bei reinen Zahlen/Definitionen false. '
+        "Sprache: Deutsch."
+    )
+    async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "format": "json", "stream": False,
+            "messages": [{"role": "system", "content": _sys},
+                         {"role": "user", "content": _user}],
+            "options": {"num_ctx": _profile_num_ctx()},
+            "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+    _j = resp.json()
+    _ti, _to = _llm_tok(_j)
+    tok["in"] += _ti
+    tok["out"] += _to
+    raw = (_j.get("message", {}) or {}).get("content", "") or ""
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    return _parse_llm_json(raw) or {}
+
+
+async def _pres_section_content(topic: str, sec_title: str, audience: str,
+                                srctext: str, model: str, tok: dict) -> list:
+    """Rechercheergebnisse (oder Allgemeinwissen) → 3–5 Folien-Stichpunkte."""
+    _sys = ("Du fasst Inhalt für EINE Präsentationsfolie zusammen. Antworte NUR mit JSON "
+            '{"bullets":["…","…","…"]}: 3–5 knappe, sachliche Stichpunkte auf Deutsch, '
+            "je höchstens ein kurzer Satz, kein Meta-Text. Stütze konkrete Angaben (Zahlen, "
+            "Daten, Namen) nur auf die gegebenen Quellen; liegen keine vor, nutze "
+            "Allgemeinwissen.")
+    _user = (f"Thema: {topic}\nFolie/Abschnitt: {sec_title}\n"
+             + (f"Zielgruppe: {audience}\n" if audience else "")
+             + ("\nQuellen:\n" + srctext[:6000] if srctext else ""))
+    async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "format": "json", "stream": False,
+            "messages": [{"role": "system", "content": _sys},
+                         {"role": "user", "content": _user}],
+            "options": {"num_ctx": _profile_num_ctx(), "num_predict": 500},
+            "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+    _j = resp.json()
+    _ti, _to = _llm_tok(_j)
+    tok["in"] += _ti
+    tok["out"] += _to
+    raw = (_j.get("message", {}) or {}).get("content", "") or ""
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    d = _parse_llm_json(raw)
+    bullets = []
+    if isinstance(d, dict):
+        b = d.get("bullets") or []
+        bullets = [re.sub(r"^\s*[-•*]\s*", "", str(x)).strip() for x in b if str(x).strip()]
+    return bullets[:6]
+
+
+async def _guided_presentation_generator(body: dict):
+    import random
+    topic = str(body.get("topic", "") or "").strip()
+    if not topic:
+        yield _sse({"type": "error", "message": "Kein Thema angegeben."})
+        return
+    audience = str(body.get("audience", "") or "").strip()
+    goal = str(body.get("goal", "") or "").strip()
+    try:
+        count = int(body.get("count") or 5)
+    except Exception:
+        count = 5
+    count = max(3, min(count, 10))
+    want_web = bool(body.get("web", True))
+    image_mode = str(body.get("image_mode", "smart") or "smart").lower()   # smart|all|none
+    image_wishes = str(body.get("image_wishes", "") or "").strip()
+    style = str(body.get("style", "") or "").strip()
+    image_model = str(body.get("image_model", "") or "")
+    tok = {"in": 0, "out": 0}
+
+    _rmodel, _rerr = await _research_model(body.get("model"))
+    if _rerr or not _rmodel:
+        yield _sse({"type": "error", "message": _rerr or "Kein Modell verfügbar."})
+        return
+    web_ok = want_web and _web_search_allowed()
+    yield _sse({"type": "pres_start", "topic": topic})
+    if want_web and not _web_search_allowed():
+        yield _sse({"type": "notice", "message": "Websuche gesperrt (Hartman-Modus) – Inhalte ohne Recherche."})
+
+    # 1. Struktur / Inhaltsverzeichnis
+    try:
+        struct = await _pres_structure(topic, audience, goal, count, _rmodel, tok)
+    except httpx.ConnectError:
+        yield _sse({"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"})
+        return
+    except Exception as e:
+        yield _sse({"type": "error", "message": f"Gliederung fehlgeschlagen: {e}"})
+        return
+    title = str(struct.get("title") or topic).strip()
+    subtitle = str(struct.get("subtitle") or "").strip()
+    sections = [s for s in (struct.get("sections") or [])
+                if isinstance(s, dict) and str(s.get("title", "")).strip()][:count]
+    if not sections:
+        sections = [{"title": topic, "illustrate": True}]
+    closing = struct.get("closing") or {}
+    yield _sse({"type": "structure", "title": title,
+                "toc": [str(s["title"]).strip() for s in sections]})
+
+    # 2. Folien zusammenbauen: Deckblatt, Inhaltsverzeichnis, Inhaltsfolien (+ Recherche), Abschluss
+    cover = {"layout": "title", "title": title, "content": subtitle}
+    toc_slide = {"layout": "bullets", "title": "Inhalt",
+                 "bullets": [str(s["title"]).strip() for s in sections]}
+    slides = [cover, toc_slide]
+    content_slides = []
+    for si, sec in enumerate(sections):
+        sec_title = str(sec["title"]).strip()
+        srcs, srctext = [], ""
+        if web_ok:
+            yield _sse({"type": "researching", "index": si, "query": sec_title})
+            try:
+                srcs, srctext = await search_with_sources(f"{topic} {sec_title}", 5)
+            except Exception:
+                srcs, srctext = [], ""
+            yield _sse({"type": "research_done", "index": si, "count": len(srcs or [])})
+        try:
+            bullets = await _pres_section_content(topic, sec_title, audience, srctext, _rmodel, tok)
+        except Exception:
+            bullets = []
+        if not bullets:
+            bullets = [f"(Kein Inhalt zu „{sec_title}“ ermittelt)"]
+        sl = {"layout": "bullets", "title": sec_title, "bullets": bullets}
+        if srcs:
+            sl["sources"] = [{"title": x.get("title", ""), "url": x.get("url", "")} for x in srcs[:4]]
+        # Bild-Entscheidung: KI-Flag + Zufall (bzw. alle/keine).
+        if image_mode == "all":
+            want_img = True
+        elif image_mode == "none":
+            want_img = False
+        else:
+            want_img = bool(sec.get("illustrate", True)) and (random.random() < 0.6)
+        sl["_want_image"] = want_img
+        slides.append(sl)
+        content_slides.append(sl)
+        yield _sse({"type": "section_done", "index": si, "title": sec_title,
+                    "bullets": bullets, "image": want_img})
+
+    close_title = str(closing.get("title") or "Fazit").strip()
+    close_sub = str(closing.get("subtitle") or "").strip()
+    closing_slide = {"layout": "title", "title": close_title, "content": close_sub}
+    slides.append(closing_slide)
+
+    data = {"type": "presentation", "title": title, "theme": "dark", "slides": slides}
+
+    # 3. Bilder: Deckblatt (flächig, landscape), gewählte Inhaltsfolien (square, zweispaltig),
+    #    Abschluss (flächig). Sequenziell – die lokale Brücke arbeitet ohnehin seriell.
+    _pm = _pick_model(_model_for("general"))
+    _wish = (style + (" · " + image_wishes if image_wishes else "")).strip(" ·")
+    targets = []
+    if image_mode != "none":
+        targets.append(("cover", cover))
+    targets += [("content", sl) for sl in content_slides if sl.get("_want_image")]
+    if image_mode != "none":
+        targets.append(("closing", closing_slide))
+    total = len(targets)
+    for _n, (kind, sl) in enumerate(targets):
+        yield _sse({"type": "slide_image_start", "n": _n + 1, "total": total,
+                    "kind": kind, "title": sl.get("title", "")})
+        try:
+            if kind in ("cover", "closing"):
+                _basis = subtitle if kind == "cover" else close_sub
+                _ip, _pi, _po = await _slide_image_prompt(sl.get("title", ""), [], _basis, _pm, _wish)
+                tok["in"] += _pi
+                tok["out"] += _po
+                _img = await _generate_image_core(_ip, "", "landscape", image_model)
+                sl["image"] = _img.get("image", "")     # flächig über das title-Layout
+            else:
+                _bul = sl.get("bullets") or []
+                _ip, _pi, _po = await _slide_image_prompt(sl.get("title", ""), _bul, "", _pm, _wish)
+                tok["in"] += _pi
+                tok["out"] += _po
+                _img = await _generate_image_core(_ip, "", "square", image_model)
+                _im = _img.get("image", "")
+                if not sl.get("left"):
+                    sl["left"] = "\n".join(_bul)
+                sl["image_right"] = _im
+                sl["image"] = _im
+                sl["layout"] = "two-column"
+            yield _sse({"type": "slide_image_done", "n": _n + 1})
+        except HTTPException as he:
+            yield _sse({"type": "notice", "message": f"Bild „{sl.get('title','')}“ nicht erzeugt – {he.detail}"})
+        except Exception as e:
+            yield _sse({"type": "notice", "message": f"Bild „{sl.get('title','')}“ nicht erzeugt – {e}"})
+
+    for sl in slides:
+        sl.pop("_want_image", None)
+    data["tokens"] = tok
+    yield _sse({"type": "done", "presentation": data, "tokens": tok, "images_done": total})
+
+
+@app.post("/api/presentation/guided")
+async def presentation_guided(req: Request):
+    """Geführter, recherche-gestützter Präsentationsassistent (SSE). Body
+    ``{topic, audience?, goal?, count?, web?, image_mode?, image_wishes?, style?,
+    model?, image_model?}``. ``image_mode`` = 'smart' (KI-Entscheidung + Zufall) /
+    'all' / 'none'. Ablauf: Gliederung → Inhaltsverzeichnis → je Punkt Webrecherche
+    (``search_with_sources``) + Zusammenfassung → Bilder (flächiges Deckblatt + Abschluss,
+    Inhaltsfolien zweispaltig). Streamt ``pres_start``/``structure``/``researching``/
+    ``research_done``/``section_done``/``slide_image_start``/``slide_image_done``/
+    ``notice``/``done``. Token-Label „Präsentationsassistent"."""
+    body = await req.json()
+    return StreamingResponse(_guided_presentation_generator(body), media_type="text/event-stream")
+
+
 # ── Arbeitsablauf im Chat (mehrstufig, Zwischenergebnisse) ────────────────────
 # Der Nutzer gibt nummerierte Schritte ein („1. … 2. …"). Jeder Schritt wird als
 # fokussierte Teilaufgabe ausgeführt; die bisherigen Ergebnisse fließen als
