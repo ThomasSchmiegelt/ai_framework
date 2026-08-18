@@ -73,9 +73,30 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 💬 **Chat** mit Streaming (SSE), Websuche (standardmäßig **aus**), Berechnungen
 - ⌨️ **Chat-Befehle (Slash-Befehle)** am Zeilenanfang: `/<Agent> <Frage>` (Schnell-Agent),
   `/dd[N]` / `/ddd[N]` (Deepdive bzw. Deepdive-Dokument), `/plan[N] [/Kürzel …]`
-  (Strategie- & Einsatzplan-Orchestrator), sowie **`/- <Text>`** (Problem/Fehler) und
-  **`/+ <Text>`** (Idee/Verbesserung) — letztere sammeln Nutzer-Feedback als Markdown in
-  `data/feedback.md`. Vollständige Übersicht in der [Bedienungsanleitung](BEDIENUNGSANLEITUNG.md#chat-befehle-slash-befehle-im-überblick)
+  (Strategie- & Einsatzplan-Orchestrator), **`/workflow`** (mehrstufiger Arbeitsablauf, s. u.),
+  **`/recherche`** (tiefe Recherche mit Quellen), **`/such`** (erweiterte Suche mit
+  Synonymen), **`/bild`** / **`/bildhelp`** (Bildgenerierung), **`/frag`** (dynamische
+  Rückfragen), sowie **`/- <Text>`** (Problem/Fehler) und **`/+ <Text>`** (Idee/Verbesserung)
+  — letztere sammeln Nutzer-Feedback als Markdown in `data/feedback.md`. Vollständige
+  Übersicht in der [Bedienungsanleitung](BEDIENUNGSANLEITUNG.md#chat-befehle-slash-befehle-im-überblick)
+- 🔧 **Arbeitsablauf (`/workflow`)** — nummerierte Schritte werden **nacheinander**
+  abgearbeitet, jedes Zwischenergebnis gespeichert und als Grundlage des nächsten Schritts
+  genutzt; am Ende **Synthese** zu einem Gesamtergebnis, per Knopf **→ Präsentation** oder
+  **→ Planer**. **Pro Schritt Modell & Websuche wählbar** über Marken `[lokal]` · `[api]` ·
+  `[web]` (kombinierbar, z. B. `[lokal,web]`): so recherchiert das **lokale Modell** im
+  Internet und speichert die Ergebnisse zwischen, die dann an ein **API-Modell** mit größerem
+  Kontextfenster zur Weiterverarbeitung übergeben werden — umgeht API-Modelle ohne
+  Internetzugriff und spart Tokens
+- 🔊 **Sprachausgabe (TTS)** — jede KI-Antwort vorlesen lassen (🔊-Knopf), mit einer zur
+  gewählten **Persona** passenden Stimme. Standard: **Browser-Sprachausgabe** (lokal,
+  kostenlos, nichts wird gespeichert); optional ein im Profil gewähltes **API-TTS-Modell**
+  (z. B. `openai::tts-1`). Der Geheim-/Hartman-Modus erzwingt die lokale Browserstimme
+- 🎨 **Bildgenerierung** — im Chat per 🎨-Umschalter, `/bild <Beschreibung>` oder geführtem
+  Dialog `/bildhelp`; wahlweise lokal über einen eigenen **Stable-Diffusion-WebUI**-Server
+  oder ein **API-Bildmodell** (z. B. `dall-e-3`). Zusätzlich **KI-Bilder je Präsentationsfolie**
+  (aus dem Folientext) direkt im Canvas
+- 🎙 **Transkription** — Audio (Mikrofon oder Datei) → Text, **lokal** via faster-whisper
+  oder per **API**; Ergebnis mit Zeitmarken, Übergabe an Chat/RAG/To-Do
 - 📈 **Funktion plotten** — nennst du eine Funktion (`f(x)=x^2`, `sin(x)`, `sqrt(x)`)
   oder bittest um einen Graphen, wird er **direkt im Chat** gezeichnet. Die Erkennung +
   Zeichnung laufen **deterministisch serverseitig** (mehrere Funktionen mit `und`/`;`,
@@ -159,10 +180,17 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Export als **PDF/DOCX**
 - 📜 **Arbeitszeugnisse** — qualifizierte Zeugnisse in üblicher, **codierter
   Zeugnissprache** passend zur Gesamtnote; nachbearbeitbar, Export als **PDF/DOCX**
+- 🧮 **Varianten** — gewichtete Entscheidung (Nutzwertanalyse mit **AHP-Paarvergleich**):
+  Kriterien gewichten (auch per **Wischtechnik**), Varianten bewerten, Ranking + Sensitivität;
+  Gewichte/Ranking rechnet der Server **deterministisch**, die KI schlägt nur vor. „Problem →
+  komplette Tabelle" erzeugt alles in einem Schritt (optional mit Interview + Webrecherche)
+- ✅ **To-Do** — Projektbaum mit **Wissensgraph** (2D & 3D-Kugel): Aufgaben, Zuständige,
+  Verknüpfungen, Anlagen; KI-Extraktion, Empfehlung „was als Nächstes", Daten-Chat über den
+  Bestand (inkl. Personen-Auswertungen), Export/Import
 - 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail, Logs, Verzeichnis-Analyse,
-  Postfach, Patente, Angebote/Rechnungen, Arbeitszeugnisse, Morphologischer Kasten
-  und Jury lassen sich im Profil ein-/ausblenden; beim **Erstaufruf** sind sie
-  ausgeblendet (nur Kern-Tabs sichtbar)
+  Postfach, Patente, Angebote/Rechnungen, Arbeitszeugnisse, Morphologischer Kasten,
+  Jury, Anfrage, Matrix, **Varianten**, **To-Do** und **Transkription** lassen sich im
+  Profil ein-/ausblenden; beim **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
 - 📋 **Diagnose-Logger** — zuschaltbares Protokoll zur Fehlersuche
 - 👤 **Nutzerprofil & Projekte** — Modell-Rollen, Dokument-Footer, Projektzuordnung
 - 💾 **Backup/Restore** — **alle** Nutzerdaten als ZIP: Profil, Projekte, Gespräche,

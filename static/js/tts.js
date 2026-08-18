@@ -92,6 +92,26 @@ const TTS = (function () {
     if (_current) { _current.classList.remove('speaking'); _current = null; }
   }
 
+  let _warned = 0;   // Zeitstempel der letzten API-Fehlermeldung (entprellt)
+
+  // Sichtbar melden, wenn ein GEWÄHLTES API-TTS-Modell scheitert (nicht bei 409 =
+  // „nicht aktiv"). Ohne diesen Hinweis fällt die Ausgabe stumm auf den Browser
+  // zurück und der Nutzer denkt, seine Auswahl werde ignoriert. Entprellt (max.
+  // alle 20 s), damit lange Texte nicht mehrfach warnen.
+  function _warnApi(status, detail) {
+    const now = Date.now();
+    if (now - _warned < 20000) return;
+    _warned = now;
+    let hint = '';
+    if (status === 502 || status === 404) {
+      hint = ' — der Anbieter unterstützt evtl. keine Sprachausgabe (/audio/speech).';
+    }
+    const msg = `🔊 API-Sprachausgabe fehlgeschlagen (HTTP ${status})${hint} `
+              + `Browser-Stimme wird genutzt.${detail ? ' ' + String(detail).slice(0, 160) : ''}`;
+    if (typeof showToast === 'function') showToast(msg, 6000);
+    else console.warn('[TTS]', msg);
+  }
+
   // API-Weg: Text am Backend synthetisieren und abspielen. Rückgabe false → Fallback.
   async function _speakApi(text, tone, onend) {
     try {
@@ -99,7 +119,16 @@ const TTS = (function () {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: text.slice(0, 4000), tone: tone || '' }),
       });
-      if (!resp.ok) return false;   // 409 (nicht aktiv) o. Ä. → Browser-Fallback
+      if (!resp.ok) {
+        // 409 = API-TTS nicht aktiv (Geheim-Modus/kein Modell) → still auf Browser.
+        // Alles andere = echter Fehler beim gewählten Modell → sichtbar melden.
+        if (resp.status !== 409) {
+          let detail = '';
+          try { detail = (await resp.json()).detail || ''; } catch (_) {}
+          _warnApi(resp.status, detail);
+        }
+        return false;
+      }
       const url = URL.createObjectURL(await resp.blob());
       const a = new Audio(url);
       _audio = a;

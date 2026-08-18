@@ -6018,23 +6018,74 @@ async def presentation_slide_image(req: Request):
 # Kontext in den nächsten Schritt. Am Ende führt ein Synthese-Schritt alles zu
 # einem Gesamtergebnis zusammen. Rein LLM-basiert (robust auch für kleinere
 # Modelle, kein Werkzeug-Loop). Modellrolle „general", Geheim/Hartman → lokal.
+# Pro Schritt kann eine Tag-Angabe ``[lokal]`` / ``[api]`` / ``[web]`` (Kombis wie
+# ``[lokal,web]``) das Modell und die Websuche steuern. Das Frontend parst die Tags und
+# schickt Schritte als Objekte ``{text, mode, web}``; zur Robustheit akzeptieren wir hier
+# auch nackte Strings (Tag im Text) und normalisieren beides.
+_WF_TAG_RE = re.compile(r"^\s*\[([^\]]{1,40})\]\s*(.*)$", re.DOTALL)
+
+
+def _wf_normalize_step(s) -> dict:
+    """Ein Schritt → ``{text, mode, web}`` (``mode`` ∈ '' / 'local' / 'api')."""
+    if isinstance(s, dict):
+        text = str(s.get("text", "") or "").strip()
+        mode = str(s.get("mode", "") or "").strip().lower()
+        web = bool(s.get("web", False))
+    else:
+        text, mode, web = str(s or "").strip(), "", False
+    m = _WF_TAG_RE.match(text)
+    if m:  # Tag im Text (Fallback, falls das Frontend nicht geparst hat)
+        toks = re.split(r"[,\s/+]+", m.group(1).lower())
+        text = m.group(2).strip()
+        for t in toks:
+            if t in ("lokal", "local"):
+                mode = "local"
+            elif t in ("api", "remote", "cloud"):
+                mode = "api"
+            elif t in ("web", "recherche", "suche", "search", "internet"):
+                web = True
+    if mode not in ("local", "api"):
+        mode = ""
+    return {"text": text, "mode": mode, "web": web}
+
+
 async def _workflow_generator(body: dict):
-    steps = [str(s).strip() for s in (body.get("steps") or []) if str(s).strip()]
-    steps = steps[:20]
+    steps = [_wf_normalize_step(s) for s in (body.get("steps") or [])]
+    steps = [s for s in steps if s["text"]][:20]
     goal = str(body.get("goal", "") or "").strip()
     if not steps:
         yield _sse({"type": "error", "message": "Keine Schritte angegeben."})
         return
-    model = _pick_model(body.get("model"), _model_for("general"))
+    base_model = _pick_model(body.get("model"), _model_for("general"))
+    # API-Modell für ``[api]``-Schritte: nur ein echtes Remote-Modell und nur außerhalb
+    # des Geheim-/Hartman-Modus (der alles lokal erzwingt).
+    _api_raw = str(body.get("api_model", "") or "").strip()
+    api_model = (_api_raw if (_api_raw and _api_raw not in _MODEL_PLACEHOLDERS
+                              and _llm.is_remote(_api_raw) and not _secret_local()) else "")
+    local_model = await _local_model(base_model)  # None, wenn kein lokales LLM da ist
     _ctx = _profile_num_ctx()
     _tok = {"in": 0, "out": 0}
-    results = []  # [(step, result)]
+    results = []  # [(step_text, result)]
     # Zeichenbudget für den mitgeführten Kontext (an num_ctx gekoppelt).
     _budget = max(2000, int((_ctx - 800) * 3.0))
 
+    def _resolve_model(mode: str):
+        """(Modell, Hinweis|None) für einen Schritt-Modus."""
+        if mode == "local":
+            if local_model:
+                return local_model, None
+            return base_model, "kein lokales Modell installiert – Standardmodell genutzt"
+        if mode == "api":
+            if api_model:
+                return api_model, None
+            if _secret_local():
+                return (local_model or base_model), "Geheim-/Hartman-Modus: lokal statt API"
+            return base_model, "kein API-Modell gewählt – Standardmodell genutzt"
+        return base_model, None
+
     yield _sse({"type": "workflow_start", "count": len(steps)})
 
-    async def _run(sys_prompt: str, user_prompt: str, num_predict: int):
+    async def _run(model: str, sys_prompt: str, user_prompt: str, num_predict: int):
         async with _model_session(model), httpx.AsyncClient(timeout=600) as client:
             resp = await _llm.chat(client, {
                 "model": model, "think": False, "stream": False,
@@ -6054,7 +6105,32 @@ async def _workflow_generator(body: dict):
 
     try:
         for i, step in enumerate(steps):
-            yield _sse({"type": "step_start", "index": i, "total": len(steps), "step": step})
+            _txt = step["text"]
+            _model, _note = _resolve_model(step["mode"])
+            yield _sse({"type": "step_start", "index": i, "total": len(steps),
+                        "step": _txt, "model": _model,
+                        "remote": _llm.is_remote(_model), "web": step["web"]})
+            if _note:
+                yield _sse({"type": "notice", "index": i, "message": _note})
+
+            # Optionale Websuche für diesen Schritt (typisch: lokales Recherche-Modell
+            # holt Quellen, die dann als Zwischenergebnis an ein API-Modell weitergehen).
+            _web_ctx = ""
+            if step["web"]:
+                if _web_search_allowed():
+                    yield _sse({"type": "searching", "index": i, "query": _txt[:80]})
+                    try:
+                        _srcs, _stext = await search_with_sources(_txt[:200], 5)
+                    except Exception as _e:
+                        _srcs, _stext = [], f"Suchfehler: {_e}"
+                    if _stext:
+                        _web_ctx = _stext[:min(_budget, 6000)]
+                    yield _sse({"type": "search_done", "index": i,
+                                "count": len(_srcs or [])})
+                else:
+                    yield _sse({"type": "notice", "index": i,
+                                "message": "Websuche im Hartman-Modus gesperrt – ohne Quellen"})
+
             prior = ""
             if results:
                 _parts = [f"### Ergebnis Schritt {si + 1} ({s}):\n{r}" for si, (s, r) in enumerate(results)]
@@ -6065,16 +6141,24 @@ async def _workflow_generator(body: dict):
                     "AKTUELLEN Schritt präzise und vollständig und baue dabei auf den "
                     "bisherigen Ergebnissen auf. Antworte fokussiert auf Deutsch in Markdown, "
                     "ohne den Schritt bloß zu wiederholen.")
+            if _web_ctx:
+                _sys += ("\n\nDir liegen Web-Suchergebnisse vor. Stütze konkrete Angaben "
+                         "(Zahlen, Daten, Namen, Preise) NUR auf diese Quellen; ist etwas "
+                         "nicht belegt, kennzeichne es als unsicher und erfinde nichts.")
             if goal:
                 _sys += f"\n\nÜbergeordnetes Ziel des Ablaufs: {goal}"
             _user = ((f"Bisherige Ergebnisse:\n{prior}\n\n---\n" if prior else "")
-                     + f"AKTUELLER SCHRITT {i + 1}/{len(steps)}: {step}")
-            _res = await _run(_sys, _user, max(300, min(int(_ctx * 0.35), 1500)))
-            results.append((step, _res))
-            yield _sse({"type": "step_done", "index": i, "step": step, "result": _res})
+                     + (f"Web-Suchergebnisse:\n{_web_ctx}\n\n---\n" if _web_ctx else "")
+                     + f"AKTUELLER SCHRITT {i + 1}/{len(steps)}: {_txt}")
+            _res = await _run(_model, _sys, _user, max(300, min(int(_ctx * 0.35), 1500)))
+            results.append((_txt, _res))
+            yield _sse({"type": "step_done", "index": i, "step": _txt, "result": _res})
 
-        # Abschluss-Synthese
-        yield _sse({"type": "synthesizing"})
+        # Abschluss-Synthese: bevorzugt das API-Modell (größeres Kontextfenster für die
+        # gesammelten Teilergebnisse), sonst das Basismodell.
+        _synth_model = api_model or base_model
+        yield _sse({"type": "synthesizing", "model": _synth_model,
+                    "remote": _llm.is_remote(_synth_model)})
         _all = "\n\n".join(f"### Schritt {i + 1}: {s}\n{r}" for i, (s, r) in enumerate(results))
         if len(_all) > _budget:
             _all = "…\n" + _all[-_budget:]
@@ -6086,7 +6170,7 @@ async def _workflow_generator(body: dict):
         if goal:
             _ssys += f"\n\nZiel des Ablaufs: {goal}"
         _suser = f"Schritt-Ergebnisse:\n{_all}\n\n---\nErstelle das zusammenhängende Gesamtergebnis."
-        _final = await _run(_ssys, _suser, max(500, min(int(_ctx * 0.5), 2200)))
+        _final = await _run(_synth_model, _ssys, _suser, max(500, min(int(_ctx * 0.5), 2200)))
     except httpx.ConnectError:
         yield _sse({"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"})
         return
@@ -6112,7 +6196,11 @@ async def _workflow_generator(body: dict):
 @app.post("/api/workflow")
 async def workflow(req: Request):
     """Führt einen mehrstufigen Arbeitsablauf aus (SSE). Body: ``{steps:[…], goal?,
-    model?}``. Streamt ``workflow_start``/``step_start``/``step_done``/
+    model?, api_model?}``; ``steps`` sind Strings ODER Objekte ``{text, mode, web}``
+    (``mode`` '' / 'local' / 'api', ``web`` = Websuche für den Schritt). Pro Schritt
+    wählbares Modell (lokal recherchiert/zwischenspeichert → API-Modell verarbeitet weiter),
+    die Synthese läuft bevorzugt auf dem API-Modell. Streamt ``workflow_start``/
+    ``step_start``/``searching``/``search_done``/``notice``/``step_done``/
     ``synthesizing``/``text``/``done``/``error``. Token-Label „Arbeitsablauf"."""
     body = await req.json()
     return StreamingResponse(_workflow_generator(body), media_type="text/event-stream")

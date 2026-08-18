@@ -1722,11 +1722,52 @@ const Chat = (() => {
   // werden nacheinander ausgeführt, Zwischenergebnisse gespeichert und als
   // Kontext an den nächsten Schritt gegeben; am Ende ein Gesamtergebnis mit
   // Übergabe-Buttons (→ Präsentation / → Planer).
+  // Ein Schritt darf mit einer Tag-Angabe beginnen: [lokal] / [api] / [web] bzw.
+  // Kombis wie [lokal,web]. → { text, mode, web } (mode '' | 'local' | 'api').
+  function _wfParseTags(s) {
+    let mode = '', web = false, text = String(s || '').trim();
+    const m = text.match(/^\s*\[([^\]]{1,40})\]\s*([\s\S]*)$/);
+    if (m) {
+      text = (m[2] || '').trim();
+      for (const t of m[1].toLowerCase().split(/[,\s/+]+/).filter(Boolean)) {
+        if (t === 'lokal' || t === 'local') mode = 'local';
+        else if (t === 'api' || t === 'remote' || t === 'cloud') mode = 'api';
+        else if (['web', 'recherche', 'suche', 'search', 'internet'].includes(t)) web = true;
+      }
+    }
+    return { text, mode, web };
+  }
+
+  // Kurzes Label für die Anzeige eines Schritt-Tags.
+  function _wfBadge(st) {
+    const bits = [];
+    if (st.mode === 'local') bits.push('💻 lokal');
+    else if (st.mode === 'api') bits.push('☁ API');
+    if (st.web) bits.push('🌐 Web');
+    return bits.length ? ' [' + bits.join(' · ') + ']' : '';
+  }
+
+  // Ein Remote-Modell für [api]-Schritte finden: bevorzugt aus den Profil-Rollen,
+  // sonst das erste Remote-Modell der konfigurierten Anbieter.
+  async function _wfApiModel() {
+    const p = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}) : {};
+    for (const k of ['model_science', 'model_general', 'model_coding', 'model_medical']) {
+      const v = String(p[k] || '').trim();
+      if (v.indexOf('::') > 0) return v;
+    }
+    try {
+      const data = await (await fetch('/api/models')).json();
+      const r = (data.models || []).find(m => m.remote);
+      if (r) return r.name;
+    } catch (_) {}
+    return '';
+  }
+
   function _parseWorkflow(text) {
     const m = text.match(/^\/(workflow|ablauf|flow)\b\s*([\s\S]*)$/i);
     if (!m) return null;
     const body = (m[2] || '').trim();
-    const steps = [];
+    const raw = [];
     let goal = '';
     // Nummerierte Marker „1." „2)" — inline ODER zeilenweise.
     const re = /(?:^|\n|\s)(\d{1,2})[.)]\s+/g;
@@ -1738,17 +1779,20 @@ const Chat = (() => {
       for (let i = 0; i < marks.length; i++) {
         const end = i + 1 < marks.length ? marks[i + 1].start : body.length;
         const s = body.slice(marks[i].contentStart, end).trim();
-        if (s) steps.push(s);
+        if (s) raw.push(s);
       }
     } else {
       // Rückfall: jede nicht-leere Zeile = ein Schritt.
-      body.split('\n').map(x => x.trim()).filter(Boolean).forEach(x => steps.push(x));
+      body.split('\n').map(x => x.trim()).filter(Boolean).forEach(x => raw.push(x));
     }
-    return { steps: steps.slice(0, 20), goal };
+    const steps = raw.slice(0, 20).map(_wfParseTags).filter(s => s.text);
+    return { steps, goal };
   }
 
   async function runWorkflow(steps, goal) {
-    steps = (steps || []).filter(Boolean);
+    // Schritte sind Objekte { text, mode, web }; nackte Strings tolerieren.
+    steps = (steps || []).map(s => (typeof s === 'string' ? _wfParseTags(s) : s))
+                         .filter(s => s && s.text);
     goal = (goal || '').trim();
     if (!steps.length) { showToast('Keine Schritte angegeben'); return; }
     if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
@@ -1757,7 +1801,7 @@ const Chat = (() => {
     setBtnSendState(false);
 
     const head = '🔧 Arbeitsablauf' + (goal ? ': ' + goal : '') + ` (${steps.length} Schritte)`;
-    appendMessage('user', head + '\n' + steps.map((s, i) => `${i + 1}. ${s}`).join('\n'));
+    appendMessage('user', head + '\n' + steps.map((s, i) => `${i + 1}. ${s.text}${_wfBadge(s)}`).join('\n'));
     if (!currentConvId) currentConvId = `conv_${Date.now()}`;
 
     const row = appendMessage('assistant', '', [], true);
@@ -1769,7 +1813,10 @@ const Chat = (() => {
     const _log = (t) => { const d = document.createElement('div'); d.className = 'research-log-line'; d.textContent = t; logEl.appendChild(d); scrollToBottom(); };
 
     const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    // API-Modell für [api]-Schritte (nur nötig, wenn ein Schritt es anfordert).
+    const apiModel = steps.some(s => s.mode === 'api') ? await _wfApiModel() : '';
     const stepResults = [];
+    const _stepModels = {};
     let answer = '', workingCleared = false;
     const clearWorking = () => { if (!workingCleared) { workingCleared = true; workingEl.remove(); } };
     abortController = new AbortController();
@@ -1777,7 +1824,7 @@ const Chat = (() => {
       const resp = await fetch('/api/workflow', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
-        body: JSON.stringify({ steps, goal, model }),
+        body: JSON.stringify({ steps, goal, model, api_model: apiModel }),
       });
       const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
       while (true) {
@@ -1790,18 +1837,32 @@ const Chat = (() => {
           if (ev.type === 'workflow_start') {
             _log('🧭 ' + ev.count + ' Schritte');
           } else if (ev.type === 'step_start') {
-            _log(`▶ Schritt ${ev.index + 1}/${ev.total}: ${(ev.step || '').slice(0, 80)}`);
+            const _mdl = ev.remote ? '☁ ' + String(ev.model || '').split('::').slice(1).join('::')
+                       : (ev.model ? '💻 ' + ev.model : '');
+            const _tag = (_mdl ? ' · ' + _mdl : '') + (ev.web ? ' · 🌐 Web' : '');
+            _log(`▶ Schritt ${ev.index + 1}/${ev.total}: ${(ev.step || '').slice(0, 70)}${_tag}`);
+            _stepModels[ev.index] = { model: ev.model, remote: ev.remote, web: ev.web };
+          } else if (ev.type === 'searching') {
+            _log(`  🔎 Websuche: ${(ev.query || '').slice(0, 70)}…`);
+          } else if (ev.type === 'search_done') {
+            _log(`  ✓ ${ev.count || 0} Quellen gefunden`);
+          } else if (ev.type === 'notice') {
+            const d = document.createElement('div'); d.className = 'research-log-line';
+            d.style.opacity = '.7'; d.textContent = '  ℹ ' + (ev.message || ''); logEl.appendChild(d); scrollToBottom();
           } else if (ev.type === 'step_done') {
             stepResults.push({ step: ev.step, result: ev.result });
+            const _sm = _stepModels[ev.index] || {};
+            const _badge = _sm.remote ? '  ☁' : (_sm.web ? '  🌐' : '');
             const det = document.createElement('details'); det.className = 'wf-step';
             const sum = document.createElement('summary');
-            sum.textContent = `✓ Schritt ${ev.index + 1}: ${(ev.step || '').slice(0, 70)}`;
+            sum.textContent = `✓ Schritt ${ev.index + 1}: ${(ev.step || '').slice(0, 70)}${_badge}`;
             det.appendChild(sum);
             const bd = document.createElement('div'); bd.className = 'wf-step-body';
             renderMarkdown(bd, ev.result || '');
             det.appendChild(bd); stepsEl.appendChild(det); scrollToBottom();
           } else if (ev.type === 'synthesizing') {
-            _log('📝 Gesamtergebnis wird zusammengeführt…');
+            const _mdl = ev.remote ? '☁ ' + String(ev.model || '').split('::').slice(1).join('::') : '';
+            _log('📝 Gesamtergebnis wird zusammengeführt…' + (_mdl ? ' (' + _mdl + ')' : ''));
           } else if (ev.type === 'text') {
             clearWorking();
             answer += ev.content; textEl.textContent = answer; scrollToBottom();
@@ -2470,7 +2531,7 @@ const Chat = (() => {
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },
-    { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander, Ergebnis → Chat/Präsentation/Planer' },
+    { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander. Pro Schritt Tags [lokal] [api] [web] (z. B. „1. [lokal,web] recherchiere … 2. [api] verarbeite …"). Ergebnis → Chat/Präsentation/Planer' },
     { key: '/+',    ins: '/+ ',    cmd: '/+ …',    desc: 'Verbesserungsidee ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/-',    ins: '/- ',    cmd: '/- …',    desc: 'Fehler/Problem ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/',     ins: '/',      cmd: '/<Agent>', desc: 'Agent nur für diese Nachricht (z. B. /datenschutz_berater)', info: true },
