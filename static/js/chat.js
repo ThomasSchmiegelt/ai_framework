@@ -201,6 +201,16 @@ const Chat = (() => {
       return;
     }
 
+    // Bildbearbeitung: „/bildedit [Anweisung]" — Bild wählen + sagen, wie es
+    // verändert werden soll (img2img, lokal über Z-Image oder ein fähiges API-Modell).
+    const be = _parseBildEdit(text);
+    if (be) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runBildEdit(be.instruction);
+      return;
+    }
+
     // Rückfragen: „/frag <Aufgabe>" erzeugt eine dynamische Eingabemaske (Text/
     // Auswahl), deren Antworten an die Aufgabe gehängt und normal gesendet werden.
     const fr = _parseFrag(text);
@@ -2256,6 +2266,110 @@ const Chat = (() => {
     }
   }
 
+  // ── /bildedit — Bildbearbeitung (img2img): Bild + Anweisung → verändertes Bild ─
+  function _parseBildEdit(text) {
+    const m = text.match(/^\/(bildedit|bildbearbeiten|imgedit|imageedit|edit)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { instruction: (m[2] || '').trim() };
+  }
+
+  function runBildEdit(instruction) {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      const file = inp.files && inp.files[0];
+      inp.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => _openBildEditForm(String(reader.result || ''), file.name, instruction);
+      reader.readAsDataURL(file);
+    });
+    inp.click();
+  }
+
+  function _openBildEditForm(dataUrl, filename, instruction) {
+    const old = document.getElementById('bildedit-form'); if (old) old.remove();
+    const ov = document.createElement('div');
+    ov.id = 'bildedit-form';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3);box-sizing:border-box';
+    ov.innerHTML = `
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:520px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.1em;margin-bottom:10px">✏️ Bild verändern</div>
+        <img src="${dataUrl}" style="max-width:100%;max-height:36vh;border-radius:8px;display:block;margin:0 auto 12px">
+        <label style="display:block;margin:6px 0 3px">Was soll verändert werden?</label>
+        <textarea id="be-instruction" rows="2" style="${fld}" placeholder="z. B. Himmel bei Sonnenuntergang · im Aquarellstil · das Auto entfernen"></textarea>
+        <label style="display:block;margin:10px 0 3px">Stärke der Veränderung</label>
+        <div id="be-strength"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button id="be-cancel" class="wf-action-btn">Abbrechen</button>
+          <button id="be-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">Verändern</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#be-instruction').value = instruction || '';
+    const host = ov.querySelector('#be-strength');
+    host.dataset.val = '0.55';
+    [['0.35', 'leicht'], ['0.55', 'mittel'], ['0.75', 'stark']].forEach(([val, lab]) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = lab; b.dataset.val = val;
+      b.style.cssText = 'padding:5px 12px;margin:2px;border-radius:14px;border:1px solid var(--border,#334);background:transparent;color:inherit;cursor:pointer';
+      if (val === '0.55') { b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff'; }
+      b.onclick = () => {
+        host.dataset.val = val;
+        [...host.children].forEach(c => { c.style.background = 'transparent'; c.style.color = 'inherit'; });
+        b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff';
+      };
+      host.appendChild(b);
+    });
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+    ov.querySelector('#be-cancel').onclick = close;
+    ov.querySelector('#be-go').onclick = () => {
+      const instr = ov.querySelector('#be-instruction').value.trim();
+      if (!instr) { showToast('Bitte eine Änderungsanweisung angeben'); return; }
+      const strength = parseFloat(host.dataset.val) || 0.55;
+      close();
+      _doBildEdit(dataUrl, instr, strength);
+    };
+    setTimeout(() => { const t = ov.querySelector('#be-instruction'); if (t) t.focus(); }, 30);
+  }
+
+  async function _doBildEdit(dataUrl, instruction, strength) {
+    showWelcome(false);
+    appendMessage('user', `✏️ Bild verändern: ${instruction}`);
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    insertImage(content, dataUrl);   // Original
+    const workingEl = makeWorking('Bild wird verändert'); content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    try {
+      const resp = await fetch('/api/image/edit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl, prompt: instruction, strength }),
+      });
+      workingEl.remove();
+      if (!resp.ok) {
+        let m = 'HTTP ' + resp.status; try { m = (await resp.json()).detail || m; } catch (_) {}
+        textEl.innerHTML = `<em style="color:#ef4444">${escHtml(m)}</em>`; return;
+      }
+      const data = await resp.json();
+      textEl.textContent = '→ Ergebnis:';
+      insertImage(content, data.image);
+      const bar = document.createElement('div'); bar.className = 'wf-actions';
+      const bAgain = document.createElement('button'); bAgain.className = 'wf-action-btn'; bAgain.textContent = '✏️ weiter bearbeiten';
+      bAgain.onclick = () => _openBildEditForm(data.image, 'ergebnis.png', '');
+      bar.appendChild(bAgain); content.appendChild(bar);
+      messages.push({ role: 'user', content: `Bild verändern: ${instruction}` });
+      messages.push({ role: 'assistant', content: '(verändertes Bild)' });
+    } catch (e) {
+      workingEl.remove();
+      textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    }
+  }
+
   // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────
   // „/bildhelp" (Aliase /imagehelp, /imghelp) öffnet den geführten Dialog; „/bild
   // <Beschreibung>" erzeugt direkt. Ein leeres „/bild" öffnet ebenfalls den Dialog.
@@ -2858,6 +2972,7 @@ const Chat = (() => {
     { key: '/bild', ins: '/bild ', cmd: '/bild …', desc: 'Bild aus Beschreibung erzeugen (lokal SD-WebUI oder API)' },
     { key: '/bildhelp', ins: '/bildhelp', cmd: '/bildhelp', desc: 'Geführter Bild-Dialog: Motiv, Stil, Perspektive, Beleuchtung, Format' },
     { key: '/bildprompt', ins: '/bildprompt ', cmd: '/bildprompt [Stil]', desc: 'Bild → Prompt: Bild auswählen, Vision-Modell leitet einen Text-zu-Bild-Prompt ab (→ „🎨 Bild daraus erzeugen")' },
+    { key: '/bildedit', ins: '/bildedit ', cmd: '/bildedit [Anweisung]', desc: 'Bildbearbeitung: Bild hochladen + sagen, wie es verändert werden soll (img2img, lokal über Z-Image oder ein fähiges API-Modell); Stärke wählbar' },
     { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Geführter Präsentationsassistent: kurzes Interview (Zielgruppe/Ziel/Umfang/Bilder) → schlüssige Gliederung + Inhaltsverzeichnis → Webrecherche je Punkt → flächiges Deckblatt & Abschlussbild, Inhaltsfolien zweispaltig → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },

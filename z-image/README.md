@@ -92,6 +92,14 @@ Fertige Bilder landen in `z-image/outputs/`. Der erste Aufruf dauert länger
 | `--offload-seq` | sequenzieller Offload (min. VRAM, am langsamsten) | aus |
 | `--min-free GB` | ab wie viel freiem VRAM **ohne** Offload geladen wird | `18` |
 | `--keep-ollama` | geladene Ollama-Modelle **nicht** automatisch entladen | aus |
+| `--init datei` | **Bildbearbeitung (img2img):** Eingabebild, das verändert wird | — |
+| `--strength F` | img2img: wie stark verändert wird (0.1 wenig … 0.95 stark) | `0.55` |
+
+**Bildbearbeitung (img2img):** mit `--init` wird statt Text→Bild ein vorhandenes Bild
+anhand des Prompts verändert (`bild.bat "im Aquarellstil" --init foto.jpg --strength 0.6`).
+Der Bild-Server (`sd_server.py`) bietet das zusätzlich als A1111-Endpunkt
+`POST /sdapi/v1/img2img` an (`init_images`/`denoising_strength`) — so nutzt die
+Chat-Bildbearbeitung `/bildedit` im Framework dieselbe crash-sichere Brücke.
 
 ## Im Chat des AI-Frameworks nutzen (🎨 lokal über Z-Image)
 

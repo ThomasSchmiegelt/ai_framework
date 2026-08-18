@@ -97,6 +97,10 @@ def main():
                     help="Ab wie viel freiem VRAM (GB) OHNE Offload geladen wird; sonst automatisch Offload")
     ap.add_argument("--keep-ollama", dest="keep_ollama", action="store_true",
                     help="Geladene Ollama-Modelle NICHT automatisch entladen (Standard: entladen, um VRAM freizugeben)")
+    ap.add_argument("--init", default=None,
+                    help="Eingabebild für Bildbearbeitung (img2img); ohne --init = Text→Bild")
+    ap.add_argument("--strength", type=float, default=0.55,
+                    help="img2img: wie stark verändert wird (0.1 wenig … 0.95 stark)")
     args = ap.parse_args()
 
     prompt = args.prompt_opt or args.prompt
@@ -110,7 +114,15 @@ def main():
 
     # Import erst hier, damit --help ohne geladene Bibliotheken funktioniert.
     import torch
-    from diffusers import ZImagePipeline
+    # Mit --init: Bildbearbeitung (img2img), sonst Text→Bild.
+    edit_mode = bool(args.init)
+    init_img = None
+    if edit_mode:
+        from diffusers import ZImageImg2ImgPipeline as _Pipe
+        from PIL import Image as _PILImage
+        init_img = _PILImage.open(args.init).convert("RGB").resize((args.width, args.height))
+    else:
+        from diffusers import ZImagePipeline as _Pipe
 
     if not torch.cuda.is_available():
         print("WARNUNG: Keine CUDA-GPU gefunden – die Generierung läuft dann sehr langsam auf der CPU.")
@@ -144,9 +156,10 @@ def main():
             print("    'ollama stop <modell>' VRAM freigeben und erneut starten.")
             offload = True
 
-    print(f"Lade Modell {MODEL_ID} … (erster Start lädt ~20 GB herunter, danach schnell)")
+    print(f"Lade Modell {MODEL_ID} …{' (Bildbearbeitung/img2img)' if edit_mode else ''}"
+          " (erster Start lädt ~20 GB herunter, danach schnell)")
     t0 = time.time()
-    pipe = ZImagePipeline.from_pretrained(MODEL_ID, dtype=dtype)
+    pipe = _Pipe.from_pretrained(MODEL_ID, dtype=dtype)
     if device == "cpu":
         pipe.to("cpu")
     elif args.offload_seq:
@@ -177,15 +190,17 @@ def main():
             g = torch.Generator(device).manual_seed(args.seed + i)
 
         t1 = time.time()
-        image = pipe(
-            prompt,
+        _kw = dict(
             negative_prompt=args.negative or None,
-            height=args.height,
-            width=args.width,
+            height=args.height, width=args.width,
             num_inference_steps=args.steps,
             guidance_scale=args.guidance,
             generator=g,
-        ).images[0]
+        )
+        if edit_mode:
+            _kw["image"] = init_img
+            _kw["strength"] = max(0.1, min(args.strength, 0.95))
+        image = pipe(prompt, **_kw).images[0]
         dt = time.time() - t1
 
         if args.out:
