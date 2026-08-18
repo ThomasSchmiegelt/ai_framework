@@ -116,11 +116,11 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   **Varianten**, **Morph-Kasten**, **Patente**, **Anfrage** (füllt das Eingabefeld vor) oder
   **Rechnung/Zeugnis** (Text in die Zwischenablage). Auch per Sprache: „… verwende den Planer-Tab",
   „… in die To-Do-Liste", „… im Mathe-Tab"
-- 🎵 **Musik-Generator (algorithmisch, optional)** — eigenständiges Werkzeug im Ordner
-  [`z-music/`](z-music/README.md): erzeugt aus einer Stimmungsbeschreibung („fröhliche
-  Abenteuermelodie", „8bit", „traurig") ein kleines Musikstück als **WAV** (Melodie/Akkorde/
-  Bass/Beat aus Musiktheorie). **Reine Python-Standardbibliothek** – keine Installation, kein
-  GPU, MIT
+- 🎵 **Musik-Generator (algorithmisch)** — im Chat per Befehl **`/musik <Stimmung>`** (z. B.
+  „/musik fröhliche 8bit Abenteuermelodie", „/musik traurig langsam") → spielt das Stück direkt
+  als Audio ab (💾 speichern). Erzeugt Melodie/Akkorde/Bass/Beat aus Musiktheorie; **reine
+  Python-Standardbibliothek**, kein GPU, MIT. Auch als eigenständiges Werkzeug im Ordner
+  [`z-music/`](z-music/README.md) (ohne Installation) nutzbar
 - 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug
   im Ordner [`z-image/`](z-image/README.md): erzeugt Bilder **komplett lokal auf der GPU**
   (Alibaba Tongyi, 6B, Apache-2.0, ~8 Schritte) über `diffusers`, getrennt vom Backend.

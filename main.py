@@ -5142,6 +5142,46 @@ async def image_upscale(req: Request):
     )
 
 
+@app.post("/api/music/generate")
+async def music_generate(req: Request):
+    """Algorithmischer Musik-Generator (Chat-Befehl ``/musik``). Body ``{description,
+    style?, key?, tempo?, bars?, seed?}`` → ``{audio: data:audio/wav;base64…, style, key,
+    tempo, bars, seconds}``. Reine Musiktheorie/Synthese (``tools/music.py``, nur
+    Standardbibliothek, MIT) – kein LLM, kein GPU, kein TokenMeter. CPU-gebunden, daher
+    in einem Thread erzeugt, um den Event-Loop nicht zu blockieren."""
+    import base64
+    from tools import music as _music
+    body = await req.json()
+    _tempo = body.get("tempo")
+    try:
+        _tempo = int(_tempo) if _tempo not in (None, "") else None
+    except Exception:
+        _tempo = None
+    try:
+        _bars = int(body.get("bars") or 16)
+    except Exception:
+        _bars = 16
+    _seed = body.get("seed")
+    try:
+        _seed = int(_seed) if _seed not in (None, "") else None
+    except Exception:
+        _seed = None
+    try:
+        res = await asyncio.to_thread(
+            _music.generate,
+            str(body.get("description", "") or ""),
+            (str(body.get("style", "")).strip() or None),
+            (str(body.get("key", "")).strip() or None),
+            _tempo, _bars, _seed,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Musik-Erzeugung fehlgeschlagen: {e}")
+    b64 = base64.b64encode(res["wav"]).decode("ascii")
+    return {"audio": f"data:audio/wav;base64,{b64}", "style": res["style"],
+            "key": res["key"], "tempo": res["tempo"], "bars": res["bars"],
+            "seconds": res["seconds"]}
+
+
 # ── Globale Kapazitätsliste ───────────────────────────────────────────────────
 # Tab-übergreifende Liste von Ressourcen/Partnern auf Basis des Planer-Schemas
 # ({kind,name,rate}), erweitert um Land/Region, freie Kapazität (h) und Skills.

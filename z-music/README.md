@@ -9,6 +9,10 @@ zusammengebaut. Kinderfreundlich zum Rumprobieren.
 - **MIT-Lizenz** – alles selbst geschrieben, keine fremden Modelle/Gewichte.
 - Läuft auf **Windows und Linux/macOS**.
 
+> Die eigentliche Logik liegt in **`tools/music.py`** (dieselbe Engine nutzt der
+> **Chat-Befehl `/musik`** im Framework). Dieses Kommandozeilen-Werkzeug ist die
+> eigenständige Variante drumherum.
+
 > Kein neuronales „Text-zu-Audio"-Modell (das gäbe es mit MusicGen o. Ä., dessen
 > Modellgewichte aber *nicht* MIT-konform sind). Dieser Generator ist dafür sofort,
 > offline, transparent und beliebig anpassbar.
