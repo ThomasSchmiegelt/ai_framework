@@ -2297,7 +2297,12 @@ const Chat = (() => {
     ov.innerHTML = `
       <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:520px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
         <div style="font-weight:700;font-size:1.1em;margin-bottom:10px">✏️ Bild verändern</div>
-        <img src="${dataUrl}" style="max-width:100%;max-height:36vh;border-radius:8px;display:block;margin:0 auto 12px">
+        <div id="be-stage" style="position:relative;max-width:100%;margin:0 auto 8px;line-height:0"></div>
+        <div id="be-masktools" style="display:none;align-items:center;gap:10px;margin:0 0 8px;font-size:.9em">
+          <span>Pinsel</span><input id="be-brush" type="range" min="8" max="80" value="34" style="flex:1">
+          <button id="be-clear" class="wf-action-btn" type="button">🗑 löschen</button>
+        </div>
+        <button id="be-maskbtn" class="wf-action-btn" type="button" style="margin-bottom:10px">🖌 Bereich markieren (nur diesen ändern)</button>
         <label style="display:block;margin:6px 0 3px">Was soll verändert werden?</label>
         <textarea id="be-instruction" rows="2" style="${fld}" placeholder="z. B. Himmel bei Sonnenuntergang · im Aquarellstil · das Auto entfernen"></textarea>
         <label style="display:block;margin:10px 0 3px">Stärke der Veränderung</label>
@@ -2309,6 +2314,57 @@ const Chat = (() => {
       </div>`;
     document.body.appendChild(ov);
     ov.querySelector('#be-instruction').value = instruction || '';
+
+    // Bild + optionaler Masken-Canvas (Inpainting, reines Vanilla-Canvas).
+    const stage = ov.querySelector('#be-stage');
+    let maskCanvas = null, overlay = null, painting = false, hasMask = false, brush = 34;
+    const _imgEl = new Image();
+    _imgEl.onload = () => {
+      const dw = Math.min(460, _imgEl.naturalWidth || 460);
+      const dh = Math.round(dw * (_imgEl.naturalHeight / _imgEl.naturalWidth));
+      const base = document.createElement('canvas'); base.width = dw; base.height = dh;
+      base.style.cssText = 'max-width:100%;border-radius:8px;display:block';
+      base.getContext('2d').drawImage(_imgEl, 0, 0, dw, dh);
+      overlay = document.createElement('canvas'); overlay.width = dw; overlay.height = dh;
+      overlay.style.cssText = 'position:absolute;left:0;top:0;max-width:100%;border-radius:8px;touch-action:none;cursor:crosshair;display:none';
+      maskCanvas = document.createElement('canvas');
+      maskCanvas.width = _imgEl.naturalWidth; maskCanvas.height = _imgEl.naturalHeight;
+      const mc = maskCanvas.getContext('2d'); mc.fillStyle = '#000'; mc.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+      stage.appendChild(base); stage.appendChild(overlay);
+      const oc = overlay.getContext('2d');
+      const sx = maskCanvas.width / dw, sy = maskCanvas.height / dh;
+      const paint = (e) => {
+        const r = overlay.getBoundingClientRect();
+        const x = (e.clientX - r.left) * (overlay.width / r.width);
+        const y = (e.clientY - r.top) * (overlay.height / r.height);
+        oc.fillStyle = 'rgba(230,60,60,0.55)';
+        oc.beginPath(); oc.arc(x, y, brush / 2, 0, 7); oc.fill();
+        mc.fillStyle = '#fff';
+        mc.beginPath(); mc.arc(x * sx, y * sy, (brush / 2) * sx, 0, 7); mc.fill();
+        hasMask = true;
+      };
+      overlay.addEventListener('pointerdown', e => { painting = true; try { overlay.setPointerCapture(e.pointerId); } catch (_) {} paint(e); });
+      overlay.addEventListener('pointermove', e => { if (painting) paint(e); });
+      overlay.addEventListener('pointerup', () => { painting = false; });
+      overlay.addEventListener('pointerleave', () => { painting = false; });
+    };
+    _imgEl.src = dataUrl;
+
+    ov.querySelector('#be-maskbtn').onclick = (ev) => {
+      const on = overlay && overlay.style.display === 'none';
+      if (overlay) overlay.style.display = on ? 'block' : 'none';
+      ov.querySelector('#be-masktools').style.display = on ? 'flex' : 'none';
+      ev.target.textContent = on ? '🖌 Markierung aus (ganzes Bild)' : '🖌 Bereich markieren (nur diesen ändern)';
+      ev.target.style.background = on ? 'var(--accent,#2d6cdf)' : '';
+      ev.target.style.color = on ? '#fff' : '';
+    };
+    ov.querySelector('#be-brush').oninput = (e) => { brush = parseInt(e.target.value, 10) || 34; };
+    ov.querySelector('#be-clear').onclick = () => {
+      if (overlay) overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+      if (maskCanvas) { const mc = maskCanvas.getContext('2d'); mc.fillStyle = '#000'; mc.fillRect(0, 0, maskCanvas.width, maskCanvas.height); }
+      hasMask = false;
+    };
+
     const host = ov.querySelector('#be-strength');
     host.dataset.val = '0.55';
     [['0.35', 'leicht'], ['0.55', 'mittel'], ['0.75', 'stark']].forEach(([val, lab]) => {
@@ -2331,24 +2387,28 @@ const Chat = (() => {
       const instr = ov.querySelector('#be-instruction').value.trim();
       if (!instr) { showToast('Bitte eine Änderungsanweisung angeben'); return; }
       const strength = parseFloat(host.dataset.val) || 0.55;
+      const maskOn = overlay && overlay.style.display !== 'none' && hasMask;
+      const mask = maskOn ? maskCanvas.toDataURL('image/png') : null;
       close();
-      _doBildEdit(dataUrl, instr, strength);
+      _doBildEdit(dataUrl, instr, strength, mask);
     };
     setTimeout(() => { const t = ov.querySelector('#be-instruction'); if (t) t.focus(); }, 30);
   }
 
-  async function _doBildEdit(dataUrl, instruction, strength) {
+  async function _doBildEdit(dataUrl, instruction, strength, mask) {
     showWelcome(false);
-    appendMessage('user', `✏️ Bild verändern: ${instruction}`);
+    appendMessage('user', `✏️ Bild verändern${mask ? ' (markierter Bereich)' : ''}: ${instruction}`);
     const row = appendMessage('assistant', '', [], true);
     const content = row.querySelector('.bubble-content');
     insertImage(content, dataUrl);   // Original
-    const workingEl = makeWorking('Bild wird verändert'); content.appendChild(workingEl);
+    const workingEl = makeWorking(mask ? 'markierter Bereich wird verändert' : 'Bild wird verändert'); content.appendChild(workingEl);
     const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
     try {
+      const _body = { image: dataUrl, prompt: instruction, strength };
+      if (mask) _body.mask = mask;
       const resp = await fetch('/api/image/edit', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: dataUrl, prompt: instruction, strength }),
+        body: JSON.stringify(_body),
       });
       workingEl.remove();
       if (!resp.ok) {
@@ -2972,7 +3032,7 @@ const Chat = (() => {
     { key: '/bild', ins: '/bild ', cmd: '/bild …', desc: 'Bild aus Beschreibung erzeugen (lokal SD-WebUI oder API)' },
     { key: '/bildhelp', ins: '/bildhelp', cmd: '/bildhelp', desc: 'Geführter Bild-Dialog: Motiv, Stil, Perspektive, Beleuchtung, Format' },
     { key: '/bildprompt', ins: '/bildprompt ', cmd: '/bildprompt [Stil]', desc: 'Bild → Prompt: Bild auswählen, Vision-Modell leitet einen Text-zu-Bild-Prompt ab (→ „🎨 Bild daraus erzeugen")' },
-    { key: '/bildedit', ins: '/bildedit ', cmd: '/bildedit [Anweisung]', desc: 'Bildbearbeitung: Bild hochladen + sagen, wie es verändert werden soll (img2img, lokal über Z-Image oder ein fähiges API-Modell); Stärke wählbar' },
+    { key: '/bildedit', ins: '/bildedit ', cmd: '/bildedit [Anweisung]', desc: 'Bildbearbeitung: Bild hochladen + sagen, wie es verändert werden soll (img2img). Optional „🖌 Bereich markieren" = nur den gemalten Bereich ändern (Inpainting). Lokal über Z-Image oder ein fähiges API-Modell; Stärke wählbar' },
     { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Geführter Präsentationsassistent: kurzes Interview (Zielgruppe/Ziel/Umfang/Bilder) → schlüssige Gliederung + Inhaltsverzeichnis → Webrecherche je Punkt → flächiges Deckblatt & Abschlussbild, Inhaltsfolien zweispaltig → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },

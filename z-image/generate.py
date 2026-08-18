@@ -101,6 +101,8 @@ def main():
                     help="Eingabebild für Bildbearbeitung (img2img); ohne --init = Text→Bild")
     ap.add_argument("--strength", type=float, default=0.55,
                     help="img2img: wie stark verändert wird (0.1 wenig … 0.95 stark)")
+    ap.add_argument("--mask", default=None,
+                    help="Maske fürs Inpainting (WEISS = Bereich ändern, schwarz = behalten); nur mit --init")
     args = ap.parse_args()
 
     prompt = args.prompt_opt or args.prompt
@@ -114,10 +116,17 @@ def main():
 
     # Import erst hier, damit --help ohne geladene Bibliotheken funktioniert.
     import torch
-    # Mit --init: Bildbearbeitung (img2img), sonst Text→Bild.
+    # Mit --init: Bildbearbeitung (img2img); zusätzlich --mask: Inpainting (nur den
+    # markierten Bereich ändern). Ohne beides: Text→Bild.
     edit_mode = bool(args.init)
-    init_img = None
-    if edit_mode:
+    inpaint_mode = bool(args.mask) and edit_mode
+    init_img = mask_img = None
+    if inpaint_mode:
+        from diffusers import ZImageInpaintPipeline as _Pipe
+        from PIL import Image as _PILImage
+        init_img = _PILImage.open(args.init).convert("RGB").resize((args.width, args.height))
+        mask_img = _PILImage.open(args.mask).convert("L").resize((args.width, args.height))
+    elif edit_mode:
         from diffusers import ZImageImg2ImgPipeline as _Pipe
         from PIL import Image as _PILImage
         init_img = _PILImage.open(args.init).convert("RGB").resize((args.width, args.height))
@@ -156,7 +165,8 @@ def main():
             print("    'ollama stop <modell>' VRAM freigeben und erneut starten.")
             offload = True
 
-    print(f"Lade Modell {MODEL_ID} …{' (Bildbearbeitung/img2img)' if edit_mode else ''}"
+    _mode_txt = ' (Inpainting)' if inpaint_mode else (' (Bildbearbeitung/img2img)' if edit_mode else '')
+    print(f"Lade Modell {MODEL_ID} …{_mode_txt}"
           " (erster Start lädt ~20 GB herunter, danach schnell)")
     t0 = time.time()
     pipe = _Pipe.from_pretrained(MODEL_ID, dtype=dtype)
@@ -200,6 +210,8 @@ def main():
         if edit_mode:
             _kw["image"] = init_img
             _kw["strength"] = max(0.1, min(args.strength, 0.95))
+        if inpaint_mode:
+            _kw["mask_image"] = mask_img
         image = pipe(prompt, **_kw).images[0]
         dt = time.time() - t1
 

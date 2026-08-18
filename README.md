@@ -105,7 +105,8 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - ✏️ **Bild bearbeiten (img2img)** — `/bildedit`: ein Bild hochladen und sagen, wie es verändert
   werden soll (z. B. „Himmel bei Sonnenuntergang", „im Aquarellstil"), mit wählbarer **Stärke**.
   Lokal über **Z-Image** (crash-sichere Brücke) oder ein **fähiges API-Bildmodell** (z. B.
-  `gpt-image-1`; nicht jedes Modell kann Bildbearbeitung)
+  `gpt-image-1`; nicht jedes Modell kann Bildbearbeitung). Optional **„🖌 Bereich markieren"
+  (Inpainting)** — nur den aufgemalten Bereich ändern (reiner Canvas-Pinsel, keine Abhängigkeit)
 - 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug
   im Ordner [`z-image/`](z-image/README.md): erzeugt Bilder **komplett lokal auf der GPU**
   (Alibaba Tongyi, 6B, Apache-2.0, ~8 Schritte) über `diffusers`, getrennt vom Backend.

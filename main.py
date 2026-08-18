@@ -4771,12 +4771,14 @@ async def _generate_image_core(prompt: str, negative: str = "", preset: str = "s
 
 
 async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
-                           preset: str = "square", model: Optional[str] = None) -> dict:
+                           preset: str = "square", model: Optional[str] = None,
+                           mask_b64: Optional[str] = None) -> dict:
     """Bildbearbeitung (img2img): vorhandenes Bild + Anweisung → verändertes Bild.
-    Lokal über SD-WebUI/Z-Image-Brücke (``/sdapi/v1/img2img``) oder OpenAI-kompatible
-    Bild-Edits-API (``/images/edits``; **nur Modelle, die das können** – sonst klare
-    Fehlermeldung). Antwort wie ``_generate_image_core``: ``{image, model, prompt}``.
-    ``strength`` = wie stark verändert wird (0.1 wenig … 0.95 stark). Geheim/Hartman:
+    Mit ``mask_b64`` = **Inpainting** (nur der weiße Maskenbereich wird geändert).
+    Lokal über SD-WebUI/Z-Image-Brücke (``/sdapi/v1/img2img``, Feld ``mask``) oder
+    OpenAI-kompatible Bild-Edits-API (``/images/edits``; **nur Modelle, die das
+    können** – sonst klare Fehlermeldung). Antwort wie ``_generate_image_core``:
+    ``{image, model, prompt}``. ``strength`` = wie stark verändert wird. Geheim/Hartman:
     nur lokal (Remote → lokaler SD-Server; ohne SD-URL 409)."""
     prompt = str(prompt or "").strip()
     if not prompt:
@@ -4797,9 +4799,13 @@ async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
                                  "Bildmodell (lokal SD-WebUI oder API) wählen.")
 
     # Rohe base64 (ohne data:-Präfix) bereitstellen.
-    raw_b64 = image_b64
-    if "," in raw_b64 and raw_b64.strip().startswith("data:"):
-        raw_b64 = raw_b64.split(",", 1)[1]
+    def _strip_data(b: str) -> str:
+        b = str(b or "")
+        if "," in b and b.strip().startswith("data:"):
+            b = b.split(",", 1)[1]
+        return b
+    raw_b64 = _strip_data(image_b64)
+    raw_mask = _strip_data(mask_b64) if mask_b64 else ""
 
     secret = _secret_local()
     is_local = model.startswith("local::") or not _llm.is_remote(model)
@@ -4822,6 +4828,8 @@ async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
             "denoising_strength": strength, "width": w, "height": h,
             "steps": 28, "cfg_scale": 6.5, "sampler_name": "DPM++ 2M",
         }
+        if raw_mask:
+            payload["mask"] = raw_mask   # Inpainting: weiß = Bereich ändern
         try:
             async with httpx.AsyncClient(timeout=300) as client:
                 resp = await client.post(f"{base}/sdapi/v1/img2img", json=payload)
@@ -4857,6 +4865,22 @@ async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
     files = {"image": ("image.png", img_bytes, "image/png")}
     form = {"model": real, "prompt": prompt, "n": "1",
             "size": _api_image_size(real, preset)}
+    if raw_mask:
+        # OpenAI-Konvention: TRANSPARENTE Bereiche der Maske werden bearbeitet.
+        # Unsere Maske ist weiß = ändern → dort Alpha 0 (transparent) setzen.
+        try:
+            import io as _io
+            from PIL import Image as _Img
+            _m = _Img.open(_io.BytesIO(base64.b64decode(raw_mask))).convert("L")
+            _im = _Img.open(_io.BytesIO(img_bytes))
+            _m = _m.resize(_im.size)
+            _alpha = _m.point(lambda p: 0 if p > 128 else 255)
+            _rgba = _Img.new("RGBA", _m.size, (0, 0, 0, 255))
+            _rgba.putalpha(_alpha)
+            _buf = _io.BytesIO(); _rgba.save(_buf, "PNG")
+            files["mask"] = ("mask.png", _buf.getvalue(), "image/png")
+        except Exception:
+            pass   # Maske optional – zur Not ohne (ganzes Bild)
     try:
         async with httpx.AsyncClient(timeout=300) as client:
             resp = await client.post(f"{base}/images/edits", headers=headers,
@@ -4896,6 +4920,7 @@ async def image_edit(req: Request):
         body.get("strength", 0.55),
         str(body.get("preset", "square") or "square"),
         str(body.get("model", "") or ""),
+        mask_b64=str(body.get("mask", "") or "") or None,
     )
 
 

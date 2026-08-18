@@ -45,10 +45,15 @@ _lock = threading.Lock()   # eine Erzeugung zur Zeit (eine GPU)
 _cfg = None                # argparse-Namespace
 
 
-def _run_generate(prompt, negative, width, height, init_b64=None, strength=None):
+def _run_generate(prompt, negative, width, height, init_b64=None, strength=None, mask_b64=None):
     """generate.py in einem frischen Unterprozess ausführen -> base64-PNG. Mit
-    ``init_b64`` = Bildbearbeitung (img2img). Wirft RuntimeError bei Fehler/Timeout
-    (der Server bleibt am Leben)."""
+    ``init_b64`` = Bildbearbeitung (img2img); zusätzlich ``mask_b64`` = Inpainting
+    (nur den markierten Bereich). Wirft RuntimeError bei Fehler/Timeout (der Server
+    bleibt am Leben)."""
+    def _decode(b):
+        if "," in b and b.strip().startswith("data:"):
+            b = b.split(",", 1)[1]
+        return base64.b64decode(b)
     with _lock:
         with tempfile.TemporaryDirectory() as td:
             out = os.path.join(td, "img.png")
@@ -60,14 +65,16 @@ def _run_generate(prompt, negative, width, height, init_b64=None, strength=None)
             if negative:
                 cmd += ["--negative", negative]
             if init_b64:
-                raw = init_b64
-                if "," in raw and raw.strip().startswith("data:"):
-                    raw = raw.split(",", 1)[1]
                 init_path = os.path.join(td, "init.png")
                 with open(init_path, "wb") as _f:
-                    _f.write(base64.b64decode(raw))
+                    _f.write(_decode(init_b64))
                 cmd += ["--init", init_path, "--strength",
                         str(strength if strength is not None else 0.55)]
+                if mask_b64:
+                    mask_path = os.path.join(td, "mask.png")
+                    with open(mask_path, "wb") as _f:
+                        _f.write(_decode(mask_b64))
+                    cmd += ["--mask", mask_path]
             if not _cfg.full_gpu:
                 cmd.append("--offload")          # niedriger Spitzen-VRAM (Standard: sicher)
             if _cfg.keep_ollama:
@@ -131,23 +138,25 @@ class _Handler(BaseHTTPRequestHandler):
             height = max(256, min(2048, int(req.get("height") or 1024)))
         except Exception:
             width = height = 1024
-        init_b64, strength = None, None
+        init_b64, strength, mask_b64 = None, None, None
         if is_edit:
             inits = req.get("init_images") or []
             if not inits:
                 self._send_json(400, {"error": "img2img ohne init_images"})
                 return
             init_b64 = inits[0]
+            mask_b64 = req.get("mask") or None
             try:
                 strength = float(req.get("denoising_strength", 0.55))
             except Exception:
                 strength = 0.55
-            print(f"img2img: \"{prompt[:70]}\" {width}x{height} strength={strength}")
+            print(f"{'inpaint' if mask_b64 else 'img2img'}: \"{prompt[:70]}\" "
+                  f"{width}x{height} strength={strength}")
         else:
             print(f"txt2img: \"{prompt[:70]}\" {width}x{height}")
         try:
             b64 = _run_generate(prompt, negative, width, height,
-                                init_b64=init_b64, strength=strength)
+                                init_b64=init_b64, strength=strength, mask_b64=mask_b64)
         except Exception as e:
             print(f"  FEHLER: {e}")
             self._send_json(500, {"error": str(e)})
