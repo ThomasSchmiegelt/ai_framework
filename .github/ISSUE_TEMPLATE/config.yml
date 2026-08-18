@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "🔒 Sicherheitslücke (vertraulich)"
+    url: https://github.com/ThomasSchmiegelt/ai_framework/security/advisories/new
+    about: "Sicherheitsprobleme bitte NICHT öffentlich melden – nutze die private Sicherheitsmeldung (siehe SECURITY.md)."
+  - name: "📖 Dokumentation"
+    url: https://github.com/ThomasSchmiegelt/ai_framework/blob/main/BEDIENUNGSANLEITUNG.md
+    about: "Bedienungsanleitung und Entwicklerdoku vor dem Melden prüfen."
