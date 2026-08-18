@@ -211,6 +211,16 @@ const Chat = (() => {
       return;
     }
 
+    // Hochskalieren: „/upscale" — Bild wählen und vergrößern (KI-Detail über Z-Image
+    // oder schnell per Lanczos).
+    const up = _parseUpscale(text);
+    if (up) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runUpscale();
+      return;
+    }
+
     // Rückfragen: „/frag <Aufgabe>" erzeugt eine dynamische Eingabemaske (Text/
     // Auswahl), deren Antworten an die Aufgabe gehängt und normal gesendet werden.
     const fr = _parseFrag(text);
@@ -2421,9 +2431,102 @@ const Chat = (() => {
       const bar = document.createElement('div'); bar.className = 'wf-actions';
       const bAgain = document.createElement('button'); bAgain.className = 'wf-action-btn'; bAgain.textContent = '✏️ weiter bearbeiten';
       bAgain.onclick = () => _openBildEditForm(data.image, 'ergebnis.png', '');
-      bar.appendChild(bAgain); content.appendChild(bar);
+      const bUp = document.createElement('button'); bUp.className = 'wf-action-btn'; bUp.textContent = '🔍 hochskalieren';
+      bUp.onclick = () => _openUpscaleForm(data.image, 'ergebnis.png');
+      bar.appendChild(bAgain); bar.appendChild(bUp); content.appendChild(bar);
       messages.push({ role: 'user', content: `Bild verändern: ${instruction}` });
       messages.push({ role: 'assistant', content: '(verändertes Bild)' });
+    } catch (e) {
+      workingEl.remove();
+      textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    }
+  }
+
+  // ── /upscale — Bild hochskalieren (KI-Detail über Z-Image oder schnell/Lanczos) ─
+  function _parseUpscale(text) {
+    const m = text.match(/^\/(upscale|hochskalieren|vergroessern|vergrößern)\b\s*([\s\S]*)$/i);
+    return m ? {} : null;
+  }
+
+  function runUpscale() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      const file = inp.files && inp.files[0];
+      inp.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => _openUpscaleForm(String(reader.result || ''), file.name);
+      reader.readAsDataURL(file);
+    });
+    inp.click();
+  }
+
+  function _openUpscaleForm(dataUrl, filename) {
+    const old = document.getElementById('upscale-form'); if (old) old.remove();
+    const ov = document.createElement('div');
+    ov.id = 'upscale-form';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = `
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:480px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.1em;margin-bottom:10px">🔍 Bild hochskalieren</div>
+        <img src="${dataUrl}" style="max-width:100%;max-height:40vh;border-radius:8px;display:block;margin:0 auto 12px">
+        <label style="display:block;margin:6px 0 3px">Methode</label>
+        <div id="up-mode"></div>
+        <div style="opacity:.7;font-size:.85em;margin-top:8px">2×, lange Seite max. 2048 px. „KI-Detail" ergänzt echte Schärfe (lokal über Z-Image, ~30–50 s); „Schnell" vergrößert nur (sofort).</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button id="up-cancel" class="wf-action-btn">Abbrechen</button>
+          <button id="up-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">Hochskalieren</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const host = ov.querySelector('#up-mode');
+    host.dataset.val = 'ai';
+    [['ai', '✨ KI-Detail'], ['fast', '⚡ Schnell (Lanczos)']].forEach(([val, lab]) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = lab; b.dataset.val = val;
+      b.style.cssText = 'padding:6px 12px;margin:2px;border-radius:14px;border:1px solid var(--border,#334);background:transparent;color:inherit;cursor:pointer';
+      if (val === 'ai') { b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff'; }
+      b.onclick = () => {
+        host.dataset.val = val;
+        [...host.children].forEach(c => { c.style.background = 'transparent'; c.style.color = 'inherit'; });
+        b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff';
+      };
+      host.appendChild(b);
+    });
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+    ov.querySelector('#up-cancel').onclick = close;
+    ov.querySelector('#up-go').onclick = () => { const mode = host.dataset.val || 'ai'; close(); _doUpscale(dataUrl, mode); };
+  }
+
+  async function _doUpscale(dataUrl, mode) {
+    showWelcome(false);
+    appendMessage('user', `🔍 Bild hochskalieren (${mode === 'fast' ? 'schnell' : 'KI-Detail'})`);
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const workingEl = makeWorking('Bild wird hochskaliert'); content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    try {
+      const resp = await fetch('/api/image/upscale', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl, factor: 2, mode }),
+      });
+      workingEl.remove();
+      if (!resp.ok) {
+        let m = 'HTTP ' + resp.status; try { m = (await resp.json()).detail || m; } catch (_) {}
+        textEl.innerHTML = `<em style="color:#ef4444">${escHtml(m)}</em>`; return;
+      }
+      const data = await resp.json();
+      textEl.textContent = `→ ${data.width}×${data.height} px (${data.mode === 'ai' ? 'KI-Detail' : 'schnell'})`
+        + (data.note ? ' · ' + data.note : '');
+      insertImage(content, data.image);
+      const bar = document.createElement('div'); bar.className = 'wf-actions';
+      const bMore = document.createElement('button'); bMore.className = 'wf-action-btn'; bMore.textContent = '🔍 nochmal';
+      bMore.onclick = () => _openUpscaleForm(data.image, 'upscaled.png');
+      bar.appendChild(bMore); content.appendChild(bar);
     } catch (e) {
       workingEl.remove();
       textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
@@ -3033,6 +3136,7 @@ const Chat = (() => {
     { key: '/bildhelp', ins: '/bildhelp', cmd: '/bildhelp', desc: 'Geführter Bild-Dialog: Motiv, Stil, Perspektive, Beleuchtung, Format' },
     { key: '/bildprompt', ins: '/bildprompt ', cmd: '/bildprompt [Stil]', desc: 'Bild → Prompt: Bild auswählen, Vision-Modell leitet einen Text-zu-Bild-Prompt ab (→ „🎨 Bild daraus erzeugen")' },
     { key: '/bildedit', ins: '/bildedit ', cmd: '/bildedit [Anweisung]', desc: 'Bildbearbeitung: Bild hochladen + sagen, wie es verändert werden soll (img2img). Optional „🖌 Bereich markieren" = nur den gemalten Bereich ändern (Inpainting). Lokal über Z-Image oder ein fähiges API-Modell; Stärke wählbar' },
+    { key: '/upscale', ins: '/upscale', cmd: '/upscale', desc: 'Bild hochskalieren (2×, max 2048): „KI-Detail" ergänzt echte Schärfe lokal über Z-Image, „Schnell" vergrößert sofort per Lanczos' },
     { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Geführter Präsentationsassistent: kurzes Interview (Zielgruppe/Ziel/Umfang/Bilder) → schlüssige Gliederung + Inhaltsverzeichnis → Webrecherche je Punkt → flächiges Deckblatt & Abschlussbild, Inhaltsfolien zweispaltig → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
