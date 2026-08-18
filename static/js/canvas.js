@@ -444,10 +444,42 @@ const CanvasRenderer = (() => {
     }
   }
 
+  // Titel-Text für ein flächiges KI-Deckblatt/Abschlussbild (weiß auf Scrim, unten).
+  function _drawCoverTitle(slide, slideH) {
+    const ty = slideH * 0.70;
+    wrapTextCenter(ctx, slide.title || '', W / 2, ty, W - 200, 52, '#ffffff', 'bold 52px system-ui');
+    const sub = slide.content || slide.subtitle || '';
+    if (sub) wrapTextCenter(ctx, sub, W / 2, ty + 62, W - 300, 24, 'rgba(255,255,255,0.9)', '24px system-ui');
+  }
+
   function drawTitleSlide(slide, theme, slideH) {
     // Editierbare Regionen (Titel + Untertitel/Content)
     _region('title', W * 0.06, slideH * 0.30, W * 0.60, 120);
     _region('content', W * 0.06, slideH * 0.30 + 120, W * 0.60, 80);
+
+    // KI-Deckblatt/Abschluss: erzeugtes Bild FLÄCHIG als Hintergrund + Titel darüber.
+    if (slide.image && !_corpImg.deckblatt) {
+      const P = _pal();
+      // Sofort-Fallback (falls das Bild nie lädt): Verlauf + Titel.
+      const g = ctx.createLinearGradient(0, 0, W, slideH);
+      g.addColorStop(0, P.dark); g.addColorStop(1, P.deep);
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, slideH);
+      _drawCoverTitle(slide, slideH);
+      const img = new Image();
+      img.onload = () => {
+        // „cover"-Fit: Bild füllt die Folie (Zuschnitt statt Verzerrung).
+        const s = Math.max(W / img.width, slideH / img.height);
+        const dw = img.width * s, dh = img.height * s;
+        ctx.drawImage(img, (W - dw) / 2, (slideH - dh) / 2, dw, dh);
+        // Dunkler Verlauf unten für Lesbarkeit des Titels.
+        const sc = ctx.createLinearGradient(0, slideH * 0.45, 0, slideH);
+        sc.addColorStop(0, 'rgba(0,0,0,0)'); sc.addColorStop(1, 'rgba(0,0,0,0.72)');
+        ctx.fillStyle = sc; ctx.fillRect(0, 0, W, slideH);
+        _drawCoverTitle(slide, slideH);
+      };
+      img.src = slide.image;
+      return;
+    }
 
     if (_corpImg.deckblatt) {
       // Corporate Deckblatt als vollflächiger Hintergrund

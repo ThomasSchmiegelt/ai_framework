@@ -179,13 +179,14 @@ const Chat = (() => {
       return;
     }
 
-    // Illustrierter Präsentationsassistent: „/praesentation [alle|keine|N] <Thema>"
-    // erzeugt eine Präsentation zum Thema samt KI-Bildern (Standard: Titel + Abschnitte).
+    // Geführter Präsentationsassistent: „/praesentation <Thema>" öffnet ein kurzes
+    // Interview (Zielgruppe/Ziel/Umfang), dann läuft Gliederung → Webrecherche je
+    // Punkt → Bilder (flächiges Deckblatt + Abschluss) automatisch durch.
     const pr = _parseIllustratedPres(text);
     if (pr) {
       input.value = '';
       autoResizeTextarea(input);
-      if (pr.topic) runIllustratedPresentation(pr.topic, pr.images);
+      if (pr.topic) _openPresInterview(pr.topic, pr.images);
       else showToast('Bitte nach „/praesentation" ein Thema angeben');
       return;
     }
@@ -2061,6 +2062,135 @@ const Chat = (() => {
     }
   }
 
+  // ── Geführter Präsentationsassistent: Interview + Erstellung ────────────────
+  function _openPresInterview(topic, imagesDirective) {
+    const old = document.getElementById('pres-interview'); if (old) old.remove();
+    const imgMode = imagesDirective === 'all' ? 'all' : imagesDirective === 'none' ? 'none' : 'smart';
+    const ov = document.createElement('div');
+    ov.id = 'pres-interview';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3)';
+    ov.innerHTML = `
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.1em;margin-bottom:4px">🖼️ Präsentation erstellen</div>
+        <div style="opacity:.7;margin-bottom:14px">Thema: <b>${escHtml(topic)}</b></div>
+        <label style="display:block;margin:8px 0 3px">Zielgruppe</label>
+        <input id="pi-audience" type="text" placeholder="z. B. Geschäftsführung, Studierende, Laien" style="${fld}">
+        <label style="display:block;margin:10px 0 3px">Ziel / Zweck</label>
+        <input id="pi-goal" type="text" placeholder="z. B. überzeugen, informieren, Entscheidung vorbereiten" style="${fld}">
+        <label style="display:block;margin:10px 0 3px">Umfang</label>
+        <div id="pi-count"></div>
+        <label style="display:block;margin:10px 0 3px">Bilder</label>
+        <div id="pi-images"></div>
+        <label style="display:block;margin:10px 0 3px">Bildwünsche / Stil (optional)</label>
+        <input id="pi-wishes" type="text" placeholder="z. B. fotorealistisch, minimalistisch, Aquarell" style="${fld}">
+        <label style="display:flex;align-items:center;gap:8px;margin:12px 0 4px;cursor:pointer"><input id="pi-web" type="checkbox" checked> Webrecherche je Gliederungspunkt</label>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button id="pi-cancel" class="wf-action-btn">Abbrechen</button>
+          <button id="pi-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">Erstellen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const mkChips = (host, opts, initial) => {
+      host.dataset.val = String(initial);
+      opts.forEach(([val, lab]) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.textContent = lab; b.dataset.val = String(val);
+        b.style.cssText = 'padding:5px 10px;margin:2px;border-radius:14px;border:1px solid var(--border,#334);background:transparent;color:inherit;cursor:pointer';
+        if (String(val) === String(initial)) { b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff'; }
+        b.onclick = () => {
+          host.dataset.val = String(val);
+          [...host.children].forEach(c => { c.style.background = 'transparent'; c.style.color = 'inherit'; });
+          b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff';
+        };
+        host.appendChild(b);
+      });
+    };
+    mkChips(ov.querySelector('#pi-count'), [[4, 'kurz (4)'], [6, 'mittel (6)'], [8, 'lang (8)']], 6);
+    mkChips(ov.querySelector('#pi-images'), [['smart', 'KI entscheidet'], ['all', 'alle Folien'], ['none', 'keine']], imgMode);
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+    ov.querySelector('#pi-cancel').onclick = close;
+    ov.querySelector('#pi-go').onclick = () => {
+      const params = {
+        topic,
+        audience: ov.querySelector('#pi-audience').value.trim(),
+        goal: ov.querySelector('#pi-goal').value.trim(),
+        count: parseInt(ov.querySelector('#pi-count').dataset.val, 10) || 6,
+        image_mode: ov.querySelector('#pi-images').dataset.val || 'smart',
+        image_wishes: ov.querySelector('#pi-wishes').value.trim(),
+        web: ov.querySelector('#pi-web').checked,
+      };
+      close();
+      runGuidedPresentation(params);
+    };
+    setTimeout(() => { const a = ov.querySelector('#pi-audience'); if (a) a.focus(); }, 30);
+  }
+
+  async function runGuidedPresentation(params) {
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false); isStreaming = true; setBtnSendState(false);
+    const head = `🖼️ Präsentation: ${params.topic}`;
+    appendMessage('user', head);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const logEl = document.createElement('div'); logEl.className = 'research-log'; content.appendChild(logEl);
+    const workingEl = makeWorking('Präsentation wird erstellt'); content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    const _log = (t) => { const d = document.createElement('div'); d.className = 'research-log-line'; d.textContent = t; logEl.appendChild(d); scrollToBottom(); };
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    let presentation = null;
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/presentation/guided', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify(Object.assign({ model }, params)),
+      });
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'pres_start') _log('🧭 Gliederung wird erstellt…');
+          else if (ev.type === 'structure') _log(`📑 Inhaltsverzeichnis (${(ev.toc || []).length}): ${(ev.toc || []).join(' · ').slice(0, 120)}`);
+          else if (ev.type === 'researching') _log(`  🔎 Recherche: ${(ev.query || '').slice(0, 60)}…`);
+          else if (ev.type === 'research_done') _log(`  ✓ ${ev.count || 0} Quellen`);
+          else if (ev.type === 'section_done') _log(`  📝 „${(ev.title || '').slice(0, 50)}" zusammengefasst${ev.image ? ' (+ Bild)' : ''}`);
+          else if (ev.type === 'slide_image_start') _log(`🖼 Bild ${ev.n}/${ev.total}${ev.kind === 'cover' ? ' (Deckblatt)' : ev.kind === 'closing' ? ' (Abschluss)' : ''} — „${(ev.title || '').slice(0, 40)}"…`);
+          else if (ev.type === 'slide_image_done') _log(`  ✓ Bild ${ev.n} fertig`);
+          else if (ev.type === 'notice') { const d = document.createElement('div'); d.className = 'research-log-line'; d.style.opacity = '.7'; d.textContent = '  ℹ ' + (ev.message || ''); logEl.appendChild(d); scrollToBottom(); }
+          else if (ev.type === 'done') { presentation = ev.presentation; if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Präsentationsassistent'); }
+          else if (ev.type === 'error') { textEl.innerHTML = `<em style="color:#ef4444">${escHtml(ev.message || 'Fehlgeschlagen')}</em>`; }
+        }
+      }
+      workingEl.remove();
+      if (presentation && typeof CanvasRenderer !== 'undefined') {
+        CanvasRenderer.render(presentation);
+        if (typeof switchTab === 'function') switchTab('canvas');
+        textEl.textContent = `✓ Präsentation „${presentation.title || params.topic}" mit ${(presentation.slides || []).length} Folien im Canvas erstellt.`;
+        const bar = document.createElement('div'); bar.className = 'wf-actions';
+        const b = document.createElement('button'); b.className = 'wf-action-btn'; b.textContent = '🖥️ zum Canvas';
+        b.onclick = () => switchTab('canvas'); bar.appendChild(b); content.appendChild(bar);
+        messages.push({ role: 'user', content: head });
+        messages.push({ role: 'assistant', content: `Präsentation „${presentation.title || params.topic}" im Canvas erstellt.` });
+        loadConversationList();
+      } else if (!textEl.innerHTML) {
+        textEl.innerHTML = `<em style="color:#ef4444">Präsentation fehlgeschlagen.</em>`;
+      }
+    } catch (e) {
+      workingEl.remove();
+      if (e.name !== 'AbortError') textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      abortController = null; isStreaming = false; setBtnSendState(true);
+    }
+  }
+
   // ── /bildprompt — Bild → Text-zu-Bild-Prompt (Vision) ───────────────────────
   // „/bildprompt [Stil]" öffnet einen Bild-Picker; das Vision-Modell macht daraus
   // einen Prompt, den man direkt an /bild weiterreichen kann.
@@ -2728,7 +2858,7 @@ const Chat = (() => {
     { key: '/bild', ins: '/bild ', cmd: '/bild …', desc: 'Bild aus Beschreibung erzeugen (lokal SD-WebUI oder API)' },
     { key: '/bildhelp', ins: '/bildhelp', cmd: '/bildhelp', desc: 'Geführter Bild-Dialog: Motiv, Stil, Perspektive, Beleuchtung, Format' },
     { key: '/bildprompt', ins: '/bildprompt ', cmd: '/bildprompt [Stil]', desc: 'Bild → Prompt: Bild auswählen, Vision-Modell leitet einen Text-zu-Bild-Prompt ab (→ „🎨 Bild daraus erzeugen")' },
-    { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Illustrierter Präsentationsassistent: Thema → Folien + KI-Bilder (Standard Titel + Abschnitte; „/praesentation alle …", „keine" oder eine Zahl steuern den Bild-Umfang) → Canvas' },
+    { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Geführter Präsentationsassistent: kurzes Interview (Zielgruppe/Ziel/Umfang/Bilder) → schlüssige Gliederung + Inhaltsverzeichnis → Webrecherche je Punkt → flächiges Deckblatt & Abschlussbild, Inhaltsfolien zweispaltig → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },
