@@ -93,26 +93,17 @@ Fertige Bilder landen in `z-image/outputs/`. Der erste Aufruf dauert länger
 | `--min-free GB` | ab wie viel freiem VRAM **ohne** Offload geladen wird | `18` |
 | `--keep-ollama` | geladene Ollama-Modelle **nicht** automatisch entladen | aus |
 
-## Im Chat des AI-Frameworks nutzen (🎨 lokal über Z-Image) — EXPERIMENTELL
-
-> ⚠️ **Achtung, noch nicht stabil.** Der Dauer-Server hält Z-Image warm und erzeugt
-> wiederholt Bilder. Auf der 24-GB-RTX-3090 belegt Z-Image (bf16) ~20 GB; die
-> VRAM-Spitze beim VAE-Decode kann bei wiederholten Läufen über die Grenze kippen und
-> einen **harten GPU-/Treiber-Fault** auslösen, der unter Windows den **ganzen Rechner
-> einfrieren/neustarten** kann. Bis das robust gelöst ist, ist **`bild.bat` der
-> empfohlene, stabile Weg** für lokale Bilder (erzeugt ein Bild und gibt den VRAM sofort
-> wieder frei). Den Server nur bewusst und beaufsichtigt starten.
+## Im Chat des AI-Frameworks nutzen (🎨 lokal über Z-Image)
 
 Die 🎨-Bildfunktion im Chat spricht die Schnittstelle eines **Stable-Diffusion-WebUI**
 (`local::sd`) an. Damit sie **Z-Image** nutzt, startest du die mitgelieferte **Brücke**
 `sd_server.py` — ein kleiner, A1111-kompatibler HTTP-Server (nur Python-Standardbibliothek,
-keine neue Abhängigkeit), der genau den einen Endpunkt `POST /sdapi/v1/txt2img` bedient und
-Z-Image dahinter warm hält:
+keine neue Abhängigkeit), der genau den einen Endpunkt `POST /sdapi/v1/txt2img` bedient:
 
 ```bash
 # Windows
-sd_server.bat                 # CPU-Offload (teilt die GPU mit Ollama)
-sd_server.bat --full-gpu      # Modell dauerhaft im VRAM (schneller)
+sd_server.bat                 # crash-sicher (Offload, teilt die GPU mit Ollama)
+sd_server.bat --full-gpu      # schneller, höherer Spitzen-VRAM
 # Linux
 ./sd_server.sh
 ```
@@ -123,12 +114,28 @@ Dann **einmal im Framework-Profil** unter **🧠 Modelle → 🎨 Bildgenerierun
 2. als Adresse **`http://127.0.0.1:7860`** eintragen (bzw. `--host`/`--port` des Servers),
 3. speichern.
 
-Danach erzeugen `/bild …`, `/bildhelp` und der 🎨-Haken die Bilder **lokal über Z-Image**.
-Der Server ignoriert die vom Framework fest gesendeten `steps=28`/`cfg=6.5` und nutzt die
-Turbo-Werte (8 Schritte, guidance 0). Test ohne Framework:
+Danach erzeugen `/bild …`, `/bildhelp`, der 🎨-Haken **und `[bild]`-Schritte im
+`/workflow`** die Bilder **lokal über Z-Image**. Der Server ignoriert die vom Framework fest
+gesendeten `steps=28`/`cfg=6.5` und nutzt die Turbo-Werte (8 Schritte, guidance 0).
+
+### Warum das crash-sicher ist
+
+Der Server-Prozess importiert selbst **kein** torch/CUDA. Jede Bilderzeugung läuft in
+einem **frischen Unterprozess** (`generate.py`), der genau **ein** Bild erzeugt und sich
+dann beendet — der bewiesen stabile Weg (identisch zu `bild.bat`). Dadurch:
+
+- **kein VRAM-/Fragmentierungs-Aufbau** über mehrere Läufe (genau das ließ eine frühere
+  In-Prozess-Variante beim 2. Bild hart abstürzen und riss den ganzen Rechner mit);
+- ein CUDA-Fehler tötet **nur den Unterprozess** — der Server meldet ihn und lebt weiter;
+- nach jedem Bild ist der **VRAM wieder komplett frei** (getestet: nach jeder Erzeugung
+  ~0,4 GB belegt), Koexistenz mit Ollama.
+
+**Preis:** jedes Bild lädt das Modell neu aus dem Cache (~30–50 s). Dafür stabil. Optionen:
+`--full-gpu` (schneller, höherer VRAM), `--steps N`, `--timeout N`, `--min-free GB`,
+`--keep-ollama`. Test ohne Framework:
 
 ```bash
-curl -s http://127.0.0.1:7860/health
+curl -s http://127.0.0.1:7860/health     # {"status":"ok",…,"mode":"subprocess (crash-sicher)"}
 ```
 
 ## VRAM-Verwaltung (wichtig bei paralleler Ollama-Nutzung)
