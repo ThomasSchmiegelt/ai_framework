@@ -93,6 +93,44 @@ Fertige Bilder landen in `z-image/outputs/`. Der erste Aufruf dauert länger
 | `--min-free GB` | ab wie viel freiem VRAM **ohne** Offload geladen wird | `18` |
 | `--keep-ollama` | geladene Ollama-Modelle **nicht** automatisch entladen | aus |
 
+## Im Chat des AI-Frameworks nutzen (🎨 lokal über Z-Image) — EXPERIMENTELL
+
+> ⚠️ **Achtung, noch nicht stabil.** Der Dauer-Server hält Z-Image warm und erzeugt
+> wiederholt Bilder. Auf der 24-GB-RTX-3090 belegt Z-Image (bf16) ~20 GB; die
+> VRAM-Spitze beim VAE-Decode kann bei wiederholten Läufen über die Grenze kippen und
+> einen **harten GPU-/Treiber-Fault** auslösen, der unter Windows den **ganzen Rechner
+> einfrieren/neustarten** kann. Bis das robust gelöst ist, ist **`bild.bat` der
+> empfohlene, stabile Weg** für lokale Bilder (erzeugt ein Bild und gibt den VRAM sofort
+> wieder frei). Den Server nur bewusst und beaufsichtigt starten.
+
+Die 🎨-Bildfunktion im Chat spricht die Schnittstelle eines **Stable-Diffusion-WebUI**
+(`local::sd`) an. Damit sie **Z-Image** nutzt, startest du die mitgelieferte **Brücke**
+`sd_server.py` — ein kleiner, A1111-kompatibler HTTP-Server (nur Python-Standardbibliothek,
+keine neue Abhängigkeit), der genau den einen Endpunkt `POST /sdapi/v1/txt2img` bedient und
+Z-Image dahinter warm hält:
+
+```bash
+# Windows
+sd_server.bat                 # CPU-Offload (teilt die GPU mit Ollama)
+sd_server.bat --full-gpu      # Modell dauerhaft im VRAM (schneller)
+# Linux
+./sd_server.sh
+```
+
+Dann **einmal im Framework-Profil** unter **🧠 Modelle → 🎨 Bildgenerierung**:
+
+1. **Lokal · Stable Diffusion WebUI** auswählen,
+2. als Adresse **`http://127.0.0.1:7860`** eintragen (bzw. `--host`/`--port` des Servers),
+3. speichern.
+
+Danach erzeugen `/bild …`, `/bildhelp` und der 🎨-Haken die Bilder **lokal über Z-Image**.
+Der Server ignoriert die vom Framework fest gesendeten `steps=28`/`cfg=6.5` und nutzt die
+Turbo-Werte (8 Schritte, guidance 0). Test ohne Framework:
+
+```bash
+curl -s http://127.0.0.1:7860/health
+```
+
 ## VRAM-Verwaltung (wichtig bei paralleler Ollama-Nutzung)
 
 Auf einer einzelnen GPU teilen sich Z-Image (~16 GB) und die lokalen Ollama-Chat-
