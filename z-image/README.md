@@ -94,12 +94,15 @@ Fertige Bilder landen in `z-image/outputs/`. Der erste Aufruf dauert länger
 | `--keep-ollama` | geladene Ollama-Modelle **nicht** automatisch entladen | aus |
 | `--init datei` | **Bildbearbeitung (img2img):** Eingabebild, das verändert wird | — |
 | `--strength F` | img2img: wie stark verändert wird (0.1 wenig … 0.95 stark) | `0.55` |
+| `--mask datei` | **Inpainting:** Maske (weiß = ändern, schwarz = behalten); nur mit `--init` | — |
 
 **Bildbearbeitung (img2img):** mit `--init` wird statt Text→Bild ein vorhandenes Bild
 anhand des Prompts verändert (`bild.bat "im Aquarellstil" --init foto.jpg --strength 0.6`).
-Der Bild-Server (`sd_server.py`) bietet das zusätzlich als A1111-Endpunkt
-`POST /sdapi/v1/img2img` an (`init_images`/`denoising_strength`) — so nutzt die
-Chat-Bildbearbeitung `/bildedit` im Framework dieselbe crash-sichere Brücke.
+Mit zusätzlicher `--mask` wird nur der markierte Bereich verändert (**Inpainting**,
+`ZImageInpaintPipeline`; weiß = ändern). Der Bild-Server (`sd_server.py`) bietet beides
+als A1111-Endpunkt `POST /sdapi/v1/img2img` an (`init_images`/`denoising_strength`,
+optional `mask`) — so nutzt die Chat-Bildbearbeitung `/bildedit` (inkl. „🖌 Bereich
+markieren") dieselbe crash-sichere Brücke.
 
 ## Im Chat des AI-Frameworks nutzen (🎨 lokal über Z-Image)
 
