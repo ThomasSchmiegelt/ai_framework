@@ -1257,6 +1257,12 @@ abrufbar.
 
 ## 11h. To-Do mit Wissensgraph (✅ To-Do)
 
+> **Direkt aus dem Chat übernehmen:** Sag im Chat z. B. *„schreib mir eine Einkaufsliste und stell sie
+> in die To-Do-Liste"*. Sobald die Antwort steht, fragt ein Fenster: **neues Projekt anlegen** oder **zu
+> einem bestehenden Projekt hinzufügen?** — die erkannten Punkte kannst du dort noch bearbeiten und
+> werden dann wirklich in die To-Do-Liste eingetragen. Das geht auch mit **jeder** Antwort über den Knopf
+> **📥 To-Do** direkt unter der Nachricht.
+
 Tab **✅ To-Do** — eine **interaktive, KI-gestützte Aufgabenliste** als **Projektbaum**. Du schreibst
 eine **Besprechungsnotiz**, lässt die KI daraus einzelne **Punkte** ableiten, hakst sie ab, verschiebst
 sie zwischen Projekten, hängst **Dokumente** an (→ Markdown, mitgesucht) und siehst alles im

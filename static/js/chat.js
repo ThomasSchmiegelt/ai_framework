@@ -304,6 +304,10 @@ const Chat = (() => {
     // Tool-Status-Element
     let toolStatusEl = null;
 
+    // Tab-übergreifend: Wunsch „… in die To-Do-Liste" merken, um nach der Antwort
+    // die Übernahme-Rückfrage anzubieten (die eigentliche Antwort erzeugt das Modell normal).
+    _todoHandoffPending = _todoIntent(text);
+
     // SSE-Stream starten (abbrechbar über AbortController)
     abortController = new AbortController();
     let wasAborted = false;
@@ -393,6 +397,13 @@ const Chat = (() => {
 
     // Stellt die Antwort selbst Rückfragen? → Angebot einer strukturierten Maske.
     _maybeOfferClarify(assistantRow, fullText);
+
+    // Tab-übergreifend: Wollte der Nutzer das Ergebnis in die To-Do-Liste? → Rückfrage
+    // „neues Projekt oder bestehendes ergänzen?" und dann wirklich anlegen.
+    if (_todoHandoffPending && fullText.trim() && !wasAborted) {
+      _todoHandoffPending = false;
+      _openTodoHandoff(fullText);
+    }
 
     abortController = null;
     isStreaming = false;
@@ -741,6 +752,16 @@ const Chat = (() => {
         });
         saveBar.appendChild(ttsBtn);
       }
+      // 📥 Diese Antwort (Liste) in die To-Do-Liste übernehmen (Rückfrage: neu/ergänzen).
+      const todoBtn = document.createElement('button');
+      todoBtn.textContent = '📥 To-Do';
+      todoBtn.title = 'Punkte dieser Antwort in die To-Do-Liste übernehmen';
+      todoBtn.addEventListener('click', () => {
+        const raw = (bubbleContent._rawMd || bubbleContent.textContent || '').trim();
+        if (!raw) { if (typeof showToast === 'function') showToast('Nichts zu übernehmen'); return; }
+        _openTodoHandoff(raw);
+      });
+      saveBar.appendChild(todoBtn);
       bubble.appendChild(saveBar);
     }
 
@@ -2531,6 +2552,121 @@ const Chat = (() => {
       workingEl.remove();
       textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
     }
+  }
+
+  // ── Tab-übergreifend: Chat-Ergebnis in die To-Do-Liste übernehmen ───────────
+  // Erkennt den Wunsch „… in die To-Do-Liste" (natürliche Sprache), bietet nach der
+  // Antwort eine Rückfrage an: neues Projekt anlegen ODER bestehendes ergänzen.
+  let _todoHandoffPending = false;
+
+  function _todoIntent(text) {
+    const t = String(text || '');
+    return /\b(in|auf|zur?|als)\b[^.\n]{0,25}\b(to-?do|to-?do-?liste|aufgaben-?liste|aufgabenliste)\b/i.test(t)
+      || /\b(to-?do|aufgabenliste)\b[^.\n]{0,22}\b(hinzuf[üu]gen|eintragen|aufnehmen|erg[äa]nzen|schreiben|stellen|packen|setzen)\b/i.test(t)
+      || /\b(pack|stell|setz|schreib|f[üu]g|leg)[a-z]*\b[^.\n]{0,25}\b(to-?do|aufgabenliste)\b/i.test(t);
+  }
+
+  // Listenpunkte aus einer Markdown-Antwort ziehen (Aufzählungen, Tabellen, sonst Zeilen).
+  function _parseListItems(md) {
+    const lines = String(md || '').split('\n');
+    const clean = (s) => String(s || '').replace(/\*\*|__|`/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').trim();
+    const items = [];
+    for (const ln of lines) {
+      const t = ln.trim();
+      if (!t) continue;
+      if (/^\|.*\|$/.test(t)) {                        // Markdown-Tabellenzeile
+        if (/^\|[\s:|\-]+\|$/.test(t)) continue;       // Trennzeile ---
+        const cells = t.split('|').slice(1, -1).map(clean);
+        const first = cells[0] || '';
+        if (!first || /^(artikel|item|aufgabe|aufgaben|name|bezeichnung|nr\.?|#|pos\.?|menge|anzahl|✓|erledigt)$/i.test(first)) continue;
+        const extra = cells.slice(1).filter(Boolean).join(' · ');
+        items.push(extra ? `${first} — ${extra}` : first);
+        continue;
+      }
+      const m = t.match(/^(?:[-*•–▪]|\d+[.)])\s+(.*)$/);  // Aufzählung / nummeriert
+      if (m) { const v = clean(m[1]); if (v) items.push(v); }
+    }
+    if (!items.length) {                                // Rückfall: nicht-leere Zeilen
+      for (const ln of lines) {
+        const t = ln.trim();
+        if (t && !/^#/.test(t) && !/^\|/.test(t)) { const v = clean(t); if (v && v.length < 200) items.push(v); }
+      }
+    }
+    return [...new Set(items)].slice(0, 200);
+  }
+
+  async function _openTodoHandoff(md) {
+    const parsed = _parseListItems(md);
+    if (!parsed.length) { showToast('Keine Listenpunkte in der Antwort erkannt'); return; }
+    let projects = [];
+    try { const d = await (await fetch('/api/todo/tree')).json(); projects = (d.flat || []).filter(p => p.id && p.id !== 'root'); } catch (_) {}
+    const guess = (() => { const h = String(md || '').match(/^#{1,3}\s+(.+)$/m); return ((h ? h[1] : 'Einkaufsliste').replace(/[*`#]/g, '').trim().slice(0, 60)) || 'Einkaufsliste'; })();
+    const old = document.getElementById('todo-handoff'); if (old) old.remove();
+    const ov = document.createElement('div'); ov.id = 'todo-handoff';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3);box-sizing:border-box';
+    const opts = projects.map(p => `<option value="${escHtml(p.id)}">${escHtml(p.name || p.id)}</option>`).join('');
+    ov.innerHTML = `
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:560px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.1em;margin-bottom:4px">✅ In die To-Do-Liste übernehmen</div>
+        <div style="opacity:.7;margin-bottom:12px">${parsed.length} Punkt(e) erkannt – wohin damit?</div>
+        <label style="display:flex;align-items:center;gap:8px;margin:4px 0;cursor:pointer"><input type="radio" name="th-target" value="new" checked> Neuen Punkt/Projekt anlegen</label>
+        <input id="th-name" type="text" style="${fld}" value="${escHtml(guess)}">
+        <label style="display:flex;align-items:center;gap:8px;margin:12px 0 4px;cursor:pointer"><input type="radio" name="th-target" value="exist" ${projects.length ? '' : 'disabled'}> Zu bestehendem Projekt ergänzen</label>
+        <select id="th-exist" style="${fld}" ${projects.length ? '' : 'disabled'}>${opts || '<option>(keine Projekte)</option>'}</select>
+        <label style="display:block;margin:12px 0 3px">Punkte (eine Zeile = ein Punkt, editierbar)</label>
+        <textarea id="th-items" rows="8" style="${fld};font-family:inherit"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button id="th-cancel" class="wf-action-btn">Abbrechen</button>
+          <button id="th-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">Übernehmen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#th-items').value = parsed.join('\n');
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+    ov.querySelector('#th-cancel').onclick = close;
+    ov.querySelector('#th-go').onclick = async () => {
+      const items = ov.querySelector('#th-items').value.split('\n').map(s => s.trim()).filter(Boolean).map(t => ({ text: t }));
+      if (!items.length) { showToast('Keine Punkte angegeben'); return; }
+      const target = ov.querySelector('input[name="th-target"]:checked').value;
+      const goBtn = ov.querySelector('#th-go'); goBtn.disabled = true; goBtn.textContent = 'Speichere…';
+      try {
+        let pname;
+        if (target === 'new') {
+          const name = ov.querySelector('#th-name').value.trim() || 'Liste';
+          const created = await (await fetch('/api/todo/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })).json();
+          await fetch(`/api/todo/projects/${created.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'frei', title: name, items }) });
+          pname = name;
+        } else {
+          const pid = ov.querySelector('#th-exist').value;
+          const proj = await (await fetch(`/api/todo/projects/${pid}`)).json();
+          pname = proj.title || proj.name || 'Projekt';
+          const merged = (proj.items || []).concat(items);
+          // Vorhandenen Header/Graph erhalten: Titel/Typ/Beteiligte/Positionen mitschicken.
+          const body = Object.assign({}, proj, {
+            items: merged,
+            project_id: proj.project_id || proj.project_ref || '',
+            positions: proj.positions || (proj.settings && proj.settings.positions) || {},
+          });
+          await fetch(`/api/todo/projects/${pid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        close();
+        if (typeof Todo !== 'undefined' && Todo.refresh) Todo.refresh();
+        showToast(`✓ ${items.length} Punkt(e) in „${pname}" übernommen`);
+        const row = appendMessage('assistant', '', [], false);
+        const c = row.querySelector('.bubble-content');
+        c.textContent = `✅ ${items.length} Punkt(e) in die To-Do-Liste „${pname}" übernommen.`;
+        const bar = document.createElement('div'); bar.className = 'wf-actions';
+        const b = document.createElement('button'); b.className = 'wf-action-btn'; b.textContent = '✅ To-Do öffnen';
+        b.onclick = () => { if (typeof switchTab === 'function') switchTab('todo'); };
+        bar.appendChild(b); c.appendChild(bar);
+      } catch (e) {
+        goBtn.disabled = false; goBtn.textContent = 'Übernehmen';
+        showToast('Fehlgeschlagen: ' + (e && e.message || e));
+      }
+    };
   }
 
   // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────
