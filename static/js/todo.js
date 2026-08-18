@@ -1143,5 +1143,8 @@ const Todo = (() => {
     _loadTree(true);
   }
 
-  return { init };
+  // Von außen (z. B. Chat→To-Do-Übernahme) aufrufbar: Baum/Ansicht neu laden.
+  function refresh() { try { _loadTree(true); } catch (_) {} }
+
+  return { init, refresh };
 })();

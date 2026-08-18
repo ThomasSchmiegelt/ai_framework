@@ -110,6 +110,9 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 🔍 **Upscaling** — `/upscale`: Bild hochskalieren (2×, max 2048). **KI-Detail** ergänzt echte
   Schärfe lokal über Z-Image (img2img mit niedriger Stärke), **Schnell** vergrößert sofort per
   Lanczos (Pillow). Keine neue Abhängigkeit; bei fehlendem lokalem Server Rückfall auf Lanczos
+- ✅ **Chat → To-Do übernehmen** — sag im Chat „… und stell es in die To-Do-Liste" (oder Knopf
+  **📥 To-Do** an jeder Antwort): eine **Rückfrage** fragt „neues Projekt anlegen oder bestehendes
+  ergänzen?", die erkannten Listenpunkte werden dann wirklich in die To-Do-Liste eingetragen
 - 🖼️ **Z-Image-Turbo (lokales Bildmodell, optional)** — eigenständiges Kommandozeilen-Werkzeug
   im Ordner [`z-image/`](z-image/README.md): erzeugt Bilder **komplett lokal auf der GPU**
   (Alibaba Tongyi, 6B, Apache-2.0, ~8 Schritte) über `diffusers`, getrennt vom Backend.
