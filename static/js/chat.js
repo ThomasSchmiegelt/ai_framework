@@ -304,9 +304,9 @@ const Chat = (() => {
     // Tool-Status-Element
     let toolStatusEl = null;
 
-    // Tab-übergreifend: Wunsch „… in die To-Do-Liste" merken, um nach der Antwort
-    // die Übernahme-Rückfrage anzubieten (die eigentliche Antwort erzeugt das Modell normal).
-    _todoHandoffPending = _todoIntent(text);
+    // Tab-übergreifend: Wunsch „… in die To-Do-Liste / in den Planer" merken, um nach
+    // der Antwort die Übernahme-Rückfrage anzubieten (die Antwort erzeugt das Modell normal).
+    _tabHandoffPending = _planIntent(text) ? 'planner' : (_todoIntent(text) ? 'todo' : '');
 
     // SSE-Stream starten (abbrechbar über AbortController)
     abortController = new AbortController();
@@ -398,11 +398,12 @@ const Chat = (() => {
     // Stellt die Antwort selbst Rückfragen? → Angebot einer strukturierten Maske.
     _maybeOfferClarify(assistantRow, fullText);
 
-    // Tab-übergreifend: Wollte der Nutzer das Ergebnis in die To-Do-Liste? → Rückfrage
-    // „neues Projekt oder bestehendes ergänzen?" und dann wirklich anlegen.
-    if (_todoHandoffPending && fullText.trim() && !wasAborted) {
-      _todoHandoffPending = false;
-      _openTodoHandoff(fullText);
+    // Tab-übergreifend: Wollte der Nutzer das Ergebnis in einen anderen Tab? → Rückfrage
+    // und dann wirklich übernehmen (To-Do: neu/ergänzen; Planer: als Projektplan).
+    if (_tabHandoffPending && fullText.trim() && !wasAborted) {
+      const _t = _tabHandoffPending; _tabHandoffPending = '';
+      if (_t === 'planner') _openPlanHandoff(fullText);
+      else _openTodoHandoff(fullText);
     }
 
     abortController = null;
@@ -762,6 +763,16 @@ const Chat = (() => {
         _openTodoHandoff(raw);
       });
       saveBar.appendChild(todoBtn);
+      // 🗂 Diese Antwort als Projektplan in den Planer übernehmen.
+      const planBtn = document.createElement('button');
+      planBtn.textContent = '🗂 Planer';
+      planBtn.title = 'Diese Antwort als Projektplan in den Planer übernehmen';
+      planBtn.addEventListener('click', () => {
+        const raw = (bubbleContent._rawMd || bubbleContent.textContent || '').trim();
+        if (!raw) { if (typeof showToast === 'function') showToast('Nichts zu übernehmen'); return; }
+        _openPlanHandoff(raw);
+      });
+      saveBar.appendChild(planBtn);
       bubble.appendChild(saveBar);
     }
 
@@ -2554,10 +2565,20 @@ const Chat = (() => {
     }
   }
 
-  // ── Tab-übergreifend: Chat-Ergebnis in die To-Do-Liste übernehmen ───────────
-  // Erkennt den Wunsch „… in die To-Do-Liste" (natürliche Sprache), bietet nach der
-  // Antwort eine Rückfrage an: neues Projekt anlegen ODER bestehendes ergänzen.
-  let _todoHandoffPending = false;
+  // ── Tab-übergreifend: Chat-Ergebnis in einen anderen Tab übernehmen ─────────
+  // Erkennt den Wunsch „… in die To-Do-Liste" bzw. „… in den Planer" (natürliche
+  // Sprache) und bietet nach der Antwort eine Rückfrage an (wohin übernehmen?).
+  let _tabHandoffPending = '';   // '' | 'todo' | 'planner'
+
+  function _planIntent(text) {
+    const t = String(text || '');
+    if (!/\bplaner\b/i.test(t) && !/\bnetzplan\b/i.test(t)) return false;
+    return /\bplaner[-\s]?tab\b/i.test(t)
+      || /\b(in|im)\s+(den|dem)?\s*planer\b/i.test(t)
+      || /\b(nutze|verwende|benutze|nutzen|verwenden|benutzen|pack[e]?|stell[e]?|leg[e]?)\b[^.\n]{0,22}\bplaner\b/i.test(t)
+      || /\bplaner\b[^.\n]{0,22}\b(nutzen|verwenden|benutzen|erstellen|anlegen|nehmen)\b/i.test(t)
+      || /\bnetzplan\b/i.test(t);
+  }
 
   function _todoIntent(text) {
     const t = String(text || '');
@@ -2667,6 +2688,43 @@ const Chat = (() => {
         showToast('Fehlgeschlagen: ' + (e && e.message || e));
       }
     };
+  }
+
+  // Chat-Ergebnis als Projektplan in den Planer übernehmen (nutzt Planner.openFromText
+  // = Dokument→Plan, leitet Vorgänge/Abhängigkeiten/kritischen Pfad ab).
+  function _openPlanHandoff(md) {
+    const text = String(md || '').trim();
+    if (!text) { showToast('Kein Inhalt für den Planer'); return; }
+    const guess = (() => { const h = text.match(/^#{1,3}\s+(.+)$/m); return ((h ? h[1] : 'Plan').replace(/[*`#]/g, '').trim().slice(0, 60)) || 'Plan'; })();
+    const old = document.getElementById('plan-handoff'); if (old) old.remove();
+    const ov = document.createElement('div'); ov.id = 'plan-handoff';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3);box-sizing:border-box';
+    ov.innerHTML = `
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:520px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.1em;margin-bottom:4px">🗂️ In den Planer übernehmen</div>
+        <div style="opacity:.7;margin-bottom:12px">Aus dem Ergebnis wird ein <b>Projektplan</b> abgeleitet (Vorgänge, Abhängigkeiten, kritischer Pfad) und im Planer-Tab geöffnet.</div>
+        <label style="display:block;margin:6px 0 3px">Plan-Name</label>
+        <input id="ph-name" type="text" style="${fld}" value="${escHtml(guess)}">
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button id="ph-cancel" class="wf-action-btn">Abbrechen</button>
+          <button id="ph-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">In den Planer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+    ov.querySelector('#ph-cancel').onclick = close;
+    ov.querySelector('#ph-go').onclick = () => {
+      const name = ov.querySelector('#ph-name').value.trim() || 'Plan';
+      close();
+      if (typeof Planner !== 'undefined' && Planner.openFromText) {
+        showToast('🗂️ Plan wird im Planer erstellt…');
+        Planner.openFromText(text, name);
+      } else showToast('Planer nicht verfügbar');
+    };
+    setTimeout(() => { const t = ov.querySelector('#ph-name'); if (t) { t.focus(); t.select(); } }, 30);
   }
 
   // ── /bild — Bildgenerierung (lokal SD-WebUI oder API) ───────────────────────
