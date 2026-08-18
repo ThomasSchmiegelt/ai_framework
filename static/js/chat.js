@@ -505,8 +505,19 @@ const Chat = (() => {
     const img = document.createElement('img');
     img.src = src;
     img.style.cssText = 'max-width:100%;border-radius:8px;display:block;box-shadow:0 2px 12px #0006';
-    img.alt = 'Diagramm';
+    img.alt = 'Bild';
     wrapper.appendChild(img);
+    // 💾 Speichern-Knopf unter jedem Bild (Data-URI/URL herunterladen).
+    const bar = document.createElement('div');
+    bar.style.cssText = 'margin-top:4px';
+    const dl = document.createElement('a');
+    dl.href = src;
+    dl.download = 'bild_' + Date.now() + '.png';
+    dl.textContent = '💾 speichern';
+    dl.title = 'Bild speichern';
+    dl.style.cssText = 'font-size:12px;color:var(--accent,#3b76ba);text-decoration:none';
+    bar.appendChild(dl);
+    wrapper.appendChild(bar);
     container.appendChild(wrapper);
     scrollToBottom();
   }
@@ -2813,6 +2824,18 @@ const Chat = (() => {
 
   // Erzeugt ein Bild und zeigt es im Verlauf an (außerhalb der LLM-Historie, wie
   // runSearch). opts = { size, negative }.
+  // Aktuelle Unterhaltung serverseitig speichern (für Abläufe, die nicht über
+  // /api/chat laufen, z. B. Bildgenerierung) – sonst fehlen sie in der Liste.
+  async function _persistConversation() {
+    if (!currentConvId || !messages.length) return;
+    try {
+      await fetch(`/api/conversations/${currentConvId}/save`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: messages.filter(m => m.role !== 'system') }),
+      });
+    } catch (_) {}
+  }
+
   async function runBild(prompt, opts) {
     prompt = (prompt || '').trim();
     opts = opts || {};
@@ -2853,19 +2876,19 @@ const Chat = (() => {
       }
       const data = await resp.json();
       textEl.remove();
-      insertImage(content, data.image);
-      // Bildunterschrift + Speichern-Link
+      insertImage(content, data.image);   // enthält den 💾-Speichern-Knopf
+      // Bildunterschrift (Prompt)
       const cap = document.createElement('div');
       cap.style.cssText = 'font-size:12px;color:var(--text-muted);margin-top:2px';
-      const dl = document.createElement('a');
-      dl.href = data.image;
-      dl.download = 'bild_' + Date.now() + '.png';
-      dl.textContent = '⬇ Speichern';
-      dl.style.cssText = 'color:var(--accent, #3b76ba);text-decoration:none;margin-left:8px';
-      cap.appendChild(document.createTextNode('🎨 ' + prompt));
-      cap.appendChild(dl);
+      cap.textContent = '🎨 ' + prompt;
       content.appendChild(cap);
       scrollToBottom();
+      // In den Verlauf aufnehmen UND persistieren, damit der Bild-Chat zuverlässig
+      // in der Unterhaltungsliste gespeichert bleibt (läuft nicht über /api/chat).
+      messages.push({ role: 'user', content: '🎨 ' + prompt });
+      messages.push({ role: 'assistant', content: '🎨 Bild erzeugt: ' + prompt });
+      _persistConversation();
+      loadConversationList();
     } catch (e) {
       textEl.innerHTML = `<em style="color:#ef4444">Bildgenerierung fehlgeschlagen: ${escHtml(e.message)}</em>`;
     } finally {
@@ -3442,7 +3465,7 @@ const Chat = (() => {
     box.innerHTML = _slashMatches.map((c, i) =>
       `<div class="slash-hint${i === _slashActive ? ' active' : ''}" data-i="${i}">`
       + `<span class="slash-hint-cmd">${escHtml(c.cmd)}</span>`
-      + `<span class="slash-hint-desc">${escHtml(c.desc)}</span></div>`).join('')
+      + `<span class="slash-hint-desc" title="${escHtml(c.desc)}">${escHtml(c.desc)}</span></div>`).join('')
       + '<div class="slash-hint-foot">↑↓ wählen · Tab/Klick übernehmen · Esc schließen</div>';
     box.querySelectorAll('.slash-hint').forEach(el => {
       // mousedown statt click: verhindert, dass das Eingabefeld vorher den Fokus verliert

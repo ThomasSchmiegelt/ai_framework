@@ -2858,12 +2858,18 @@ body.assistant-mode #tab-bar .tab-btn:not([data-tab="chat"]) { display: none !im
   padding: 5px; box-shadow: 0 6px 22px rgba(0,0,0,.4); font-size: 12.5px;
 }
 .slash-hint {
-  display: flex; gap: 10px; padding: 5px 8px; border-radius: 6px;
-  cursor: pointer; align-items: baseline;
+  display: flex; gap: 12px; padding: 5px 8px; border-radius: 6px;
+  cursor: pointer; align-items: flex-start;
 }
 .slash-hint:hover, .slash-hint.active { background: var(--bg-hover); }
-.slash-hint-cmd { color: var(--accent); font-weight: 600; white-space: nowrap; min-width: 80px; }
-.slash-hint-desc { color: var(--text-muted); }
+.slash-hint-cmd {
+  color: var(--accent); font-weight: 600; white-space: nowrap;
+  flex: 0 0 auto; min-width: 120px;
+}
+.slash-hint-desc {
+  color: var(--text-muted); flex: 1 1 auto; min-width: 0; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 .slash-hint-foot {
   padding: 4px 8px 2px; font-size: 11px; color: var(--text-muted); opacity: .8;
   border-top: 1px solid var(--border); margin-top: 3px;

@@ -4311,6 +4311,26 @@ async def import_conversation(req: Request):
     return {"ok": True, "id": conv_id}
 
 
+@app.post("/api/conversations/{cid}/save")
+async def save_conversation_messages(cid: str, req: Request):
+    """Nachrichten einer Unterhaltung persistieren – für Nicht-Chat-Abläufe (z. B.
+    Bildgenerierung), die NICHT über /api/chat laufen und sonst nicht in der
+    Unterhaltungsliste gespeichert würden."""
+    body = await req.json()
+    messages = body.get("messages", [])
+    if not isinstance(messages, list) or not messages:
+        raise HTTPException(400, "Keine Nachrichten")
+    await _db.save_conversation(
+        cid, messages,
+        model=body.get("model"),
+        agent_id=body.get("agent_id"),
+        canvas_json=body.get("canvas_json"),
+    )
+    if body.get("project_id"):
+        await _db.set_project(cid, body["project_id"])
+    return {"ok": True, "id": cid}
+
+
 @app.post("/api/conversations/export-all")
 async def export_all_conversations():
     """Exportiert alle Gespräche als ZIP-Archiv."""
