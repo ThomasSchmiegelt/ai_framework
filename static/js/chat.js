@@ -145,6 +145,16 @@ const Chat = (() => {
       return;
     }
 
+    // Musik: „/musik <Stil/Stimmung>" (Aliase /music, /song) erzeugt ein kurzes Stück
+    // (algorithmisch, tools/music.py) und spielt es als Audio im Chat ab.
+    const mu = _parseMusik(text);
+    if (mu) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runMusik(mu.description);
+      return;
+    }
+
     // Bild-Modus per Toolbar-Haken (🎨): die nächste normale Nachricht wird zum
     // Bild-Prompt. One-shot – der Haken wird danach zurückgesetzt.
     const imgToggle = document.getElementById('btn-image-toggle');
@@ -2836,6 +2846,55 @@ const Chat = (() => {
     } catch (_) {}
   }
 
+  // ── /musik — algorithmischer Musik-Generator (kein LLM/GPU, tools/music.py) ──
+  function _parseMusik(text) {
+    const m = text.match(/^\/(musik|music|song)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { description: (m[2] || '').trim() };
+  }
+
+  async function runMusik(description) {
+    description = (description || '').trim();
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false); isStreaming = true; setBtnSendState(false);
+    appendMessage('user', '🎵 ' + (description || 'Musik'));
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text';
+    textEl.appendChild(makeWorking('🎵 Musik wird erzeugt'));
+    content.appendChild(textEl); scrollToBottom();
+    try {
+      const resp = await fetch('/api/music/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      });
+      if (!resp.ok) {
+        let d = 'HTTP ' + resp.status; try { d = (await resp.json()).detail || d; } catch (_) {}
+        textEl.innerHTML = `<em style="color:#ef4444">Musik fehlgeschlagen: ${escHtml(d)}</em>`; return;
+      }
+      const data = await resp.json();
+      textEl.textContent = `🎵 ${data.style} · ${data.key} · ${data.tempo} BPM · ${data.seconds}s`;
+      const wrap = document.createElement('div'); wrap.style.cssText = 'margin:8px 0';
+      const audio = document.createElement('audio'); audio.controls = true; audio.src = data.audio;
+      audio.style.cssText = 'width:min(420px,100%);display:block';
+      wrap.appendChild(audio);
+      const dl = document.createElement('a'); dl.href = data.audio; dl.download = 'musik_' + Date.now() + '.wav';
+      dl.textContent = '💾 speichern';
+      dl.style.cssText = 'font-size:12px;color:var(--accent,#3b76ba);text-decoration:none;display:inline-block;margin-top:4px';
+      wrap.appendChild(dl);
+      content.appendChild(wrap); scrollToBottom();
+      // In den Verlauf + persistieren (leichter Marker, nicht die Audiodaten).
+      messages.push({ role: 'user', content: '🎵 ' + (description || 'Musik') });
+      messages.push({ role: 'assistant', content: `🎵 Musik erzeugt (${data.style}, ${data.key}, ${data.tempo} BPM, ${data.seconds}s)` });
+      _persistConversation(); loadConversationList();
+    } catch (e) {
+      textEl.innerHTML = `<em style="color:#ef4444">Musik fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      isStreaming = false; setBtnSendState(true);
+    }
+  }
+
   async function runBild(prompt, opts) {
     prompt = (prompt || '').trim();
     opts = opts || {};
@@ -3426,6 +3485,7 @@ const Chat = (() => {
     { key: '/bildprompt', ins: '/bildprompt ', cmd: '/bildprompt [Stil]', desc: 'Bild → Prompt: Bild auswählen, Vision-Modell leitet einen Text-zu-Bild-Prompt ab (→ „🎨 Bild daraus erzeugen")' },
     { key: '/bildedit', ins: '/bildedit ', cmd: '/bildedit [Anweisung]', desc: 'Bildbearbeitung: Bild hochladen + sagen, wie es verändert werden soll (img2img). Optional „🖌 Bereich markieren" = nur den gemalten Bereich ändern (Inpainting). Lokal über Z-Image oder ein fähiges API-Modell; Stärke wählbar' },
     { key: '/upscale', ins: '/upscale', cmd: '/upscale', desc: 'Bild hochskalieren (2×, max 2048): „KI-Detail" ergänzt echte Schärfe lokal über Z-Image, „Schnell" vergrößert sofort per Lanczos' },
+    { key: '/musik', ins: '/musik ', cmd: '/musik <Stil/Stimmung>', desc: 'Musik erzeugen (algorithmisch, ohne GPU): z. B. „/musik fröhliche 8bit Abenteuermelodie", „/musik traurig langsam" – spielt das Stück als Audio ab (💾 speichern)' },
     { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Geführter Präsentationsassistent: kurzes Interview (Zielgruppe/Ziel/Umfang/Bilder) → schlüssige Gliederung + Inhaltsverzeichnis → Webrecherche je Punkt → flächiges Deckblatt & Abschlussbild, Inhaltsfolien zweispaltig → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
