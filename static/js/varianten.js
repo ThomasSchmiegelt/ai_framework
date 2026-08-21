@@ -267,11 +267,22 @@ const Varianten = (() => {
   function _renderCR() {
     const el = _el('var-cr');
     const r = _data.result || {};
-    if (!_data.criteria || _data.criteria.length < 3) { el.textContent = ''; return; }
+    if (!_data.criteria || _data.criteria.length < 3) { el.innerHTML = ''; return; }
     const cr = r.cr != null ? r.cr : 0;
     const ok = r.consistent !== false;
-    el.textContent = `Konsistenz CR = ${cr.toFixed(2)} ${ok ? '✓' : '⚠ zu inkonsistent (>0,10)'}`;
+    let html = `<span>Konsistenz CR = ${cr.toFixed(2)} ${ok ? '✓' : '⚠ zu inkonsistent (>0,10)'}</span>`;
+    // Bei Inkonsistenz das strittigste Urteil benennen + gezielt neu bewerten anbieten
+    const wp = r.worst_pair;
+    if (!ok && wp && _data.criteria[wp.i] && _data.criteria[wp.j]) {
+      const a = escHtml(_data.criteria[wp.i].name || ('Kriterium ' + (wp.i + 1)));
+      const b = escHtml(_data.criteria[wp.j].name || ('Kriterium ' + (wp.j + 1)));
+      html += ` <button class="export-btn var-cr-fix" data-i="${wp.i}" data-j="${wp.j}" ` +
+        `title="Dieses Urteil weicht am stärksten von den übrigen ab">⚠ ${a} ↔ ${b} — erneut bewerten</button>`;
+    }
+    el.innerHTML = html;
     el.className = 'var-cr ' + (ok ? 'var-cr-ok' : 'var-cr-bad');
+    const fix = el.querySelector('.var-cr-fix');
+    if (fix) fix.addEventListener('click', () => _openStepwisePairs([[+fix.dataset.i, +fix.dataset.j]]));
   }
 
   function _renderResult() {
@@ -418,6 +429,142 @@ const Varianten = (() => {
     if (_swipeKeyHandler) { document.removeEventListener('keydown', _swipeKeyHandler); _swipeKeyHandler = null; }
   }
 
+  // ── Schritt-für-Schritt (inkrementeller Paarvergleich) ─────────────────────
+  // Merkmal eingeben → gegen jedes bereits vorhandene abfragen. Erst Stärke 3
+  // (Standard „etwas"), pro Urteil optional feinere Stärke (5/7/9). Beliebig oft
+  // wiederholbar. Läuft über dasselbe _data.pairwise + _save wie die Matrix.
+  let _stepQueue = [], _stepIdx = 0, _stepStrength = 3, _stepOnDone = null;
+
+  function _stepPhase(which) {
+    _el('var-stepwise-add').style.display = which === 'add' ? 'block' : 'none';
+    _el('var-stepwise-q').style.display = which === 'q' ? 'block' : 'none';
+  }
+
+  function _renderStepList() {
+    const el = _el('var-stepwise-list');
+    if (!el) return;
+    const names = (_data.criteria || []).map((c, i) => `${i + 1}. ${escHtml(c.name || '—')}`);
+    el.innerHTML = names.length
+      ? 'Merkmale: ' + names.join(' · ')
+      : 'Noch keine Merkmale — das erste eingeben.';
+  }
+
+  function _openStepwise() {
+    if (!_data) { _status('Erst einen Vergleich anlegen/öffnen.'); return; }
+    _stepQueue = []; _stepIdx = 0; _stepStrength = 3;
+    _el('var-stepwise').style.display = 'flex';
+    _stepPhase('add');
+    _renderStepList();
+    _highlightStrength();
+    const inp = _el('var-stepwise-input');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 30); }
+  }
+
+  // Direkt in die Frage-Phase mit einer festen Paarliste (z. B. „erneut bewerten")
+  function _openStepwisePairs(pairs) {
+    if (!_data) { _status('Erst einen Vergleich anlegen/öffnen.'); return; }
+    _stepQueue = pairs.slice(); _stepIdx = 0; _stepStrength = 3;
+    _el('var-stepwise').style.display = 'flex';
+    _highlightStrength();
+    _renderStepQuestion();
+  }
+
+  function _stepAddCriterion() {
+    const inp = _el('var-stepwise-input');
+    const nm = (inp && inp.value || '').trim();
+    if (!nm) return;
+    _data.criteria.push({ name: nm, direction: 'benefit' });
+    _resizeMatrices();
+    const k = _data.criteria.length - 1;
+    if (inp) { inp.value = ''; inp.focus(); }
+    _renderStepList();
+    // Neues Merkmal gegen jedes vorherige abfragen (neu vs. alle bisherigen)
+    if (k >= 1) {
+      _stepQueue = [];
+      for (let x = 0; x < k; x++) _stepQueue.push([k, x]);
+      _stepIdx = 0;
+      _stepStrength = 3; _highlightStrength();
+      _renderStepQuestion();
+    } else {
+      _saveSoon();   // erstes Merkmal: nichts zu fragen
+    }
+  }
+
+  function _renderStepQuestion() {
+    const pair = _stepQueue[_stepIdx];
+    if (!pair) { _finishStepQueue(); return; }
+    const [i, j] = pair;
+    _stepPhase('q');
+    _el('var-stepwise-a').textContent = _data.criteria[i] ? (_data.criteria[i].name || 'Merkmal ' + (i + 1)) : '?';
+    _el('var-stepwise-b').textContent = _data.criteria[j] ? (_data.criteria[j].name || 'Merkmal ' + (j + 1)) : '?';
+    _el('var-stepwise-progress').textContent = `${_stepIdx + 1} / ${_stepQueue.length}`;
+  }
+
+  function _highlightStrength() {
+    document.querySelectorAll('#var-stepwise .var-strength-btn').forEach(b => {
+      b.classList.toggle('active', +b.dataset.s === _stepStrength);
+    });
+  }
+
+  // dir: 'more' (i wichtiger als j), 'less' (i unwichtiger), 'eq' (gleich)
+  function _stepAnswer(dir) {
+    const pair = _stepQueue[_stepIdx];
+    if (!pair) return;
+    const [i, j] = pair;
+    let v = 1;
+    if (dir === 'more') v = _stepStrength;
+    else if (dir === 'less') v = 1 / _stepStrength;
+    _data.pairwise[i][j] = v;
+    _data.pairwise[j][i] = 1 / v;
+    _stepIdx++;
+    _stepStrength = 3; _highlightStrength();   // Stärke je Frage zurück auf Standard
+    _renderStepQuestion();
+  }
+
+  function _finishStepQueue() {
+    _stepQueue = []; _stepIdx = 0;
+    _renderPairwise();
+    _save();
+    _stepPhase('add');
+    _renderStepList();
+    const inp = _el('var-stepwise-input');
+    if (inp) setTimeout(() => inp.focus(), 30);
+  }
+
+  function _stepRepeat() {
+    if (!_data || _data.criteria.length < 2) { _status('Mindestens zwei Merkmale nötig.'); return; }
+    _stepQueue = [];
+    for (let i = 0; i < _data.criteria.length; i++)
+      for (let j = i + 1; j < _data.criteria.length; j++) _stepQueue.push([i, j]);
+    _stepIdx = 0; _stepStrength = 3; _highlightStrength();
+    _renderStepQuestion();
+  }
+
+  function _stepDone() {
+    _el('var-stepwise').style.display = 'none';
+    _render();
+    _save();
+    if (typeof _stepOnDone === 'function') { const cb = _stepOnDone; _stepOnDone = null; cb(_data); }
+  }
+
+  // ── Chat-Einstieg: Overlay über dem Chat öffnen (Assistent-Modus tauglich) ──
+  async function openStepwise(opts) {
+    opts = opts || {};
+    _stepOnDone = opts.onDone || null;
+    try {
+      if (opts.name) {
+        // anlegen (falls neu), dann öffnen — 409 = existiert bereits, ignorieren
+        try { await _api('POST', '/api/varianten/projects', { name: opts.name, title: opts.title || opts.name }); }
+        catch (e) { /* existiert schon */ }
+        await _loadList(opts.name);
+        _el('var-project').value = opts.name;
+        await _open(opts.name);
+      }
+      if (!_data) { _status('Kein Vergleich geöffnet.'); return; }
+      _openStepwise();
+    } catch (e) { _status('Fehler: ' + e.message); }
+  }
+
   // ── Problem → komplette Tabelle (Auto-Fill) ────────────────────────────────
   async function _generateAll() {
     const problem = (_el('var-problem').value || '').trim();
@@ -488,10 +635,23 @@ const Varianten = (() => {
     _el('var-swipe-right').addEventListener('click', () => _swipeAnswer('right'));
     _el('var-swipe-eq').addEventListener('click', () => _swipeAnswer('up'));
     _el('var-swipe').addEventListener('click', e => { if (e.target.id === 'var-swipe') _closeSwipe(); });
+    // Schritt-für-Schritt (inkrementeller Paarvergleich)
+    _el('btn-var-stepwise').addEventListener('click', _openStepwise);
+    _el('var-stepwise-close').addEventListener('click', () => { _el('var-stepwise').style.display = 'none'; _render(); });
+    _el('var-stepwise-add-btn').addEventListener('click', _stepAddCriterion);
+    _el('var-stepwise-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); _stepAddCriterion(); } });
+    _el('var-stepwise-repeat').addEventListener('click', _stepRepeat);
+    _el('var-stepwise-done').addEventListener('click', _stepDone);
+    _el('var-stepwise-more').addEventListener('click', () => _stepAnswer('more'));
+    _el('var-stepwise-eq').addEventListener('click', () => _stepAnswer('eq'));
+    _el('var-stepwise-less').addEventListener('click', () => _stepAnswer('less'));
+    document.querySelectorAll('#var-stepwise .var-strength-btn').forEach(b =>
+      b.addEventListener('click', () => { _stepStrength = +b.dataset.s; _highlightStrength(); }));
+    _el('var-stepwise').addEventListener('click', e => { if (e.target.id === 'var-stepwise') { _el('var-stepwise').style.display = 'none'; _render(); } });
     // Problem → komplette Tabelle
     _el('btn-var-generate').addEventListener('click', _generateAll);
     _loadList();
   }
 
-  return { init };
+  return { init, openStepwise };
 })();

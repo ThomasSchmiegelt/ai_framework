@@ -36,6 +36,22 @@ def _ri(n: int) -> float:
     return 1.59 if n > 15 else 0.0
 
 
+# Erlaubte Saaty-Stufen (für den „idealen" Vorschlagswert beim Konsistenzhinweis).
+_SAATY_STEPS = [1.0 / v for v in (9, 8, 7, 6, 5, 4, 3, 2)] + [float(v) for v in range(1, 10)]
+
+
+def _snap_saaty(v: float) -> float:
+    """Einen Verhältniswert auf die nächste Saaty-Stufe runden (log-Abstand)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 1.0
+    if f <= 0 or math.isnan(f) or math.isinf(f):
+        return 1.0
+    f = max(1.0 / 9.0, min(9.0, f))
+    return min(_SAATY_STEPS, key=lambda s: abs(math.log(s) - math.log(f)))
+
+
 def _clamp_saaty(v) -> float:
     """Ein Paarvergleichswert auf einen sinnvollen Bereich bringen.
 
@@ -112,6 +128,31 @@ def pairwise_weights(matrix: list) -> dict:
         ri = _ri(n)
         cr = (ci / ri) if ri > 0 else 0.0
 
+    # Inkonsistentestes Urteil: Paar i<j, dessen gesetzter Wert a_ij am stärksten
+    # vom „idealen" Verhältnis w_i/w_j abweicht (Abstand im Log-Raum). Nur bei ≥3
+    # Kriterien und messbarer Inkonsistenz sinnvoll — Grundlage für den gezielten
+    # „erneut bewerten"-Hinweis im Frontend.
+    worst_pair = None
+    if n >= 3 and cr > 0:
+        best_dev = -1.0
+        for i in range(n):
+            for j in range(i + 1, n):
+                if weights[j] <= 0:
+                    continue
+                ideal = weights[i] / weights[j]
+                actual = a[i][j]
+                if actual <= 0 or ideal <= 0:
+                    continue
+                dev = abs(math.log(actual) - math.log(ideal))
+                if dev > best_dev:
+                    best_dev = dev
+                    worst_pair = {
+                        "i": i,
+                        "j": j,
+                        "actual": round(actual, 4),
+                        "ideal": round(_snap_saaty(ideal), 4),
+                    }
+
     return {
         "weights": [round(w, 6) for w in weights],
         "lambda_max": round(lam, 6),
@@ -119,6 +160,7 @@ def pairwise_weights(matrix: list) -> dict:
         "cr": round(max(cr, 0.0), 6),
         "consistent": cr <= 0.10,
         "n": n,
+        "worst_pair": worst_pair,
     }
 
 

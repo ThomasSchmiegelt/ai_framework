@@ -152,6 +152,7 @@
       <button class="tab-btn" data-tab="rechnung">🧾 Angebot / Rechnung</button>
       <button class="tab-btn" data-tab="zeugnis">📜 Zeugnisse</button>
       <button class="tab-btn" data-tab="varianten">🧮 Varianten</button>
+      <button class="tab-btn" data-tab="compare">📊 Excel-Vergleich</button>
       <button class="tab-btn" data-tab="todo">✅ To-Do</button>
       <button class="tab-btn" data-tab="transcription">🎙 Transkription</button>
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
@@ -281,6 +282,42 @@
         <div class="bild-actions">
           <button id="bild-cancel" class="bild-btn-sec">Abbrechen</button>
           <button id="bild-go" class="bild-btn-go">🎨 Erzeugen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Excel-Vergleich aus dem Chat (/excelvergleich) ─────────────────── -->
+    <div id="compare-help" class="bild-overlay" style="display:none">
+      <div class="bild-card">
+        <div class="bild-close" id="cmphelp-close" title="Schließen (Esc)">✕</div>
+        <div class="bild-title">📊 Excel-Vergleich</div>
+        <div class="planner-muted" style="font-size:12px;margin-bottom:8px">
+          Zwei Tabellen laden, je ein Blatt und eine Schlüsselspalte wählen. Das Ergebnis
+          (Diff + KI-Bewertung) erscheint direkt im Chat.
+        </div>
+        <label class="bild-lbl">Datei A</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="file" id="cmphelp-file-a" accept=".xlsx,.xls,.csv" style="flex:1" />
+          <button id="cmphelp-read-a" class="bild-btn-sec">einlesen</button>
+        </div>
+        <div id="cmphelp-a-meta" class="planner-muted" style="font-size:11px;margin:2px 0"></div>
+        <div style="display:flex;gap:6px">
+          <select id="cmphelp-sheet-a" style="flex:1" title="Blatt"></select>
+          <select id="cmphelp-key-a" style="flex:1" title="Schlüsselspalte"></select>
+        </div>
+        <label class="bild-lbl">Datei B</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="file" id="cmphelp-file-b" accept=".xlsx,.xls,.csv" style="flex:1" />
+          <button id="cmphelp-read-b" class="bild-btn-sec">einlesen</button>
+        </div>
+        <div id="cmphelp-b-meta" class="planner-muted" style="font-size:11px;margin:2px 0"></div>
+        <div style="display:flex;gap:6px">
+          <select id="cmphelp-sheet-b" style="flex:1" title="Blatt"></select>
+          <select id="cmphelp-key-b" style="flex:1" title="Schlüsselspalte"></select>
+        </div>
+        <div class="bild-actions">
+          <button id="cmphelp-cancel" class="bild-btn-sec">Abbrechen</button>
+          <button id="cmphelp-go" class="bild-btn-go">🔍 Vergleichen</button>
         </div>
       </div>
     </div>
@@ -2293,6 +2330,7 @@
           <div class="var-sec">
             <div class="var-sec-head">2 · Paarvergleich der Kriterien
               <button id="btn-var-swipe" class="export-btn" title="Kriterien paarweise per Tastatur/Wischen vergleichen">🎚 Schnellvergleich</button>
+              <button id="btn-var-stepwise" class="export-btn" title="Merkmal für Merkmal hinzufügen und paarweise abfragen">➕ Schritt-für-Schritt</button>
               <button id="btn-var-ai-pairwise" class="export-btn var-ai">🤖 Vorschlag</button>
               <span id="var-cr" class="var-cr"></span>
             </div>
@@ -2349,7 +2387,107 @@
           <div class="var-swipe-hint planner-muted">← linke wichtiger · → rechte wichtiger · ↑ gleich wichtig · Esc schließt</div>
         </div>
       </div>
+
+      <!-- Schritt-für-Schritt-Overlay (inkrementeller Paarvergleich) -->
+      <div id="var-stepwise" class="var-swipe-overlay" style="display:none">
+        <div class="var-swipe-card">
+          <div class="var-swipe-close" id="var-stepwise-close" title="Schließen (Esc)">✕</div>
+          <!-- Phase A: Merkmal hinzufügen -->
+          <div id="var-stepwise-add">
+            <div class="var-swipe-q">Schritt-für-Schritt Paarvergleich</div>
+            <p class="planner-muted" style="font-size:12px;margin:4px 0 10px">
+              Merkmal (Kriterium) eingeben. Ab dem zweiten Merkmal wirst du gefragt, wie
+              wichtig es im Vergleich zu jedem vorherigen ist.
+            </p>
+            <div style="display:flex;gap:6px">
+              <input type="text" id="var-stepwise-input" class="var-input" placeholder="Neues Merkmal" style="flex:1" />
+              <button id="var-stepwise-add-btn" class="export-btn">hinzufügen</button>
+            </div>
+            <div id="var-stepwise-list" class="planner-muted" style="font-size:12px;margin-top:10px"></div>
+            <div style="margin-top:14px;display:flex;gap:6px;flex-wrap:wrap;justify-content:center">
+              <button id="var-stepwise-repeat" class="export-btn">🔁 alle Paare wiederholen</button>
+              <button id="var-stepwise-done" class="export-btn">✓ Fertig</button>
+            </div>
+          </div>
+          <!-- Phase B: Frage -->
+          <div id="var-stepwise-q" style="display:none">
+            <div class="var-swipe-progress" id="var-stepwise-progress"></div>
+            <div class="var-swipe-q">Wie wichtig ist <b id="var-stepwise-a">A</b> gegenüber <b id="var-stepwise-b">B</b>?</div>
+            <div class="var-swipe-strength" style="margin:10px 0;text-align:center">
+              <span class="planner-muted" style="font-size:12px">Stärke:</span>
+              <button class="var-strength-btn" data-s="3">etwas</button>
+              <button class="var-strength-btn" data-s="5">deutlich</button>
+              <button class="var-strength-btn" data-s="7">stark</button>
+              <button class="var-strength-btn" data-s="9">extrem</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+              <button id="var-stepwise-more" class="export-btn">wichtiger</button>
+              <button id="var-stepwise-eq" class="export-btn">gleich</button>
+              <button id="var-stepwise-less" class="export-btn">weniger wichtig</button>
+            </div>
+            <div class="var-swipe-hint planner-muted" style="margin-top:10px">
+              Standard-Stärke „etwas" (Saaty 3) — für ein feineres Urteil vorher eine andere Stärke wählen.
+            </div>
+          </div>
+        </div>
+      </div>
     </div><!-- /varianten-panel -->
+
+    <!-- ── Excel-Vergleich (zwei Blätter über Schlüsselspalte + KI-Bewertung) ── -->
+    <div id="compare-panel" class="panel" style="overflow:auto;padding:12px 14px">
+      <div id="cmp-toolbar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <h2 style="font-size:16px;margin:0">📊 Excel-Vergleich</h2>
+        <select id="cmp-project" style="min-width:180px"><option value="">— gespeicherten Vergleich öffnen —</option></select>
+        <button id="btn-cmp-delete" class="export-btn btn-danger-sm" title="Gespeicherten Vergleich löschen">✕</button>
+        <span id="cmp-spin" class="pf-spin" style="display:none;margin-left:auto"></span>
+        <span id="cmp-status" class="planner-muted" style="font-size:11.5px"></span>
+      </div>
+
+      <p class="planner-muted" style="font-size:12px;margin:0 0 10px">
+        Zwei Excel-/CSV-Dateien laden, je ein Blatt und eine <strong>Schlüsselspalte</strong> wählen
+        (z. B. ID/Name) — der Vergleich zeigt neue, entfernte und geänderte Zeilen und lässt die
+        Unterschiede zusätzlich von der KI bewerten. Alles lokal, deterministischer Diff.
+      </p>
+
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <!-- Datei A -->
+        <div class="cmp-side" style="flex:1;min-width:280px;border:1px solid var(--border);border-radius:8px;padding:10px">
+          <div class="var-sec-head">Datei A</div>
+          <input type="file" id="cmp-file-a" class="file-styled" accept=".xlsx,.xls,.csv" />
+          <button id="btn-cmp-read-a" class="export-btn">⬆ einlesen</button>
+          <div id="cmp-a-meta" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
+          <label class="var-lbl" style="margin-top:8px">Blatt</label>
+          <select id="cmp-sheet-a" class="var-input"></select>
+          <label class="var-lbl" style="margin-top:6px">Kopfzeile (0-basiert)</label>
+          <input type="number" id="cmp-header-a" class="var-input" value="0" min="0" step="1" style="max-width:90px" />
+          <label class="var-lbl" style="margin-top:6px">Schlüsselspalte</label>
+          <select id="cmp-key-a" class="var-input"></select>
+        </div>
+        <!-- Datei B -->
+        <div class="cmp-side" style="flex:1;min-width:280px;border:1px solid var(--border);border-radius:8px;padding:10px">
+          <div class="var-sec-head">Datei B</div>
+          <input type="file" id="cmp-file-b" class="file-styled" accept=".xlsx,.xls,.csv" />
+          <button id="btn-cmp-read-b" class="export-btn">⬆ einlesen</button>
+          <div id="cmp-b-meta" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
+          <label class="var-lbl" style="margin-top:8px">Blatt</label>
+          <select id="cmp-sheet-b" class="var-input"></select>
+          <label class="var-lbl" style="margin-top:6px">Kopfzeile (0-basiert)</label>
+          <input type="number" id="cmp-header-b" class="var-input" value="0" min="0" step="1" style="max-width:90px" />
+          <label class="var-lbl" style="margin-top:6px">Schlüsselspalte</label>
+          <select id="cmp-key-b" class="var-input"></select>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0">
+        <button id="btn-cmp-run" class="export-btn var-ai">🔍 Vergleichen</button>
+        <input type="text" id="cmp-save-name" placeholder="Name zum Speichern…" style="max-width:200px" />
+        <button id="btn-cmp-save" class="export-btn">💾 Speichern</button>
+        <button id="btn-cmp-csv" class="export-btn" title="Diff-Tabelle als CSV">⬇ CSV</button>
+      </div>
+
+      <div id="cmp-diff"></div>
+      <div id="cmp-eval" class="var-explain" style="margin-top:12px"></div>
+    </div><!-- /compare-panel -->
 
     <!-- ── KI-To-Do-Liste mit Wissensgraph ──────────────────────────────────── -->
     <div id="todo-panel" class="panel">
@@ -3464,7 +3602,7 @@
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
 <script src="/js/tts.js?v=20260818wfmodel"></script>
-<script src="/js/chat.js?v=20260818musik"></script>
+<script src="/js/chat.js?v=20260821compare"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260721"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
@@ -3488,11 +3626,12 @@
 <script src="/js/rechnung.js?v=20260714"></script>
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
-<script src="/js/varianten.js?v=20260816autofill"></script>
+<script src="/js/varianten.js?v=20260821compare"></script>
+<script src="/js/compare.js?v=20260821compare"></script>
 <script src="/js/todo.js?v=20260818handoff"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260817slideimg"></script>
+<script src="/js/app.js?v=20260821compare"></script>
 
 </body>
 </html>

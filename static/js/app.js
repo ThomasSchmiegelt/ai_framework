@@ -724,6 +724,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('Rechnung', () => { if (typeof Rechnung !== 'undefined') Rechnung.init(); });
   _safeInit('Zeugnis', () => { if (typeof Zeugnis !== 'undefined') Zeugnis.init(); });
   _safeInit('Varianten', () => { if (typeof Varianten !== 'undefined') Varianten.init(); });
+  _safeInit('Compare', () => { if (typeof Compare !== 'undefined') Compare.init(); });
   _safeInit('Todo', () => { if (typeof Todo !== 'undefined') Todo.init(); });
   _safeInit('Transcription', () => { if (typeof Transcription !== 'undefined') Transcription.init(); });
   _safeInit('TTS', () => { if (typeof TTS !== 'undefined') TTS.init(); });
