@@ -155,6 +155,26 @@ const Chat = (() => {
       return;
     }
 
+    // Excel-Vergleich: „/excelvergleich" (Aliase /xlsvergleich, /excel) öffnet ein
+    // Overlay (zwei Dateien + Blatt/Schlüsselspalte) und rendert das Ergebnis im Chat.
+    const xc = _parseExcelCompare(text);
+    if (xc) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runExcelCompare();
+      return;
+    }
+
+    // Paarvergleich: „/paarvergleich <Thema>" (Aliase /entscheidung, /ahp) startet den
+    // schrittweisen Merkmal-für-Merkmal-Paarvergleich (Varianten-Overlay über dem Chat).
+    const pv = _parsePairwise(text);
+    if (pv) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runPairwise(pv.topic);
+      return;
+    }
+
     // Bild-Modus per Toolbar-Haken (🎨): die nächste normale Nachricht wird zum
     // Bild-Prompt. One-shot – der Haken wird danach zurückgesetzt.
     const imgToggle = document.getElementById('btn-image-toggle');
@@ -2748,6 +2768,8 @@ const Chat = (() => {
     { key: 'mathe', label: '🧮 Mathe', input: 'mathe-input' },
     { key: 'medizin', label: '🩺 Medizin', input: 'medizin-input' },
     { key: 'varianten', label: '⚖ Varianten', input: 'var-problem' },
+    { key: 'pairwise', label: '⚖ Paarvergleich starten' },
+    { key: 'compare', label: '📊 Excel-Vergleich' },
     { key: 'morph', label: '🧩 Morph-Kasten', input: 'morph-problem' },
     { key: 'patente', label: '📜 Patente', input: 'pat-search-term' },
     { key: 'rfq', label: '📩 Anfrage', input: 'rfq-chat-input' },
@@ -2760,6 +2782,14 @@ const Chat = (() => {
     if (!text) { showToast('Nichts zu übernehmen'); return; }
     if (key === 'todo') return _openTodoHandoff(text);
     if (key === 'planner') return _openPlanHandoff(text);
+    if (key === 'pairwise') {
+      if (typeof Varianten !== 'undefined' && Varianten.openStepwise) {
+        const nm = text.slice(0, 60).replace(/[^\wäöüÄÖÜß \-]/g, '').trim() || 'Entscheidung';
+        Varianten.openStepwise({ name: nm, title: text.slice(0, 120) });
+        showToast('⚖ Schritt-für-Schritt Paarvergleich gestartet');
+      } else showToast('Varianten-Modul nicht geladen');
+      return;
+    }
     const t = _HANDOFF_TARGETS.find(x => x.key === key);
     const name = t ? t.label.replace(/^\S+\s/, '') : key;
     if (key === 'ide') {
@@ -2844,6 +2874,146 @@ const Chat = (() => {
         body: JSON.stringify({ messages: messages.filter(m => m.role !== 'system') }),
       });
     } catch (_) {}
+  }
+
+  // ── /excelvergleich — Excel-Vergleich aus dem Chat (Overlay #compare-help) ──
+  // Zwei Tabellen laden, Blatt + Schlüsselspalte wählen; Diff + KI-Bewertung
+  // rendern direkt in einer Chat-Blase. Nutzt die geteilten Compare-Helfer, damit
+  // es auch im Assistent-Modus (Tabs ausgeblendet) funktioniert.
+  function _parseExcelCompare(text) {
+    const m = text.match(/^\/(excelvergleich|xlsvergleich|excel|tabellenvergleich)\b\s*([\s\S]*)$/i);
+    return m ? {} : null;
+  }
+
+  let _cmpHelpWired = false;
+  const _cmpSideA = {}, _cmpSideB = {};
+
+  function _cmpFillSide(pfx, side, data) {
+    document.getElementById('cmphelp-' + pfx + '-meta').textContent =
+      `${data.filename} · ${data.n_rows} Zeilen · Blatt „${data.sheet}"`;
+    const ssel = document.getElementById('cmphelp-sheet-' + pfx);
+    ssel.innerHTML = (data.sheets || []).map(s => `<option ${s === data.sheet ? 'selected' : ''}>${escHtml(s)}</option>`).join('');
+    const ksel = document.getElementById('cmphelp-key-' + pfx);
+    ksel.innerHTML = (data.headers || []).map((h, i) => `<option value="${i}">${escHtml(h || ('Spalte ' + (i + 1)))}</option>`).join('');
+    side.file_id = data.file_id; side.filename = data.filename; side.sheet = data.sheet; side.key = 0;
+  }
+
+  async function _cmpRead(pfx, side, useSelectedSheet) {
+    if (typeof Compare === 'undefined') { showToast('Vergleichsmodul nicht geladen'); return; }
+    const fileEl = document.getElementById('cmphelp-file-' + pfx);
+    const f = (fileEl.files && fileEl.files[0]) || side.file;
+    if (!f) { showToast('Bitte Datei ' + pfx.toUpperCase() + ' wählen'); return; }
+    side.file = f;
+    const sheet = useSelectedSheet ? (document.getElementById('cmphelp-sheet-' + pfx).value || '') : '';
+    document.getElementById('cmphelp-' + pfx + '-meta').textContent = 'lese…';
+    try {
+      const data = await Compare.preview(f, sheet, 0);
+      _cmpFillSide(pfx, side, data);
+    } catch (e) { document.getElementById('cmphelp-' + pfx + '-meta').textContent = 'Fehler: ' + e.message; }
+  }
+
+  function runExcelCompare() {
+    const ov = document.getElementById('compare-help');
+    if (!ov) return;
+    if (!_cmpHelpWired) {
+      _cmpHelpWired = true;
+      const close = () => { ov.style.display = 'none'; };
+      document.getElementById('cmphelp-close').addEventListener('click', close);
+      document.getElementById('cmphelp-cancel').addEventListener('click', close);
+      ov.addEventListener('click', e => { if (e.target === ov) close(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && ov.style.display !== 'none') close(); });
+      document.getElementById('cmphelp-read-a').addEventListener('click', () => _cmpRead('a', _cmpSideA, false));
+      document.getElementById('cmphelp-read-b').addEventListener('click', () => _cmpRead('b', _cmpSideB, false));
+      document.getElementById('cmphelp-sheet-a').addEventListener('change', () => _cmpRead('a', _cmpSideA, true));
+      document.getElementById('cmphelp-sheet-b').addEventListener('change', () => _cmpRead('b', _cmpSideB, true));
+      document.getElementById('cmphelp-go').addEventListener('click', () => {
+        if (!_cmpSideA.file_id || !_cmpSideB.file_id) { showToast('Bitte beide Dateien einlesen'); return; }
+        const params = {
+          file_id_a: _cmpSideA.file_id, sheet_a: document.getElementById('cmphelp-sheet-a').value || _cmpSideA.sheet,
+          header_row_a: 0, key_a: parseInt(document.getElementById('cmphelp-key-a').value || '0', 10) || 0,
+          file_id_b: _cmpSideB.file_id, sheet_b: document.getElementById('cmphelp-sheet-b').value || _cmpSideB.sheet,
+          header_row_b: 0, key_b: parseInt(document.getElementById('cmphelp-key-b').value || '0', 10) || 0,
+          model: (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined,
+        };
+        const labelA = _cmpSideA.filename || 'A', labelB = _cmpSideB.filename || 'B';
+        close();
+        _runExcelCompareStream(params, labelA, labelB);
+      });
+    }
+    ['a', 'b'].forEach(p => {
+      document.getElementById('cmphelp-sheet-' + p).innerHTML = '';
+      document.getElementById('cmphelp-key-' + p).innerHTML = '';
+      document.getElementById('cmphelp-' + p + '-meta').textContent = '';
+    });
+    _cmpSideA.file_id = ''; _cmpSideA.file = null; _cmpSideB.file_id = ''; _cmpSideB.file = null;
+    ov.style.display = 'flex';
+  }
+
+  async function _runExcelCompareStream(params, labelA, labelB) {
+    if (typeof Compare === 'undefined') return;
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false); isStreaming = true; setBtnSendState(false);
+    appendMessage('user', `📊 Excel-Vergleich: ${labelA} ↔ ${labelB}`);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const diffEl = document.createElement('div');
+    const evalEl = document.createElement('div'); evalEl.className = 'bubble-text';
+    evalEl.appendChild(makeWorking('🔍 vergleicht'));
+    content.appendChild(diffEl); content.appendChild(evalEl); scrollToBottom();
+    let evalText = '';
+    await Compare.runStream(params, {
+      onDiff: (diff) => { diffEl.innerHTML = Compare.renderDiffHtml(diff); evalEl.innerHTML = ''; evalEl.appendChild(makeWorking('🧠 KI bewertet')); scrollToBottom(); },
+      onText: (chunk) => { evalText += chunk; evalEl.innerHTML = (typeof marked !== 'undefined') ? marked.parse(evalText) : escHtml(evalText); scrollToBottom(); },
+      onDone: (evaluation, tokens) => {
+        evalEl.innerHTML = (typeof marked !== 'undefined') ? marked.parse(evaluation || evalText) : escHtml(evaluation || evalText);
+        if (tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(tokens, 'Excel-Vergleich');
+        messages.push({ role: 'user', content: `📊 Excel-Vergleich: ${labelA} ↔ ${labelB}` });
+        messages.push({ role: 'assistant', content: '📊 Excel-Vergleich:\n\n' + (evaluation || evalText) });
+        _persistConversation(); loadConversationList();
+        isStreaming = false; setBtnSendState(true);
+      },
+      onError: (msg) => { evalEl.innerHTML = `<em style="color:#ef4444">Vergleich fehlgeschlagen: ${escHtml(msg)}</em>`; isStreaming = false; setBtnSendState(true); },
+    });
+  }
+
+  // ── /paarvergleich — schrittweiser Paarvergleich (Varianten-Overlay) ──────────
+  function _parsePairwise(text) {
+    const m = text.match(/^\/(paarvergleich|entscheidung|ahp)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { topic: (m[2] || '').trim() };
+  }
+
+  function runPairwise(topic) {
+    if (typeof Varianten === 'undefined' || !Varianten.openStepwise) { showToast('Varianten-Modul nicht geladen'); return; }
+    const name = (topic || '').trim() || ('Entscheidung ' + new Date().toLocaleDateString('de-DE'));
+    const safe = name.replace(/[^\wäöüÄÖÜß \-]/g, '').slice(0, 60).trim() || 'Entscheidung';
+    Varianten.openStepwise({
+      name: safe, title: name,
+      onDone: (data) => {
+        const r = (data && data.result) || {};
+        const weights = r.weights || [];
+        const crit = data.criteria || [];
+        showWelcome(false);
+        appendMessage('user', '⚖ Paarvergleich: ' + name);
+        if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+        const row = appendMessage('assistant', '', [], true);
+        const content = row.querySelector('.bubble-content');
+        const el = document.createElement('div'); el.className = 'bubble-text';
+        let md = `**Gewichtung „${name}"**\n\n`;
+        if (weights.length && crit.length) {
+          const order = crit.map((c, i) => ({ name: c.name || '?', w: weights[i] || 0 })).sort((a, b) => b.w - a.w);
+          order.forEach((o, i) => { md += `${i + 1}. ${o.name} — ${(o.w * 100).toFixed(0)}%\n`; });
+        } else { md += '_(noch keine Gewichte — Merkmale hinzufügen und bewerten)_\n'; }
+        if (r.cr != null && crit.length >= 3) md += `\nKonsistenz CR = ${r.cr.toFixed(2)} ${r.consistent !== false ? '✓' : '⚠ zu inkonsistent'}`;
+        md += `\n\n_Weiter im Varianten-Tab: Varianten hinzufügen und bewerten._`;
+        el.innerHTML = (typeof marked !== 'undefined') ? marked.parse(md) : escHtml(md).replace(/\n/g, '<br>');
+        content.appendChild(el);
+        messages.push({ role: 'user', content: '⚖ Paarvergleich: ' + name });
+        messages.push({ role: 'assistant', content: md });
+        _persistConversation(); loadConversationList();
+      },
+    });
   }
 
   // ── /musik — algorithmischer Musik-Generator (kein LLM/GPU, tools/music.py) ──
@@ -3486,6 +3656,8 @@ const Chat = (() => {
     { key: '/bildedit', ins: '/bildedit ', cmd: '/bildedit [Anweisung]', desc: 'Bildbearbeitung: Bild hochladen + sagen, wie es verändert werden soll (img2img). Optional „🖌 Bereich markieren" = nur den gemalten Bereich ändern (Inpainting). Lokal über Z-Image oder ein fähiges API-Modell; Stärke wählbar' },
     { key: '/upscale', ins: '/upscale', cmd: '/upscale', desc: 'Bild hochskalieren (2×, max 2048): „KI-Detail" ergänzt echte Schärfe lokal über Z-Image, „Schnell" vergrößert sofort per Lanczos' },
     { key: '/musik', ins: '/musik ', cmd: '/musik <Stil/Stimmung>', desc: 'Musik erzeugen (algorithmisch, ohne GPU): z. B. „/musik fröhliche 8bit Abenteuermelodie", „/musik traurig langsam" – spielt das Stück als Audio ab (💾 speichern)' },
+    { key: '/excelvergleich', ins: '/excelvergleich', cmd: '/excelvergleich', desc: 'Excel-Vergleich: zwei Tabellen laden, je Blatt + Schlüsselspalte wählen → neue/entfernte/geänderte Zeilen + KI-Bewertung im Chat (auch /xlsvergleich, /excel)' },
+    { key: '/paarvergleich', ins: '/paarvergleich ', cmd: '/paarvergleich [Thema]', desc: 'Schrittweiser Paarvergleich: Merkmal für Merkmal eingeben, Wichtigkeit gegen die vorherigen bewerten (Gewichte + Konsistenzcheck). Auch /entscheidung, /ahp' },
     { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Geführter Präsentationsassistent: kurzes Interview (Zielgruppe/Ziel/Umfang/Bilder) → schlüssige Gliederung + Inhaltsverzeichnis → Webrecherche je Punkt → flächiges Deckblatt & Abschlussbild, Inhaltsfolien zweispaltig → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },

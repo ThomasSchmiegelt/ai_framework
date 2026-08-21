@@ -27,6 +27,7 @@
 - [Angebot & Rechnung](#11e-angebot--rechnung)
 - [Arbeitszeugnisse](#11f-arbeitszeugnisse)
 - [Variantenvergleich (🧮 Varianten)](#11g-variantenvergleich--varianten)
+- [Excel-Listen vergleichen (📊 Excel-Vergleich)](#11g1-excel-listen-vergleichen--excel-vergleich)
 - [To-Do mit Wissensgraph (✅ To-Do)](#11h-to-do-mit-wissensgraph--to-do)
 - [Transkription — Sprache zu Text (🎙 Transkription)](#11i-transkription--sprache-zu-text--transkription)
 - [Geheim-Modus — alles lokal](#11j-geheim-modus--alles-lokal)
@@ -108,7 +109,8 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | ⚖️ Patente | Patent-Recherche, Fallakten & KI-Analyse *(optional)* |
 | 🧾 Angebot / Rechnung | Angebote & Rechnungen mit exakter Betragsrechnung (§14 UStG) *(optional)* |
 | 📜 Zeugnisse | Qualifizierte Arbeitszeugnisse in Zeugnissprache *(optional)* |
-| 🧮 Varianten | Gewichteter Variantenvergleich (Paarvergleich/AHP) mit KI-Hilfe, Schnellvergleich (Wischtechnik) & Auto-Tabelle aus Problembeschreibung *(optional)* |
+| 🧮 Varianten | Gewichteter Variantenvergleich (Paarvergleich/AHP) mit KI-Hilfe, Schnell- & Schritt-für-Schritt-Vergleich & Auto-Tabelle aus Problembeschreibung *(optional)* |
+| 📊 Excel-Vergleich | Zwei Excel-/CSV-Blätter über eine Schlüsselspalte vergleichen (neue/entfernte/geänderte Zeilen) + KI-Bewertung; auch per `/excelvergleich` im Chat *(optional)* |
 | ✅ To-Do | KI-Aufgabenliste (Besprechung/Projekt) mit Wissensgraph (2D & rotierende 3D-Kugel) *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
@@ -1253,6 +1255,36 @@ Vorschläge; Gewichte und Ranking rechnet weiterhin der Server. Im Geheim-Modus 
 
 Jeder Vergleich wird automatisch gespeichert (`data/varianten/`) und ist über die Auswahl oben wieder
 abrufbar.
+
+**➕ Schritt-für-Schritt (inkrementeller Paarvergleich):** Statt erst alle Kriterien anzulegen, kannst
+du sie **einzeln** eingeben — nach jedem neuen Merkmal fragt dich das Fenster, wie wichtig es **im
+Vergleich zu jedem bisherigen** ist (*wichtiger / gleich / weniger wichtig*). Standard ist die Stufe
+„etwas"; für ein feineres Urteil vorher **etwas/deutlich/stark/extrem** wählen. Über **🔁 alle Paare
+wiederholen** kannst du den Durchlauf beliebig oft neu machen. Ist die **Konsistenz** zu niedrig,
+benennt der Hinweis das strittigste Urteil und bietet **„erneut bewerten"** genau für dieses Paar an.
+Das geht auch **aus dem Chat** mit **`/paarvergleich [Thema]`** (funktioniert auch im Assistent-Modus).
+
+---
+
+## 11g.1 Excel-Listen vergleichen (📊 Excel-Vergleich)
+
+Tab **📊 Excel-Vergleich** — vergleicht **zwei Excel-/CSV-Dateien** (die je mehrere Tabellenblätter
+haben dürfen) und wertet die Unterschiede zusätzlich per **KI** aus.
+
+1. **Datei A** und **Datei B** laden und je **⬆ einlesen**.
+2. Pro Datei das gewünschte **Blatt** und eine **Schlüsselspalte** wählen (z. B. eine ID- oder
+   Namensspalte — darüber werden gleiche Zeilen einander zugeordnet).
+3. **🔍 Vergleichen** — es erscheint eine Übersicht: **nur in A**, **nur in B** und **geänderte Zeilen**
+   (Spalte, alter Wert → neuer Wert), darunter eine **KI-Bewertung** der wichtigsten Unterschiede.
+4. Mit einem Namen **💾 Speichern** — der Vergleich ist später über die Auswahl oben wieder abrufbar
+   (`data/compare/`). **⬇ CSV** exportiert die Unterschiede.
+
+> **Auch aus dem Chat:** Tippe **`/excelvergleich`** — es öffnet sich dasselbe Fenster (zwei Dateien +
+> Blatt/Schlüsselspalte), und das Ergebnis erscheint direkt im Chat. So funktioniert es auch im
+> **Assistent-Modus**, in dem nur der Chat sichtbar ist.
+
+Alles läuft **lokal**: der eigentliche Abgleich ist rein rechnerisch, nur die abschließende Bewertung
+nutzt das (lokal bevorzugte) Sprachmodell.
 
 ---
 

@@ -4804,6 +4804,23 @@ select.ob-input option {
 .var-swipe-eq:hover { border-color: var(--accent); }
 .var-swipe-eq .var-swipe-key { font-size: 18px; }
 .var-swipe-hint { text-align: center; font-size: 11px; margin-top: 14px; }
+/* Schritt-für-Schritt: Stärke-Auswahl + Merkmal-Eingabe */
+.var-strength-btn { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; margin: 0 3px; font-size: 12px; cursor: pointer; transition: border-color .12s, background .12s; }
+.var-strength-btn:hover { border-color: var(--accent); }
+.var-strength-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+#var-stepwise .var-input { width: 100%; box-sizing: border-box; background: var(--bg-card, var(--bg-input)); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+
+/* ── Excel-Vergleich (Tab + Chat-Overlay) ────────────────────────────────────── */
+#compare-panel .var-lbl, .cmp-side .var-lbl { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 8px 0 4px; }
+#compare-panel select.var-input, #compare-panel input.var-input { width: 100%; box-sizing: border-box; background: var(--bg-input, var(--bg-card)); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
+.cmp-summary { font-size: 13px; margin: 6px 0; }
+.cmp-table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.cmp-table th, .cmp-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.cmp-table th { background: var(--bg-hover, rgba(128,128,128,0.12)); font-weight: 600; }
+.cmp-table .cmp-key { white-space: nowrap; }
+.cmp-table .cmp-a { color: #ef4444; }
+.cmp-table .cmp-b { color: #22c55e; }
+.bild-card select { width: 100%; box-sizing: border-box; background: var(--bg-card, var(--bg-input)); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
 
 /* ── Geführte Bildgenerierung (/bildhelp) ────────────────────────────────────── */
 .bild-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; }
