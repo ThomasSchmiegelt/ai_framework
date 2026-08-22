@@ -11,11 +11,12 @@ Bedienung aus Nutzersicht: siehe [BEDIENUNGSANLEITUNG.md](../BEDIENUNGSANLEITUNG
 Browser (Vanilla JS, SPA)                 static/index.html + static/js/*.js
         │  fetch + SSE (Server-Sent Events)
         ▼
-FastAPI / Uvicorn (async)                 main.py  (~5400 Zeilen)
-        │  httpx                          tools/*.py   (Tool-Implementierungen)
-        ▼                                 db.py        (SQLite via aiosqlite)
-Ollama (lokales LLM)                      http://localhost:11434
-        │
+FastAPI / Uvicorn (async)                 main.py      (dünn: app + startup + include_router + Mount)
+        │                                 core.py      (geteilte Kernfläche + Capability-Cores)
+        │  httpx                          routers/*.py (ein APIRouter je Feature, ~39 Module)
+        ▼                                 tools/*.py   (Tool-Implementierungen)
+Ollama (lokales LLM)                      db.py        (SQLite via aiosqlite)
+        │                                 http://localhost:11434
         ▼
 SQLite (data/ai_framework_thomas.db)
 ```
@@ -24,9 +25,38 @@ SQLite (data/ai_framework_thomas.db)
 - **Kein Frontend-Build**: HTML/CSS/JS werden direkt über `StaticFiles` ausgeliefert.
 - **Single-User-fokussiert**, läuft aber auch im Server-Modus (`0.0.0.0`).
 
+### 1.1 Backend-Aufteilung (`main.py` → `core.py` + `routers/`)
+
+Das Backend war ein ~16.000-Zeilen-Monolith (`main.py`) und wurde aufgeteilt:
+
+- **`main.py`** (dünn): nur `from core import *`, `app = FastAPI(...)`, CORS, `@startup`,
+  alle `app.include_router(...)` und als **letzte Zeile** der `StaticFiles`-Mount.
+- **`core.py`** (geteilte Kernfläche): Konfiguration + Pfade (inkl. Import-Seiteneffekte:
+  DB-Pfad, `mkdir`-Loop, `_llm.set_config`, `_seed_defaults`), Modellwahl, Profil-Flags,
+  Prompt-Bau, LLM-Plumbing, `_sse`, sowie die **Capability-Cores**, die der Chat-Tool-Loop
+  aufruft (`_generate_image_core`/`_edit_image_core`/`_upscale_image_core`,
+  `_run_python_code`/`_safe_exec`, `_text_to_presentation`, Canvas-/Präsentations-Parser,
+  Cross-Feature-Pfad-Resolver). `core.py` definiert ein umfassendes `__all__` (inkl.
+  `_unterstrich`-Helfer); `main.py` und **jeder** Router machen `from core import *`, sodass
+  verschobener Routen-Code geteilte Namen **unqualifiziert** weiternutzt.
+- **`routers/<feature>.py`**: je Feature ein `router = APIRouter()`. Neues Feature =
+  neues Router-Modul + Import + `include_router` an den zwei Markern in `main.py`.
+- **Abhängigkeitsrichtung strikt einseitig**: `routers/* → core → {db, tools/*}` — kein Router
+  importiert `main`, kein `tools/*` importiert `main`. Web-Suche (`tools.search.search_with_sources`)
+  wird lokal dort importiert, wo sie gebraucht wird.
+- **Route-Reihenfolge**: literal-vor-parametrisch **je Router** erhalten (z. B. `/api/pst/stores`
+  vor `/api/pst/{store_id}`); der Static-Mount bleibt die allerletzte `app.`-Zeile.
+
+Die folgenden §2-Verweise auf „`main.py`" meinen inhaltlich die entsprechende Stelle in
+`core.py` bzw. `routers/<feature>.py` (z. B. `_chat_generator` → `routers/chat.py`,
+`_model_session`/`_pick_model`/`_augment_prefix` → `core.py`).
+
 ---
 
-## 2. Backend (`main.py`)
+## 2. Backend (`core.py` + `routers/`)
+
+> Historisch lag alles in `main.py`; seit der Aufteilung (siehe §1.1) liegen die hier
+> beschriebenen Bausteine in `core.py` (geteilte Kernfläche) bzw. `routers/<feature>.py`.
 
 ### 2.1 Konfiguration
 `config.json` wird beim Start eingelesen — keine Umgebungsvariablen:
