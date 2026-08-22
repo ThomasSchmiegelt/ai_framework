@@ -2839,6 +2839,25 @@ const Chat = (() => {
       menu.appendChild(b);
     });
     document.body.appendChild(menu);
+    // Im Viewport halten: der „senden an…"-Button steht meist am unteren Chat-Rand,
+    // deshalb je nach Platz nach OBEN oder UNTEN klappen und die Höhe auf den
+    // sichtbaren Bereich begrenzen (scrollbar) — sonst sind die unteren Einträge
+    // unter dem Fensterrand nicht erreichbar.
+    const margin = 8;
+    const vh = window.innerHeight, vw = window.innerWidth;
+    const spaceBelow = vh - r.bottom - margin;
+    const spaceAbove = r.top - margin;
+    const openUp = menu.offsetHeight > spaceBelow && spaceAbove > spaceBelow;
+    const avail = openUp ? spaceAbove : spaceBelow;
+    menu.style.maxHeight = Math.max(140, Math.min(menu.offsetHeight, avail)) + 'px';
+    const mh = menu.offsetHeight;   // nach der Höhenbegrenzung neu messen
+    let top = openUp ? (r.top - mh - 4) : (r.bottom + 4);
+    top = Math.max(margin, Math.min(top, vh - mh - margin));
+    let left = Math.round(r.left);
+    const mw = menu.offsetWidth;
+    if (left + mw > vw - margin) left = Math.max(margin, vw - mw - margin);
+    menu.style.top = Math.round(top) + 'px';
+    menu.style.left = left + 'px';
     setTimeout(() => {
       const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
       document.addEventListener('click', close);
