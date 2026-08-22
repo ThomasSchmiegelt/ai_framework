@@ -516,7 +516,7 @@ async def _patente_analyze_generator(name: str, body: PatAnalyze):
         yield _sse({"type": "error", "message": _m_err})
         return
     neben_model = _pick_model(body.neben_model, model) if body.neben_model else model
-    if _research_local_only() and _llm.is_remote(neben_model):
+    if _research_local_only() and _llm.is_remote(neben_model) and not _llm.is_local(neben_model):
         neben_model = model
     tok = {"in": 0, "out": 0}
     queue: asyncio.Queue = asyncio.Queue()
@@ -635,7 +635,7 @@ async def _patente_fto_generator(name: str, body: PatFto):
         yield _sse({"type": "error", "message": _m_err})
         return
     neben_model = _pick_model(body.neben_model, model) if body.neben_model else model
-    if _research_local_only() and _llm.is_remote(neben_model):
+    if _research_local_only() and _llm.is_remote(neben_model) and not _llm.is_local(neben_model):
         neben_model = model
     tok = {"in": 0, "out": 0}
     queue: asyncio.Queue = asyncio.Queue()

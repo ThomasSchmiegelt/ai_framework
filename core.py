@@ -90,8 +90,9 @@ def _pick_model(m, fallback: Optional[str] = None) -> str:
     **Remote-Modell verworfen**, damit der lokale Fallback greift — so bleibt alles
     lokal, ohne jeden Endpoint einzeln anzufassen (zentraler Chokepoint)."""
     m = (m or "").strip()
-    if m and _secret_local() and _llm.is_remote(m):
+    if m and _secret_local() and _llm.is_remote(m) and not _llm.is_local(m):
         m = ""  # Remote-Wahl im Geheim-Modus fallenlassen → lokaler Fallback
+        # (ein als lokal markierter llama.cpp/LM-Studio-Anbieter bleibt erlaubt)
     if m and m not in _MODEL_PLACEHOLDERS:
         return m
     return fallback or DEFAULT_MODEL
@@ -423,8 +424,8 @@ def _model_for(role: str) -> str:
     Standardmodell); eine bereits lokale Rollen-Zuweisung bleibt erhalten."""
     key = _MODEL_ROLES.get(role)
     val = str(_load_profile().get(key, "") or "").strip() if key else ""
-    if val and _secret_local() and _llm.is_remote(val):
-        val = ""
+    if val and _secret_local() and _llm.is_remote(val) and not _llm.is_local(val):
+        val = ""  # lokaler llama.cpp-Anbieter bleibt auch im Geheim-Modus zulässig
     return val or DEFAULT_MODEL
 
 
@@ -449,11 +450,16 @@ async def _local_model(preferred: Optional[str] = None) -> Optional[str]:
     lokal laufen sollen (Verzeichnis-Analyse, PST-Auswertung, „Recherche lokal").
     Reihenfolge: ``preferred`` (falls lokal & installiert) → general-Rolle (falls lokal)
     → DEFAULT_MODEL → erstes installiertes Modell. ``None``, wenn kein lokales LLM da ist."""
+    # Ein als lokal markierter llama.cpp/LM-Studio-Anbieter zählt wie Ollama — und
+    # wird sogar akzeptiert, wenn gar kein Ollama läuft (eigener lokaler Server).
+    if _llm.is_local(preferred):
+        return preferred
     installed = await _installed_local_models()
     if not installed:
-        return None
+        gen = _model_for("general")
+        return gen if _llm.is_local(gen) else None
     def _ok(m: Optional[str]) -> bool:
-        return bool(m) and not _llm.is_remote(m) and m in installed
+        return bool(m) and ((not _llm.is_remote(m) and m in installed) or _llm.is_local(m))
     if _ok(preferred):
         return preferred
     gen = _model_for("general")
@@ -589,7 +595,7 @@ async def _research_model(preferred: Optional[str] = None,
     ``fehler`` ist gesetzt, wenn umgebogen werden müsste, aber kein lokales LLM
     installiert ist."""
     m = _pick_model(preferred, fallback or _model_for("science"))
-    if _research_local_only() and _llm.is_remote(m):
+    if _research_local_only() and _llm.is_remote(m) and not _llm.is_local(m):
         loc = await _local_model(m)
         if not loc:
             return None, ('Kein lokales LLM verfügbar – „Web-Recherche lokal" ist '

@@ -26,7 +26,7 @@ const Profile = (() => {
   function _freeOnly() {
     try { return localStorage.getItem('profile_free_only') === '1'; } catch (_) { return false; }
   }
-  function _isFreeModel(m) { return !m.remote || /:free$/i.test(m.name || ''); }
+  function _isFreeModel(m) { return !m.remote || m.local || /:free$/i.test(m.name || ''); }
 
   async function _fillModelSelects() {
     let models = [];
@@ -38,7 +38,7 @@ const Profile = (() => {
     const shown = _freeOnly() ? models.filter(_isFreeModel) : models;
     const names = models.map(m => m.name);
     const shownNames = shown.map(m => m.name);
-    const _label = m => m.remote ? `☁ ${m.name.split('::').slice(1).join('::')} (${m.provider || 'API'})` : m.name;
+    const _label = m => m.remote ? `${m.local ? '🖥' : '☁'} ${m.name.split('::').slice(1).join('::')} (${m.provider || 'API'})` : m.name;
     for (const role of Object.keys(MODEL_ROLES)) {
       const sel = document.getElementById('profile-model-' + role);
       if (!sel) continue;
@@ -389,7 +389,7 @@ const Profile = (() => {
       row.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12.5px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:6px 10px';
       row.innerHTML = `<strong>${p.name}</strong> <span class="planner-muted">${p.base_url}</span> `
         + `<span class="planner-muted">· ${p.models ? p.models.length : 0} Modelle · `
-        + `${p.has_key ? '🔑 Key gesetzt' : '⚠ kein Key'}</span>`;
+        + `${p.local ? '🖥 lokal' : (p.has_key ? '🔑 Key gesetzt' : '⚠ kein Key')}</span>`;
       const del = document.createElement('button');
       del.className = 'export-btn'; del.textContent = '✕';
       del.style.cssText = 'margin-left:auto;font-size:11px';
@@ -403,13 +403,14 @@ const Profile = (() => {
     const name = document.getElementById('provider-name').value.trim();
     const base_url = document.getElementById('provider-url').value.trim();
     const api_key = document.getElementById('provider-key').value.trim();
+    const local = !!document.getElementById('provider-local')?.checked;
     const msg = document.getElementById('provider-msg');
     if (!name || !base_url) { msg.textContent = 'Name und Base-URL erforderlich.'; return; }
     msg.textContent = 'Anbieter wird geprüft und gespeichert …';
     try {
       const resp = await fetch('/api/providers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, base_url, api_key }),
+        body: JSON.stringify({ name, base_url, api_key, local }),
       });
       if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
       const p = await resp.json();
@@ -417,6 +418,7 @@ const Profile = (() => {
       document.getElementById('provider-name').value = '';
       document.getElementById('provider-url').value = '';
       document.getElementById('provider-key').value = '';
+      if (document.getElementById('provider-local')) document.getElementById('provider-local').checked = false;
       await _loadProviders();
       await _fillModelSelects();   // neue Remote-Modelle in den Rollen-Listen anzeigen
       await _fillTtsSelect();      // neuer Anbieter → TTS-Vorschläge aktualisieren

@@ -125,7 +125,8 @@ def _save_api_providers(items: list) -> None:
 def _provider_public(p: dict) -> dict:
     """Anbieter ohne API-Key (für die Anzeige im Frontend)."""
     return {"id": p.get("id"), "name": p.get("name"), "base_url": p.get("base_url"),
-            "models": p.get("models", []), "has_key": bool(p.get("api_key"))}
+            "models": p.get("models", []), "has_key": bool(p.get("api_key")),
+            "local": bool(p.get("local"))}
 
 
 @router.get("/api/providers")
@@ -161,7 +162,11 @@ async def save_provider(req: Request):
 
     models = body.get("models") or []
     prov = {"id": pid, "name": name, "base_url": base_url, "api_key": api_key,
-            "models": [str(m) for m in models]}
+            "models": [str(m) for m in models],
+            # „local": true = OpenAI-kompatibler Server auf dem eigenen Rechner
+            # (llama.cpp / LM Studio). Zählt für die Lokal-Gates (Geheim-Modus,
+            # vertrauliche Auswertungen, Web-Recherche-lokal) wie Ollama.
+            "local": bool(body.get("local"))}
     if not prov["models"]:
         try:
             prov["models"] = await _llm.fetch_provider_models(prov)

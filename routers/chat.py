@@ -663,7 +663,7 @@ async def _chat_generator(request: ChatRequest):
     # Profil-Schalter „Recherche lokal": Wissenschafts-/Recherchekontext (Matrix-Zellen
     # laufen mit science=true) zwingend auf ein lokales Modell umbiegen, auch wenn die
     # Rolle ein externes API-Modell ist. Ist kein lokales LLM da → Fehlerframe.
-    if request.science and _research_local_only() and _llm.is_remote(model):
+    if request.science and _research_local_only() and _llm.is_remote(model) and not _llm.is_local(model):
         _loc = await _local_model(model)
         if not _loc:
             yield _sse({"type": "error", "message": "Kein lokales LLM verfügbar – „Web-Recherche lokal“ ist im Profil aktiv."})
