@@ -596,54 +596,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     a.click();
   });
 
-  // Vollständiges Backup / Restore
-  document.getElementById('btn-backup-all')?.addEventListener('click', () => {
-    showToast('Backup wird erstellt…');
-    const a = document.createElement('a');
-    a.href = '/api/backup';
-    a.download = '';
-    a.click();
-  });
-
-  const restoreInput = document.getElementById('restore-input');
-  document.getElementById('btn-restore-all')?.addEventListener('click', () => restoreInput?.click());
-  restoreInput?.addEventListener('change', async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    e.target.value = '';
-    showToast('Restore läuft…');
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const resp = await fetch('/api/restore', { method: 'POST', body: fd });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const stats = await resp.json();
-      const msg = [
-        stats.profile   ? '✓ Profil'     : '',
-        stats.projects  ? '✓ Projekte'   : '',
-        stats.conversations ? `✓ ${stats.conversations} Gespräche` : '',
-        stats.plans         ? `✓ ${stats.plans} Pläne`             : '',
-        stats.agents        ? `✓ ${stats.agents} Agenten`          : '',
-        stats.rag_collections ? `✓ ${stats.rag_collections} Wissensdatenbanken` : '',
-        stats.profile_assets  ? `✓ ${stats.profile_assets} Branding-Bilder`     : '',
-        stats.errors?.length ? `⚠ ${stats.errors.length} Fehler`  : '',
-      ].filter(Boolean).join(' · ');
-      showToast(msg || 'Restore abgeschlossen', 4000);
-      await Chat.loadConversationList();
-      await Projects.load();
-      // Profil/Branding und Wissensdatenbanken nach dem Restore aktualisieren
-      if (typeof Profile !== 'undefined' && Profile.load) { try { await Profile.load(); } catch (_) {} }
-      if (typeof AgentManager !== 'undefined' && AgentManager.load) { try { await AgentManager.load(); } catch (_) {} }
-      if (typeof RAG !== 'undefined' && RAG.loadCollections) { try { await RAG.loadCollections(); } catch (_) {} }
-      const _logo = document.getElementById('sidebar-logo');
-      if (_logo) { _logo.src = `/api/profile/asset/logo?t=${Date.now()}`; _logo.style.display = ''; }
-      if (typeof CanvasRenderer !== 'undefined' && CanvasRenderer.reloadBranding) {
-        try { CanvasRenderer.reloadBranding(); } catch (_) {}
-      }
-    } catch (err) {
-      showToast('Restore fehlgeschlagen: ' + err.message);
-    }
-  });
+  // Vollständiges Backup / Restore liegt jetzt ausschließlich im Profil-Modal
+  // (btn-profile-export / btn-profile-import, mit wählbarem Umfang). Die früheren
+  // Sidebar-Knöpfe (btn-backup-all / btn-restore-all) wurden entfernt.
 
   // ── Export/Import im Profil ───────────────────────────────────────────────
   // Gleicher Endpunkt wie die Knöpfe in der Seitenleiste, aber mit wählbarem
@@ -697,6 +652,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (typeof Profile !== 'undefined' && Profile.load) { try { await Profile.load(); } catch (_) {} }
       if (typeof AgentManager !== 'undefined' && AgentManager.load) { try { await AgentManager.load(); } catch (_) {} }
       if (typeof RAG !== 'undefined' && RAG.loadCollections) { try { await RAG.loadCollections(); } catch (_) {} }
+      // Branding/Logo nach dem Restore auffrischen (wie früher der Sidebar-Restore)
+      const _logo = document.getElementById('sidebar-logo');
+      if (_logo) { _logo.src = `/api/profile/asset/logo?t=${Date.now()}`; _logo.style.display = ''; }
+      if (typeof CanvasRenderer !== 'undefined' && CanvasRenderer.reloadBranding) {
+        try { CanvasRenderer.reloadBranding(); } catch (_) {}
+      }
     } catch (err) {
       if (out) out.textContent = '⚠ Fehlgeschlagen: ' + err.message;
       showToast('Wiederherstellung fehlgeschlagen: ' + err.message);

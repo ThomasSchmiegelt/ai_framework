@@ -101,11 +101,8 @@
         <button id="btn-export-all-conv" class="btn-sidebar-action" title="Alle Gespräche exportieren (ZIP)">⬇ Gespräche</button>
       </div>
       <input type="file" id="conv-import-input" accept=".json" style="display:none" />
-      <div style="display:flex;gap:6px">
-        <button id="btn-backup-all" class="btn-sidebar-action" title="Alle Nutzerdaten exportieren (ZIP-Backup)">💾 Backup</button>
-        <button id="btn-restore-all" class="btn-sidebar-action" title="Nutzerdaten aus ZIP-Backup wiederherstellen">📥 Restore</button>
-      </div>
-      <input type="file" id="restore-input" accept=".zip" style="display:none" />
+      <!-- Backup/Restore liegen jetzt im Profil-Modal („💾 Alle Daten sichern & wiederherstellen",
+           mit wählbarem Umfang) — die früheren Sidebar-Knöpfe wurden dorthin verlagert. -->
       <button id="btn-profile" class="btn-sidebar-action" style="width:100%">👤 Profil bearbeiten</button>
       <button id="btn-secret-mode" class="btn-sidebar-action" style="width:100%"
               title="Geheim-Modus: sämtliche Modell-Rollen zwingend lokal. Klick schaltet um.">🔓 Geheim-Modus: aus</button>
@@ -140,7 +137,6 @@
       <button class="tab-btn" data-tab="rfq">📋 Anfrage</button>
       <button class="tab-btn" data-tab="planner">🗂️ Planer</button>
       <button class="tab-btn" data-tab="ide">💻 Code</button>
-      <button class="tab-btn" data-tab="agents">🤖 Agenten</button>
       <button class="tab-btn" data-tab="rag">📚 RAG</button>
       <button class="tab-btn" data-tab="mail">📧 Mail</button>
       <button class="tab-btn" data-tab="logs">📋 Logs</button>
@@ -3608,7 +3604,7 @@
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
 <script src="/js/tts.js?v=20260818wfmodel"></script>
-<script src="/js/chat.js?v=20260821compare"></script>
+<script src="/js/chat.js?v=20260822handoff"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260721"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
@@ -3637,7 +3633,7 @@
 <script src="/js/todo.js?v=20260818handoff"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
-<script src="/js/app.js?v=20260821compare"></script>
+<script src="/js/app.js?v=20260822sidebar"></script>
 
 </body>
 </html>
