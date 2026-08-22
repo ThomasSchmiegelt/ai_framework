@@ -478,6 +478,31 @@ _SEARCH_KB_TOOL_DEF = {
     },
 }
 
+# Patentrecherche-Werkzeug (Assistent-Modus): sucht Patente (EPO-OPS falls konfiguriert,
+# sonst Google-Patents-Fallback). Braucht Web-Zugang → nur wenn Websuche erlaubt ist
+# (im Geheim-/Hartman-Modus aus). NICHT in TOOL_DEFS (gated).
+_SEARCH_PATENTS_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "search_patents",
+        "description": (
+            "Recherchiert PATENTE zu einem technischen Thema und liefert die wichtigsten "
+            "Treffer (Nummer, Titel, Anmelder, Datum, Kurzfassung). Nutze es, wenn der Nutzer "
+            "nach Patenten, Schutzrechten oder Stand der Technik zu einer Technologie fragt."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Technisches Stichwort / Thema (Boolesch AND/OR/NOT erlaubt)"},
+                "assignee": {"type": "string", "description": "Optional: Anmelder/Rechteinhaber"},
+                "ipc": {"type": "string", "description": "Optional: IPC-/CPC-Klasse, z. B. B60L"},
+                "max_results": {"type": "integer", "description": "Anzahl Treffer (Standard 8, max 20)"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 
 # ── Pydantic-Modelle ──────────────────────────────────────────────────────────
 
@@ -738,6 +763,11 @@ async def _chat_generator(request: ChatRequest):
         if any(int(c.get("n_chunks", 0) or 0) > 0 for c in _kb):
             active_tools = active_tools + [_SEARCH_KB_TOOL_DEF]
 
+    # Assistent-Modus: Patentrecherche freischalten, wenn Web-Zugang erlaubt ist
+    # (Geheim-/Hartman-Modus sperrt die Websuche → auch dieses Werkzeug entfällt).
+    if _assist_on and _web_search_allowed() and not any(t["function"]["name"] == "search_patents" for t in active_tools):
+        active_tools = active_tools + [_SEARCH_PATENTS_TOOL_DEF]
+
     # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
     messages: list = []
     _sci = _SCIENCE_PROMPT if request.science else ""
@@ -754,6 +784,8 @@ async def _chat_generator(request: ChatRequest):
             _caps.append("Bild/Grafik/Motiv erzeugen → generate_image")
         if any(t["function"]["name"] == "search_knowledge_base" for t in active_tools):
             _caps.append("eigene Dokumente/Unterlagen durchsuchen → search_knowledge_base")
+        if any(t["function"]["name"] == "search_patents" for t in active_tools):
+            _caps.append("Patente/Schutzrechte recherchieren → search_patents")
         if any(t["function"]["name"] == "create_diagram" for t in active_tools):
             _caps.append("Ablauf/Architektur/Beziehungen → create_diagram (Mermaid)")
         if any(t["function"]["name"] == "create_presentation" for t in active_tools):
@@ -766,7 +798,12 @@ async def _chat_generator(request: ChatRequest):
                         "SELBST, welches Werkzeug eine Aufgabe am besten löst — rufe es dann "
                         "eigenständig auf, statt nur zu beschreiben. Verfügbare Fähigkeiten: "
                         + "; ".join(_caps) + ". Für einfache Wissens-/Gesprächsfragen antworte "
-                        "direkt ohne Werkzeug.")
+                        "direkt ohne Werkzeug. Für Aufgaben, die eine Datei-Auswahl oder einen "
+                        "geführten Dialog brauchen und die du nicht selbst ausführen kannst, "
+                        "verweise den Nutzer auf den passenden Chat-Befehl: gewichtete "
+                        "Entscheidung/Variantenvergleich → /paarvergleich, zwei Excel-Tabellen "
+                        "vergleichen → /excelvergleich, geführte Präsentation → /praesentation, "
+                        "mehrstufige Web-Recherche → /recherche. Eine Gesamtübersicht liefert /hilfe.")
     _agent_hint = ""
     if _agent_tools_on and ALLOW_PYTHON_EXEC:
         _agent_hint = ("Du hast einen Code-Interpreter: Für rechen-/datenlastige oder komplexe "
@@ -1273,6 +1310,56 @@ async def _execute_tool(name: str, args: dict) -> str:
             parts.append(f"{label}\n{h.get('text','')}")
         return ("Treffer aus der Wissensdatenbank (stütze deine Antwort darauf und nenne die "
                 "Quelle in eckigen Klammern):\n\n" + "\n\n".join(parts))[:8000]
+
+    if name == "search_patents":
+        # Patentrecherche (Assistent-Modus): EPO-OPS falls konfiguriert, sonst Google-Fallback.
+        from tools import patente as _patente
+        term = str(args.get("query", "") or "").strip()
+        if not term:
+            return "Kein Suchbegriff angegeben."
+        try:
+            n = int(args.get("max_results", 8) or 8)
+        except Exception:
+            n = 8
+        n = max(1, min(n, 20))
+        # OPS-Zugangsdaten (falls vorhanden) inline lesen — ohne Router-Kopplung.
+        _ops = None
+        try:
+            if EPO_OPS_FILE.exists():
+                _d = json.loads(EPO_OPS_FILE.read_text(encoding="utf-8"))
+                if _d.get("consumer_key") and _d.get("consumer_secret"):
+                    _ops = _d
+        except Exception:
+            _ops = None
+        try:
+            async with httpx.AsyncClient() as client:
+                results, fehler, quelle = await _patente.search_patents(
+                    client, term, str(args.get("assignee", "") or ""), "",
+                    n, ipc=str(args.get("ipc", "") or ""),
+                    ops_creds=_ops, cache_dir=PAT_CACHE_DIR)
+        except Exception as e:
+            return "Patentrecherche fehlgeschlagen: " + str(e)[:200]
+        if not results:
+            return (f"Keine Patente zu '{term}' gefunden."
+                    + (f" ({fehler})" if fehler else ""))
+        lines = []
+        for r in results:
+            if r.get("error"):
+                continue
+            pid = r.get("patent_id", "")
+            title = r.get("title", "") or "(ohne Titel)"
+            date = r.get("publication_date", "") or r.get("date", "")
+            assignee = r.get("assignee", "") or (", ".join(r.get("inventors", []) or [])[:80])
+            abstract = (r.get("abstract", "") or "").strip().replace("\n", " ")
+            if len(abstract) > 300:
+                abstract = abstract[:300].rstrip() + " …"
+            head = f"[{pid}] {title}"
+            meta = " · ".join(x for x in (assignee, date) if x)
+            lines.append(head + (f"\n{meta}" if meta else "") + (f"\n{abstract}" if abstract else ""))
+        body = "\n\n".join(lines) or "(keine auswertbaren Treffer)"
+        src = "EPO OPS (amtlich)" if quelle == "epo_ops" else "Google Patents (Fallback)"
+        return (f"Patent-Treffer zu '{term}' (Quelle: {src}). Fasse die relevantesten für den "
+                f"Nutzer zusammen und nenne jeweils die Patentnummer:\n\n" + body)[:8000]
 
     if name in ("create_presentation", "create_spreadsheet"):
         canvas_type = name.replace("create_", "")
