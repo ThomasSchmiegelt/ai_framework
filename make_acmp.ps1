@@ -55,13 +55,13 @@ New-Item -ItemType Directory -Path $Out -Force | Out-Null
 # Bewusst eine Positivliste: alles Nicht-Aufgefuehrte bleibt draussen. So kann
 # kein Ollama-Ordner, kein venv und keine Nutzerdatei versehentlich mitwandern.
 $rootFiles = @(
-    'main.py', 'db.py', 'requirements.txt', 'test_chat.py', 'VERSION',
+    'main.py', 'core.py', 'db.py', 'requirements.txt', 'test_chat.py', 'VERSION',
     'LICENSE', 'update.bat',
     'start.bat', 'start_server.bat', 'install.bat', 'install.ps1', 'install.sh',
     'start.sh', 'uninstall.bat', 'uninstall.ps1', 'diagnose.bat', 'test_chat.bat'
 )
 $rootGlobs = @('*.md')
-$dirs      = @('static', 'tools', 'docs', 'scripts', 'samples', 'bilder', 'defaults')
+$dirs      = @('static', 'tools', 'routers', 'docs', 'scripts', 'samples', 'bilder', 'defaults')
 
 foreach ($f in $rootFiles) {
     $p = Join-Path $src $f
