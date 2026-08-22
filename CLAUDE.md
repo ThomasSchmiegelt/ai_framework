@@ -39,8 +39,9 @@ Ollama must run separately on `http://localhost:11434` with at least one `config
 
 ## Testing / Diagnostics
 
-There is **no automated test suite or linter configured** (no pytest, no ruff/flake8 config) — verify changes by running the app and exercising the affected tab/endpoint manually. Two manual smoke-test scripts exist for backend-only checks (both auto-detect dev vs. portable-bundle layout):
-- `python3 test_chat.py [appdir]` — hits `/api/chat` directly (bypassing the frontend), once without tools and once with tools, printing raw SSE frames. Requires the app already running.
+There is **no linter configured** (no ruff/flake8) and pytest is **not** a dependency — verify changes by running the app and exercising the affected tab/endpoint manually. Three backend-only check scripts exist:
+- `python test_boot.py` — **in-process Boot-/Smoke-Test ohne laufenden Server oder Ollama** (nutzt den FastAPI-TestClient): App bootet, StaticFiles-Mount ist letzte Route, alle Feature-Router eingehängt, zentrale lokale GET-Endpunkte = 200, llama.cpp-`is_local`-Weiche. Plain-Script (Exit-Code) **und** pytest-kompatibel. Nach Backend-Umbauten zuerst laufen lassen.
+- `python3 test_chat.py [appdir]` — hits `/api/chat` directly (bypassing the frontend), once without tools and once with tools, printing raw SSE frames. Requires the app already running (auto-detects dev vs. portable-bundle layout).
 - `diagnose.bat` (Windows) — collects OS/Python/package/port/Ollama status into `diagnose_report.txt`.
 
 ## Key Configuration
