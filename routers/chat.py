@@ -452,6 +452,32 @@ _GENERATE_IMAGE_TOOL_DEF = {
     },
 }
 
+# Wissensdatenbank-Werkzeug (Assistent-Modus): durchsucht die persönlichen RAG-Sammlungen
+# des Nutzers. Nur angeboten, wenn mindestens eine nicht-leere Sammlung existiert. Die
+# Einbettung der Anfrage braucht lokales Ollama (Embedding-Modell) — schlägt sie fehl,
+# meldet das Werkzeug das klar zurück. NICHT in TOOL_DEFS (gated).
+_SEARCH_KB_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "search_knowledge_base",
+        "description": (
+            "Durchsucht die persönliche WISSENSDATENBANK des Nutzers (hinterlegte Dokumente, "
+            "Notizen, PDFs in den RAG-Sammlungen) nach relevanten Textstellen und liefert die "
+            "besten Treffer mit Quellenangabe. Nutze es, wenn sich die Frage auf eigene/interne "
+            "Unterlagen bezieht oder der Nutzer etwas aus seinen hinterlegten Dokumenten wissen "
+            "will. Stütze deine Antwort dann auf die gefundenen Stellen und nenne die Quelle."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "Suchbegriff/Frage in natürlicher Sprache"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 
 # ── Pydantic-Modelle ──────────────────────────────────────────────────────────
 
@@ -702,6 +728,16 @@ async def _chat_generator(request: ChatRequest):
     if _assist_on and _image_model() and not any(t["function"]["name"] == "generate_image" for t in active_tools):
         active_tools = active_tools + [_GENERATE_IMAGE_TOOL_DEF]
 
+    # Assistent-Modus: Wissensdatenbank-Suche freischalten, wenn mindestens eine
+    # nicht-leere RAG-Sammlung existiert (sonst hätte das Werkzeug nichts zu durchsuchen).
+    if _assist_on and not any(t["function"]["name"] == "search_knowledge_base" for t in active_tools):
+        try:
+            _kb = await _db.rag_list_collections()
+        except Exception:
+            _kb = []
+        if any(int(c.get("n_chunks", 0) or 0) > 0 for c in _kb):
+            active_tools = active_tools + [_SEARCH_KB_TOOL_DEF]
+
     # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
     messages: list = []
     _sci = _SCIENCE_PROMPT if request.science else ""
@@ -716,6 +752,8 @@ async def _chat_generator(request: ChatRequest):
             _caps.append("aktuelle Fakten/Recherche → web_search")
         if any(t["function"]["name"] == "generate_image" for t in active_tools):
             _caps.append("Bild/Grafik/Motiv erzeugen → generate_image")
+        if any(t["function"]["name"] == "search_knowledge_base" for t in active_tools):
+            _caps.append("eigene Dokumente/Unterlagen durchsuchen → search_knowledge_base")
         if any(t["function"]["name"] == "create_diagram" for t in active_tools):
             _caps.append("Ablauf/Architektur/Beziehungen → create_diagram (Mermaid)")
         if any(t["function"]["name"] == "create_presentation" for t in active_tools):
@@ -1206,6 +1244,35 @@ async def _execute_tool(name: str, args: dict) -> str:
             return json.dumps({"ok": False, "error": str(e.detail)}, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+
+    if name == "search_knowledge_base":
+        # Wissensdatenbank-Suche (Assistent-Modus): alle nicht-leeren RAG-Sammlungen.
+        from tools.rag import query_collections as _qc
+        q = str(args.get("query", "") or "").strip()
+        if not q:
+            return "Keine Suchanfrage angegeben."
+        try:
+            colls = await _db.rag_list_collections()
+        except Exception:
+            colls = []
+        ids = [c["id"] for c in colls if int(c.get("n_chunks", 0) or 0) > 0]
+        if not ids:
+            return "Die Wissensdatenbank ist leer — es sind keine durchsuchbaren Sammlungen vorhanden."
+        try:
+            hits = await _qc(ids, q, top_k_cap=8)
+        except Exception as e:
+            return ("Wissensdatenbank-Suche fehlgeschlagen (Einbettung braucht lokales Ollama): "
+                    + str(e)[:200])
+        if not hits:
+            return f"Keine passenden Stellen zu '{q}' in der Wissensdatenbank gefunden."
+        parts = []
+        for i, h in enumerate(hits, 1):
+            src = h.get("filename", "") or h.get("collection_name", "")
+            coll = h.get("collection_name", "")
+            label = f"[{i}] {src}" + (f" · {coll}" if coll and coll != src else "")
+            parts.append(f"{label}\n{h.get('text','')}")
+        return ("Treffer aus der Wissensdatenbank (stütze deine Antwort darauf und nenne die "
+                "Quelle in eckigen Klammern):\n\n" + "\n\n".join(parts))[:8000]
 
     if name in ("create_presentation", "create_spreadsheet"):
         canvas_type = name.replace("create_", "")
