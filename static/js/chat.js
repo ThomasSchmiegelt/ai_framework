@@ -93,6 +93,15 @@ const Chat = (() => {
     if (!text && pendingFiles.length === 0) return;
     hideSlashHints();
 
+    // Befehlsübersicht: „/hilfe" (Aliase /help, /befehle, /?) zeigt alle Chat-Befehle
+    // als Karte an (kein LLM-Aufruf).
+    if (_parseHelp(text)) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runHelp();
+      return;
+    }
+
     // Nutzer-Feedback: „/- <Text>" (Fehler/Problem) bzw. „/+ <Text>" (Idee/
     // Verbesserung) wird ins Markdown-Protokoll geschrieben, nicht ans LLM gesendet.
     const fb = _parseFeedback(text);
@@ -3342,6 +3351,28 @@ const Chat = (() => {
   }
   window.runFeedback = runFeedback;
 
+  // ── /hilfe — Übersicht aller Chat-Befehle (kein LLM) ─────────────────────────
+  // Erkennt „/hilfe", „/help", „/befehle", „/?". Rendert die Befehlsliste aus
+  // SLASH_COMMANDS (einzige Quelle → bleibt automatisch aktuell) als Chat-Karte.
+  function _parseHelp(text) {
+    return /^\/(hilfe|help|befehle|\?)\s*$/i.test((text || '').trim());
+  }
+  function runHelp() {
+    showWelcome(false);
+    const lines = SLASH_COMMANDS
+      .filter(c => !c.info)   // der reine „/<Agent>"-Platzhalter wird separat erklärt
+      .map(c => `- **${c.cmd}** — ${c.desc}`);
+    const md = '📖 **Chat-Befehle** — tippe `/` im Eingabefeld für Autovervollständigung '
+      + '(↑↓ wählen · Tab übernehmen), oder nutze direkt:\n\n'
+      + lines.join('\n')
+      + '\n- **/<Agentenkürzel>** — einen gespeicherten Agenten nur für die nächste Nachricht verwenden '
+      + '(z. B. `/datenschutz_berater`)\n\n'
+      + '_Tipp: Über das Menü „↪ senden an…" unter jeder Antwort lässt sich das Ergebnis an andere '
+      + 'Tabs (To-Do, Planer, Code, Mathe …) übergeben._';
+    appendMessage('assistant', md);
+  }
+  window.runHelp = runHelp;
+
   // ── /plan — Strategie- & Einsatzplan-Orchestrator ────────────────────────────
   // „/plan" (optional mit Zusatz) baut aus dem bisherigen Chat-Verlauf in einem Zug
   // Strategie + Beratungs-Agenten + Einsatz-/Ressourcenplan + Bewertungs-Jury als
@@ -3647,6 +3678,7 @@ const Chat = (() => {
   // Beim Tippen eines führenden „/" erscheint über der Eingabe eine graue Liste der
   // verfügbaren Slash-Befehle. Auswahl per Klick, Tab oder ↑/↓+Tab; Esc schließt.
   const SLASH_COMMANDS = [
+    { key: '/hilfe', ins: '/hilfe', cmd: '/hilfe', desc: 'Übersicht aller Chat-Befehle anzeigen (auch /help, /befehle, /?)' },
     { key: '/such', ins: '/such ', cmd: '/such …', desc: 'Alternative Suchbegriffe finden + Web durchsuchen (auch /suche, /finde)' },
     { key: '/recherche', ins: '/recherche ', cmd: '/recherche …', desc: 'Tiefe Recherche: mehrere Aspekte im Web, steuerbare Tiefe & Länge (auch /deep, /tief)' },
     { key: '/frag', ins: '/frag ', cmd: '/frag …', desc: 'Rückfragen-Maske: fehlende Infos per Formular ergänzen, dann antworten' },

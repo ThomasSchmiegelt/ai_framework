@@ -104,3 +104,10 @@ Thumbs.db
 *.tmp
 *~
 *.bak
+
+# Windows-Verknuepfungen (plattformspezifisch, gehoeren nicht ins Repo)
+*.lnk
+
+# Persoenliche Notizen / versehentliche Paketierungs-Artefakte (nur lokal)
+to_do_Liste.txt
+make_portable_nomodels.zip

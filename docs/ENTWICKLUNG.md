@@ -446,6 +446,20 @@ liefert ein `LLMResponse(dict)`, das zusätzlich `.json()` / `.raise_for_status(
   listen beide (`profile.js` `_fillModelSelects`, Label `☁ model (Provider)`).
 - **Config:** `_llm.set_config(OLLAMA_BASE, API_PROVIDERS_FILE)` einmal beim Start. Verwaltung
   im **Profil-Modal** („☁ KI-Anbieter (API)"). Für remote ist `_model_session` ein No-op.
+- **Lokaler OpenAI-Server (llama.cpp / LM Studio) — größeres Kontextfenster.** Ein Anbieter mit
+  `"local": true` (UI-Checkbox „🖥 Lokaler Server" beim Anlegen) läuft zwar über den OpenAI-Pfad
+  (`::` → `is_remote` bleibt `True`, Routing/`_model_session`-No-op unverändert), zählt aber über
+  `_llm.is_local(model)` für **alle Lokal-Gates wie Ollama**: `_pick_model`/`_model_for` verwerfen
+  ihn im Geheim-Modus **nicht**, `_local_model`/`_analysis_model` akzeptieren ihn (sogar **ohne
+  laufendes Ollama**), und die `research_local_only`-Checks (`_research_model`, `chat.py`,
+  `patente.py`) lassen ihn durch. So sind vertrauliche Auswertungen (Postfach, Verzeichnis-Analyse,
+  To-Do-ask) und der Geheim-Chat mit einem **lokalen** Modell nutzbar, das ein deutlich größeres
+  Kontextfenster hat als Ollamas Default — llama.cpp starten mit
+  `llama-server -m modell.gguf -c 65536 --host 127.0.0.1 --port 8080`, dann Anbieter mit
+  `base_url = http://127.0.0.1:8080/v1` + Häkchen „lokal" anlegen. **Hinweis:** `num_ctx` wird an
+  OpenAI-Anbieter **nicht** durchgereicht (`_to_openai_payload` verwirft `options` außer
+  `temperature`) — das Kontextfenster bestimmt der `-c`-Startparameter des Servers, nicht der
+  num_ctx-Regler der UI. Cloud-Anbieter (ohne `local`) bleiben im Geheim-Modus unverändert gesperrt.
 
 ---
 

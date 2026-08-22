@@ -53,6 +53,23 @@ def is_remote(model: str) -> bool:
     return bool(model) and _REMOTE_SEP in model
 
 
+def is_local(model: str) -> bool:
+    """True, wenn ``model`` (``<id>::<modell>``) von einem als **lokal** markierten
+    Anbieter bedient wird — d. h. einem OpenAI-kompatiblen Server auf dem eigenen
+    Rechner (llama.cpp ``llama-server``, LM Studio, …), dessen ``api_providers.json``-
+    Eintrag ``"local": true`` trägt.
+
+    Solche Modelle laufen zwar über den OpenAI-Pfad (``::`` → ``is_remote`` bleibt
+    True, damit Routing/`_model_session` korrekt bleiben), zählen für die Lokal-Gates
+    (Geheim-Modus, vertrauliche Auswertungen, „Web-Recherche lokal") aber wie Ollama —
+    die Inhalte verlassen den Rechner nicht. So wird ein *großes lokales Kontextfenster*
+    (llama.cpp ``-c``) auch in den vertraulichen Features nutzbar."""
+    if not is_remote(model):
+        return False
+    provider, _ = resolve(model)
+    return bool(provider and provider.get("local"))
+
+
 def resolve(model: str):
     """Gibt ``(provider_cfg, real_model)`` zurück; ``(None, model)`` für lokal."""
     if not is_remote(model):
@@ -274,9 +291,10 @@ async def list_remote_models() -> list:
     for p in load_providers():
         pid = p.get("id", "")
         pname = p.get("name", pid)
+        _local = bool(p.get("local"))
         for mdl in (p.get("models") or []):
             out.append({"name": f"{pid}{_REMOTE_SEP}{mdl}", "remote": True,
-                        "provider": pname})
+                        "provider": pname, "local": _local})
     return out
 
 

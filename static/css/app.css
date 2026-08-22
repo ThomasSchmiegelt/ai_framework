@@ -4354,12 +4354,15 @@ select.ob-input option {
 #patente-panel input[type="text"],
 #patente-panel input[type="search"],
 #patente-panel input[type="password"],
+#patente-panel input[type="number"],
+#patente-panel input[type="date"],
 #patente-panel textarea,
 #patente-panel select {
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 7px 11px; font-size: 13px; font-family: inherit;
 }
 #patente-panel textarea { font-family: 'Consolas', 'Courier New', monospace; font-size: 12.5px; }
+#patente-panel input:focus, #patente-panel textarea:focus, #patente-panel select:focus { outline: none; border-color: var(--accent); }
 #patente-panel input::placeholder, #patente-panel textarea::placeholder { color: var(--text-muted); }
 #patente-panel input:focus, #patente-panel textarea:focus, #patente-panel select:focus {
   outline: none; border-color: var(--accent);
@@ -4812,7 +4815,10 @@ select.ob-input option {
 
 /* ── Excel-Vergleich (Tab + Chat-Overlay) ────────────────────────────────────── */
 #compare-panel .var-lbl, .cmp-side .var-lbl { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 8px 0 4px; }
-#compare-panel select.var-input, #compare-panel input.var-input { width: 100%; box-sizing: border-box; background: var(--bg-input, var(--bg-card)); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
+#compare-panel select, #compare-panel input[type="text"], #compare-panel input[type="number"], #compare-panel input[type="search"], #compare-panel textarea { box-sizing: border-box; background: var(--bg-input, var(--bg-card)); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
+#compare-panel select.var-input, #compare-panel input.var-input { width: 100%; }
+#compare-panel input:focus, #compare-panel select:focus, #compare-panel textarea:focus { outline: none; border-color: var(--accent); }
+#compare-panel input::placeholder, #compare-panel textarea::placeholder { color: var(--text-muted); }
 .cmp-summary { font-size: 13px; margin: 6px 0; }
 .cmp-table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
 .cmp-table th, .cmp-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
