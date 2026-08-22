@@ -815,3 +815,151 @@ sich aus demselben `_graphElements(projects)` wie der 2D-Graph:
 Jetzt `animate:true` + `animationThreshold` + `numIter`, und das Fit passiert im
 `layoutstop`-Callback → der Browser bekommt zwischen den Iterationen Kontrolle zurück. Der
 300-Knoten-Guard bleibt für 2D und empfiehlt zusätzlich die (nicht blockierende) 3D-Kugel.
+
+---
+
+## 22. Patente-Recherche (`routers/patente.py`, `tools/patente.py`, `tools/epo_ops.py`)
+
+Tab „⚖️ Patente" (`data-tab="patente"`, `patente.js`). **Reine Logik ohne FastAPI/DB** liegt in
+`tools/patente.py` (Recherche/Pipeline) und `tools/epo_ops.py` (EPO Open Patent Services); HTTP-
+Plumbing + Persistenz in `routers/patente.py` (Muster wie `tools/mailstore.py` ↔ `routers/pst.py`).
+
+- **Datenquellen-Hybrid** (`fetch_patent`/`search_patents`): primär **EPO OPS** (amtlich —
+  Rechtsstand, INPADOC-Familie, CPC, Erfinder; OAuth2-Key in `data/epo_ops.json`, gitignored,
+  Backup nur mit `secrets`; Endpoints `/api/patente/ops-config`), **Google-Patents-Scraping** als
+  Fallback — **gedrosselt** (Lock + Mindestpause + Backoff, Muster `tools/search.py`) und **gecacht**
+  (`data/patente/_cache/` = `PAT_CACHE_DIR`, 30 Tage). Suche: OPS-CQL (`epo_ops.build_cql`) bzw.
+  `build_google_query`; Rückgabe `(results, error, source)`. **Kein amtliches Google-API → ToS-Risiko**
+  (aus dem Original-Tool übernommen).
+- **Endpoints:** `/api/patente/search` (`PatSearch`), `/api/patente/preview` (Volltext ohne
+  Speichern), Projekt-CRUD `/api/patente/projects[...]`, CSV-/JSON-Import, `/fto`-Check, Analyse-Lauf.
+- **Pipeline (Prüfer-Methodik):** Technik-Prüfschleife → **Merkmalsanalyse** (`run_merkmalsanalyse`:
+  `extract_claim1` ungekürzt → element-weise Tabelle, bei 2 Dokumenten Claim-Chart, FREIGABE-Schleife)
+  → **Neuheit & erfinderische Tätigkeit** (EPA-Aufgabe-Lösungs-Ansatz; nächstliegender SdT via
+  Projekt-RAG) → Recht → Umgehung/Innovation/Entwurf/Kritik → Moderator (deterministische
+  `kennzahlen_markdown`-Tabelle). Kontextbudget aus `_profile_num_ctx()`.
+- **Deterministisch ohne LLM:** `patent_kennzahlen` (Restlaufzeit/Zitate/Familie/Anspruchsbreite →
+  Triage-Score 0–100, in `patente_project_get` angereichert, Score-Spalte sortierbar); FTO-Check =
+  Claim-Chart Anspruch 1 ↔ Produktbeschreibung (All-Elements-Rule, Ampel je Merkmal). 📊 Statistik-
+  Subtab rein Frontend.
+- Unterliegt der „Web-Recherche lokal"-Option; Modellrolle **`science`**. Ergebnisse per RAG
+  indexierbar (`_pat_index_analysis`). **Assistent-Werkzeug** `search_patents` (siehe §12/CLAUDE).
+  Detail-Roadmap: `docs/PATENTE_ANALYSE.md`.
+
+---
+
+## 23. Dokumentgeneratoren — Rechnungen/Angebote & Arbeitszeugnisse (`routers/dokumente.py`, `tools/dokumente.py`)
+
+Zwei Tabs, ein Router (`routers/dokumente.py`) + eine Logik-Datei (`tools/dokumente.py`, pure logic).
+
+- **Rechnungen & Angebote** (Tab „Rechnungen", `rechnung.js`): Beträge (Netto/USt/Brutto,
+  §14-UStG-Pflichtangaben) werden **deterministisch mit `Decimal`** gerechnet — **nie vom LLM** —
+  damit die Dokumente rechnerisch korrekt sind. `tools/dokumente.py` `invoice_markdown`/`invoice_docx`.
+  Endpoints `/api/rechnung/*` (`next-number`, `parse`, `breakdown`, `create`, `list`, `{nr}`,
+  `{nr}/pdf`, `{nr}/docx`) + `/api/angebot/*` (u. a. `from-plan`) + `/api/firmenprofil`. Export PDF
+  (`tools.export.to_pdf`) und DOCX (eigener Positionstabellen-Bauer). Datensätze unter
+  `data/rechnungen/` bzw. `data/angebote/` (gitignored — echte Finanzdaten).
+- **Arbeitszeugnisse** (Tab „Zeugnisse", `zeugnis.js`): der codierte Zeugnistext kommt **vom LLM**
+  (`tools/dokumente.py` `zeugnis_system_prompt`/`zeugnis_user_prompt`), gerendert mit den generischen
+  Exportern `tools.export.to_pdf`/`to_docx`. Endpoints `/api/zeugnis/*` (`generate`, `{zid}/save`,
+  `list`, `{zid}`). Datensätze unter `data/zeugnisse/`.
+- **Merkregel:** Zahlen/Recht = deterministisch (Decimal), Fließtext/Formulierung = LLM.
+
+---
+
+## 24. Excel-Vergleich (`routers/compare.py`, `tools/tablediff.py`)
+
+Tab „📊 Excel-Vergleich" (`data-tab="compare"`, `compare.js`). **Reine Logik** in
+`tools/tablediff.py` (nur stdlib): `diff_tables(headers_a,rows_a,key_a, headers_b,rows_b,key_b)` →
+nur-in-A/nur-in-B/geänderte Zellen über eine **Schlüsselspalte** (Spalten über Header-Namen gepaart);
+`diff_summary_text` = LLM-Kontext.
+
+- **Ablauf:** zwei Excel-/CSV-Dateien laden (`POST /api/compare/preview`, Spiegel von `rfq_preview`,
+  `tools/files.read_table` liest Blatt per Name + liefert Blattliste), je Blatt + Schlüsselspalte
+  wählen → `POST /api/compare/run` (**SSE**): `diff`-Frame (deterministisch) + gestreamte **KI-
+  Bewertung** (`_pick_model(_model_for("general"))` → Geheim-/Hartman lokal, Anti-Halluzination).
+- **Persistenz:** benannt unter `data/compare/<name>/comparison.json` (`_cmp_save`/`_cmp_load`, CRUD
+  `/api/compare/projects[/{name}]`, im Backup `_backup_dirs_always`).
+- **Aus dem Chat:** `/excelvergleich` (Aliase `/xlsvergleich`, `/excel`) öffnet Overlay
+  `#compare-help` (zwei Slots) und rendert Diff+Bewertung **inline in der Chat-Blase** (Assistent-
+  Modus-tauglich); Overlay und Tab teilen `Compare.preview`/`runStream`/`renderDiffHtml`.
+
+---
+
+## 25. Audio — Transkription (STT) & Sprachausgabe (TTS)
+
+**Transkription** (Tab „🎙 Transkription", `transcription.js`, `tools/transcribe.py`): Audio → Text.
+Weicher `faster_whisper`-Import (MIT, pure logic). Quelle Mikrofon (getUserMedia+MediaRecorder, USB-
+Geräteauswahl via `enumerateDevices`) oder Datei; Engine **lokal** (faster-whisper, CPU/int8 —
+**kein `_model_session`-Guard nötig**, belegt kein Ollama-VRAM; GPU per `config.json stt_device`)
+oder **API** (`/audio/transcriptions`, OpenAI/Groq via `_llm.resolve`). Endpoints `POST /api/transcribe`
+(multipart; Audio → `data/transcripts/`, in `_backup_dirs_bulk`) + `GET /api/transcribe/engines`.
+Config `stt_model`/`stt_device`/`stt_compute`/`stt_download_root` (Default `models/whisper`,
+gitignored). Ergebnis mit Zeitmarken, „→ Chat/RAG/To-Do"; Chat-Diktat `#btn-chat-mic`. **Geheim-Modus
+erzwingt `engine=local`.** Audio ≠ Token-Strom → kein TokenMeter. Lizenz: PyAV/ffmpeg-LGPL
+(dokumentierte Ausnahme, siehe Project Constraints). **CSS:** `#transcription-panel`-Controls müssen
+`--bg-input`/`--text`/`--border` setzen (kein globales Formular-Styling → sonst browser-weiß).
+
+**Sprachausgabe/TTS** (`static/js/tts.js`, `routers/tts.py`): Antworten vorlesen. Primär clientseitig
+über die **Web Speech API** (`speechSynthesis`, zero-dependency). Persona (`tone`) → Stimmenprofil
+(`PERSONA_VOICE`, Geschlecht per Namensheuristik, Alter/Klang über `pitch`/`rate`). 🔊-Knopf je
+Assistenten-Antwort, im Transkriptions-Tab (`#tr-speak`), Profil-Test. **Optional API-TTS:** Profil-
+Feld `tts_model` (`anbieter::modell`) → `POST /api/tts` (Backend `/audio/speech`, Persona→Stimme via
+`_TTS_VOICE_MAP`), spielt mp3, **fällt bei Fehler/409 auf Browser zurück** (sichtbarer `showToast`-
+Hinweis bei „echten" Fehlern). `GET /api/tts/config` baut die Auswahl. **Geheim-Modus** erzwingt
+Browser (`/api/tts` → 409). Audio ≠ Token-Strom → kein TokenMeter. **Antwortstil-Personas**
+(`VALID_TONES`/`_TONE_PROMPTS`, Profil `tone` → `_persona_prefix()`): roboter/professor/doktor/felix/
+sandra + **`hartman`** — Letzterer ist ein **Lokal-Riegel** (`_hartman()` fließt in `_secret_local()`
+und `_web_search_allowed()`).
+
+---
+
+## 26. Bild-Subsysteme — Generierung, Bearbeitung, Präsentationsbilder (`routers/image.py`, `core.py`-Kerne, `routers/presentation.py`)
+
+**Kerne in `core.py`** (damit der Chat-Tool-Loop sie aufrufen kann): `_generate_image_core`,
+`_edit_image_core`, `_upscale_image_core`, `_IMAGE_SIZES`, `_image_model`, `_sd_url`,
+`_ensure_sd_server` u. a.; die HTTP-Wrapper liegen in `routers/image.py` (`/api/image/config`,
+`/generate`, `/edit`, `/upscale`) + `/api/image-to-prompt` in `routers/presentation.py`.
+
+- **Zwei Wege, Profilwahl `image_model`:** **lokal `local::sd`** = eigener Stable-Diffusion-WebUI-
+  Server (A1111/Forge, `POST {sd_url}/sdapi/v1/txt2img`, URL `sd_webui_url`; **Brücke `z-image/
+  sd_server.py`** startet je Bild einen frischen Unterprozess → crash-sicher, siehe CLAUDE) —
+  **kein `_model_session`/VRAM-Guard** (separater Server); **API `<anbieter>::<modell>`** =
+  `POST {base}/images/generations` (`dall-e-3`/`gpt-image-1`). Antwort = Data-URI. Bild ≠ Token-Strom
+  → **kein TokenMeter**.
+- **Geheim-/Hartman-Modus** (`_secret_local()`): API gesperrt → auf `local::sd` umgeleitet, ohne
+  SD-URL **HTTP 409** (keine Cloud-Anfrage).
+- **Chat-Auslöser:** 🎨-Haken, `/bild`, geführter `/bildhelp` (deterministisch, Geheim-tauglich),
+  `/bildedit` (img2img + Inpainting-Pinsel), `/upscale` (KI-Detail via Z-Image img2img @0.30 bzw.
+  Lanczos-Fallback), `/bildprompt` (Vision → Prompt). Assistent-Modus: gated Tool `generate_image`.
+- **KI-Bilder in Präsentationen** (`routers/presentation.py` `POST /api/presentation/slide-image`,
+  Helfer `_slide_image_prompt`: Folientext → Bild-Prompt per kurzem LLM-Call → `_generate_image_core`).
+  Frontend `canvas.js` `generateSlideImage`/`generateAllImages` setzen `slide.image_right` + Text +
+  `layout='two-column'` → **Canvas-Renderer UND PPTX-Export** (`tools/export.py`, `image_right`/
+  `_embed_b64_image`) zeigen es ohne neuen Zeichencode. **Geführter Assistent** `/praesentation`
+  (`_guided_presentation_generator`): Interview → Gliederung → je Punkt Webrecherche → flächiges
+  Deckblatt/Abschluss + zweispaltige Inhaltsfolien. Nicht zu verwechseln mit `illustrated_
+  presentation.js` (Folien **aus** einem Bilderordner via Vision).
+
+---
+
+## 27. Arbeitsablauf im Chat (`/workflow`) (`routers/workflow.py`, `chat.js`)
+
+`chat.js` `_parseWorkflow`/`runWorkflow`/`_workflowToPresentation` (Aliase `/ablauf`, `/flow`), SSE
+`POST /api/workflow` (`_workflow_generator`): nummerierte Schritte werden **nacheinander** als
+fokussierte Teilaufgaben ausgeführt (rein LLM, **kein Werkzeug-Loop** → robust auch für kleine
+Modelle), Zwischenergebnisse fließen als Kontext in den nächsten Schritt (Budget an `_profile_num_ctx()`
+gekoppelt), am Ende **Synthese**. Frames `workflow_start`/`step_start`/`searching`/`search_done`/
+`notice`/`step_done`/`synthesizing`/`text`/`done`/`error`; jeder Schritt als einklappbares `<details>`.
+
+- **Pro-Schritt-Tags** (`_wf_normalize_step` Backend + `_wfParseTags` Frontend, gleiche Regex): ein
+  Schritt darf mit `[lokal]`/`[api]`/`[web]` (Kombis) beginnen. `mode='local'`→`_local_model`,
+  `mode='api'`→ Frontend-Remote-Modell (im Geheim-/Hartman-Modus verworfen → `notice`+lokal);
+  `web=true` **und** `_web_search_allowed()` ⇒ `search_with_sources(step,5)` als Kontext. Die
+  **Synthese** läuft bevorzugt auf `api_model` (größeres Kontextfenster).
+- **Medien-Schritte** (`kind` image/voice): `[bild]`/„generiere ein Bild von …" (`_WF_IMG_RE`) →
+  `_generate_image_core(preset="square")` → `image`-Frame; `[sprache]`/„… als Sprachnachricht/vorlesen"
+  (`_WF_VOICE_RE`) → `speak`-Frame → Frontend `TTS.speak`. Badges 🖼/🔊. Bild/Sprache erzeugen **keine
+  Chat-Tokens**.
+- **Übergabe-Buttons:** „→ Präsentation" (`/api/presentation/from-text`) und „→ Planer"
+  (`Planner.openFromText`). Basis-Modellrolle `general` (Geheim/Hartman → lokal), Token „Arbeitsablauf".
