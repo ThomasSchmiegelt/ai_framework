@@ -315,6 +315,7 @@ FastAPI (Python, async)  +  Vanilla JS (SPA)  +  Ollama (lokal)
      db.py (SQLite + FTS5)    data/profile_assets/ (Logo/Vorlagen)
 ```
 
+Anwendungsfälle (was kann ich konkret tun?): **[USE_CASES.md](USE_CASES.md)**
 Details für Entwickler: **[docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md)**
 Bedienung für Anwender: **[BEDIENUNGSANLEITUNG.md](BEDIENUNGSANLEITUNG.md)**
 
