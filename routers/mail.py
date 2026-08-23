@@ -199,6 +199,49 @@ async def mail_to_rag(req: Request):
     return {"ok": True, "ingested": ingested, "chunks": chunks}
 
 
+@router.post("/api/mail/to-postfach")
+async def mail_to_postfach(req: Request):
+    """Brücke Mail-Tab → Postfach: holt die neuesten Mails über die im Mail-Tab
+    konfigurierte IMAP-/POP3-Verbindung (Session-Passwort), konvertiert sie über den
+    Postfach-Parser (inkl. Anhänge) und legt einen Postfach-Store unter data/pst/<id>/ an.
+    Danach im Postfach über die normale Wieder-Öffnen-Route nutzbar. Bleibt lokal; die
+    Auswertung (Stufe 2/Tags) läuft weiter über ``_analysis_model``."""
+    import email as _email
+    from tools import mail as _mail
+    from tools import mailstore
+    body = await req.json()
+    try:
+        limit = int(body.get("limit") or 500)
+    except Exception:
+        limit = 500
+    limit = max(1, min(limit, 5000))
+    cfg = _mail_cfg_or_401()
+    try:
+        raws = await asyncio.to_thread(_mail.fetch_recent_raw, cfg, limit)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Mail-Abruf fehlgeschlagen: {e}")
+
+    store_id = uuid.uuid4().hex[:12]
+    base = PST_DIR / store_id
+    att_dir = base / "att"
+    att_dir.mkdir(parents=True, exist_ok=True)
+    mails = []
+    for i, raw in enumerate(raws):
+        try:
+            em = _email.message_from_bytes(raw)
+            m = mailstore._msg_from_email(em, f"m{i}", "imap", att_dir)
+            m["stage"] = 1
+            mails.append(m)
+        except Exception:
+            continue
+    store = {
+        "id": store_id, "source": f"Mail-Konto: {cfg.get('user', '')}", "source_format": "imap",
+        "opened_at": time.time(), "count": len(mails), "mails": mails,
+    }
+    (base / "store.json").write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+    return {"store_id": store_id, "count": len(mails)}
+
+
 # ── Mail-Aktionen & Regeln (regelbasierte Verarbeitung, Versand stets manuell) ──
 # MAIL_RULES_FILE → core (Backup nutzt es)
 

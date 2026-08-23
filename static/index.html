@@ -1698,9 +1698,10 @@
     <div id="postfach-panel" class="panel">
       <div id="pf-toolbar">
         <h2 style="font-size:16px;margin:0">📮 Postfach</h2>
-        <input type="text" id="pf-path" placeholder="Server-Pfad zur .pst / .mbox / .eml / .msg" />
+        <input type="text" id="pf-path" placeholder="Pfad: .pst/.mbox/.eml/.msg, Thunderbird-Ordner (endungslos, z. B. …\Mail\Local Folders\Inbox) oder Maildir-Verzeichnis" />
         <input type="password" id="pf-pass" placeholder="Passwort (falls geschützt)" autocomplete="off" style="max-width:180px" />
         <button id="btn-pf-open" class="export-btn">📥 Einlesen</button>
+        <button id="btn-pf-mail" class="export-btn" title="Neueste Mails aus dem im Mail-Tab konfigurierten Konto (IMAP/POP3) holen und als Postfach auswerten">📨 aus Mail-Konto</button>
         <button id="btn-pf-stores" class="export-btn" title="Bereits eingelesene Postfächer wieder öffnen (ohne erneutes Parsen)">📂 Gespeicherte</button>
         <button id="btn-pf-stage2" class="export-btn" title="Analysestufe 2: Anhänge lesen (Dokumente + Bilder per lokalem Modell) und Themen-Schlagworte vergeben">🏷 Stufe 2: Anhänge & Tags</button>
         <button id="btn-pf-connectors" class="export-btn" title="Konnektoren definieren – benannte Wortgruppen, nach denen der Graph geordnet wird">🔗 Konnektoren</button>
@@ -3623,7 +3624,7 @@
 <script src="/js/medizin.js?v=20260711docs2"></script>
 <script src="/js/mathe.js?v=20260622"></script>
 <script src="/js/dir_analysis.js?v=20260627local"></script>
-<script src="/js/postfach.js?v=20260703save"></script>
+<script src="/js/postfach.js?v=20260823mail"></script>
 <script src="/js/patente.js?v=20260712read"></script>
 <script src="/js/rechnung.js?v=20260714"></script>
 <script src="/js/zeugnis.js?v=20260712"></script>

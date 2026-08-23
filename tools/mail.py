@@ -147,6 +147,57 @@ def fetch_messages(cfg: dict, uids: list[str]) -> list[dict]:
     return _imap_fetch(cfg, uids)
 
 
+def fetch_recent_raw(cfg: dict, limit: int = 500) -> list[bytes]:
+    """Rohe Nachrichten (bytes) der neuesten ``limit`` Mails — für die Postfach-Brücke
+    (Konvertierung über ``tools.mailstore._msg_from_email`` inkl. Anhänge). Newest first."""
+    if _protocol(cfg) == "pop3":
+        return _pop3_recent_raw(cfg, limit)
+    return _imap_recent_raw(cfg, limit)
+
+
+def _imap_recent_raw(cfg: dict, limit: int = 500) -> list[bytes]:
+    conn = _imap_connect(cfg)
+    try:
+        conn.select("INBOX", readonly=True)
+        typ, data = conn.uid("search", None, "ALL")
+        if typ != "OK":
+            return []
+        uids = data[0].split()
+        uids = uids[-max(1, int(limit)):][::-1]   # neueste zuerst
+        out: list[bytes] = []
+        for uid in uids:
+            typ, mdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
+            if typ != "OK":
+                continue
+            raw = next((p[1] for p in mdata if isinstance(p, tuple)), b"")
+            if raw:
+                out.append(raw)
+        return out
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
+def _pop3_recent_raw(cfg: dict, limit: int = 500) -> list[bytes]:
+    conn = _pop3_connect(cfg)
+    try:
+        uidls = _pop3_uidl_map(conn)[::-1]   # neueste zuerst
+        out: list[bytes] = []
+        for num, _uid in uidls[:max(1, int(limit))]:
+            try:
+                out.append(b"\n".join(conn.retr(num)[1]))
+            except Exception:
+                continue
+        return out
+    finally:
+        try:
+            conn.quit()
+        except Exception:
+            pass
+
+
 def _imap_list(cfg: dict, limit: int = 25, search: str = "") -> list[dict]:
     """Listet die neuesten Mails aus INBOX (nur Header). Optionaler Suchbegriff
     filtert clientseitig über Absender/Betreff (umlaut-/charset-sicher)."""

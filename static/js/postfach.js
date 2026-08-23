@@ -557,6 +557,42 @@ const Postfach = (() => {
     }
   }
 
+  /* ── Brücke: Mails aus dem im Mail-Tab konfigurierten Konto laden ─── */
+  async function _fromMail() {
+    // Konfiguration/Session-Passwort prüfen (Passwort lebt nur im Speicher des Mail-Tabs).
+    let cfg = {};
+    try { cfg = await (await fetch('/api/mail/config')).json(); } catch (_) {}
+    if (!cfg.host || !cfg.user) {
+      _status('Kein Mail-Konto konfiguriert — bitte zuerst im Mail-Tab Host/Benutzer eintragen.');
+      if (typeof showToast === 'function') showToast('Mail-Konto zuerst im Mail-Tab einrichten');
+      return;
+    }
+    if (!cfg.has_password) {
+      _status('Mail-Passwort fehlt — bitte einmalig im Mail-Tab eingeben (nur für diese Sitzung).');
+      if (typeof showToast === 'function') showToast('Passwort im Mail-Tab eingeben');
+      return;
+    }
+    const n = parseInt(prompt('Wie viele der neuesten Mails laden?', '300') || '0', 10);
+    if (!n || n < 1) return;
+    _status(`⏳ Lade die neuesten ${n} Mails aus ${cfg.user}…`);
+    $('btn-pf-mail').disabled = true;
+    try {
+      const r = await fetch('/api/mail/to-postfach', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: n }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      await _reopen(d.store_id);
+      _status(`✓ ${d.count} Mails aus dem Konto eingelesen`);
+    } catch (e) {
+      _status('Mail-Abruf fehlgeschlagen: ' + e.message);
+      if (typeof showToast === 'function') showToast('Postfach/Mail: ' + e.message);
+    } finally {
+      $('btn-pf-mail').disabled = false;
+    }
+  }
+
   /* ── Stufe 2: Anhänge + Themen-Tags (lokal) ──────────────────── */
   async function _stage2() {
     if (!_storeId) { _status('Erst ein Postfach einlesen'); return; }
@@ -997,6 +1033,7 @@ const Postfach = (() => {
     _loadConnectors();
     _loadFormats();
     $('btn-pf-open')?.addEventListener('click', _open);
+    $('btn-pf-mail')?.addEventListener('click', _fromMail);
     $('pf-path')?.addEventListener('keydown', e => { if (e.key === 'Enter') _open(); });
     $('btn-pf-stage2')?.addEventListener('click', _stage2);
     $('btn-pf-delete')?.addEventListener('click', _deleteStore);
