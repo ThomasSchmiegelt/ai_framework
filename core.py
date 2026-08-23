@@ -138,6 +138,7 @@ TRANSCRIPTS_DIR = DATA_DIR / "transcripts"   # hochgeladene/aufgenommene Audioda
 # Externe OpenAI-kompatible KI-Anbieter (enthält API-Keys → gitignored, NICHT im Backup)
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
+RAG_IMAGES_DIR = DATA_DIR / "rag_images"   # Bild-aware RAG: Originalbilder je Sammlung/Dokument (Backup-Ordner)
 # RAG-Embedding-Modell (Default). Cross-Feature (RAG, Verzeichnis-Analyse, Chat-Upload,
 # To-Do, Planer) → in core, damit alle Router es über ``from core import *`` erhalten.
 EMBED_MODEL: str = _CONFIG.get("embed_model", "nomic-embed-text")
@@ -154,7 +155,7 @@ STT_DOWNLOAD_ROOT = (
     if _stt_root else (Path(__file__).parent / "models" / "whisper")
 )
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR, RAG_IMAGES_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -531,6 +532,138 @@ async def _analysis_model(preferred: Optional[str] = None) -> Optional[str]:
         if m and m not in _MODEL_PLACEHOLDERS and _llm.is_remote(m):
             return m
     return await _local_model(preferred)
+
+
+async def _vision_model(preferred: Optional[str] = None) -> Optional[str]:
+    """Lokales Modell für Bild-/Vision-Aufgaben (Bildanalyse, Präsentation-aus-Bildern,
+    Bild-aware RAG). Bevorzugt das vertrauliche Analyse-Modell (``_analysis_model`` →
+    Geheim-/Hartman-tauglich, lokal); ist dieses nicht multimodal, wird ein installiertes
+    **vision-fähiges** Ollama-Modell bevorzugt (Fähigkeit aus ``/api/tags`` ``capabilities``).
+    Rückfall = das Analyse-Modell. ``None`` ⇒ kein lokales LLM (Aufrufer meldet 503/Fehler)."""
+    base = await _analysis_model(preferred)
+    if not base or _llm.is_remote(base):
+        return base   # None → 503; lokaler Server/llama.cpp / erlaubtes API-Modell → so belassen
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(f"{OLLAMA_BASE}/api/tags")
+            resp.raise_for_status()
+            models = resp.json().get("models", [])
+        vision = [m.get("name") for m in models
+                  if "vision" in (m.get("capabilities") or []) and m.get("name")]
+        if base in vision:
+            return base
+        if vision:
+            return vision[0]
+    except Exception:
+        pass
+    return base   # Fallback: Analyse-Modell (evtl. nur Text → schwächere Beschreibung)
+
+
+def _slide_fields_from_partial(raw: str):
+    """Bergungs-Parser für (evtl. ABGESCHNITTENES) Slide-JSON: zieht title, bullets
+    und caption per Regex heraus, auch wenn das JSON nie geschlossen wurde. So landet
+    bei trunkierter Modellantwort kein roher ``{"title":…``-Text auf der Folie.
+    Geteilt (Bildanalyse in Agenten + Präsentation-aus-Bildern) → core."""
+    title = ""
+    mt = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+    if mt:
+        title = mt.group(1)
+    bullets = []
+    mb = re.search(r'"bullets"\s*:\s*\[(.*)', raw, re.DOTALL)
+    if mb:
+        seg = mb.group(1)
+        end = seg.find("]")
+        if end >= 0:
+            seg = seg[:end]
+        bullets = re.findall(r'"((?:[^"\\]|\\.)*)"', seg)
+    caption = ""
+    mc = re.search(r'"caption"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+    if mc:
+        caption = mc.group(1)
+    return title, bullets, caption
+
+
+async def _analyze_image_core(image_b64: str, system_prompt: str = "", filename: str = "",
+                              topic: str = "", model: Optional[str] = None,
+                              want_notes: bool = False) -> dict:
+    """Analysiert EIN Bild mit einem Vision-Modell → strukturierter Folieninhalt
+    ``{title, bullets, caption, notes?, descriptive_filename, tokens}``. Geteilter Kern für
+    ``/api/analyze-image`` (Agenten) und den Präsentation-aus-Bildern-Generator. Nutzt den
+    **Dateinamen als Hinweis** (``is_descriptive_filename``); ``want_notes`` verlangt zusätzlich
+    eine kurze Sprechernotiz. ``format:json`` + Kontextfenster verhindern Vorgeplapper."""
+    from tools.imaging import downscale, is_descriptive_filename
+    system_prompt = (system_prompt or "").strip() or (
+        "Du bist ein technischer Fach-Experte und beschreibst das gezeigte Bild "
+        "knapp und sachlich auf Deutsch.")
+    filename = (filename or "").strip()
+    topic = (topic or "").strip()
+    _model = _pick_model(model)
+    descriptive, label = is_descriptive_filename(filename) if filename else (False, "")
+    small = downscale(image_b64)
+
+    name_hint = ""
+    if filename:
+        if descriptive:
+            name_hint = (f"\nDer Dateiname '{label}' ist beschreibend – nutze ihn als Hinweis "
+                         f"auf den Bildinhalt und möglichst als Folientitel.")
+        else:
+            name_hint = (f"\nDer Dateiname ('{filename}') ist nicht aussagekräftig – ignoriere ihn "
+                         f"und stütze dich allein auf das, was im Bild zu sehen ist.")
+
+    _notes_field = (',"notes":"eine kurze Sprechernotiz (1-2 Sätze) für den Vortragenden"'
+                    if want_notes else "")
+    user_text = (
+        (f"Kontext der Präsentation: {topic}\n" if topic else "")
+        + "Beschreibe dieses Bild für eine Präsentationsfolie."
+        + name_hint
+        + "\n\nAntworte NUR mit JSON in genau diesem Format, ohne weiteren Text:\n"
+        '{"title":"Kurzer Folientitel","bullets":["Stichpunkt 1","Stichpunkt 2","Stichpunkt 3"],'
+        '"caption":"Eine kurze Bildunterschrift (max. ein Satz)"' + _notes_field + '}\n'
+        "Maximal 3 kurze Stichpunkte (je höchstens ein knapper Satz). "
+        "Kein Markdown, keine Sternchen, keine Aufzählungszeichen im Text.")
+
+    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": _model, "think": False, "format": "json",
+            "messages": [{"role": "system", "content": system_prompt},
+                         {"role": "user", "content": user_text, "images": [small]}],
+            "options": {"num_ctx": _profile_num_ctx()}, "stream": False,
+        })
+        resp.raise_for_status()
+        _ai_j = resp.json()
+    _ai_ti, _ai_to = _llm_tok(_ai_j)
+    raw = _ai_j.get("message", {}).get("content", "")
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+    def _strip_md(s: str) -> str:
+        s = re.sub(r"[*_`#>]+", "", s)
+        s = re.sub(r"^\s*[-•]\s*", "", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    title, bullets, caption, notes = (label if descriptive else "Abbildung"), [], "", ""
+    data = _parse_llm_json(raw)
+    if isinstance(data, dict):
+        title = _strip_md(str(data.get("title") or "")) or title
+        b = data.get("bullets") or []
+        bullets = [_strip_md(str(x)) for x in b if str(x).strip()][:3]
+        caption = _strip_md(str(data.get("caption") or ""))
+        notes = _strip_md(str(data.get("notes") or ""))
+    if not bullets and not caption:
+        st, sb, sc = _slide_fields_from_partial(raw)
+        if st:
+            title = _strip_md(st) or title
+        bullets = [_strip_md(str(x)) for x in sb if str(x).strip()][:3]
+        caption = _strip_md(sc)
+    if not bullets and not caption:
+        plain = raw.strip()
+        looks_json = plain.startswith("{") or '"bullets"' in plain or '"title"' in plain
+        caption = "" if looks_json else _strip_md(plain)[:200]
+
+    out = {"title": title, "bullets": bullets, "caption": caption,
+           "descriptive_filename": descriptive, "tokens": {"in": _ai_ti, "out": _ai_to}}
+    if want_notes:
+        out["notes"] = notes
+    return out
 
 
 # ── Automatische Mathe-Weiche ────────────────────────────────────────────────
@@ -2220,7 +2353,7 @@ __all__ = [
     '_IMAGE_SIZES', '_image_model', '_sd_url', '_sd_reachable', '_sd_server_python', '_sd_server_dir', '_url_port', '_launch_detached', '_ensure_sd_server', '_api_image_size', '_generate_image_core', '_edit_image_core', '_upscale_image_core',
     'CAPACITY_FILE', 'BILDER_DIR', 'PROFILE_FILE', 'PROFILE_ASSETS_DIR',
     'PROJECTS_FILE', 'FEEDBACK_FILE', 'TRANSCRIPTS_DIR', 'API_PROVIDERS_FILE',
-    'LOG_FILE', 'EMBED_MODEL', '_extract_text', '_is_image', '_todo_root_name', '_med_transcript',
+    'LOG_FILE', 'RAG_IMAGES_DIR', 'EMBED_MODEL', '_extract_text', '_is_image', '_todo_root_name', '_med_transcript',
     '_derive_adaptive_prompt', '_safe_exec', '_run_python_code', '_extract_inline_tool_calls', '_strip_inline_tool_calls', '_extract_code_block',
     'STT_MODEL', 'STT_DEVICE', 'STT_COMPUTE',
     '_stt_root', 'STT_DOWNLOAD_ROOT', 'DEFAULTS_DIR', '_seed_defaults',
@@ -2231,7 +2364,8 @@ __all__ = [
     '_active_mode', '_MODEL_ROLES', '_OPTIONAL_TABS', '_cfg_hidden', '_DEFAULT_HIDDEN_TABS',
     '_model_for', '_installed_local_models', '_local_llm_available', '_local_model',
     '_hartman', '_secret_local', '_web_search_allowed', '_assistant_mode',
-    '_chat_agent_tools', '_confidential_api_allowed', '_analysis_model', '_MATH_KEYWORDS',
+    '_chat_agent_tools', '_confidential_api_allowed', '_analysis_model',
+    '_vision_model', '_slide_fields_from_partial', '_analyze_image_core', '_MATH_KEYWORDS',
     '_MATH_SYMBOLS', '_looks_like_math', '_math_autoroute_enabled', '_research_local_only',
     '_research_model', '_research_fallback_model', '_research_llm_json', '_profile_num_ctx',
     '_BASE_GUARD', '_FORMULA_RULE', '_PLOT_RULE', '_DIAGRAM_RULE',

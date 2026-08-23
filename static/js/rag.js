@@ -235,7 +235,7 @@ const RAG = (() => {
       const docs = await (await fetch(`/api/rag/collections/${c.id}/documents`)).json();
       const docRows = docs.map(d => `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12.5px;padding:3px 0">
-          <span style="flex:1;min-width:0">📄 ${escHtml(d.filename)} <span class="planner-muted">· ${d.n_chunks} Chunks</span></span>
+          <span style="flex:1;min-width:0">${d.image_rel ? '🖼' : '📄'} ${escHtml(d.filename)} <span class="planner-muted">· ${d.n_chunks} Chunks</span></span>
           <button class="export-btn rag-exp-doc" data-id="${d.id}" data-fmt="md" style="font-size:11px" title="Inhalt als Markdown exportieren">⬇ md</button>
           <button class="export-btn rag-exp-doc" data-id="${d.id}" data-fmt="txt" style="font-size:11px" title="Inhalt als Text exportieren">⬇ txt</button>
           <button class="export-btn rag-del-doc" data-id="${d.id}" style="font-size:11px">entfernen</button>
@@ -415,17 +415,27 @@ const RAG = (() => {
     loadCollections();
   }
 
+  const _RAG_IMG_RE = /\.(jpe?g|png|gif|webp|bmp)$/i;
+
   async function _uploadFiles(files) {
     if (!_uploadTargetId) return;
     for (const f of files) {
-      showToast(`⏳ ${f.name} wird verarbeitet…`);
+      const isImg = _RAG_IMG_RE.test(f.name);
       const fd = new FormData();
       fd.append('file', f);
+      // Optionale Beschreibung/Kontext – verbessert die Auffindbarkeit (wird mit-embeddet).
+      // Nur beim Einzel-Upload nachfragen (bei Ordner-/Mehrfach-Upload würde es je Bild stören).
+      if (isImg && files.length === 1) {
+        const cap = prompt(`Optionale Beschreibung/Kontext für „${f.name}“ (leer lassen ist ok):`, '');
+        if (cap && cap.trim()) fd.append('caption', cap.trim());
+      }
+      showToast(isImg ? `⏳ ${f.name} wird beschrieben (Vision-Modell)…` : `⏳ ${f.name} wird verarbeitet…`);
       try {
         const r = await fetch(`/api/rag/collections/${_uploadTargetId}/documents`, { method: 'POST', body: fd });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail || r.status);
-        showToast(`✓ ${f.name}: ${data.n_chunks} Chunks`);
+        if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'RAG');
+        showToast(`✓ ${f.name}: ${data.n_chunks} Chunks${data.kind === 'image' ? ' 🖼' : ''}`);
       } catch (e) { showToast(`Fehler bei ${f.name}: ${e.message}`); }
     }
     loadCollections();
@@ -497,8 +507,11 @@ const RAG = (() => {
       inp.remove();
       if (!files.length) return;
       showToast(`📂 ${files.length} Datei(en) aus Ordner werden eingelesen…`);
-      if (_ragOptimize) _uploadFilesOptimized(files);
-      else _uploadFiles(files);
+      // Bilder immer über den Vision-Weg (nicht über das Text-Optimieren).
+      const images = files.filter(f => _RAG_IMG_RE.test(f.name));
+      const others = files.filter(f => !_RAG_IMG_RE.test(f.name));
+      if (images.length) _uploadFiles(images);
+      if (others.length) { if (_ragOptimize) _uploadFilesOptimized(others); else _uploadFiles(others); }
     });
     document.body.appendChild(inp);
     inp.click();
@@ -684,8 +697,11 @@ const RAG = (() => {
       if (!e.target.files.length) return;
       const files = Array.from(e.target.files);
       e.target.value = '';
-      if (_ragOptimize) _uploadFilesOptimized(files);
-      else _uploadFiles(files);
+      // Bilder laufen immer über den Vision-Weg (nicht über das Text-Optimieren).
+      const images = files.filter(f => _RAG_IMG_RE.test(f.name));
+      const others = files.filter(f => !_RAG_IMG_RE.test(f.name));
+      if (images.length) _uploadFiles(images);
+      if (others.length) { if (_ragOptimize) _uploadFilesOptimized(others); else _uploadFiles(others); }
     });
 
     // Optimize-Toggle in die RAG-Konfigurationsleiste einfügen

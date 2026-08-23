@@ -7,7 +7,7 @@ const MatrixResearch = (() => {
   // cols: Array von { prompt: string }
   // cells[r][c]: { status: 'empty'|'running'|'done', text: string }
   let _rows  = [{ topic: '' }, { topic: '' }, { topic: '' }];
-  let _cols  = [{ prompt: '', agent: '' }, { prompt: '', agent: '' }];
+  let _cols  = [{ prompt: '', agent: '', tool: '' }, { prompt: '', agent: '', tool: '' }];
   let _cells = [];  // _cells[r][c]
   let _running = false;
   let _favAgents = [];  // nur als Favorit markierte Agenten (auswählbar pro Spalte)
@@ -116,6 +116,22 @@ const MatrixResearch = (() => {
     return html;
   }
 
+  // Wählbares Werkzeug pro Spalte (leer = Automatisch = alle Werkzeuge; 'none' = ohne Werkzeug).
+  // Namen entsprechen den Tool-Namen des Chat-Tool-Loops (ChatRequest.tools).
+  const _TOOL_CHOICES = [
+    ['', 'Werkzeug: automatisch'],
+    ['web_search', '🔍 Websuche'],
+    ['search_knowledge_base', '📚 Wissensdatenbank'],
+    ['calculate', '🧮 Rechnen'],
+    ['create_diagram', '🕸 Diagramm'],
+    ['route_planner', '🗺 Route'],
+    ['none', '🚫 Kein Werkzeug'],
+  ];
+  function _toolOptionsHtml(selected) {
+    return _TOOL_CHOICES.map(([v, l]) =>
+      `<option value="${v}"${v === (selected || '') ? ' selected' : ''}>${l}</option>`).join('');
+  }
+
   /* ── Zelleninhalt rendern (Markdown + LaTeX bei fertigen Zellen) ──── */
   function _renderCell(div, cell) {
     if (cell.status === 'running') { div.textContent = '⟳ Suche läuft…'; return; }
@@ -205,6 +221,7 @@ const MatrixResearch = (() => {
           <button class="btn-del-matrix-col" data-col="${c}" title="Spalte löschen">✕</button>
         </div>
         <select class="matrix-col-agent" data-col="${c}" title="Agent für diese Spalte (nur Favoriten)">${_agentOptionsHtml(col.agent || '')}</select>
+        <select class="matrix-col-tool" data-col="${c}" title="Werkzeug für diese Spalte (automatisch = alle)">${_toolOptionsHtml(col.tool || '')}</select>
         <div class="matrix-col-ctrls">
           <label title="Diese Spalte bei „Alle ausführen“ berücksichtigen"><input type="checkbox" class="matrix-col-active" data-col="${c}"${active ? ' checked' : ''}> ausführen</label>
           <label title="Ergebnisse der vorherigen Spalten dieser Zeile als Kontext mitgeben"><input type="checkbox" class="matrix-col-ctx" data-col="${c}"${col.ctx ? ' checked' : ''}> Kontext</label>
@@ -255,6 +272,12 @@ const MatrixResearch = (() => {
     headerRow.querySelectorAll('.matrix-col-agent[data-col]').forEach(sel => {
       sel.addEventListener('change', () => {
         _cols[+sel.dataset.col].agent = sel.value;
+        _saveState();
+      });
+    });
+    headerRow.querySelectorAll('.matrix-col-tool[data-col]').forEach(sel => {
+      sel.addEventListener('change', () => {
+        _cols[+sel.dataset.col].tool = sel.value;
         _saveState();
       });
     });
@@ -343,6 +366,10 @@ const MatrixResearch = (() => {
     // Mit gewähltem Agent: dessen System-Prompt (z. B. Bewertung/Plausibilitätsprüfung)
     // steuert die Antwort. Ohne Agent: einfacher Recherche-Assistent.
     const body = { model, use_tools: true, science: true };
+    // Spalten-Werkzeug: 'none' = ohne Werkzeug, '<name>' = nur dieses Werkzeug, '' = automatisch.
+    const colTool = _cols[c]?.tool || '';
+    if (colTool === 'none') body.use_tools = false;
+    else if (colTool) body.tools = [colTool];
     if (agentId) {
       body.agent_id = agentId;
       body.messages = [{ role: 'user', content: userMsg }];

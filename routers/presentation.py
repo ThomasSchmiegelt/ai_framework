@@ -471,6 +471,255 @@ async def presentation_guided(req: Request):
     return StreamingResponse(_guided_presentation_generator(body), media_type="text/event-stream")
 
 
+# ── Präsentation AUS hochgeladenen Bildern (Chat: /praesentation im Bildmodus) ─
+# Reihe von Bildern → je Bild Vision-Analyse (Dateiname-Hinweis) → Zweispalter-Folie
+# (Bild | Text), optional Intro aus .md/.txt, optional Mermaid-Übersicht, Cover/Abschluss
+# je Quelle (hochgeladen | generiert | Text). Nutzt den geteilten Vision-Kern und bleibt
+# lokal (Geheim/Hartman). Mermaid wird im Frontend zu PNG gerastert (export-fest).
+
+_PRES_STYLE_FRAMING = {
+    "technisch": "Formuliere sachlich-präzise und technisch fundiert.",
+    "sozial": "Formuliere empathisch, verständlich und menschenzentriert.",
+    "wissenschaftlich": "Formuliere nüchtern und präzise, mit Fachbegriffen.",
+    "marketing": "Formuliere prägnant, nutzenorientiert und überzeugend.",
+    "schlicht": "Formuliere schlicht, klar und knapp.",
+    "kreativ": "Formuliere anschaulich, bildhaft und originell.",
+}
+
+
+def _pres_persona(style: str, address: str, audience: str) -> str:
+    """Deterministischer System-Prompt für die Bild-Beschreibung aus Stil + Anrede + Zielgruppe."""
+    parts = ["Du bist ein Fach-Experte und beschreibst Bilder für eine Präsentationsfolie."]
+    s = (style or "").strip().lower()
+    if s in _PRES_STYLE_FRAMING:
+        parts.append(_PRES_STYLE_FRAMING[s])
+    elif style:
+        parts.append(f"Stil: {style}.")
+    if audience:
+        parts.append(f"Zielgruppe: {audience} – wähle Ansprache und Tiefe passend.")
+    a = (address or "").strip().lower()
+    if a.startswith("sie"):
+        parts.append("Verwende die höfliche Anrede „Sie“.")
+    elif a.startswith("du"):
+        parts.append("Verwende die persönliche Anrede „Du“.")
+    parts.append("Antworte knapp und sachlich auf Deutsch.")
+    return " ".join(parts)
+
+
+async def _pres_intro_bullets(topic: str, doc_text: str, persona: str,
+                              model: str, tok: dict) -> list:
+    """Einleitungsfolie aus Thema/Belegmaterial → 3–5 Stichpunkte (ein LLM-Aufruf)."""
+    if not (topic or doc_text):
+        return []
+    _sys = (persona + " Du schreibst die Einleitungsfolie einer Präsentation. Antworte NUR mit JSON "
+            '{"bullets":["…","…","…"]}: 3–5 knappe Stichpunkte, kein Markdown, kein Vorspann.')
+    _user = ((f"Thema: {topic}\n" if topic else "")
+             + (("Belegmaterial:\n" + doc_text[:4000]) if doc_text else ""))
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "format": "json", "stream": False,
+                "messages": [{"role": "system", "content": _sys},
+                             {"role": "user", "content": _user}],
+                "options": {"num_ctx": _profile_num_ctx(), "num_predict": 400},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+        _ti, _to = _llm_tok(_j)
+        tok["in"] += _ti
+        tok["out"] += _to
+        raw = re.sub(r"<think>.*?</think>", "", (_j.get("message", {}) or {}).get("content", "") or "", flags=re.DOTALL)
+        d = _parse_llm_json(raw)
+        b = (d or {}).get("bullets") if isinstance(d, dict) else None
+        return [re.sub(r"^\s*[-•*]\s*", "", str(x)).strip() for x in (b or []) if str(x).strip()][:5]
+    except Exception:
+        return []
+
+
+async def _pres_mermaid_defs(context: str, count: int, model: str, tok: dict) -> list:
+    """0–2 valide Mermaid-Definitionen als Übersicht (ein LLM-Aufruf). Rückgabe:
+    ``[{title, mermaid}]``. Das Frontend rastert die Definition zu einem Bild."""
+    count = max(1, min(int(count or 1), 2))
+    _sys = ("Du erstellst valide Mermaid-Diagramme (flowchart TD ODER graph LR) als Übersicht "
+            "zu einem Präsentationsinhalt. Antworte NUR mit JSON "
+            '{"diagrams":[{"title":"kurzer Titel","mermaid":"flowchart TD\\n  A[Start]-->B[Ende]"}]}. '
+            f"Höchstens {count} Diagramm(e). Verwende in Knotentexten NUR einfache ASCII-Wörter "
+            "(keine Anführungszeichen, Klammern, Sonderzeichen); im Feld mermaid nur die reine "
+            "Mermaid-Definition mit \\n als Zeilentrenner.")
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=150) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "format": "json", "stream": False,
+                "messages": [{"role": "system", "content": _sys},
+                             {"role": "user", "content": f"Inhalt:\n{context[:4000]}"}],
+                "options": {"num_ctx": _profile_num_ctx(), "num_predict": 500},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+        _ti, _to = _llm_tok(_j)
+        tok["in"] += _ti
+        tok["out"] += _to
+        raw = re.sub(r"<think>.*?</think>", "", (_j.get("message", {}) or {}).get("content", "") or "", flags=re.DOTALL)
+        d = _parse_llm_json(raw)
+        out = []
+        for it in ((d or {}).get("diagrams") or [])[:count]:
+            if isinstance(it, dict) and str(it.get("mermaid", "")).strip():
+                out.append({"title": str(it.get("title") or "Übersicht").strip(),
+                            "mermaid": str(it["mermaid"]).strip()})
+        return out
+    except Exception:
+        return []
+
+
+async def _images_presentation_generator(body: dict):
+    images = body.get("images") or []
+    images = [im for im in images if isinstance(im, dict) and im.get("data")]
+    if not images:
+        yield _sse({"type": "error", "message": "Keine Bilder übergeben."})
+        return
+    topic = str(body.get("topic", "") or "").strip()
+    audience = str(body.get("audience", "") or "").strip()
+    address = str(body.get("address", "") or "").strip()
+    style = str(body.get("style", "") or "").strip()
+    doc_text = str(body.get("doc_text", "") or "").strip()
+    cover_source = str(body.get("cover_source", "generate") or "generate").strip().lower()
+    want_mermaid = bool(body.get("want_mermaid"))
+    mermaid_count = int(body.get("mermaid_count") or 2)
+    want_notes = bool(body.get("want_notes"))
+    image_wishes = str(body.get("image_wishes", "") or "").strip()
+    image_model = str(body.get("image_model", "") or "")
+    tok = {"in": 0, "out": 0}
+
+    model = await _vision_model(body.get("model"))
+    if not model:
+        yield _sse({"type": "error", "message": "Kein lokales multimodales Modell verfügbar – die Bild-Präsentation braucht ein Vision-Modell (z. B. „qwen2.5-vl“/„llava“ in Ollama)."})
+        return
+
+    persona = _pres_persona(style, address, audience)
+    yield _sse({"type": "pres_start", "topic": topic or "Bildpräsentation"})
+
+    # 1. Je Bild analysieren → Zweispalter-Folie (Original-Bild rechts)
+    content_slides = []
+    captions = []
+    first_title = ""
+    total = len(images)
+    for i, im in enumerate(images):
+        name = str(im.get("name", "") or "")
+        data_uri = str(im.get("data", "") or "")
+        yield _sse({"type": "analyzing", "n": i + 1, "total": total, "name": name})
+        try:
+            a = await _analyze_image_core(data_uri, system_prompt=persona, filename=name,
+                                          topic=topic, model=model, want_notes=want_notes)
+            _t = a.get("tokens") or {}
+            tok["in"] += _t.get("in", 0)
+            tok["out"] += _t.get("out", 0)
+        except Exception as e:
+            yield _sse({"type": "notice", "message": f"Bild {i + 1} ({name}): Analyse fehlgeschlagen – {e}"})
+            a = {"title": name or "Abbildung", "bullets": [], "caption": ""}
+        lines = list(a.get("bullets") or [])
+        if a.get("caption"):
+            lines.append(a["caption"])
+        sl = {"layout": "two-column", "title": a.get("title") or "Abbildung",
+              "left": "\n".join(lines), "image_right": data_uri}
+        if want_notes and a.get("notes"):
+            sl["notes"] = a["notes"]
+        content_slides.append(sl)
+        if a.get("caption"):
+            captions.append(a["caption"])
+        if not first_title:
+            first_title = a.get("title") or ""
+        yield _sse({"type": "image_done", "n": i + 1, "title": sl["title"]})
+
+    title = topic or first_title or "Präsentation"
+    subtitle = audience and f"Für {audience}" or ""
+
+    # 2. Optionale Intro-Folie aus Thema/Belegmaterial
+    intro_slide = None
+    if topic or doc_text:
+        yield _sse({"type": "notice", "message": "Einleitung wird formuliert…"})
+        ib = await _pres_intro_bullets(topic, doc_text, persona, model, tok)
+        if ib:
+            intro_slide = {"layout": "bullets", "title": "Über diese Präsentation", "bullets": ib}
+
+    # 3. Optionale Mermaid-Übersicht (Frontend rastert → Bild)
+    diagram_slides = []
+    if want_mermaid and mermaid_count > 0:
+        yield _sse({"type": "notice", "message": "Diagramm-Übersicht wird abgeleitet…"})
+        ctx = (("Thema: " + topic + "\n") if topic else "") \
+            + ("Belegmaterial: " + doc_text[:2000] + "\n" if doc_text else "") \
+            + "Bildinhalte:\n" + "\n".join(f"- {c}" for c in captions[:20])
+        for dg in await _pres_mermaid_defs(ctx, mermaid_count, model, tok):
+            diagram_slides.append({"layout": "two-column", "title": dg["title"],
+                                   "left": "Übersicht", "mermaid": dg["mermaid"]})
+
+    # 4. Cover / Abschluss je Quelle
+    async def _gen_slide_image(_title, _basis):
+        _pm = _pick_model(_model_for("general"))
+        _wish = (style + (" · " + image_wishes if image_wishes else "")).strip(" ·")
+        _ip, _pi, _po = await _slide_image_prompt(_title, [], _basis, _pm, _wish)
+        tok["in"] += _pi
+        tok["out"] += _po
+        _img = await _generate_image_core(_ip, "", "landscape", image_model)
+        return _img.get("image", "")
+
+    close_title = "Vielen Dank"
+    if cover_source == "generate":
+        # Lokalen Bild-Server bei Bedarf starten (Z-Image-Brücke), sonst Rückfall auf „uploaded"/Text.
+        _im = image_model or _image_model()
+        _is_local_img = _im == "local::sd" or (bool(_im) and not _llm.is_remote(_im))
+        if _is_local_img and not await _ensure_sd_server():
+            yield _sse({"type": "notice", "message": "Bild-Server nicht erreichbar – Start/Abschluss aus hochgeladenen Bildern."})
+            cover_source = "uploaded"
+
+    cover = {"layout": "title", "title": title}
+    if subtitle:
+        cover["content"] = subtitle
+    closing = {"layout": "title", "title": close_title}
+    if cover_source == "uploaded":
+        cover["image"] = str(images[0].get("data", "") or "")
+        closing["image"] = str(images[-1].get("data", "") or "")
+    elif cover_source == "generate":
+        yield _sse({"type": "slide_image_start", "n": 1, "total": 2, "kind": "cover", "title": title})
+        try:
+            cover["image"] = await _gen_slide_image(title, subtitle)
+            yield _sse({"type": "slide_image_done", "n": 1})
+        except Exception as e:
+            yield _sse({"type": "notice", "message": f"Deckblatt-Bild nicht erzeugt – {e}"})
+        yield _sse({"type": "slide_image_start", "n": 2, "total": 2, "kind": "closing", "title": close_title})
+        try:
+            closing["image"] = await _gen_slide_image(close_title, title)
+            yield _sse({"type": "slide_image_done", "n": 2})
+        except Exception as e:
+            yield _sse({"type": "notice", "message": f"Abschluss-Bild nicht erzeugt – {e}"})
+
+    # 5. Folien zusammenstellen: Cover → Intro → Bildfolien → Diagramme → Abschluss
+    slides = [cover]
+    if intro_slide:
+        slides.append(intro_slide)
+    slides += content_slides
+    slides += diagram_slides
+    slides.append(closing)
+
+    data = {"type": "presentation", "title": title, "theme": "dark", "slides": slides,
+            "tokens": tok}
+    yield _sse({"type": "structure", "count": len(slides), "title": title})
+    yield _sse({"type": "done", "presentation": data, "tokens": tok})
+
+
+@router.post("/api/presentation/from-images")
+async def presentation_from_images(req: Request):
+    """Baut aus hochgeladenen Bildern eine Präsentation (SSE). Body ``{images:[{name,data}],
+    doc_text?, topic?, audience?, address, style?, cover_source(uploaded|generate|text),
+    want_mermaid, mermaid_count?, want_notes, image_wishes?, model?, image_model?}``. Je Bild
+    Vision-Analyse (Dateiname-Hinweis) → Zweispalter-Folie; optional Intro/Mermaid; Cover/Abschluss
+    je Quelle. Braucht ein lokales multimodales Modell (``_vision_model``). Mermaid-Folien tragen ein
+    ``mermaid``-Feld, das das Frontend zu einem Bild rastert. Token-Label „Präsentationsassistent"."""
+    body = await req.json()
+    return StreamingResponse(_images_presentation_generator(body), media_type="text/event-stream")
+
+
 
 
 

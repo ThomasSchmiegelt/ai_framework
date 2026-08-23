@@ -492,6 +492,42 @@ einklappbar (`<details>`). **Hilfe-Wissensdatenbank:** `🆘 …erstellen/aktual
 `Hilfe: LOCAL AI`-Sammlung ein und legt/erneuert einen Favoriten-Agenten **`hilfe_agent`**
 (🆘, an die Basis gebunden) an — idempotent, erreichbar via `/Hilfe …`.
 
+**Bild-aware RAG (Bilder verstehen, finden, anzeigen).** Das RAG ist textbasiert
+(`nomic-embed-text` versteht nur Text). Damit Bilder trotzdem *auffindbar* und *anzeigbar*
+werden, ohne neues Embedding-Modell/Abhängigkeit:
+
+- **Ingest** (`routers/rag.py`): Bei Bild-Endung (`_IMG_EXTS`) speichert der Upload das Original
+  permanent unter `RAG_IMAGES_DIR/<coll>/<doc_id><ext>` (`core.py`, in der mkdir-Liste + Backup
+  `_backup_dirs_always()`) und lässt es **lokal per Vision-Modell beschreiben** — `_describe_image`
+  (Muster wie Postfach Stufe 2: base64-Bild in `msg["images"]`, `async with _model_session(model)`,
+  `_analysis_model(None)`), Systemprompt `_RAG_IMAGE_DESCRIBE_SYSTEM` (faktisch-reich, sichtbarer
+  Text/Diagramminhalt wortgetreu). Ein optionaler `caption`-Formwert wird der durchsuchbaren
+  Beschreibung vorangestellt (eigenes Fachvokabular mit-embedden). Die Beschreibung läuft durch das
+  normale `ingest_file(coll, desc, filename, doc_id, image_rel=…)` (clean/chunk/embed wie Text).
+  Ohne lokales LLM → **HTTP 503**; ein reines Textmodell liefert eine schwächere Beschreibung
+  (multimodales Modell empfohlen, z. B. `llava`/`qwen2.5-vl`). Der Ordner-Import
+  (`/api/rag/.../folder`) behandelt Bilder analog (Modell einmal vor der Schleife auflösen; ohne
+  Modell werden Bilder übersprungen).
+- **Verknüpfung** (`db.py`): eine nullable Spalte `rag_documents.image_rel` (Migration wie
+  `char_limit`/`strictness`). Präsenz = Bild-Dokument. `rag_add_document(..., image_rel=None)`
+  persistiert sie, `rag_document_image(did)` liest sie zum Ausliefern, `rag_fetch_chunks` gibt
+  `d.id AS document_id, d.image_rel` mit.
+- **Treffer & Anzeige:** `query_collections` hängt Bild-Treffern
+  `image_url = /api/rag/documents/{did}/image` an (Text bleibt die Beschreibung fürs Grounding).
+  Der Endpoint (`FileResponse`, Pfad über `_safe_relpath` abgesichert) liefert das Original. Der
+  Chat-`rag`-Frame (`routers/chat.py`) reicht `image_url` je Quelle durch, `chat.js
+  insertRagSources()` rendert ein klickbares **Thumbnail** (dedupe je Bild-URL), 🖼-Badge in der
+  Dokumentliste. Bild-Uploads laufen im Frontend immer über den Vision-Weg (nicht das
+  Text-Optimieren).
+- **Auch im Assistent-Modus (Werkzeug-Weg):** das `search_knowledge_base`-Tool (`routers/chat.py`)
+  liefert nun einen **JSON-Umschlag** `{text, sources}` (Quellen inkl. `image_url`); der Chat-Tool-Loop
+  streamt daraus ein `rag`-Frame (Muster wie `run_python`/`generate_image`) → `chat.js
+  insertRagSources` zeigt dieselben **Thumbnails** wie der direkte RAG-Weg, dem Modell geht nur der
+  `text`. Ebenso schränkt eine **Matrix-Spalte** über `ChatRequest.tools` das Werkzeug gezielt ein
+  (z. B. nur `search_knowledge_base`).
+- **Bewusst v1-außen:** Sammlungs-Export/-Klon (`rag_export`) trägt die Bild-Bytes nicht mit
+  (Voll-Backup deckt sie über den Ordner ab).
+
 ---
 
 ## 14. Agenten — Favoriten, Slash, Adaptiv, Gesetz-Agent
@@ -940,6 +976,27 @@ und `_web_search_allowed()`).
   (`_guided_presentation_generator`): Interview → Gliederung → je Punkt Webrecherche → flächiges
   Deckblatt/Abschluss + zweispaltige Inhaltsfolien. Nicht zu verwechseln mit `illustrated_
   presentation.js` (Folien **aus** einem Bilderordner via Vision).
+- **Präsentation AUS hochgeladenen Bildern** (`/praesentation` **Bildmodus**, `routers/presentation.py`
+  `POST /api/presentation/from-images` → `_images_presentation_generator`). Das Interview-Overlay
+  (`chat.js` `_openPresInterview`) erlaubt `/praesentation` **ohne Thema** und bietet **Bild-Auswahl**
+  (mehrere, Thumbnails, **Drag-Sortieren** = Folienreihenfolge) + optionale **.md/.txt** (Zusatzkontext),
+  Chips **Anrede (Du/Sie)** / **Stil** (technisch/sozial/…) / **Start&Abschluss** (hochgeladen/generieren/
+  Text) sowie Toggles **Mermaid** und **Sprechernotizen**. Ablauf: `_pres_persona(style,address,audience)`
+  → je Bild (in gewählter Reihenfolge) der **geteilte Vision-Kern `_analyze_image_core`** (`core.py`, aus
+  `/api/analyze-image` herausgezogen; nutzt **Dateinamen als Hinweis** via `is_descriptive_filename`,
+  optional `notes`) → Zweispalter-Folie mit **Original-Bild** als `image_right` → optional Intro-Folie
+  (`_pres_intro_bullets` aus Thema/Doc) → optional **0–2 Mermaid-Definitionen** (`_pres_mermaid_defs`;
+  die Folie trägt ein Text-Feld `mermaid`) → **Cover/Abschluss** je `cover_source`. Modellwahl über den
+  **geteilten `_vision_model`** (`core.py`, verallgemeinert aus dem Bild-aware-RAG-`_pick_vision_model`):
+  bevorzugt ein installiertes **multimodales** Ollama-Modell (Fähigkeit aus `/api/tags` `capabilities`),
+  Geheim-/Hartman-tauglich; ohne lokales Vision-LLM → SSE-`error`. **Mermaid-Rasterung im Frontend**
+  (`chat.js` `_mermaidToPng`): mermaid liegt nur im Browser → SVG→PNG-Data-URI, **`htmlLabels:false`**
+  (sonst erzeugen HTML-Labels `<foreignObject>`, das den Canvas „tainted" und `toDataURL` blockiert),
+  danach Chat-Standardkonfig wiederhergestellt; das PNG wird `image_right` (**so exportiert der PPTX/PDF-
+  Export es mit**). Nach dem Rendern **Nachfrage** (`_presConfirmBar`): „✅ so verwenden" bzw.
+  „🎨 Start-/Abschlussfolie neu generieren" (`_regenCoverClosing` → `/api/presentation/slide-image`).
+  **Sprechernotizen**: `slide.notes` → PPTX-Notizbereich (`tools/export.py to_pptx`,
+  `slide.notes_slide.notes_text_frame.text`). Token-Label „Präsentationsassistent".
 
 ---
 

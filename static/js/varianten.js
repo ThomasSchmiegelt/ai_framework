@@ -449,10 +449,20 @@ const Varianten = (() => {
       : 'Noch keine Merkmale — das erste eingeben.';
   }
 
+  // Das Overlay liegt statisch im (ggf. ausgeblendeten) #varianten-panel. Wird es aus dem
+  // Chat geöffnet (/paarvergleich), ist der Panel-Vorfahre display:none → ein position:fixed-
+  // Element darin wird NICHT gerendert. Darum vor dem Anzeigen nach <body> heben (CSS ist
+  // ID-basiert, daher unabhängig vom Elternknoten).
+  function _liftStepwise() {
+    const ov = _el('var-stepwise');
+    if (ov && ov.parentElement !== document.body) document.body.appendChild(ov);
+    return ov;
+  }
+
   function _openStepwise() {
     if (!_data) { _status('Erst einen Vergleich anlegen/öffnen.'); return; }
     _stepQueue = []; _stepIdx = 0; _stepStrength = 3;
-    _el('var-stepwise').style.display = 'flex';
+    _liftStepwise().style.display = 'flex';
     _stepPhase('add');
     _renderStepList();
     _highlightStrength();
@@ -464,7 +474,7 @@ const Varianten = (() => {
   function _openStepwisePairs(pairs) {
     if (!_data) { _status('Erst einen Vergleich anlegen/öffnen.'); return; }
     _stepQueue = pairs.slice(); _stepIdx = 0; _stepStrength = 3;
-    _el('var-stepwise').style.display = 'flex';
+    _liftStepwise().style.display = 'flex';
     _highlightStrength();
     _renderStepQuestion();
   }

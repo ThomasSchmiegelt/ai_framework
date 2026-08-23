@@ -7,6 +7,8 @@ const Chat = (() => {
   let currentConvId = null;
   let abortController = null;   // bricht den laufenden /api/chat-Stream ab
   let showThinking = false;    // Denkprozess-Panel aktiv?
+  let _presImages = [];        // /praesentation Bildmodus: [{name, data(dataURL)}], sortierbar
+  let _presDoc = '';           // optionaler .md/.txt-Inhalt als Zusatzkontext
 
   // Anzeigenamen der Antwortstil-Personas (Profil → tone). Leer = Standard-Branding.
   const PERSONA_NAMES = {
@@ -225,8 +227,8 @@ const Chat = (() => {
     if (pr) {
       input.value = '';
       autoResizeTextarea(input);
-      if (pr.topic) _openPresInterview(pr.topic, pr.images);
-      else showToast('Bitte nach „/praesentation" ein Thema angeben');
+      // Thema optional: ohne Thema öffnet sich das Interview im Bildmodus (Bilder → Präsentation).
+      _openPresInterview(pr.topic, pr.images);
       return;
     }
 
@@ -531,9 +533,30 @@ const Chat = (() => {
     const box = document.createElement('div');
     box.style.cssText = 'margin:0 0 10px;padding:8px 10px;border-left:3px solid var(--accent);background:var(--accent-dim);border-radius:6px;font-size:12px;color:var(--text-dim)';
     const items = sources.map(s =>
-      `<span title="Score ${s.score}">📄 ${escHtml(s.filename)} <span class="planner-muted">(${escHtml(s.collection)})</span></span>`
+      `<span title="Score ${s.score}">${s.image_url ? '🖼' : '📄'} ${escHtml(s.filename)} <span class="planner-muted">(${escHtml(s.collection)})</span></span>`
     ).join(' · ');
     box.innerHTML = `📚 <strong>Kontext aus Wissenssammlung:</strong> ${items}`;
+    // Bild-aware RAG: Thumbnails der Bild-Treffer (dedupe je Bild-URL), Klick öffnet Vollbild.
+    const seen = new Set();
+    const thumbs = [];
+    for (const s of sources) {
+      if (s.image_url && !seen.has(s.image_url)) { seen.add(s.image_url); thumbs.push(s); }
+    }
+    if (thumbs.length) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:8px';
+      for (const s of thumbs) {
+        const a = document.createElement('a');
+        a.href = s.image_url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.title = (s.filename || 'Bild') + ' — zum Vergrößern klicken';
+        const img = document.createElement('img');
+        img.src = s.image_url; img.alt = s.filename || 'Bild';
+        img.style.cssText = 'height:64px;width:auto;max-width:120px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;display:block';
+        a.appendChild(img);
+        row.appendChild(a);
+      }
+      box.appendChild(row);
+    }
     container.insertBefore(box, beforeEl);
     scrollToBottom();
   }
@@ -2155,34 +2178,63 @@ const Chat = (() => {
   }
 
   // ── Geführter Präsentationsassistent: Interview + Erstellung ────────────────
+  // Zwei Modi im selben Overlay: OHNE Bilder = Themenweg (Gliederung/Webrecherche,
+  // /api/presentation/guided); MIT hochgeladenen Bildern = Bildweg (Vision je Bild →
+  // Folien, /api/presentation/from-images). Die Bild-Auswahl entscheidet den Modus.
   function _openPresInterview(topic, imagesDirective) {
     const old = document.getElementById('pres-interview'); if (old) old.remove();
+    _presImages = []; _presDoc = '';
     const imgMode = imagesDirective === 'all' ? 'all' : imagesDirective === 'none' ? 'none' : 'smart';
     const ov = document.createElement('div');
     ov.id = 'pres-interview';
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
-    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3)';
+    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3);box-sizing:border-box';
     ov.innerHTML = `
-      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
-        <div style="font-weight:700;font-size:1.1em;margin-bottom:4px">🖼️ Präsentation erstellen</div>
-        <div style="opacity:.7;margin-bottom:14px">Thema: <b>${escHtml(topic)}</b></div>
-        <label style="display:block;margin:8px 0 3px">Zielgruppe</label>
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:580px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.1em;margin-bottom:10px">🖼️ Präsentation erstellen</div>
+
+        <label style="display:block;margin:2px 0 3px">Bilder (optional – mit Bildern: aus den Bildern; ohne: aus dem Thema)</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+          <button id="pi-pick-images" type="button" class="wf-action-btn">＋ Bilder wählen</button>
+          <button id="pi-pick-doc" type="button" class="wf-action-btn">＋ Text/Markdown</button>
+          <span id="pi-doc-info" style="opacity:.7;align-self:center;font-size:.9em"></span>
+        </div>
+        <div id="pi-thumbs" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+
+        <label style="display:block;margin:8px 0 3px">Thema / was beschrieben werden soll</label>
+        <input id="pi-topic" type="text" placeholder="z. B. Baustellenfortschritt KW 12" style="${fld}">
+        <label style="display:block;margin:10px 0 3px">Zielgruppe</label>
         <input id="pi-audience" type="text" placeholder="z. B. Geschäftsführung, Studierende, Laien" style="${fld}">
         <label style="display:block;margin:10px 0 3px">Ziel / Zweck</label>
         <input id="pi-goal" type="text" placeholder="z. B. überzeugen, informieren, Entscheidung vorbereiten" style="${fld}">
-        <label style="display:block;margin:10px 0 3px">Umfang</label>
-        <div id="pi-count"></div>
-        <label style="display:block;margin:10px 0 3px">Bilder</label>
-        <div id="pi-images"></div>
-        <label style="display:block;margin:10px 0 3px">Bildwünsche / Stil (optional)</label>
+        <label style="display:block;margin:10px 0 3px">Anrede</label>
+        <div id="pi-address"></div>
+        <label style="display:block;margin:10px 0 3px">Stil</label>
+        <div id="pi-style"></div>
+        <label style="display:block;margin:10px 0 3px">Start- & Abschlussfolie</label>
+        <div id="pi-cover"></div>
+        <label style="display:flex;align-items:center;gap:8px;margin:12px 0 4px;cursor:pointer"><input id="pi-mermaid" type="checkbox"> Mermaid-Diagramm(e) als Übersicht ergänzen</label>
+        <label style="display:flex;align-items:center;gap:8px;margin:4px 0 4px;cursor:pointer"><input id="pi-notes" type="checkbox"> Sprechernotizen je Folie (PPTX)</label>
+
+        <div id="pi-topic-only" style="border-top:1px solid var(--border,#334);margin-top:10px;padding-top:8px">
+          <div style="opacity:.7;font-size:.85em;margin-bottom:4px">Nur ohne Bilder (Themenweg):</div>
+          <label style="display:block;margin:4px 0 3px">Umfang</label>
+          <div id="pi-count"></div>
+          <label style="display:block;margin:8px 0 3px">Bilder generieren</label>
+          <div id="pi-images"></div>
+          <label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;cursor:pointer"><input id="pi-web" type="checkbox" checked> Webrecherche je Gliederungspunkt</label>
+        </div>
+
+        <label style="display:block;margin:10px 0 3px">Bildwünsche / Stil generierter Bilder (optional)</label>
         <input id="pi-wishes" type="text" placeholder="z. B. fotorealistisch, minimalistisch, Aquarell" style="${fld}">
-        <label style="display:flex;align-items:center;gap:8px;margin:12px 0 4px;cursor:pointer"><input id="pi-web" type="checkbox" checked> Webrecherche je Gliederungspunkt</label>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
           <button id="pi-cancel" class="wf-action-btn">Abbrechen</button>
           <button id="pi-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">Erstellen</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
+    if (topic) ov.querySelector('#pi-topic').value = topic;
+
     const mkChips = (host, opts, initial) => {
       host.dataset.val = String(initial);
       opts.forEach(([val, lab]) => {
@@ -2198,26 +2250,249 @@ const Chat = (() => {
         host.appendChild(b);
       });
     };
+    mkChips(ov.querySelector('#pi-address'), [['sie', 'Sie'], ['du', 'Du']], 'sie');
+    mkChips(ov.querySelector('#pi-style'), [['technisch', 'technisch'], ['sozial', 'sozial'], ['wissenschaftlich', 'wissenschaftlich'], ['marketing', 'marketing'], ['schlicht', 'schlicht'], ['kreativ', 'kreativ']], 'technisch');
+    mkChips(ov.querySelector('#pi-cover'), [['generate', 'generieren'], ['uploaded', 'hochgeladenes Bild'], ['text', 'nur Text']], 'generate');
     mkChips(ov.querySelector('#pi-count'), [[4, 'kurz (4)'], [6, 'mittel (6)'], [8, 'lang (8)']], 6);
     mkChips(ov.querySelector('#pi-images'), [['smart', 'KI entscheidet'], ['all', 'alle Folien'], ['none', 'keine']], imgMode);
+
+    // Bild-Auswahl + Drag-Sortieren
+    const thumbs = ov.querySelector('#pi-thumbs');
+    const _renderThumbs = () => {
+      thumbs.innerHTML = '';
+      const topicOnly = ov.querySelector('#pi-topic-only');
+      if (topicOnly) topicOnly.style.display = _presImages.length ? 'none' : '';
+      _presImages.forEach((im, idx) => {
+        const cell = document.createElement('div');
+        cell.draggable = true; cell.dataset.idx = String(idx);
+        cell.style.cssText = 'position:relative;width:64px;height:64px;border-radius:6px;overflow:hidden;border:1px solid var(--border,#334);cursor:grab';
+        cell.title = im.name + ' — ziehen zum Sortieren';
+        cell.innerHTML = `<img src="${im.data}" style="width:100%;height:100%;object-fit:cover;display:block"><button data-x="${idx}" style="position:absolute;top:0;right:0;border:0;background:#000a;color:#fff;cursor:pointer;font-size:12px;line-height:1;padding:1px 4px">×</button><span style="position:absolute;bottom:0;left:0;background:#000a;color:#fff;font-size:10px;padding:0 3px">${idx + 1}</span>`;
+        cell.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(idx)); });
+        cell.addEventListener('dragover', e => e.preventDefault());
+        cell.addEventListener('drop', e => {
+          e.preventDefault();
+          const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+          const to = idx;
+          if (isNaN(from) || from === to) return;
+          const [m] = _presImages.splice(from, 1);
+          _presImages.splice(to, 0, m);
+          _renderThumbs();
+        });
+        cell.querySelector('button[data-x]').onclick = (e) => { e.stopPropagation(); _presImages.splice(idx, 1); _renderThumbs(); };
+        thumbs.appendChild(cell);
+      });
+    };
+    ov.querySelector('#pi-pick-images').onclick = () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true; inp.style.display = 'none';
+      inp.onchange = async () => {
+        const files = [...(inp.files || [])].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name));
+        files.sort((a, b) => a.name.localeCompare(b.name, 'de', { numeric: true }));
+        for (const f of files) {
+          const data = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.readAsDataURL(f); });
+          _presImages.push({ name: f.name, data });
+        }
+        _renderThumbs();
+      };
+      inp.click();
+    };
+    ov.querySelector('#pi-pick-doc').onclick = () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = '.md,.txt,text/plain,text/markdown'; inp.style.display = 'none';
+      inp.onchange = () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        const r = new FileReader();
+        r.onload = () => { _presDoc = String(r.result || ''); ov.querySelector('#pi-doc-info').textContent = `✓ ${f.name}`; };
+        r.readAsText(f);
+      };
+      inp.click();
+    };
+    _renderThumbs();
+
     const close = () => ov.remove();
     ov.addEventListener('click', e => { if (e.target === ov) close(); });
     document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
     ov.querySelector('#pi-cancel').onclick = close;
     ov.querySelector('#pi-go').onclick = () => {
+      const topicVal = ov.querySelector('#pi-topic').value.trim();
+      if (_presImages.length) {
+        const params = {
+          images: _presImages.slice(),
+          doc_text: _presDoc || '',
+          topic: topicVal,
+          audience: ov.querySelector('#pi-audience').value.trim(),
+          address: ov.querySelector('#pi-address').dataset.val || 'sie',
+          style: ov.querySelector('#pi-style').dataset.val || '',
+          cover_source: ov.querySelector('#pi-cover').dataset.val || 'generate',
+          want_mermaid: ov.querySelector('#pi-mermaid').checked,
+          mermaid_count: 2,
+          want_notes: ov.querySelector('#pi-notes').checked,
+          image_wishes: ov.querySelector('#pi-wishes').value.trim(),
+        };
+        close();
+        runImagePresentation(params);
+        return;
+      }
+      if (!topicVal) { showToast('Bitte ein Thema eingeben oder Bilder wählen'); return; }
       const params = {
-        topic,
+        topic: topicVal,
         audience: ov.querySelector('#pi-audience').value.trim(),
         goal: ov.querySelector('#pi-goal').value.trim(),
         count: parseInt(ov.querySelector('#pi-count').dataset.val, 10) || 6,
         image_mode: ov.querySelector('#pi-images').dataset.val || 'smart',
         image_wishes: ov.querySelector('#pi-wishes').value.trim(),
+        style: ov.querySelector('#pi-style').dataset.val || '',
         web: ov.querySelector('#pi-web').checked,
       };
       close();
       runGuidedPresentation(params);
     };
-    setTimeout(() => { const a = ov.querySelector('#pi-audience'); if (a) a.focus(); }, 30);
+    setTimeout(() => { const a = ov.querySelector('#pi-topic'); if (a) a.focus(); }, 30);
+  }
+
+  // Mermaid-Definition → PNG-Data-URI (für export-feste Diagrammfolien). mermaid.js liegt
+  // nur im Browser; das Backend liefert die Definition als Text, hier wird sie gerastert.
+  // WICHTIG: mit htmlLabels:false rendern — HTML-Labels erzeugen <foreignObject>, das den
+  // Canvas „tainted" und toDataURL blockiert. Danach die Chat-Standardkonfig wiederherstellen.
+  async function _mermaidToPng(def) {
+    try {
+      _ensureMermaid();
+      if (typeof mermaid === 'undefined') return '';
+      mermaid.initialize({ startOnLoad: false, theme: 'dark', htmlLabels: false,
+        flowchart: { htmlLabels: false },
+        themeVariables: { background: '#1e1e2e', primaryColor: '#3b76ba',
+                          primaryTextColor: '#d4e8f8', lineColor: '#a3c8eb' } });
+      let png = '';
+      try {
+        const id = 'mmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+        const { svg } = await mermaid.render(id, def);
+        const dataUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl; });
+        const scale = 2;
+        const w = (img.naturalWidth || 640) * scale, h = (img.naturalHeight || 400) * scale;
+        const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#1e1e2e'; ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        png = cv.toDataURL('image/png');
+      } finally {
+        // Chat-Standard (mit HTML-Labels) wiederherstellen, damit Chat-Diagramme unverändert bleiben.
+        mermaid.initialize({ startOnLoad: false, theme: 'dark',
+          themeVariables: { background: '#1e1e2e', primaryColor: '#3b76ba',
+                            primaryTextColor: '#d4e8f8', lineColor: '#a3c8eb' } });
+      }
+      return png;
+    } catch (_) { return ''; }
+  }
+
+  async function runImagePresentation(params) {
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false); isStreaming = true; setBtnSendState(false);
+    const head = `🖼️ Präsentation aus ${params.images.length} Bild(ern)${params.topic ? ': ' + params.topic : ''}`;
+    appendMessage('user', head);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const logEl = document.createElement('div'); logEl.className = 'research-log'; content.appendChild(logEl);
+    const workingEl = makeWorking('Präsentation wird erstellt'); content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    const _log = (t) => { const d = document.createElement('div'); d.className = 'research-log-line'; d.textContent = t; logEl.appendChild(d); scrollToBottom(); };
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    const image_model = (typeof Profile !== 'undefined' && Profile.imageModel) ? Profile.imageModel() : undefined;
+    let presentation = null;
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/presentation/from-images', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify(Object.assign({ model, image_model }, params)),
+      });
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'pres_start') _log('🧭 Bilder werden ausgewertet…');
+          else if (ev.type === 'analyzing') _log(`  🔍 Bild ${ev.n}/${ev.total}${ev.name ? ' — ' + ev.name : ''}…`);
+          else if (ev.type === 'image_done') _log(`  ✓ „${(ev.title || '').slice(0, 50)}"`);
+          else if (ev.type === 'slide_image_start') _log(`🖼 Bild ${ev.n}/${ev.total}${ev.kind === 'cover' ? ' (Deckblatt)' : ev.kind === 'closing' ? ' (Abschluss)' : ''}…`);
+          else if (ev.type === 'slide_image_done') _log(`  ✓ Bild ${ev.n} fertig`);
+          else if (ev.type === 'structure') _log(`📑 ${ev.count} Folien`);
+          else if (ev.type === 'notice') { const d = document.createElement('div'); d.className = 'research-log-line'; d.style.opacity = '.7'; d.textContent = '  ℹ ' + (ev.message || ''); logEl.appendChild(d); scrollToBottom(); }
+          else if (ev.type === 'done') { presentation = ev.presentation; if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Präsentationsassistent'); }
+          else if (ev.type === 'error') { textEl.innerHTML = `<em style="color:#ef4444">${escHtml(ev.message || 'Fehlgeschlagen')}</em>`; }
+        }
+      }
+      workingEl.remove();
+      if (presentation && typeof CanvasRenderer !== 'undefined') {
+        // Mermaid-Folien zu Bildern rastern (export-fest), sonst als Text-Folie belassen.
+        for (const sl of (presentation.slides || [])) {
+          if (sl.mermaid) {
+            const png = await _mermaidToPng(sl.mermaid);
+            if (png) { sl.image_right = png; sl.layout = 'two-column'; }
+            delete sl.mermaid;
+          }
+        }
+        CanvasRenderer.render(presentation);
+        if (typeof switchTab === 'function') switchTab('canvas');
+        textEl.textContent = `✓ Präsentation „${presentation.title || ''}" mit ${(presentation.slides || []).length} Folien im Canvas erstellt.`;
+        _presConfirmBar(content, presentation, params);
+        messages.push({ role: 'user', content: head });
+        messages.push({ role: 'assistant', content: `Präsentation „${presentation.title || ''}" im Canvas erstellt.` });
+        loadConversationList();
+      } else if (!textEl.innerHTML) {
+        textEl.innerHTML = `<em style="color:#ef4444">Präsentation fehlgeschlagen.</em>`;
+      }
+    } catch (e) {
+      workingEl.remove();
+      if (e.name !== 'AbortError') textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      abortController = null; isStreaming = false; setBtnSendState(true);
+    }
+  }
+
+  // Nachfrage nach dem Bauen: so verwenden ODER Start-/Abschlussfolie per Bildgenerator neu.
+  function _presConfirmBar(content, presentation, params) {
+    const bar = document.createElement('div'); bar.className = 'wf-actions';
+    const bCanvas = document.createElement('button'); bCanvas.className = 'wf-action-btn'; bCanvas.textContent = '🖥️ zum Canvas';
+    bCanvas.onclick = () => switchTab('canvas');
+    const bUse = document.createElement('button'); bUse.className = 'wf-action-btn'; bUse.textContent = '✅ so verwenden';
+    bUse.onclick = () => { bar.remove(); showToast('Präsentation übernommen'); };
+    const bRegen = document.createElement('button'); bRegen.className = 'wf-action-btn'; bRegen.textContent = '🎨 Start-/Abschlussfolie neu generieren';
+    bRegen.onclick = () => _regenCoverClosing(presentation, params, bRegen);
+    bar.appendChild(bCanvas); bar.appendChild(bUse); bar.appendChild(bRegen);
+    content.appendChild(bar);
+  }
+
+  async function _regenCoverClosing(presentation, params, btn) {
+    const slides = presentation.slides || [];
+    if (!slides.length) return;
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = '🎨 wird generiert…';
+    const image_model = (typeof Profile !== 'undefined' && Profile.imageModel) ? Profile.imageModel() : undefined;
+    const style = params.style || '';
+    const wishes = params.image_wishes || '';
+    const _gen = async (slide, basis) => {
+      try {
+        const r = await fetch('/api/presentation/slide-image', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: slide.title || '', content: basis, preset: 'landscape',
+                                 style: [style, wishes].filter(Boolean).join(' · '), model: image_model }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Präsentationsbild');
+        if (d.image) { slide.image = d.image; slide.layout = 'title'; }
+      } catch (e) { showToast('Bild fehlgeschlagen: ' + e.message); }
+    };
+    await _gen(slides[0], presentation.title || '');
+    await _gen(slides[slides.length - 1], presentation.title || '');
+    try { CanvasRenderer.render(presentation); switchTab('canvas'); } catch (_) {}
+    btn.disabled = false; btn.textContent = orig;
+    showToast('Start-/Abschlussfolie neu generiert');
   }
 
   async function runGuidedPresentation(params) {
@@ -3709,7 +3984,7 @@ const Chat = (() => {
     { key: '/musik', ins: '/musik ', cmd: '/musik <Stil/Stimmung>', desc: 'Musik erzeugen (algorithmisch, ohne GPU): z. B. „/musik fröhliche 8bit Abenteuermelodie", „/musik traurig langsam" – spielt das Stück als Audio ab (💾 speichern)' },
     { key: '/excelvergleich', ins: '/excelvergleich', cmd: '/excelvergleich', desc: 'Excel-Vergleich: zwei Tabellen laden, je Blatt + Schlüsselspalte wählen → neue/entfernte/geänderte Zeilen + KI-Bewertung im Chat (auch /xlsvergleich, /excel)' },
     { key: '/paarvergleich', ins: '/paarvergleich ', cmd: '/paarvergleich [Thema]', desc: 'Schrittweiser Paarvergleich: Merkmal für Merkmal eingeben, Wichtigkeit gegen die vorherigen bewerten (Gewichte + Konsistenzcheck). Auch /entscheidung, /ahp' },
-    { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Geführter Präsentationsassistent: kurzes Interview (Zielgruppe/Ziel/Umfang/Bilder) → schlüssige Gliederung + Inhaltsverzeichnis → Webrecherche je Punkt → flächiges Deckblatt & Abschlussbild, Inhaltsfolien zweispaltig → Canvas' },
+    { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Präsentationsassistent (Interview): OHNE Bilder aus dem Thema (Gliederung + Webrecherche); MIT hochgeladenen Bildern eine Präsentation AUS den Bildern (Vision je Bild, Dateiname-Hinweis, sortierbar) + optional .md/.txt, Mermaid-Diagramme, Sprechernotizen, Start/Abschluss generiert → Canvas' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },

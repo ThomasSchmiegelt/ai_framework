@@ -519,6 +519,7 @@ class ChatRequest(BaseModel):
     agent_id: Optional[str] = None
     use_tools: bool = True
     web_search: bool = False   # Websuche-Tool nur anbieten, wenn der Schalter aktiv ist
+    tools: Optional[List[str]] = None   # explizite Werkzeug-Wahl (z. B. Matrix-Spalte): active_tools darauf einschränken
     conversation_id: Optional[str] = None
     rag_collections: List[str] = []
     science: bool = False   # Wissenschaftsmodus (z. B. Matrix-Recherche)
@@ -768,6 +769,30 @@ async def _chat_generator(request: ChatRequest):
     if _assist_on and _web_search_allowed() and not any(t["function"]["name"] == "search_patents" for t in active_tools):
         active_tools = active_tools + [_SEARCH_PATENTS_TOOL_DEF]
 
+    # Explizite Werkzeug-Wahl (z. B. eine Matrix-Spalte wählt „Websuche" oder „Wissensdatenbank"):
+    # active_tools auf die gewünschten Namen einschränken – mit denselben Freigaben/Gates wie oben.
+    if request.tools:
+        _want = [str(t).strip() for t in request.tools if str(t).strip()]
+        if _want:
+            _registry = {t["function"]["name"]: t for t in TOOL_DEFS}
+            for _gd in (_RUN_PYTHON_TOOL_DEF, _GENERATE_IMAGE_TOOL_DEF,
+                        _SEARCH_KB_TOOL_DEF, _SEARCH_PATENTS_TOOL_DEF):
+                _registry[_gd["function"]["name"]] = _gd
+            _picked = []
+            for _n in _want:
+                _def = _registry.get(_n)
+                if not _def:
+                    continue
+                if _n == "web_search" and not _web_search_allowed():
+                    continue
+                if _n == "run_python" and not ALLOW_PYTHON_EXEC:
+                    continue
+                if _n == "generate_image" and not _image_model():
+                    continue
+                _picked.append(_def)
+            if _picked:
+                active_tools = _picked
+
     # Nachrichten aufbauen – Modus-Brille (falls aktiv) dem System-Prompt voranstellen
     messages: list = []
     _sci = _SCIENCE_PROMPT if request.science else ""
@@ -873,7 +898,8 @@ async def _chat_generator(request: ChatRequest):
             }[_strict]
             messages.append({"role": "system", "content": _rag_instr + "\n\n" + ctx})
             yield _sse({"type": "rag", "sources": [
-                {"filename": h["filename"], "collection": h["collection_name"], "score": h["score"]}
+                {"filename": h["filename"], "collection": h["collection_name"], "score": h["score"],
+                 **({"image_url": h["image_url"]} if h.get("image_url") else {})}
                 for h in hits
             ]})
 
@@ -1204,6 +1230,18 @@ async def _chat_generator(request: ChatRequest):
                 except Exception:
                     pass
 
+            # Wissensdatenbank-Suche: Quellen (inkl. Bild-Thumbnails) anzeigen, Modell nur Text geben
+            if fn == "search_knowledge_base":
+                try:
+                    _kbd = json.loads(tool_result)
+                    if isinstance(_kbd, dict) and "text" in _kbd:
+                        _srcs = _kbd.get("sources") or []
+                        if _srcs:
+                            yield _sse({"type": "rag", "sources": _srcs})
+                        tool_result = _kbd.get("text", "") or tool_result
+                except Exception:
+                    pass
+
             # Assistent-Modus: erzeugtes Bild sofort anzeigen, dem Modell nur eine Notiz geben
             if fn == "generate_image":
                 try:
@@ -1303,13 +1341,20 @@ async def _execute_tool(name: str, args: dict) -> str:
         if not hits:
             return f"Keine passenden Stellen zu '{q}' in der Wissensdatenbank gefunden."
         parts = []
+        sources = []
         for i, h in enumerate(hits, 1):
             src = h.get("filename", "") or h.get("collection_name", "")
             coll = h.get("collection_name", "")
             label = f"[{i}] {src}" + (f" · {coll}" if coll and coll != src else "")
             parts.append(f"{label}\n{h.get('text','')}")
-        return ("Treffer aus der Wissensdatenbank (stütze deine Antwort darauf und nenne die "
-                "Quelle in eckigen Klammern):\n\n" + "\n\n".join(parts))[:8000]
+            s = {"filename": h.get("filename", ""), "collection": coll, "score": h.get("score")}
+            if h.get("image_url"):
+                s["image_url"] = h["image_url"]   # Bild-aware RAG: Thumbnail im Chat
+            sources.append(s)
+        _kb_text = ("Treffer aus der Wissensdatenbank (stütze deine Antwort darauf und nenne die "
+                    "Quelle in eckigen Klammern):\n\n" + "\n\n".join(parts))[:8000]
+        # JSON-Umschlag: der Loop zeigt die Quellen (inkl. Bild-Thumbnails) an und gibt dem Modell nur den Text.
+        return json.dumps({"text": _kb_text, "sources": sources}, ensure_ascii=False)
 
     if name == "search_patents":
         # Patentrecherche (Assistent-Modus): EPO-OPS falls konfiguriert, sonst Google-Fallback.
