@@ -2760,7 +2760,8 @@ body.assistant-mode #tab-bar .tab-btn:not([data-tab="chat"]) { display: none !im
 .btn-del-matrix-col:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
 
 /* Agenten-Auswahl je Spalte (im Spaltenkopf) */
-.matrix-col-agent {
+.matrix-col-agent,
+.matrix-col-tool {
   width: calc(100% - 12px);
   margin: 0 6px 6px;
   background: var(--bg-input);
@@ -2771,7 +2772,8 @@ body.assistant-mode #tab-bar .tab-btn:not([data-tab="chat"]) { display: none !im
   padding: 3px 4px;
   cursor: pointer;
 }
-.matrix-col-agent:focus { outline: none; border-color: var(--accent); }
+.matrix-col-agent:focus,
+.matrix-col-tool:focus { outline: none; border-color: var(--accent); }
 
 /* Partner-Auswertung: Spalten-Label + Steuerelemente im Spaltenkopf */
 .matrix-col-label {

@@ -42,6 +42,59 @@ import core as _core  # noqa: F401
 router = APIRouter()
 
 
+# ── Bild-aware RAG (Vision-Beschreibung beim Ingest) ──────────────────────────
+# Bilder werden gespeichert + per lokalem Vision-Modell beschrieben; die Beschreibung
+# wird wie Text indiziert (auffindbar), das Original bleibt über die Dokument-
+# Verknüpfung (rag_documents.image_rel) anzeigbar. Muster: routers/pst.py Stufe 2.
+_IMG_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+_RAG_IMAGE_DESCRIBE_SYSTEM = (
+    "Du beschreibst ein Bild für eine durchsuchbare Wissensdatenbank. Erfasse den Inhalt "
+    "faktisch und möglichst vollständig, damit das Bild später über eine Textsuche gefunden "
+    "wird: sichtbare Objekte, Personen (nur sachlich), Handlungen, Szene/Umgebung, Farben nur "
+    "wenn bedeutsam. Gib ALLEN sichtbaren Text/Beschriftungen wortgetreu wieder (Schilder, "
+    "Diagramm-Achsen, Tabellen, Logos, Zahlen). Bei Diagrammen/Charts/Screenshots: Aussage, "
+    "Achsen, Werte und Trends benennen. Antworte in sachlicher deutscher Prosa, ohne Vorspann, "
+    "ohne Anrede, ohne Markdown."
+)
+
+
+async def _describe_image(path: Path, model: str, caption: str = "") -> tuple[str, dict]:
+    """Beschreibt ein Bild per lokalem Vision-Modell für die RAG-Indizierung.
+
+    Muster wie ``routers/pst.py`` (Stufe 2): base64-Bild an ein multimodales Modell.
+    ``caption`` (optionaler Nutzertext) wird dem durchsuchbaren Text vorangestellt, damit
+    eigenes Fachvokabular mit-embeddet wird. Rückgabe: (Beschreibungstext, {"in","out"})."""
+    tok = {"in": 0, "out": 0}
+    b64 = base64.b64encode(path.read_bytes()).decode()
+    cap = (caption or "").strip()
+    usr = "Beschreibe dieses Bild vollständig für die Wissensdatenbank."
+    if cap:
+        usr += f"\n\nZusätzlicher Kontext vom Nutzer (mit einbeziehen): {cap}"
+    msg = {"role": "user", "content": usr, "images": [b64]}
+    async with _model_session(model), httpx.AsyncClient(timeout=240) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "stream": False,
+            "messages": [{"role": "system", "content": _RAG_IMAGE_DESCRIBE_SYSTEM}, msg],
+            "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+        j = resp.json()
+    a, b = _llm_tok(j)
+    tok["in"] += a
+    tok["out"] += b
+    desc = (j.get("message", {}).get("content", "") or "").strip()
+    desc = re.sub(r"<think>.*?</think>", "", desc, flags=re.DOTALL).strip()
+    if cap:
+        desc = f"{cap}\n\n{desc}" if desc else cap
+    return desc, tok
+
+
+# Vision-Modellwahl für die Bildbeschreibung = geteilter Kern ``_vision_model`` (core.py).
+async def _pick_vision_model() -> Optional[str]:
+    return await _vision_model(None)
+
+
 # ── RAG-API (Wissenssammlungen) ───────────────────────────────────────────────
 
 class RagCollectionCreate(BaseModel):
@@ -125,6 +178,14 @@ async def rag_create_collection(body: RagCollectionCreate):
 @router.delete("/api/rag/collections/{cid}")
 async def rag_delete_collection(cid: str):
     await _db.rag_delete_collection(cid)
+    # Bild-aware RAG: den Bildordner der Sammlung mit entfernen (DB-Zeilen kaskadieren,
+    # die Dateien auf der Platte nicht).
+    try:
+        img_dir = (RAG_IMAGES_DIR / _safe_relpath(cid)).resolve()
+        if RAG_IMAGES_DIR.resolve() in img_dir.parents and img_dir.is_dir():
+            shutil.rmtree(img_dir, ignore_errors=True)
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -134,15 +195,46 @@ async def rag_documents(cid: str):
 
 
 @router.post("/api/rag/collections/{cid}/documents")
-async def rag_add_document(cid: str, file: UploadFile = File(...)):
+async def rag_add_document(cid: str, file: UploadFile = File(...), caption: str = Form("")):
     from tools.rag import ingest_file
     coll = await _db.rag_get_collection(cid)
     if not coll:
         raise HTTPException(status_code=404, detail="Sammlung nicht gefunden")
-    # Upload temporär ablegen, Text extrahieren
+    doc_id = f"doc_{uuid.uuid4().hex[:12]}"
+    raw = await file.read()
+    ext = Path(file.filename or "").suffix.lower()
+
+    # Bild-aware RAG: Bild speichern + lokal per Vision-Modell beschreiben; die
+    # Beschreibung wird indiziert (auffindbar), das Original bleibt anzeigbar.
+    if ext in _IMG_EXTS:
+        model = await _pick_vision_model()
+        if not model:
+            raise HTTPException(status_code=503, detail="Bild-Import benötigt ein lokales multimodales Modell (z. B. „llava“ oder „qwen2.5-vl“ in Ollama). Bitte ein solches Modell installieren/laden.")
+        rel = f"{_safe_relpath(cid)}/{doc_id}{ext}"
+        dest = RAG_IMAGES_DIR / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(dest, "wb") as fh:
+            await fh.write(raw)
+        try:
+            desc, _tok = await _describe_image(dest, model, caption)
+        except Exception as e:
+            try:
+                dest.unlink()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail=f"Bildbeschreibung fehlgeschlagen: {e}")
+        if not desc:
+            desc = f"[Bild: {file.filename}]"
+        try:
+            n = await ingest_file(coll, desc, file.filename, doc_id, image_rel=rel)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        return {"ok": True, "filename": file.filename, "n_chunks": n, "kind": "image", "tokens": _tok}
+
+    # Textdokument: temporär ablegen, Text extrahieren
     tmp = UPLOADS_DIR / f"rag_{uuid.uuid4().hex}_{file.filename}"
     async with aiofiles.open(tmp, "wb") as fh:
-        await fh.write(await file.read())
+        await fh.write(raw)
     try:
         text = _extract_text(tmp)
     finally:
@@ -153,7 +245,7 @@ async def rag_add_document(cid: str, file: UploadFile = File(...)):
     if not text or text.startswith("[Lesefehler"):
         raise HTTPException(status_code=400, detail=f"Text konnte nicht extrahiert werden: {text}")
     try:
-        n = await ingest_file(coll, text, file.filename, f"doc_{uuid.uuid4().hex[:12]}")
+        n = await ingest_file(coll, text, file.filename, doc_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"ok": True, "filename": file.filename, "n_chunks": n}
@@ -255,7 +347,16 @@ async def rag_add_document_optimized(cid: str, file: UploadFile = File(...)):
 
 @router.delete("/api/rag/documents/{did}")
 async def rag_delete_document(did: str):
+    # Bild-aware RAG: Originalbild (falls vorhanden) vor dem DB-Löschen mit entfernen.
+    info = await _db.rag_document_image(did)
     await _db.rag_delete_document(did)
+    if info and info.get("image_rel"):
+        try:
+            fp = (RAG_IMAGES_DIR / _safe_relpath(info["image_rel"])).resolve()
+            if RAG_IMAGES_DIR.resolve() in fp.parents and fp.is_file():
+                fp.unlink()
+        except Exception:
+            pass
     return {"ok": True}
 
 
@@ -290,6 +391,25 @@ async def rag_export_document(did: str, format: str = "md"):
     base = re.sub(r"[^\w.\-]+", "_", Path(doc["filename"]).stem) or "dokument"
     headers = {"Content-Disposition": f'attachment; filename="{base}.{ext}"'}
     return Response(content=text, media_type=f"{media}; charset=utf-8", headers=headers)
+
+
+@router.get("/api/rag/documents/{did}/image")
+async def rag_document_image(did: str):
+    """Bild-aware RAG: liefert das Originalbild eines Bild-Dokuments (für Thumbnails im
+    Chat-Quellen-Panel). 404, wenn das Dokument kein Bild trägt oder die Datei fehlt."""
+    info = await _db.rag_document_image(did)
+    if not info:
+        raise HTTPException(status_code=404, detail="Kein Bild zu diesem Dokument")
+    rel = _safe_relpath(info["image_rel"])
+    fp = (RAG_IMAGES_DIR / rel).resolve()
+    try:
+        if RAG_IMAGES_DIR.resolve() not in fp.parents or not fp.is_file():
+            raise HTTPException(status_code=404, detail="Bilddatei fehlt")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=404, detail="Bilddatei fehlt")
+    return FileResponse(str(fp), filename=info["filename"])
 
 
 @router.post("/api/rag/collections/{cid}/from-conversation")
@@ -346,10 +466,12 @@ async def rag_from_text(cid: str, req: Request):
 
 
 # In den RAG geeignete Dateiendungen (Textextraktion via tools/files.py).
+# Bild-Endungen (_IMG_EXTS) werden zusätzlich aufgenommen und – falls ein lokales
+# Vision-Modell verfügbar ist – per Beschreibung indiziert (Bild-aware RAG).
 _RAG_FOLDER_EXTS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt", ".md", ".rtf",
     ".py", ".js", ".json", ".yaml", ".yml", ".html", ".htm", ".css",
-}
+} | _IMG_EXTS
 
 
 @router.post("/api/rag/collections/{cid}/folder")
@@ -380,10 +502,30 @@ async def rag_add_folder(cid: str, req: Request):
         n_chunks = 0
         n_ok = 0
         errors: list = []
+        # Vision-Modell für Bilder einmal auflösen (lokal, Geheim-Modus-tauglich, bevorzugt
+        # multimodal); ohne ein solches Modell werden Bilder übersprungen (Text läuft normal).
+        img_model = await _pick_vision_model()
         for i, fp in enumerate(files):
             yield _sse({"type": "progress", "step": fp.name, "index": i,
                         "total": total, "pct": int(i / total * 100) if total else 100})
             try:
+                ext = fp.suffix.lower()
+                if ext in _IMG_EXTS:
+                    if not img_model:
+                        errors.append(f"{fp.name}: kein lokales Vision-Modell")
+                        continue
+                    doc_id = f"doc_{uuid.uuid4().hex[:12]}"
+                    rel = f"{_safe_relpath(coll['id'])}/{doc_id}{ext}"
+                    dest = RAG_IMAGES_DIR / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(fp, dest)
+                    desc, _ = await _describe_image(dest, img_model, "")
+                    if not desc:
+                        desc = f"[Bild: {fp.name}]"
+                    c = await ingest_file(coll, desc, fp.name, doc_id, image_rel=rel)
+                    n_chunks += c
+                    n_ok += 1
+                    continue
                 text = await asyncio.to_thread(_extract_text, fp)
                 if not text or text.startswith("[Lesefehler") or text.startswith("[Kann Datei"):
                     errors.append(f"{fp.name}: kein Text")

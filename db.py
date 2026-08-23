@@ -162,6 +162,12 @@ async def init():
                 "ALTER TABLE rag_collections ADD COLUMN clean_level TEXT NOT NULL DEFAULT 'standard'")
         except Exception:
             pass
+        # Migration: Bild-aware RAG – Dokument→Originalbild-Verknüpfung (relativer Pfad
+        # unter RAG_IMAGES_DIR). Präsenz = Bild-Dokument (Chunk-Text = Vision-Beschreibung).
+        try:
+            await db.execute("ALTER TABLE rag_documents ADD COLUMN image_rel TEXT")
+        except Exception:
+            pass
         await db.commit()
 
 
@@ -418,14 +424,17 @@ async def rag_delete_collection(cid: str):
 
 
 async def rag_add_document(doc_id: str, collection_id: str, filename: str,
-                           chunks: list, embeddings: list):
-    """Legt ein Dokument an und speichert seine Chunks + Embeddings (BLOB)."""
+                           chunks: list, embeddings: list, image_rel: str = None):
+    """Legt ein Dokument an und speichert seine Chunks + Embeddings (BLOB).
+
+    ``image_rel`` (optional): relativer Pfad des Originalbildes unter RAG_IMAGES_DIR
+    für Bild-Dokumente (Chunk-Text = Vision-Beschreibung); ``None`` bei Textdokumenten."""
     now = time.time()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute(
-            "INSERT INTO rag_documents(id, collection_id, filename, n_chunks, created_at) VALUES(?,?,?,?,?)",
-            (doc_id, collection_id, filename, len(chunks), now),
+            "INSERT INTO rag_documents(id, collection_id, filename, n_chunks, created_at, image_rel) VALUES(?,?,?,?,?,?)",
+            (doc_id, collection_id, filename, len(chunks), now, image_rel or None),
         )
         for seq, (text, emb) in enumerate(zip(chunks, embeddings)):
             await db.execute(
@@ -439,10 +448,23 @@ async def rag_list_documents(cid: str) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            "SELECT id, filename, n_chunks, created_at FROM rag_documents WHERE collection_id=? ORDER BY created_at DESC",
+            "SELECT id, filename, n_chunks, created_at, image_rel FROM rag_documents WHERE collection_id=? ORDER BY created_at DESC",
             (cid,),
         )
         return [dict(r) for r in await cur.fetchall()]
+
+
+async def rag_document_image(did: str) -> Optional[dict]:
+    """Dateiname + relativer Bildpfad eines Dokuments (für die Bild-Auslieferung).
+    Gibt ``None`` zurück, wenn das Dokument nicht existiert oder kein Bild trägt."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT filename, image_rel FROM rag_documents WHERE id=?", (did,))
+        row = await cur.fetchone()
+        if not row or not row["image_rel"]:
+            return None
+        return {"filename": row["filename"], "image_rel": row["image_rel"]}
 
 
 async def rag_document_chunks(did: str) -> Optional[dict]:
@@ -474,7 +496,8 @@ async def rag_fetch_chunks(collection_ids: list) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            f"""SELECT k.id, k.collection_id, k.text, k.embedding, d.filename, c.name AS collection_name
+            f"""SELECT k.id, k.collection_id, k.text, k.embedding, d.id AS document_id,
+                       d.filename, d.image_rel, c.name AS collection_name
                 FROM rag_chunks k
                 JOIN rag_documents d   ON k.document_id = d.id
                 JOIN rag_collections c ON k.collection_id = c.id

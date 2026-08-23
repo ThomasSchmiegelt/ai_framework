@@ -508,6 +508,14 @@ def to_pptx(data: dict) -> Path:
             fp_p.runs[0].font.size = Pt(8)
             fp_p.runs[0].font.color.rgb = C_GRAY
 
+        # Sprechernotizen (falls vorhanden) in den PPTX-Notizbereich schreiben.
+        notes = slide_data.get("notes")
+        if notes:
+            try:
+                slide.notes_slide.notes_text_frame.text = str(notes)
+            except Exception:
+                pass
+
     fp = Path(tempfile.mktemp(suffix=".pptx"))
     prs.save(str(fp))
     return fp

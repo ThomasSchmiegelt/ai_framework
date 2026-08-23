@@ -184,132 +184,23 @@ async def derive_persona(req: Request):
             "tokens": {"in": _dp_ti, "out": _dp_to}}
 
 
-def _slide_fields_from_partial(raw: str):
-    """Bergungs-Parser für (evtl. ABGESCHNITTENES) Slide-JSON: zieht title, bullets
-    und caption per Regex heraus, auch wenn das JSON nie geschlossen wurde. So landet
-    bei trunkierter Modellantwort kein roher ``{"title":…``-Text auf der Folie."""
-    title = ""
-    mt = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
-    if mt:
-        title = mt.group(1)
-    bullets = []
-    mb = re.search(r'"bullets"\s*:\s*\[(.*)', raw, re.DOTALL)
-    if mb:
-        seg = mb.group(1)
-        end = seg.find("]")
-        if end >= 0:
-            seg = seg[:end]            # nur bis zum schließenden ] (falls vorhanden)
-        # Vollständig in Anführungszeichen stehende Strings — ein abgeschnittener
-        # (nicht geschlossener) letzter Stichpunkt wird so automatisch übersprungen.
-        bullets = re.findall(r'"((?:[^"\\]|\\.)*)"', seg)
-    caption = ""
-    mc = re.search(r'"caption"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
-    if mc:
-        caption = mc.group(1)
-    return title, bullets, caption
-
-
 @router.post("/api/analyze-image")
 async def analyze_image(req: Request):
     """Analysiert ein einzelnes Bild mit einem Vision-Modell und liefert
-    strukturierten Folieninhalt (Titel, Stichpunkte, Bildunterschrift)."""
-    import re
-    from tools.imaging import downscale, is_descriptive_filename
-
+    strukturierten Folieninhalt (Titel, Stichpunkte, Bildunterschrift). Dünner Wrapper
+    um den geteilten Kern ``_analyze_image_core`` (core.py)."""
     body = await req.json()
     image_b64 = body.get("image") or ""
     if not image_b64:
         raise HTTPException(400, "Kein Bild übergeben")
-
-    system_prompt = (body.get("system_prompt") or "").strip() or (
-        "Du bist ein technischer Fach-Experte und beschreibst das gezeigte Bild "
-        "knapp und sachlich auf Deutsch."
+    return await _analyze_image_core(
+        image_b64,
+        system_prompt=body.get("system_prompt") or "",
+        filename=body.get("filename") or "",
+        topic=body.get("topic") or "",
+        model=body.get("model"),
+        want_notes=bool(body.get("want_notes")),
     )
-    filename = (body.get("filename") or "").strip()
-    topic = (body.get("topic") or "").strip()
-    _model = _pick_model(body.get("model"))
-
-    descriptive, label = is_descriptive_filename(filename) if filename else (False, "")
-    small = downscale(image_b64)
-
-    name_hint = ""
-    if filename:
-        if descriptive:
-            name_hint = (
-                f"\nDer Dateiname '{label}' ist beschreibend – nutze ihn als Hinweis "
-                f"auf den Bildinhalt und möglichst als Folientitel."
-            )
-        else:
-            name_hint = (
-                f"\nDer Dateiname ('{filename}') ist nicht aussagekräftig – ignoriere ihn "
-                f"und stütze dich allein auf das, was im Bild zu sehen ist."
-            )
-
-    user_text = (
-        (f"Kontext der Präsentation: {topic}\n" if topic else "")
-        + "Beschreibe dieses Bild für eine Präsentationsfolie."
-        + name_hint
-        + "\n\nAntworte NUR mit JSON in genau diesem Format, ohne weiteren Text:\n"
-        '{"title":"Kurzer Folientitel","bullets":["Stichpunkt 1","Stichpunkt 2","Stichpunkt 3"],'
-        '"caption":"Eine kurze Bildunterschrift (max. ein Satz)"}\n'
-        "Maximal 3 kurze Stichpunkte (je höchstens ein knapper Satz). "
-        "Kein Markdown, keine Sternchen, keine Aufzählungszeichen im Text."
-    )
-
-    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
-        resp = await _llm.chat(client,{
-            "model": _model,
-            "think": False,
-            # format:"json" + ausreichendes Kontextfenster verhindern Vorgeplapper und
-            # abgeschnittene Antworten (sonst landet roher JSON-Text auf der Folie).
-            "format": "json",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text, "images": [small]},
-            ],
-            "options": {"num_ctx": _profile_num_ctx()},
-            "stream": False,
-        })
-        resp.raise_for_status()
-        _ai_j = resp.json()
-        _ai_ti, _ai_to = _llm_tok(_ai_j)
-        raw = _ai_j.get("message", {}).get("content", "")
-
-    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-
-    def _strip_md(s: str) -> str:
-        # Markdown-Reste entfernen, die das Canvas sonst literal zeichnet
-        s = re.sub(r"[*_`#>]+", "", s)
-        s = re.sub(r"^\s*[-•]\s*", "", s)
-        return re.sub(r"\s+", " ", s).strip()
-
-    title, bullets, caption = (label if descriptive else "Abbildung"), [], ""
-    data = _parse_llm_json(raw)
-    if isinstance(data, dict):
-        title = _strip_md(str(data.get("title") or "")) or title
-        b = data.get("bullets") or []
-        bullets = [_strip_md(str(x)) for x in b if str(x).strip()][:3]
-        caption = _strip_md(str(data.get("caption") or ""))
-    if not bullets and not caption:
-        # Bergung aus (evtl. abgeschnittenem) JSON — kein roher JSON-Müll auf der Folie.
-        st, sb, sc = _slide_fields_from_partial(raw)
-        if st:
-            title = _strip_md(st) or title
-        bullets = [_strip_md(str(x)) for x in sb if str(x).strip()][:3]
-        caption = _strip_md(sc)
-    if not bullets and not caption:
-        # Letzter Fallback: nur echten Fließtext zeigen, niemals JSON-Fragmente.
-        plain = raw.strip()
-        looks_json = plain.startswith("{") or '"bullets"' in plain or '"title"' in plain
-        caption = "" if looks_json else _strip_md(plain)[:200]
-
-    return {
-        "title": title,
-        "bullets": bullets,
-        "caption": caption,
-        "descriptive_filename": descriptive,
-        "tokens": {"in": _ai_ti, "out": _ai_to},
-    }
 
 
 @router.post("/api/illus/intro")

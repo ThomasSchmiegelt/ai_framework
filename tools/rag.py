@@ -277,9 +277,15 @@ def _from_blob(blob: bytes) -> np.ndarray:
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 
-async def ingest_file(collection: dict, text: str, filename: str, doc_id: str) -> int:
+async def ingest_file(collection: dict, text: str, filename: str, doc_id: str,
+                      image_rel: str = None) -> int:
     """Bereinigt (falls aktiviert), chunkt, embeddet und speichert ein Dokument.
-    Gibt die Anzahl gespeicherter Chunks zurück."""
+    Gibt die Anzahl gespeicherter Chunks zurück.
+
+    ``image_rel`` (optional): relativer Pfad des Originalbildes unter RAG_IMAGES_DIR
+    für Bild-Dokumente – ``text`` ist dann die per Vision-Modell erzeugte Beschreibung,
+    die wie normaler Text bereinigt/gechunkt/embeddet wird; die Verknüpfung zur Bilddatei
+    wird am Dokument gespeichert (macht das Bild in Treffern anzeigbar)."""
     if collection.get("clean"):
         text = clean_text(text, collection.get("clean_level") or DEFAULT_CLEAN_LEVEL)
     else:
@@ -296,7 +302,7 @@ async def ingest_file(collection: dict, text: str, filename: str, doc_id: str) -
             f"Embedding-Anzahl ({len(vecs)}) passt nicht zu Chunks ({len(chunks)}). {_hint}"
         )
     blobs = [_to_blob(v) for v in vecs]
-    await _db.rag_add_document(doc_id, collection["id"], filename, chunks, blobs)
+    await _db.rag_add_document(doc_id, collection["id"], filename, chunks, blobs, image_rel=image_rel)
     return len(chunks)
 
 
@@ -366,10 +372,16 @@ async def query_collections(collection_ids: list, query: str, top_k_cap: int = 8
         if len(text) > remaining:
             text = text[:remaining].rstrip() + " …"
         used += len(text)
-        hits.append({
+        hit = {
             "text": text,
             "filename": r["filename"],
             "collection_name": r["collection_name"],
             "score": round(score, 4),
-        })
+        }
+        # Bild-aware RAG: stammt der Treffer aus einem Bild-Dokument, den Bildbezug
+        # mitgeben, damit der Chat ein Thumbnail zeigen kann (Text = Vision-Beschreibung).
+        if r.get("image_rel"):
+            hit["document_id"] = r.get("document_id")
+            hit["image_url"] = f"/api/rag/documents/{r.get('document_id')}/image"
+        hits.append(hit)
     return hits
