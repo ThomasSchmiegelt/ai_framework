@@ -517,15 +517,63 @@ class MailFormatUnavailable(Exception):
     pass
 
 
+def _looks_like_mbox(path) -> bool:
+    """Heuristik für endungslose Mbox-Dateien (z. B. Thunderbird „Local Folders": die
+    Ordner heißen ``Inbox``/``Sent`` OHNE Endung). Eine Mbox beginnt mit der Trennzeile
+    ``From `` (mit Leerzeichen) — im Gegensatz zum ``From:``-Header einer einzelnen .eml."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(5)
+        return head == b"From "
+    except Exception:
+        return False
+
+
 def read_store(path, password: Optional[str] = None, att_dir=None, limit: int = 5000) -> list:
     """Liest einen Mail-Container und liefert die Nachrichten-dicts (siehe Modul-Docstring).
     ``att_dir`` (Path) legt Anhänge als Dateien ab. ``password`` wird — falls das Format es
-    unterstützt — durchgereicht (bei klassischem PST i. d. R. nicht nötig)."""
+    unterstützt — durchgereicht (bei klassischem PST i. d. R. nicht nötig).
+
+    Neben den Endungen ``.pst``/``.mbox``/``.eml``/``.msg`` werden erkannt:
+    - **endungslose Mbox-Dateien** (Thunderbird „Local Folders") per Inhalts-Heuristik,
+    - **Maildir-Verzeichnisse** (Ordner mit ``cur``/``new``)."""
     path = Path(path)
     if att_dir is not None:
         att_dir = Path(att_dir)
         att_dir.mkdir(parents=True, exist_ok=True)
+
+    # Maildir: ein Verzeichnis (mit cur/new). z. B. Dovecot; manche Thunderbird-Setups.
+    if path.is_dir():
+        import mailbox
+        try:
+            box = mailbox.Maildir(str(path), factory=None)
+        except Exception as e:
+            raise MailFormatUnavailable(f"Verzeichnis ist kein lesbares Maildir: {e}")
+        out = []
+        for i, em in enumerate(box):
+            if i >= limit:
+                break
+            try:
+                out.append(_msg_from_email(em, f"m{i}", "maildir", att_dir))
+            except Exception:
+                continue
+        return out
+
     ext = path.suffix.lower()
+
+    # Mbox: über die Endung ODER (endungslos/unbekannt) per Inhalts-Heuristik (Thunderbird).
+    if ext == ".mbox" or (ext not in (".pst", ".eml", ".msg") and _looks_like_mbox(path)):
+        import mailbox
+        out = []
+        box = mailbox.mbox(str(path))
+        for i, em in enumerate(box):
+            if i >= limit:
+                break
+            try:
+                out.append(_msg_from_email(em, f"m{i}", "mbox", att_dir))
+            except Exception:
+                continue
+        return out
 
     if ext == ".pst":
         # Bevorzugt Outlook-COM (Windows, nativ, permissiv) → sonst libpff (LGPL) →
@@ -542,18 +590,7 @@ def read_store(path, password: Optional[str] = None, att_dir=None, limit: int = 
                 pass
         return _read_pst_pure(path, att_dir, limit)
 
-    if ext == ".mbox":
-        import mailbox
-        out = []
-        box = mailbox.mbox(str(path))
-        for i, em in enumerate(box):
-            if i >= limit:
-                break
-            try:
-                out.append(_msg_from_email(em, f"m{i}", "mbox", att_dir))
-            except Exception:
-                continue
-        return out
+    # (.mbox / endungslose Mbox wird bereits oben behandelt.)
 
     if ext == ".eml":
         with open(path, "rb") as fh:

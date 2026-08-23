@@ -61,8 +61,11 @@ _PST_TAG_SYSTEM = (
 
 def _pst_resolve_file(p: str) -> Path:
     fp = Path(str(p or "").strip()).expanduser()
-    if not fp.is_file():
-        raise HTTPException(status_code=400, detail=f"Datei nicht gefunden: {fp}")
+    # Datei (PST/mbox/eml/msg/endungslose Thunderbird-Mbox) ODER Verzeichnis (Maildir).
+    if not fp.exists():
+        raise HTTPException(status_code=400, detail=f"Nicht gefunden: {fp}")
+    if not (fp.is_file() or fp.is_dir()):
+        raise HTTPException(status_code=400, detail=f"Kein lesbares Postfach: {fp}")
     return fp
 
 
@@ -193,13 +196,15 @@ async def pst_open(req: Request):
 
     for m in mails:
         m["stage"] = 1
+    # Anzeige-Label: endungslose Thunderbird-Mbox → „mbox", Verzeichnis → „maildir".
+    _fmt = fp.suffix.lower() or ("maildir" if fp.is_dir() else "mbox")
     store = {
-        "id": store_id, "source": str(fp), "source_format": fp.suffix.lower(),
+        "id": store_id, "source": str(fp), "source_format": _fmt,
         "opened_at": time.time(), "count": len(mails), "mails": mails,
     }
     base.mkdir(parents=True, exist_ok=True)
     (base / "store.json").write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
-    return {"store_id": store_id, "count": len(mails), "source_format": fp.suffix.lower(),
+    return {"store_id": store_id, "count": len(mails), "source_format": _fmt,
             "password": pw_status, "mails": _pst_list_view(mails)}
 
 
