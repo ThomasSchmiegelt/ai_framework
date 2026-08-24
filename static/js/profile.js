@@ -117,9 +117,13 @@ const Profile = (() => {
   }
 
   function applyMode(mode) {
-    const m = ['maschinenbau', 'ki', 'soziales', 'marketing', 'finanz', 'geschaeftsfuehrung', 'custom'].includes(mode) ? mode : 'maschinenbau';
+    const m = ['maschinenbau', 'ki', 'soziales', 'marketing', 'finanz', 'geschaeftsfuehrung', 'modern_blau', 'custom'].includes(mode) ? mode : 'maschinenbau';
     document.documentElement.dataset.mode = m;
-    // Offene Präsentation sofort im neuen Farbschema neu zeichnen
+    // Modus-abhängige Branding-Vorlagen (Modern Blau) neu laden …
+    if (typeof CanvasRenderer !== 'undefined' && CanvasRenderer.reloadBranding) {
+      try { CanvasRenderer.reloadBranding(); } catch (_) {}
+    }
+    // … und offene Präsentation sofort im neuen Farbschema neu zeichnen
     if (typeof CanvasRenderer !== 'undefined' && CanvasRenderer.rerender) {
       try { CanvasRenderer.rerender(); } catch (_) {}
     }

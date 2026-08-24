@@ -75,6 +75,17 @@ html[data-mode="geschaeftsfuehrung"] {
   --accent-rgb: 217,178,59;
   --border: rgba(230,213,149,0.16);
 }
+/* Modern Blau = firmeneigenes Corporate-Design (Styleguide-Palette, siehe
+   „weitere Vorlagen/modern_blau/"). Kräftiges, sattes Blau; Sekundärfarben aus
+   rgb(17/49/79), rgb(0/58/116), rgb(0/86/173), rgb(40/121/192). */
+html[data-mode="modern_blau"] {
+  --bg-main: #0b243f; --bg-sidebar: #071829; --bg-input: #11314f;
+  --bg-hover: #0056ad; --bg-active: #0056ad; --bg-user-msg: #003a74;
+  --text: #eaf3fc; --text-dim: #a3c8eb; --text-muted: #6c6f76;
+  --accent: #2879c0; --accent-hover: #3b8fdc; --accent-dim: rgba(40,121,192,0.16);
+  --accent-rgb: 40,121,192;
+  --border: rgba(163,200,235,0.18);
+}
 /* Eigener, frei konfigurierbarer Modus = Violett. */
 html[data-mode="custom"] {
   --bg-main: #221432; --bg-sidebar: #190e26; --bg-input: #2e1c42;
@@ -2204,6 +2215,14 @@ body.assistant-mode #tab-bar .tab-btn:not([data-tab="chat"]) { display: none !im
   overflow-y: auto;
 }
 .modal-base h3 { font-size: 17px; color: var(--text); margin-bottom: 4px; }
+
+/* Handy-Kopplung: aktiver Ziel-Umschalter (gesamtes Tool / nur Chat) */
+.pair-scope.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
 
 /* ── Sidebar Neue Elemente ──────────────────────────────────────── */
 #project-filter-bar {

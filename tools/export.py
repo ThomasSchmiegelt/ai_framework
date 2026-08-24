@@ -121,6 +121,47 @@ _ASSETS_DIR   = Path(__file__).parent.parent / "data" / "profile_assets"
 _DECKBLATT    = _ASSETS_DIR / "cover.jpg"     # Vorlagen-Deckblatt (Titelfolie)
 _KOPFZEILE    = _ASSETS_DIR / "header.jpg"    # Vorlagen-Kopfzeile (Banner)
 
+# Modus-spezifische Branding-Vorlagen (nur „Modern Blau"): liegen gitignored unter
+# „weitere Vorlagen/modern_blau/". Wir spiegeln hier bewusst die Logik aus
+# core._mode_template_asset (tools/* darf core NICHT importieren) – stdlib-only.
+_MODE_TEMPLATES_DIR = Path(__file__).parent.parent / "weitere Vorlagen"
+_MODE_TEMPLATE_NAMES = {
+    "cover":   ["Deckblatt", "cover", "deckblatt"],
+    "header":  ["inhaltsfolie", "Inhaltsfolie", "header", "kopfzeile"],
+    "closing": ["Abschlussfolie", "abschlussfolie", "closing", "abschluss"],
+    "logo":    ["logo", "Logo"],
+}
+_MODE_TEMPLATE_EXTS = [".png", ".jpg", ".jpeg", ".webp"]
+
+
+def _mode_template_path(kind: str, data: dict):
+    """Firmeneigene Vorlage für ``kind`` im aktiven Modus (nur modern_blau), sonst None."""
+    mode = str(((data or {}).get("_profile") or {}).get("mode", "") or "").lower().strip()
+    if mode != "modern_blau":
+        return None
+    base = _MODE_TEMPLATES_DIR / "modern_blau"
+    if not base.is_dir():
+        return None
+    for stem in _MODE_TEMPLATE_NAMES.get(kind, []):
+        for ext in _MODE_TEMPLATE_EXTS:
+            fp = base / f"{stem}{ext}"
+            if fp.exists() and fp.is_file():
+                return fp
+    return None
+
+
+def _resolve_asset(kind: str, data: dict):
+    """Vorlage für ``kind``: modus-spezifisch (Modern Blau) ODER Profil-Branding.
+    ``kind`` ∈ {cover, header, logo, closing}. Gibt einen existierenden Pfad oder None."""
+    tpl = _mode_template_path(kind, data)
+    if tpl is not None:
+        return tpl
+    default = {"cover": _DECKBLATT, "header": _KOPFZEILE,
+               "logo": _ASSETS_DIR / "logo.png", "closing": None}.get(kind)
+    if default is not None and Path(default).exists():
+        return Path(default)
+    return None
+
 # Corporate-Farben (Primärpalette)
 _CORP_PRIMARY   = "3B76BA"   # rgb(59,118,186)
 _CORP_DARK      = "11314F"   # rgb(17,49,79)
@@ -188,8 +229,8 @@ def to_docx(data: dict) -> Path:
     doc = Document()
 
     if data.get("_include_header_image"):
-        _DOKUMENTE = _ASSETS_DIR / "header.jpg"   # Vorlagen-Kopfzeile aus dem Profil
-        if _DOKUMENTE.exists():
+        _DOKUMENTE = _resolve_asset("header", data)   # Kopfzeile (modus- oder profilspezifisch)
+        if _DOKUMENTE is not None:
             from docx.shared import Inches
             doc.add_picture(str(_DOKUMENTE), width=Inches(6.3))
             doc.add_paragraph()  # Abstand
@@ -342,16 +383,40 @@ def to_pptx(data: dict) -> Path:
     slides = data.get("slides", [])
     footer_text = _footer_text(data)
 
+    _cover_asset   = _resolve_asset("cover", data)     # Deckblatt (modus- oder profilspezifisch)
+    _header_asset  = _resolve_asset("header", data)    # Kopfzeile
+    _closing_asset = _resolve_asset("closing", data)   # Abschlussfolie (nur Modern Blau)
+    _last_idx = len(slides) - 1
+
     for slide_idx, slide_data in enumerate(slides):
         slide  = prs.slides.add_slide(blank_layout)
         layout = slide_data.get("layout", "bullets")
         title  = slide_data.get("title", "")
+        # Abschlussfolie = letzte Folie (nicht zugleich die erste) mit Titel-Layout.
+        _is_closing = slide_idx == _last_idx and slide_idx > 0 and layout == "title"
+
+        # ── Abschlussfolie (letzte Titelfolie) mit eigener Vorlage ────────────
+        if _is_closing and _closing_asset is not None:
+            slide.shapes.add_picture(str(_closing_asset), 0, 0, _SLIDE_W, _SLIDE_H)
+            # Heller Grund → Titel in dunklem Corporate-Blau, links.
+            _add_text_run(
+                slide, title,
+                l=Inches(0.7), t=Inches(2.9), w=Inches(5.6), h=Inches(1.3),
+                size=Pt(34), bold=True, color=C_DARK, align=PP_ALIGN.LEFT
+            )
+            content = slide_data.get("content", "")
+            if content:
+                _add_text_run(
+                    slide, content,
+                    l=Inches(0.7), t=Inches(4.2), w=Inches(5.6), h=Inches(0.9),
+                    size=Pt(18), bold=False, color=C_PRIMARY, align=PP_ALIGN.LEFT
+                )
 
         # ── Deck­blatt (erste Folie oder explizit "title") ────────────────────
-        if slide_idx == 0 and layout == "title" and _DECKBLATT.exists():
+        elif slide_idx == 0 and layout == "title" and _cover_asset is not None:
             # Deckblatt als vollflächiger Hintergrund
             slide.shapes.add_picture(
-                str(_DECKBLATT), 0, 0, _SLIDE_W, _SLIDE_H
+                str(_cover_asset), 0, 0, _SLIDE_W, _SLIDE_H
             )
             # Titel im blauen Bereich (untere Hälfte der Hexagon-Fläche)
             _add_text_run(
@@ -400,9 +465,9 @@ def to_pptx(data: dict) -> Path:
             bg.fore_color.rgb = C_WHITE
 
             # Kopfzeile als Bild-Strip
-            if _KOPFZEILE.exists():
+            if _header_asset is not None:
                 slide.shapes.add_picture(
-                    str(_KOPFZEILE), 0, 0, _SLIDE_W, _HEADER_H
+                    str(_header_asset), 0, 0, _SLIDE_W, _HEADER_H
                 )
 
             # Dünner Corporate-Trennstrich unterhalb der Kopfzeile
@@ -1059,6 +1124,9 @@ def _pdf_presentation(data: dict, fp: Path) -> None:
     SW, SH = 13.33, 7.5           # 16:9 quer (Zoll)
     footer_text = _footer_text(data)
     slides = data.get("slides", []) or []
+    _cover_asset   = _resolve_asset("cover", data)
+    _closing_asset = _resolve_asset("closing", data)
+    _last_idx = len(slides) - 1
 
     with PdfPages(str(fp)) as pdf:
         for slide_idx, sd in enumerate(slides):
@@ -1068,11 +1136,24 @@ def _pdf_presentation(data: dict, fp: Path) -> None:
             ax = fig.add_axes([0, 0, 1, 1]); ax.axis("off")
             ax.set_xlim(0, 1); ax.set_ylim(0, 1)
             cover_used = False
+            _is_closing = slide_idx == _last_idx and slide_idx > 0 and layout == "title"
 
             if layout == "title":
-                # Erste Titelfolie: Corporate-Deckblatt (cover.jpg) als Hintergrund,
-                # genau wie im PPTX-Export. Sonst dunkler Standard-Hintergrund.
-                if slide_idx == 0 and _DECKBLATT.exists() and _pdf_fullbleed_image(fig, _DECKBLATT):
+                # Abschlussfolie (letzte Titelfolie) mit eigener Vorlage: heller Grund,
+                # Titel links in dunklem Corporate-Blau.
+                if _is_closing and _closing_asset is not None and _pdf_fullbleed_image(fig, _closing_asset):
+                    cover_used = True
+                    tax = fig.add_axes([0, 0, 1, 1]); tax.axis("off")
+                    tax.set_xlim(0, 1); tax.set_ylim(0, 1)
+                    tax.text(0.06, 0.48, title, ha="left", va="center", fontsize=26,
+                             fontweight="bold", color=(0.067, 0.192, 0.310), wrap=True, parse_math=False)
+                    sub = sd.get("content", "")
+                    if sub:
+                        tax.text(0.06, 0.37, sub, ha="left", va="center", fontsize=15,
+                                 color=(0.231, 0.463, 0.729), wrap=True, parse_math=False)
+                # Erste Titelfolie: Corporate-Deckblatt als Hintergrund, genau wie im
+                # PPTX-Export. Sonst dunkler Standard-Hintergrund.
+                elif slide_idx == 0 and _cover_asset is not None and _pdf_fullbleed_image(fig, _cover_asset):
                     cover_used = True
                     # Titel über das Deckblatt legen (eigene Achse oben drauf, links).
                     tax = fig.add_axes([0, 0, 1, 1]); tax.axis("off")

@@ -375,12 +375,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 🧭 Assistent-Modus: nur Chat-Tab, das Modell wählt Werkzeuge selbst. Spiegelt sich in
   // <body class="assistant-mode"> (blendet alle Tabs außer Chat aus) und im Badge.
+  // Handy-Kopplung „nur Chat": URL-Parameter ?assistant=1 erzwingt die Assistent-
+  // Ansicht LOKAL (nur dieses Gerät/diese Sitzung) – das Profil wird NICHT verändert.
+  let _forceAssistant = false;
+  try { _forceAssistant = new URLSearchParams(location.search).get('assistant') === '1'; } catch (_) {}
   const _assistBtn = document.getElementById('btn-assistant-mode');
   function _reflectAssistant(on) {
-    document.body.classList.toggle('assistant-mode', !!on);
+    on = !!on || _forceAssistant;
+    document.body.classList.toggle('assistant-mode', on);
     if (_assistBtn) {
       _assistBtn.textContent = on ? '🧭 Assistent-Modus: an' : '🧭 Assistent-Modus: aus';
-      _assistBtn.classList.toggle('secret-on', !!on);
+      _assistBtn.classList.toggle('secret-on', on);
     }
     if (on && typeof switchTab === 'function') switchTab('chat');
   }
@@ -690,6 +695,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('Transcription', () => { if (typeof Transcription !== 'undefined') Transcription.init(); });
   _safeInit('TTS', () => { if (typeof TTS !== 'undefined') TTS.init(); });
   _safeInit('Jury', () => { if (typeof Jury !== 'undefined') Jury.init(); });
+  _safeInit('Pairing', () => { if (typeof Pairing !== 'undefined') Pairing.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)
   (function wireGuide() {

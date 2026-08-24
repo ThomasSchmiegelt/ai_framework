@@ -128,6 +128,9 @@ MAIL_RULES_FILE = DATA_DIR / "mail_rules.json"   # Mail-Automatikregeln (Mail-Ro
 MORPH_TRAIN_DIR = DATA_DIR / "morph_training"    # Morph-Kasten Trainingsbeispiele (Backup)
 CAPACITY_FILE = DATA_DIR / "capacity.json"   # globale Kapazitätsliste (tab-übergreifend)
 BILDER_DIR = Path(__file__).parent / "bilder"
+# Firmeneigene Branding-Vorlagen je Modus (gitignored, lokal befüllt). Aktuell nur
+# „modern_blau" → APP_DIR/"weitere Vorlagen"/modern_blau/. Siehe README dort.
+MODE_TEMPLATES_DIR = APP_DIR / "weitere Vorlagen"
 PROFILE_FILE = DATA_DIR / "user_profile.json"
 PROFILE_ASSETS_DIR = DATA_DIR / "profile_assets"
 PROJECTS_FILE = DATA_DIR / "projects.json"
@@ -195,7 +198,7 @@ _llm.set_config(OLLAMA_BASE, API_PROVIDERS_FILE)
 # ── Modi (fachliche Ausrichtung) ──────────────────────────────────────────────
 # AI_Framework_Thomas kennt vier Modi; jeder prägt Farben (Frontend) und – wenn aktiv – die
 # fachliche Brille der KI (System-Prompt-Präfix).
-VALID_MODES = {"maschinenbau", "ki", "soziales", "marketing", "finanz", "geschaeftsfuehrung", "custom"}
+VALID_MODES = {"maschinenbau", "ki", "soziales", "marketing", "finanz", "geschaeftsfuehrung", "modern_blau", "custom"}
 DEFAULT_MODE = "maschinenbau"
 _MODE_PROMPTS = {
     "maschinenbau": (
@@ -225,6 +228,11 @@ _MODE_PROMPTS = {
         "Fachlicher Kontext: Geschäftsführung und Management. Antworte strategisch, "
         "entscheidungsorientiert und prägnant, mit Blick auf Ziele, Chancen/Risiken "
         "und unternehmerische Wirkung."
+    ),
+    "modern_blau": (
+        "Fachlicher Kontext: Professionelle Unternehmenskommunikation im Corporate-"
+        "Design »Modern Blau«. Antworte klar, sachlich und präsentationsreif, mit "
+        "gut strukturierten, übernehmbaren Aussagen (Stichpunkte, prägnante Titel)."
     ),
 }
 
@@ -392,6 +400,38 @@ def _active_mode() -> str:
     """Aktiver Modus aus dem Profil (Fallback DEFAULT_MODE)."""
     m = str(_load_profile().get("mode", "") or "").lower().strip()
     return m if m in VALID_MODES else DEFAULT_MODE
+
+
+# Modus-spezifische Branding-Vorlagen. Pro Asset-Zweck („kind") werden mehrere
+# Dateinamen (case-insensitiv, PNG/JPG) akzeptiert – so kann der Nutzer die Original-
+# dateien aus dem Styleguide 1:1 hineinkopieren.
+_MODE_TEMPLATE_NAMES = {
+    "cover":   ["Deckblatt", "cover", "deckblatt"],
+    "header":  ["inhaltsfolie", "Inhaltsfolie", "header", "kopfzeile"],
+    "closing": ["Abschlussfolie", "abschlussfolie", "closing", "abschluss"],
+    "logo":    ["logo", "Logo"],
+}
+_MODE_TEMPLATE_EXTS = [".png", ".jpg", ".jpeg", ".webp"]
+
+
+def _mode_template_asset(kind: str, mode: str | None = None):
+    """Pfad zur firmeneigenen Vorlage für ``kind`` im aktuellen Modus, falls vorhanden.
+
+    Nur „modern_blau" hat aktuell eigene Vorlagen (``weitere Vorlagen/modern_blau/``).
+    In anderen Modi ⇒ ``None`` (dann greift das normale Profil-Branding). Auch ``None``,
+    wenn keine passende Datei existiert – es entsteht nie ein Fehler."""
+    m = (mode or _active_mode())
+    if m != "modern_blau":
+        return None
+    base = MODE_TEMPLATES_DIR / "modern_blau"
+    if not base.is_dir():
+        return None
+    for stem in _MODE_TEMPLATE_NAMES.get(kind, []):
+        for ext in _MODE_TEMPLATE_EXTS:
+            fp = base / f"{stem}{ext}"
+            if fp.exists() and fp.is_file():
+                return fp
+    return None
 
 
 # Drei Modell-Rollen im Profil: Allgemein / Programmieren / Wissenschaftlich.
@@ -2352,6 +2392,7 @@ __all__ = [
     '_extract_canvas_json', '_strip_canvas_json', '_normalize_presentation', '_parse_prose_presentation', '_text_to_presentation',
     '_IMAGE_SIZES', '_image_model', '_sd_url', '_sd_reachable', '_sd_server_python', '_sd_server_dir', '_url_port', '_launch_detached', '_ensure_sd_server', '_api_image_size', '_generate_image_core', '_edit_image_core', '_upscale_image_core',
     'CAPACITY_FILE', 'BILDER_DIR', 'PROFILE_FILE', 'PROFILE_ASSETS_DIR',
+    'MODE_TEMPLATES_DIR', '_mode_template_asset',
     'PROJECTS_FILE', 'FEEDBACK_FILE', 'TRANSCRIPTS_DIR', 'API_PROVIDERS_FILE',
     'LOG_FILE', 'RAG_IMAGES_DIR', 'EMBED_MODEL', '_extract_text', '_is_image', '_todo_root_name', '_med_transcript',
     '_derive_adaptive_prompt', '_safe_exec', '_run_python_code', '_extract_inline_tool_calls', '_strip_inline_tool_calls', '_extract_code_block',
