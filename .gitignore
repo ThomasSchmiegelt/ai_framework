@@ -111,3 +111,12 @@ Thumbs.db
 # Persoenliche Notizen / versehentliche Paketierungs-Artefakte (nur lokal)
 to_do_Liste.txt
 make_portable_nomodels.zip
+
+# Firmeneigene Branding-Vorlagen ("Modern Blau") = PRIVAT, niemals versionieren.
+# Nur README.md und .gitkeep bleiben eingecheckt (Struktur), die Bilddateien nicht.
+weitere Vorlagen/**/*.png
+weitere Vorlagen/**/*.jpg
+weitere Vorlagen/**/*.jpeg
+weitere Vorlagen/**/*.webp
+!weitere Vorlagen/**/README.md
+!weitere Vorlagen/**/.gitkeep

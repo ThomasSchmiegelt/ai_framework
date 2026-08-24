@@ -181,6 +181,10 @@ _PROFILE_ASSETS = {
     "logo":   {"file": "logo.png",   "max": 512,  "fmt": "PNG",  "default": "default_logo.png",   "size": "512×512 px, PNG mit Transparenz"},
     "cover":  {"file": "cover.jpg",  "max": 1920, "fmt": "JPEG", "default": "default_cover.jpg",   "size": "1920×1080 px, JPG"},
     "header": {"file": "header.jpg", "max": 1920, "fmt": "JPEG", "default": "default_header.jpg",  "size": "1920×240 px, PNG/JPG"},
+    # „closing" (Abschlussfolie) hat KEIN Profil-Upload – es kommt ausschließlich aus den
+    # modus-spezifischen Vorlagen (Modern Blau). Als Profil-Asset nur ein Platzhalter,
+    # damit die GET-Route den Zweck kennt.
+    "closing": {"file": "closing.jpg", "max": 1920, "fmt": "JPEG", "default": "",                 "size": "1920×1080 px, JPG (nur Modern Blau)"},
 }
 
 
@@ -248,6 +252,11 @@ async def upload_profile_asset(kind: str, file: UploadFile = File(...)):
 async def get_profile_asset(kind: str):
     if kind not in _PROFILE_ASSETS:
         raise HTTPException(400, "Unbekannter Asset-Typ")
+    # 1) Firmeneigene Vorlage des aktiven Modus (nur „Modern Blau") hat Vorrang …
+    tpl = _mode_template_asset(kind)
+    if tpl is not None:
+        return FileResponse(tpl)
+    # 2) … sonst das normale Profil-Branding (kein „closing"-Profilupload → 404).
     fp = PROFILE_ASSETS_DIR / _PROFILE_ASSETS[kind]["file"]
     if not fp.exists():
         raise HTTPException(404, "Kein Asset hinterlegt")

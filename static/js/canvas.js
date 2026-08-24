@@ -23,14 +23,18 @@ const CanvasRenderer = (() => {
   /* ── Branding-Bilder aus dem Nutzerprofil vorladen ─────────────────────── */
   // Deckblatt/Kopfzeile/Logo werden im Profil hochgeladen (data/profile_assets).
   // Sind keine hinterlegt, bleiben die Folien schlicht ohne Bild.
-  const _corpImg = { deckblatt: null, kopfzeile: null, logo: null };
+  const _corpImg = { deckblatt: null, kopfzeile: null, logo: null, abschluss: null };
   const _KOPFZEILE_H = Math.round(W * 90 / 1341);  // ~86 px bei W=1280
 
+  // Deckblatt/Kopfzeile/Logo/Abschluss – im Modus „Modern Blau" aus den firmeneigenen
+  // Vorlagen („weitere Vorlagen/modern_blau/"), sonst aus dem Profil-Branding. Der
+  // Server entscheidet je nach aktivem Modus, welche Datei ausgeliefert wird.
   function reloadBranding() {
-    const specs = [['deckblatt', 'cover'], ['kopfzeile', 'header'], ['logo', 'logo']];
+    const specs = [['deckblatt', 'cover'], ['kopfzeile', 'header'],
+                   ['logo', 'logo'], ['abschluss', 'closing']];
     for (const [key, kind] of specs) {
       const img = new Image();
-      img.onload = () => { _corpImg[key] = img; };
+      img.onload = () => { _corpImg[key] = img; if (currentData && currentData.type === 'presentation') rerender(); };
       img.onerror = () => { _corpImg[key] = null; };
       img.src = `/api/profile/asset/${kind}?t=${Date.now()}`;
     }
@@ -388,7 +392,7 @@ const CanvasRenderer = (() => {
     _editRegions = [];   // Regionen der neuen Folie sammeln
     _clearMathLayer();   // Formel-Overlays der vorherigen Folie entfernen
     clear(theme.bg);
-    drawSlide(slide, theme, data);
+    drawSlide(slide, theme, data, slideIdx);
     drawSlideNumber(slideIdx, data.slides.length, theme);
     drawBrandingBar(theme, data.title);
   }
@@ -427,12 +431,15 @@ const CanvasRenderer = (() => {
     ctx.fillText(`${idx + 1} / ${total}`, W - 24, H - 22);
   }
 
-  function drawSlide(slide, theme, data) {
+  function drawSlide(slide, theme, data, slideIdx) {
     const layout = slide.layout || 'bullets';
     const slideH = H - 44; // ohne Branding-Bar
+    // Abschlussfolie = letzte Folie (und nicht zugleich die erste) mit Titel-Layout.
+    const total = (data && data.slides) ? data.slides.length : 1;
+    const isClosing = (typeof slideIdx === 'number') && slideIdx === total - 1 && slideIdx > 0;
 
     if (layout === 'title') {
-      drawTitleSlide(slide, theme, slideH);
+      drawTitleSlide(slide, theme, slideH, isClosing);
     } else if (layout === 'section') {
       drawSectionSlide(slide, theme, slideH);
     } else if (layout === 'two-column') {
@@ -452,13 +459,17 @@ const CanvasRenderer = (() => {
     if (sub) wrapTextCenter(ctx, sub, W / 2, ty + 62, W - 300, 24, 'rgba(255,255,255,0.9)', '24px system-ui');
   }
 
-  function drawTitleSlide(slide, theme, slideH) {
+  function drawTitleSlide(slide, theme, slideH, isClosing) {
     // Editierbare Regionen (Titel + Untertitel/Content)
     _region('title', W * 0.06, slideH * 0.30, W * 0.60, 120);
     _region('content', W * 0.06, slideH * 0.30 + 120, W * 0.60, 80);
 
+    // Passende Corporate-Vorlage: Abschlussfolie für die letzte Folie (falls hinterlegt),
+    // sonst das Deckblatt (auch als Rückfall für die Abschlussfolie → wie bisher).
+    const corp = (isClosing && _corpImg.abschluss) ? _corpImg.abschluss : _corpImg.deckblatt;
+
     // KI-Deckblatt/Abschluss: erzeugtes Bild FLÄCHIG als Hintergrund + Titel darüber.
-    if (slide.image && !_corpImg.deckblatt) {
+    if (slide.image && !corp) {
       const P = _pal();
       // Sofort-Fallback (falls das Bild nie lädt): Verlauf + Titel.
       const g = ctx.createLinearGradient(0, 0, W, slideH);
@@ -481,17 +492,27 @@ const CanvasRenderer = (() => {
       return;
     }
 
-    if (_corpImg.deckblatt) {
-      // Corporate Deckblatt als vollflächiger Hintergrund
-      ctx.drawImage(_corpImg.deckblatt, 0, 0, W, slideH);
+    if (corp) {
+      // Corporate Deckblatt/Abschlussfolie als vollflächiger Hintergrund
+      ctx.drawImage(corp, 0, 0, W, slideH);
 
-      // Titeltext in der blauen Hexagon-Fläche (linke Hälfte, vertikale Mitte)
-      const titleY = slideH * 0.42;
-      wrapTextCenter(ctx, slide.title || '', W * 0.33, titleY, W * 0.6, 50, '#ffffff', 'bold 50px system-ui');
-
-      if (slide.content) {
-        wrapTextCenter(ctx, slide.content, W * 0.33, titleY + 72, W * 0.6, 22,
-                       'rgba(163,200,235,0.95)', '22px system-ui');
+      if (isClosing && _corpImg.abschluss) {
+        // Abschlussfolie: heller Grund → Titel in dunklem Corporate-Blau, links.
+        const titleY = slideH * 0.44;
+        wrapTextCenter(ctx, slide.title || '', W * 0.26, titleY, W * 0.44, 44,
+                       '#11314f', 'bold 44px system-ui');
+        if (slide.content) {
+          wrapTextCenter(ctx, slide.content, W * 0.26, titleY + 62, W * 0.44, 22,
+                         '#3b76ba', '22px system-ui');
+        }
+      } else {
+        // Deckblatt: Titeltext in der blauen Hexagon-Fläche (linke Hälfte, vertikale Mitte)
+        const titleY = slideH * 0.42;
+        wrapTextCenter(ctx, slide.title || '', W * 0.33, titleY, W * 0.6, 50, '#ffffff', 'bold 50px system-ui');
+        if (slide.content) {
+          wrapTextCenter(ctx, slide.content, W * 0.33, titleY + 72, W * 0.6, 22,
+                         'rgba(163,200,235,0.95)', '22px system-ui');
+        }
       }
     } else {
       // Fallback: Modus-Verlauf
