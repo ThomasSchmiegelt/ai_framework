@@ -6,6 +6,10 @@
 git+https://github.com/huggingface/diffusers.git
 transformers
 accelerate
+# NumPy < 2.3 erzwingen: torch 2.6.0 (der vom Installer gesetzte CUDA-Build) ist mit
+# NumPy >= 2.3 inkompatibel -> torch._dynamo bricht beim Import ab
+# ("cannot import name 'NP_SUPPORTED_MODULES'"), wodurch die ganze Bilderzeugung scheitert.
+numpy<2.3
 safetensors
 sentencepiece
 protobuf
