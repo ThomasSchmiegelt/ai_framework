@@ -31,6 +31,28 @@ Die erste Zahl, die mit `192.168.` beginnt, ist die Adresse — z. B.
 
 ---
 
+## Windows-Nutzer: Kurzfassung (Fritz!Box)
+
+Auf **Windows** heißt „im Netz erreichbar starten" nicht `AI_HOST=0.0.0.0`, sondern:
+
+1. **Mit `start_server.bat` starten** (bindet an `0.0.0.0`). `start.bat` lauscht nur
+   auf `127.0.0.1` — damit erreicht dich **kein** Handy, egal was der QR-Code zeigt.
+2. **Windows-Firewall** für Port 8780 einmalig freigeben (eine Eingabeaufforderung
+   **als Administrator**):
+   ```
+   netsh advfirewall firewall add rule name="LOCAL AI 8780" dir=in action=allow protocol=TCP localport=8780
+   ```
+3. **Fritz!Box:** Handy im **normalen WLAN**, **nicht** im **Gastzugang** — der Gastzugang
+   der Fritz!Box isoliert Geräte, dann „sehen" sich Handy und Rechner nicht.
+
+Der Kopplungs-Dialog (Sidebar „📱 Handy koppeln (QR)") prüft die Erreichbarkeit jetzt
+selbst und warnt konkret, falls eine dieser drei Sachen fehlt.
+
+Die folgenden Linux-Schritte gelten sinngemäß (statt `ufw` die Windows-Firewall, statt
+`AI_HOST=0.0.0.0 ./start.sh` die `start_server.bat`).
+
+---
+
 ## Stufe 1 — Schnell im Handy-Browser testen
 
 1. Am Rechner die Software so starten, dass sie **im Netz erreichbar** ist:
