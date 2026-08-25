@@ -3082,6 +3082,20 @@ const Chat = (() => {
     { key: 'zeugnis', label: '📄 Zeugnis', copy: true },
   ];
 
+  // Ziel-spezifische Aktionen für die „was soll dort passieren?"-Rückfrage. Nur Tabs
+  // mit sinnvoller Aufbereitung (die Ziele mit eigenem Dialog – todo/planner/pairwise/
+  // ide/compare – laufen direkt weiter).
+  const _HANDOFF_ACTIONS = {
+    patente: ['🔎 Recherche-Suchbegriff', '📝 als Patent-Entwurf', '🆕 Neuheitsanalyse'],
+    mathe: ['🧮 Aufgabe lösen', '📐 Schritt für Schritt'],
+    medizin: ['🩺 Auswerten', '📋 Zusammenfassen'],
+    varianten: ['⚖ Entscheidung bewerten'],
+    morph: ['🧩 Problem zerlegen'],
+    rfq: ['📩 Als Anfrage aufbereiten'],
+    rechnung: ['🧾 Positionen extrahieren'],
+    zeugnis: ['📄 Zeugnis-Angaben'],
+  };
+
   function _handoffToTab(key, md) {
     const text = String(md || '').trim();
     if (!text) { showToast('Nichts zu übernehmen'); return; }
@@ -3095,18 +3109,26 @@ const Chat = (() => {
       } else showToast('Varianten-Modul nicht geladen');
       return;
     }
-    const t = _HANDOFF_TARGETS.find(x => x.key === key);
-    const name = t ? t.label.replace(/^\S+\s/, '') : key;
     if (key === 'ide') {
       if (typeof CodeIDE !== 'undefined' && CodeIDE.loadFromChat) CodeIDE.loadFromChat(text, 'chat');
       else if (typeof CodeWorkspace !== 'undefined' && CodeWorkspace.loadFromChat) CodeWorkspace.loadFromChat(text, 'chat');
       if (typeof switchTab === 'function') switchTab('ide');
       showToast('✓ in den Code-Tab übernommen'); return;
     }
+    // Tabs mit Aufbereitung: erst „was soll passieren?" fragen und den Inhalt zielgerecht
+    // umformen (z. B. Patente → Recherche-Suchbegriff), dann übernehmen.
+    if (_HANDOFF_ACTIONS[key]) return _openHandoffPrepare(key, text);
+    _handoffRoute(key, text);
+  }
+
+  // Platziert den (ggf. aufbereiteten) Text im Ziel-Tab (Feld füllen / Zwischenablage).
+  function _handoffRoute(key, text, action) {
+    const t = _HANDOFF_TARGETS.find(x => x.key === key);
+    const name = t ? t.label.replace(/^\S+\s/, '') : key;
     if (typeof switchTab === 'function') switchTab(key);
     if (t && t.copy) {
       if (navigator.clipboard) { try { navigator.clipboard.writeText(text); } catch (_) {} }
-      showToast(`${name}-Tab geöffnet – Antwort liegt in der Zwischenablage (ins passende Feld einfügen)`);
+      showToast(`${name}-Tab geöffnet – aufbereiteter Text in der Zwischenablage (einfügen)`);
       return;
     }
     const el = t && t.input ? document.getElementById(t.input) : null;
@@ -3114,10 +3136,70 @@ const Chat = (() => {
       el.value = text;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       try { el.focus(); } catch (_) {}
-      showToast(`✓ in den ${name}-Tab übernommen`);
+      // Patente-Recherche: wenn gewünscht, die Suche gleich auslösen.
+      if (key === 'patente' && /recherche|suchbegriff/i.test(action || '')) {
+        const go = document.getElementById('pat-search-btn') || document.getElementById('btn-pat-search');
+        if (go) { try { go.click(); } catch (_) {} }
+      }
+      showToast(`✓ aufbereitet in den ${name}-Tab übernommen`);
     } else {
       showToast(`${name}-Tab geöffnet`);
     }
+  }
+
+  function _openHandoffPrepare(key, md) {
+    const t = _HANDOFF_TARGETS.find(x => x.key === key);
+    const name = t ? t.label : key;
+    const actions = _HANDOFF_ACTIONS[key] || [];
+    const old = document.getElementById('handoff-prep'); if (old) old.remove();
+    const ov = document.createElement('div'); ov.id = 'handoff-prep';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3);box-sizing:border-box';
+    ov.innerHTML = `
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:520px;width:100%;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.08em;margin-bottom:2px">→ ${escHtml(name)}: Was soll dort passieren?</div>
+        <div style="opacity:.7;margin-bottom:12px;font-size:.9em">Der Inhalt wird für den Ziel-Tab passend aufbereitet.</div>
+        <div id="hp-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+          ${actions.map((a, i) => `<button type="button" class="hp-act${i === 0 ? ' active' : ''}" data-a="${escHtml(a)}" style="padding:5px 10px;border-radius:14px;border:1px solid var(--border,#334);background:${i === 0 ? 'var(--accent,#2d6cdf)' : 'transparent'};color:${i === 0 ? '#fff' : 'inherit'};cursor:pointer;font-size:.9em">${escHtml(a)}</button>`).join('')}
+        </div>
+        <label style="display:block;margin:2px 0 3px;font-size:.9em">Zusatzwunsch (optional)</label>
+        <input id="hp-extra" type="text" style="${fld}" placeholder="z. B. Fokus, Sprache, Umfang …">
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button id="hp-cancel" class="wf-action-btn">Abbrechen</button>
+          <button id="hp-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">Aufbereiten &amp; übernehmen</button>
+        </div>
+        <div id="hp-status" style="margin-top:8px;font-size:.88em;color:var(--text-muted,#8b98a5)"></div>
+      </div>`;
+    document.body.appendChild(ov);
+    let _act = actions[0] || '';
+    ov.querySelectorAll('.hp-act').forEach(b => b.addEventListener('click', () => {
+      _act = b.dataset.a;
+      ov.querySelectorAll('.hp-act').forEach(x => { x.classList.remove('active'); x.style.background = 'transparent'; x.style.color = 'inherit'; });
+      b.classList.add('active'); b.style.background = 'var(--accent,#2d6cdf)'; b.style.color = '#fff';
+    }));
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    ov.querySelector('#hp-cancel').onclick = close;
+    ov.querySelector('#hp-go').onclick = async () => {
+      const extra = ov.querySelector('#hp-extra').value.trim();
+      const action = (_act + (extra ? ' — ' + extra : '')).trim();
+      const go = ov.querySelector('#hp-go'); go.disabled = true;
+      ov.querySelector('#hp-status').textContent = '⏳ Inhalt wird aufbereitet …';
+      let prepared = md;
+      try {
+        const r = await fetch('/api/handoff/prepare', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target: key, content: md, action }),
+        });
+        if (r.ok) {
+          const s = await r.json();
+          prepared = s.prepared || md;
+          if (s.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(s.tokens, 'Handoff-Aufbereitung');
+        }
+      } catch (_) {}
+      close();
+      _handoffRoute(key, prepared, action);
+    };
   }
 
   function _openHandoffMenu(md, anchor) {
