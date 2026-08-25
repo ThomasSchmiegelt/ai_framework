@@ -4247,6 +4247,7 @@ const Chat = (() => {
             title: pmeta.name || nm, description: proposal.brief || '',
             criteria: dec.criteria, variants: dec.variants,
             pairwise: dec.pairwise_matrix || [], ratings: dec.ratings || [],
+            project_id: projectId || '',
           }),
         });
         if (r.ok) { varName = nm; made.push('Variantenvergleich'); }
@@ -4272,7 +4273,7 @@ const Chat = (() => {
       if (pat && (pat.title || pat.claim1)) {
         const nm = (pmeta.name || 'Patente').replace(/[^\w \-]/g, '').trim().slice(0, 50) || 'Patente';
         try {
-          const r = await fetch('/api/patente/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nm }) });
+          const r = await fetch('/api/patente/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nm, project_id: projectId || '' }) });
           if (r.ok) { const s = await r.json(); patName = s.name || nm; made.push('Patent-Projekt'); }
         } catch (_) {}
       }
@@ -4288,6 +4289,21 @@ const Chat = (() => {
               project_id: projectId, plan_id: planId || '' }),
           });
           if (r.ok) { const s = await r.json(); angNr = s.nummer; made.push('Angebot ' + (s.nummer || '')); }
+        } catch (_) {}
+      }
+
+      // Verknüpfte Artefakte zentral am Projekt hinterlegen → Projekt-Modal zeigt alles
+      if (projectId) {
+        try {
+          await fetch('/api/projects/' + projectId, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ links: {
+              plan_id: planId || '', varianten: varName || '', patente: patName || '',
+              todo_pid: todoPid || '', angebot_nr: angNr || '',
+              has_doku: !!((proposal.doku || {}).markdown || ((proposal.doku || {}).presentation)),
+              has_flow: !!((proposal.flow || {}).mermaid), run: true,
+            } }),
+          });
         } catch (_) {}
       }
 

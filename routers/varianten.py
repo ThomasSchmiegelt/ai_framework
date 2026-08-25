@@ -126,6 +126,7 @@ def _var_save(name: str, body: dict) -> dict:
         "variants": variants,
         "pairwise": body.get("pairwise") or [],
         "ratings": body.get("ratings") or [],
+        "project_id": str(body.get("project_id", "")).strip(),   # optionale Dach-Projekt-Verknüpfung
         "updated_at": time.time(),
     }
     data["result"] = _var_compute(data)

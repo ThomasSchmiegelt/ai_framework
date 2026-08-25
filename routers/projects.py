@@ -97,6 +97,12 @@ async def update_project(pid: str, req: Request):
             for k in ("status", "plan_id", "angebot_nr", "rechnung_nr"):
                 if k in body:
                     p[k] = str(body.get(k) or "").strip()
+            # Verknüpfte Artefakte (Orchestrator): zusammengeführt statt überschrieben,
+            # damit spätere PUTs einzelne Verknüpfungen ergänzen können.
+            if "links" in body and isinstance(body["links"], dict):
+                cur = p.get("links") if isinstance(p.get("links"), dict) else {}
+                cur.update(body["links"])
+                p["links"] = cur
             if body.get("status") and body["status"] not in _PROJECT_STATUS_LABELS:
                 raise HTTPException(status_code=400, detail="Unbekannter Projektstatus.")
             p["updated_at"] = time.time()

@@ -69,6 +69,19 @@ const Projects = (() => {
           + skills.map(a => `<span class="tool-badge" title="${escHtml(a.description || '')}">${(a.icon || '🤖')} ${escHtml(a.name)}</span>`).join('')
           + `</div>`
         : '';
+      // Vom Orchestrator (/projekt) verknüpfte Artefakte als Schnell-Buttons.
+      const L = (p.links && typeof p.links === 'object') ? p.links : {};
+      const lb = [];
+      if (L.plan_id) lb.push(`<button class="tool-badge project-link-btn" data-act="plan" data-val="${escHtml(L.plan_id)}" title="Plan öffnen">📅 Plan</button>`);
+      if (L.varianten) lb.push(`<button class="tool-badge project-link-btn" data-act="varianten" title="Variantenvergleich">🧮 Varianten</button>`);
+      if (L.patente) lb.push(`<button class="tool-badge project-link-btn" data-act="patente" title="Patente">⚖ Patente</button>`);
+      if (L.todo_pid) lb.push(`<button class="tool-badge project-link-btn" data-act="todo" title="To-Do">✅ To-Do</button>`);
+      if (L.angebot_nr) lb.push(`<button class="tool-badge project-link-btn" data-act="angebot" title="Angebot/Rechnungen">🧾 Angebot</button>`);
+      if (L.run) lb.push(`<button class="tool-badge project-link-btn" data-act="run" data-val="${escHtml(p.id)}" title="Gespeicherter Vorgang (JSON)">🗂 Vorgang</button>`);
+      const linksHtml = lb.length
+        ? `<div class="project-links" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+             <span style="color:var(--text-dim);font-size:12px">🔗 Verknüpft:</span>${lb.join('')}</div>`
+        : '';
       const row = document.createElement('div');
       row.className = 'project-row';
       row.innerHTML = `
@@ -77,11 +90,24 @@ const Projects = (() => {
           <span class="project-name">${escHtml(p.name)}</span>
           <span class="project-desc">${escHtml(p.description || '')}</span>
           ${skillsHtml}
+          ${linksHtml}
         </div>
         <button class="btn-delete-project" data-id="${escHtml(p.id)}" data-skills="${skills.length}" title="Löschen">🗑</button>
       `;
       list.appendChild(row);
     }
+    list.querySelectorAll('.project-link-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        const act = b.dataset.act, val = b.dataset.val;
+        if (act === 'run') { showToast('Gespeicherter Vorgang: data/orchestrator/' + (val || '') + '.json'); return; }
+        closeModal();
+        if (act === 'plan') { if (typeof Planner !== 'undefined' && Planner.openPlan && val) Planner.openPlan(val); else if (typeof switchTab === 'function') switchTab('planner'); }
+        else if (act === 'varianten' && typeof switchTab === 'function') switchTab('varianten');
+        else if (act === 'patente' && typeof switchTab === 'function') switchTab('patente');
+        else if (act === 'todo' && typeof switchTab === 'function') switchTab('todo');
+        else if (act === 'angebot' && typeof switchTab === 'function') switchTab('rechnung');
+      });
+    });
     list.querySelectorAll('.btn-delete-project').forEach(btn => {
       btn.addEventListener('click', async () => {
         const n = parseInt(btn.dataset.skills, 10) || 0;
