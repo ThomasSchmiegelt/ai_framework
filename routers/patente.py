@@ -212,6 +212,7 @@ async def patente_projects():
 
 class PatProjectCreate(BaseModel):
     name: str
+    project_id: str = ""   # optionale Verknüpfung mit einem Dach-Projekt (Orchestrator)
 
 
 @router.post("/api/patente/projects")
@@ -222,6 +223,10 @@ async def patente_project_create(body: PatProjectCreate):
     if not (d / "patente.json").exists():
         (d / "patente.json").write_text("[]", encoding="utf-8")
     (d / "analysen").mkdir(exist_ok=True)
+    if (body.project_id or "").strip():
+        meta = _pat_meta(d)
+        meta["project_id"] = body.project_id.strip()
+        _pat_save_meta(d, meta)
     return {"name": safe}
 
 
