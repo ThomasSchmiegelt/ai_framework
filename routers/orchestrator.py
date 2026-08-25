@@ -40,7 +40,7 @@ router = APIRouter()
 
 # Phasen der Reihe nach. Stage 1 deckt die ersten vier ab; die restlichen sind für
 # Stage 2 vorgesehen und werden vorerst als „geplant"-Hinweis gemeldet.
-_STAGE1_PHASES = ["project", "morph", "decision", "plan", "todo"]
+_STAGE1_PHASES = ["project", "flow", "morph", "decision", "plan", "todo"]
 _STAGE2_PHASES = ["patente", "doku", "angebot"]
 _ALL_PHASES = _STAGE1_PHASES + _STAGE2_PHASES
 
@@ -50,8 +50,13 @@ class OrchestratorRequest(BaseModel):
     extra: str = ""                      # optionale Randbedingungen
     model: Optional[str] = None
     phases: Optional[List[str]] = None   # Teilmenge von _ALL_PHASES (Standard: alle)
-    plan_tasks: int = 16                 # Ziel-Vorgangszahl für den Plan
-    doc_format: str = "beides"           # praesentation | dokument | beides (Stage 2)
+    plan_tasks: Optional[int] = None     # Ziel-Vorgangszahl; None ⇒ automatisch aus Komplexität
+    doc_format: str = "beides"           # praesentation | dokument | beides
+
+
+# Komplexitätsstufe (1–5) → sinnvolle Vorgangszahl im Plan.
+_COMPLEXITY_TASKS = {1: 6, 2: 10, 3: 16, 4: 24, 5: 34}
+_COMPLEXITY_LABEL = {1: "sehr einfach", 2: "einfach", 3: "mittel", 4: "komplex", 5: "sehr komplex"}
 
 
 async def _llm_json(model: str, system: str, user: str, tok: dict) -> dict:
@@ -123,26 +128,72 @@ async def _orchestrator_generator(req: OrchestratorRequest):
         return
     model = _pick_model(req.model, _model_for("general"))
     phases = [p for p in (req.phases or _ALL_PHASES) if p in _ALL_PHASES] or _ALL_PHASES
-    count = max(4, min(int(req.plan_tasks or 16), 60))
+    # Explizite Vorgangszahl übersteuert die automatische Ableitung aus der Komplexität.
+    explicit_count = int(req.plan_tasks) if (req.plan_tasks and int(req.plan_tasks) > 0) else None
+    count = max(4, min(explicit_count, 60)) if explicit_count else 16   # vorläufig; ggf. aus Komplexität
     task_text = brief + (f"\n\nRandbedingungen:\n{extra}" if extra else "")
     tok = {"in": 0, "out": 0}
     proposal: dict = {"brief": brief, "doc_format": req.doc_format}
 
     yield _sse({"type": "orchestrator_start", "phases": phases})
 
-    # ── Phase: Projekt-Rahmen (Name/Beschreibung) ─────────────────────────────
+    # ── Phase: Projekt-Rahmen (Name/Beschreibung) + Komplexität → Vorgangszahl ─
     if "project" in phases:
-        yield _sse({"type": "phase", "key": "project", "label": "🗂 Projektrahmen wird bestimmt…"})
+        yield _sse({"type": "phase", "key": "project", "label": "🗂 Projektrahmen & Komplexität…"})
         d = await _llm_json(
             model,
-            "Du benennst ein Projekt aus einer Vorhaben-Beschreibung. Antworte NUR mit JSON: "
-            '{"name":"kurzer, prägnanter Projektname","description":"1–2 Sätze Zusammenfassung"}.',
+            ("Du benennst ein Projekt aus einer Vorhaben-Beschreibung UND schätzt seine Komplexität "
+             "(1=sehr einfach … 5=sehr komplex) für die spätere Detailtiefe des Projektplans. "
+             'Antworte NUR mit JSON: {"name":"kurzer, prägnanter Projektname",'
+             '"description":"1–2 Sätze Zusammenfassung","complexity":3}.'),
             task_text, tok)
         proposal["project"] = {
             "name": (str(d.get("name", "")).strip() or brief.split("\n", 1)[0][:60] or "Neues Projekt")[:120],
             "description": str(d.get("description", "")).strip()[:1000],
         }
+        # Komplexität → Vorgangszahl (sofern der Aufrufer keine feste Zahl vorgab).
+        try:
+            complexity = int(d.get("complexity", 3) or 3)
+        except Exception:
+            complexity = 3
+        complexity = max(1, min(complexity, 5))
+        proposal["complexity"] = complexity
+        if explicit_count is None:
+            count = _COMPLEXITY_TASKS.get(complexity, 16)
         yield _sse({"type": "project", "project": proposal["project"]})
+        yield _sse({"type": "complexity", "complexity": complexity,
+                    "label": _COMPLEXITY_LABEL.get(complexity, ""), "plan_tasks": count,
+                    "auto": explicit_count is None})
+
+    # ── Phase: Ablaufdiagramm (Mermaid) — „was ist alles zu tun" ──────────────
+    if "flow" in phases:
+        yield _sse({"type": "phase", "key": "flow", "label": "🗺 Ablaufdiagramm wird erstellt…"})
+        _pname = (proposal.get("project", {}) or {}).get("name", "") or brief[:60]
+        d = await _llm_json(
+            model,
+            ("Du entwirfst den ABLAUF zur Umsetzung eines Vorhabens als Mermaid-Flussdiagramm. "
+             "Liefere 5–9 aufeinander aufbauende Schritte (von der Analyse bis zum Ergebnis/Angebot). "
+             "Gib das Diagramm als gültigen Mermaid-Code 'flowchart TD' mit Knoten A,B,C… und Pfeilen "
+             "(A[\"Schritt\"] --> B[\"Schritt\"]) zurück, deutsche Kurzlabels ohne Sonderzeichen/Klammern "
+             "im Label. Antworte NUR mit JSON: {\"steps\":[\"Schritt 1\",\"Schritt 2\"],\"mermaid\":\"flowchart TD\\n  A[...] --> B[...]\"}"),
+            f"Vorhaben: {_pname}\n{task_text}", tok)
+        steps = [str(s).strip() for s in (d.get("steps") or []) if str(s).strip()][:12]
+        mermaid = str(d.get("mermaid", "") or "").strip()
+        # Validierung/Rückfall: gültiges Mermaid muss mit flowchart/graph beginnen.
+        if not re.match(r"^\s*(flowchart|graph)\b", mermaid):
+            if steps:
+                _ids = [chr(65 + i) for i in range(len(steps))]
+                _lines = ["flowchart TD"]
+                for i, s in enumerate(steps):
+                    _lbl = re.sub(r'["\[\]()]', "", s)[:40]
+                    _lines.append(f'  {_ids[i]}["{_lbl}"]')
+                for i in range(len(steps) - 1):
+                    _lines.append(f"  {_ids[i]} --> {_ids[i + 1]}")
+                mermaid = "\n".join(_lines)
+            else:
+                mermaid = ""
+        proposal["flow"] = {"steps": steps, "mermaid": mermaid}
+        yield _sse({"type": "flow", "flow": proposal["flow"]})
 
     # ── Phase: Morphologischer Kasten (Zerlegung) ─────────────────────────────
     morph_params: list = []
@@ -404,3 +455,86 @@ async def orchestrator_plan(req: OrchestratorRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Persistenz: Vorgang (proposal) als JSON speichern — unter dem Projekt und
+# optional als wiederverwendbare Vorlage. Damit „weiß" das Tool, was zu tun war,
+# und der komplette Durchlauf ist reproduzierbar/nachvollziehbar. ─────────────
+_ORCH_TPL_DIR = ORCHESTRATOR_DIR / "_templates"
+
+
+def _orch_safe(name: str) -> str:
+    safe = "".join(c for c in str(name or "") if c.isalnum() or c in (" ", "_", "-")).strip()
+    return (safe or "vorgang")[:80]
+
+
+class OrchestratorSaveRequest(BaseModel):
+    project_id: str = ""
+    proposal: dict = {}
+    created: dict = {}                    # was tatsächlich angelegt wurde (IDs)
+    save_as_template: bool = False
+    template_name: str = ""
+
+
+@router.post("/api/orchestrator/save")
+async def orchestrator_save(req: OrchestratorSaveRequest):
+    """Speichert den kompletten Vorgang als JSON unter dem Projekt (und optional als
+    Vorlage). Rein Datei-basiert, kein LLM."""
+    if not (req.proposal or {}):
+        raise HTTPException(status_code=400, detail="Kein Vorgang (proposal) übergeben.")
+    ORCHESTRATOR_DIR.mkdir(parents=True, exist_ok=True)
+    record = {
+        "version": 1,
+        "saved_at": time.time(),
+        "project_id": (req.project_id or "").strip(),
+        "proposal": req.proposal,
+        "created": req.created or {},
+    }
+    pid = (req.project_id or "").strip() or _orch_safe(
+        (req.proposal.get("project") or {}).get("name", "") or "vorgang")
+    path = ORCHESTRATOR_DIR / f"{_orch_safe(pid)}.json"
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    tpl_name = ""
+    if req.save_as_template:
+        _ORCH_TPL_DIR.mkdir(parents=True, exist_ok=True)
+        tpl_name = _orch_safe(req.template_name or (req.proposal.get("project") or {}).get("name", "") or "vorlage")
+        # Vorlage = der Ablauf (flow) + Struktur, ohne die konkreten Ergebnisse aufzublähen.
+        tpl = {
+            "version": 1, "saved_at": time.time(), "name": tpl_name,
+            "brief": req.proposal.get("brief", ""),
+            "complexity": req.proposal.get("complexity"),
+            "flow": req.proposal.get("flow") or {},
+            "phases": [k for k in _ALL_PHASES if k in (req.proposal or {})],
+        }
+        (_ORCH_TPL_DIR / f"{tpl_name}.json").write_text(
+            json.dumps(tpl, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "path": path.name, "template": tpl_name}
+
+
+@router.get("/api/orchestrator/runs/{project_id}")
+async def orchestrator_run_get(project_id: str):
+    path = ORCHESTRATOR_DIR / f"{_orch_safe(project_id)}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Kein gespeicherter Vorgang für dieses Projekt.")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Konnte Vorgang nicht lesen: {e}")
+
+
+@router.get("/api/orchestrator/templates")
+async def orchestrator_templates():
+    out = []
+    if _ORCH_TPL_DIR.exists():
+        for f in sorted(_ORCH_TPL_DIR.glob("*.json")):
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            out.append({"name": d.get("name") or f.stem,
+                        "brief": (d.get("brief") or "")[:200],
+                        "complexity": d.get("complexity"),
+                        "steps": (d.get("flow") or {}).get("steps") or [],
+                        "saved_at": d.get("saved_at", 0)})
+    out.sort(key=lambda x: x.get("saved_at", 0), reverse=True)
+    return out

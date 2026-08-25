@@ -4080,6 +4080,26 @@ const Chat = (() => {
       const c = _projCard('🗂 Projekt: ' + (ev.project.name || ''));
       c._body.innerHTML = escHtml(ev.project.description || '');
       ctx.cardsWrap.appendChild(c); ctx.cards.project = c;
+    } else if (ev.type === 'complexity') {
+      const n = document.createElement('div');
+      n.style.cssText = 'margin:2px 0 4px;font-size:.9em;color:var(--text-muted,#8b98a5)';
+      n.textContent = '📊 Komplexität: ' + (ev.label || ev.complexity) + ' → '
+        + ev.plan_tasks + ' Planvorgänge' + (ev.auto ? ' (automatisch)' : '');
+      ctx.cardsWrap.appendChild(n);
+    } else if (ev.type === 'flow') {
+      const c = _projCard('🗺 Ablaufdiagramm');
+      const f = ev.flow || {};
+      if (f.mermaid) {
+        const holder = document.createElement('div');
+        holder.style.cssText = 'overflow-x:auto';
+        c._body.appendChild(holder);
+        try { _renderMermaid(holder, f.mermaid); } catch (_) { holder.textContent = f.mermaid; }
+      } else if ((f.steps || []).length) {
+        c._body.innerHTML = '<ol style="margin:0;padding-left:20px">' + f.steps.map(s => '<li>' + escHtml(s) + '</li>').join('') + '</ol>';
+      } else {
+        c._body.innerHTML = '<em>kein Ablauf</em>';
+      }
+      ctx.cardsWrap.appendChild(c); ctx.cards.flow = c;
     } else if (ev.type === 'morph') {
       const c = _projCard('🧩 Zerlegung — morphologischer Kasten');
       const params = (ev.morph.parameters || []);
@@ -4271,6 +4291,18 @@ const Chat = (() => {
         } catch (_) {}
       }
 
+      // 7) Vorgang als JSON unter dem Projekt speichern (reproduzierbar/nachvollziehbar)
+      try {
+        await fetch('/api/orchestrator/save', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_id: projectId || '', proposal,
+            created: { plan_id: planId, var_name: varName, todo_pid: todoPid, pat_name: patName, angebot_nr: angNr },
+          }),
+        });
+        made.push('Vorgang gespeichert');
+      } catch (_) {}
+
       // Projekt-Auswahl aktualisieren, aktuelle Unterhaltung zuordnen
       if (projectId && typeof Projects !== 'undefined') {
         try { await Projects.load(); } catch (_) {}
@@ -4304,6 +4336,22 @@ const Chat = (() => {
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         }));
       }
+      // Ablauf als wiederverwendbare Vorlage speichern
+      const tplBtn = _planBtn('btn-cancel', '⭐ Als Vorlage', async () => {
+        tplBtn.disabled = true;
+        try {
+          const r = await fetch('/api/orchestrator/save', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_id: projectId || '', proposal,
+              created: { plan_id: planId, var_name: varName, todo_pid: todoPid, pat_name: patName, angebot_nr: angNr },
+              save_as_template: true, template_name: pmeta.name || '' }),
+          });
+          const s = r.ok ? await r.json() : {};
+          tplBtn.textContent = s.template ? '⭐ Vorlage „' + s.template + '"' : '⭐ gespeichert';
+          showToast('✓ Als Vorlage gespeichert');
+        } catch (_) { tplBtn.disabled = false; showToast('Vorlage fehlgeschlagen'); }
+      });
+      done.appendChild(tplBtn);
       statusEl.appendChild(done);
       showToast('✓ Projekt angelegt: ' + made.length + ' Artefakte');
     } catch (e) {

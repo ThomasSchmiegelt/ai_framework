@@ -60,6 +60,7 @@ def _backup_dirs_always() -> list:
         (RFQ_DIR, "rfq"), (MORPH_TRAIN_DIR, "morph_training"),
         (VARIANTEN_DIR, "varianten"), (COMPARE_DIR, "compare"), (TODO_DIR, "todo"),
         (TODO_ATT_DIR, "todo_att"),   # To-Do-Anlagen (Original-Dateien; MD-Text + Baum sind in der DB)
+        (ORCHESTRATOR_DIR, "orchestrator"),   # gespeicherte /projekt-Vorgänge + Vorlagen
         (RAG_IMAGES_DIR, "rag_images"),   # Bild-aware RAG: Originalbilder (Beschreibung + Vektoren sind in der DB)
     ]
 
