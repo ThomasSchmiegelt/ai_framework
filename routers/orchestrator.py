@@ -376,6 +376,20 @@ async def _orchestrator_generator(req: OrchestratorRequest):
         except Exception as e:
             proposal["patente"] = {}
             yield _sse({"type": "notice", "message": f"Patent-Entwurf übersprungen: {e}"})
+        # Skizzen ergänzen: Schema-Figuren mit Bezugszeichen (+ optional KI-Konzeptbild).
+        if proposal.get("patente"):
+            try:
+                yield _sse({"type": "phase", "key": "patente", "label": "🖼 Patent-Skizzen (Figuren + Bezugszeichen)…"})
+                figs = await _patent_figures_core(
+                    task_text, claim1=proposal["patente"].get("claim1", ""),
+                    model=model, want_image=True, n=2)
+                proposal["patente"]["figures"] = figs.get("figures") or []
+                proposal["patente"]["bezugszeichen"] = figs.get("bezugszeichen") or []
+                proposal["patente"]["figures_description"] = figs.get("description") or ""
+                _ft = figs.get("tokens") or {}
+                tok["in"] += int(_ft.get("in", 0) or 0); tok["out"] += int(_ft.get("out", 0) or 0)
+            except Exception as e:
+                yield _sse({"type": "notice", "message": f"Patent-Skizzen übersprungen: {e}"})
         yield _sse({"type": "patente", "patente": proposal.get("patente") or {}})
 
     # ── Phase: Dokumentation (Markdown) + Präsentation (+ optional Titelbild) ──

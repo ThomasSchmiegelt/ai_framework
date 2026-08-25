@@ -654,6 +654,51 @@ const Patente = (() => {
     }
   }
 
+  /* ── Skizzen/Figuren (Entwurf, kein Einreichen) ─────────────────────── */
+  async function _renderPatMermaid(el, def) {
+    if (typeof mermaid === 'undefined') { el.textContent = def; return; }
+    try { mermaid.initialize({ startOnLoad: false, theme: 'dark' }); } catch (_) {}
+    try {
+      const { svg } = await mermaid.render('pm-' + Date.now() + Math.random().toString(36).slice(2, 6), def);
+      el.innerHTML = svg;
+    } catch (_) { el.textContent = def; }
+  }
+
+  async function _runSketches() {
+    if (_needProject()) return;
+    const desc = ($('pat-fto-produkt')?.value || '').trim();
+    if (desc.length < 30) { _status('Bitte die Erfindung oben (Aufbau/Komponenten/Funktion) ausführlicher beschreiben.'); return; }
+    const out = $('pat-analyse-result');
+    out.innerHTML = '<p class="planner-muted">⏳ Skizzen werden erzeugt…</p>';
+    const btn = $('btn-pat-sketches'); if (btn) btn.disabled = true;
+    try {
+      const r = await fetch(`/api/patente/projects/${encodeURIComponent(_project)}/sketches`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: desc, want_image: true, figures: 2 }),
+      });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || ('HTTP ' + r.status)); }
+      const res = await r.json();
+      if (res.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(res.tokens, 'Patente');
+      out.innerHTML = '<div class="pat-stage"><h4>🖼 Skizzen (Entwurf – kein Einreichen)</h4><div id="pat-sketch-body"></div></div>';
+      const body = $('pat-sketch-body');
+      (res.figures || []).forEach(f => {
+        const cap = document.createElement('div'); cap.style.cssText = 'font-weight:600;margin:8px 0 2px'; cap.textContent = f.caption || ''; body.appendChild(cap);
+        if (f.mermaid) { const h = document.createElement('div'); h.style.cssText = 'overflow-x:auto'; body.appendChild(h); _renderPatMermaid(h, f.mermaid); }
+        if (f.image) { const im = document.createElement('img'); im.src = f.image; im.style.cssText = 'max-width:100%;border-radius:6px;margin-top:4px'; body.appendChild(im); }
+      });
+      if ((res.bezugszeichen || []).length) {
+        const bz = document.createElement('div'); bz.style.cssText = 'margin-top:8px;font-size:12.5px';
+        bz.innerHTML = '<strong>Bezugszeichenliste:</strong> ' + res.bezugszeichen.map(z => escHtml((z.n || '') + ' — ' + (z.label || ''))).join(' · ');
+        body.appendChild(bz);
+      }
+      if (res.description) { const d = document.createElement('div'); d.style.cssText = 'margin-top:6px;font-size:12.5px;opacity:.85'; d.textContent = res.description; body.appendChild(d); }
+    } catch (e) {
+      out.innerHTML = `<p style="color:#ef4444">Fehler: ${escHtml(e.message)}</p>`;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   /* ── Akte-Statistik (deterministisch, rein Frontend) ────────────────── */
   function _bars(counts, total, max) {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, max || 10)
@@ -855,6 +900,7 @@ const Patente = (() => {
 
     $('btn-pat-analyze')?.addEventListener('click', _runAnalysis);
     $('btn-pat-fto')?.addEventListener('click', _runFto);
+    $('btn-pat-sketches')?.addEventListener('click', _runSketches);
 
     $('btn-pat-graph')?.addEventListener('click', _buildGraph);
 

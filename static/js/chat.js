@@ -4239,6 +4239,43 @@ const Chat = (() => {
       if ((p.ipc || []).length) html += '<div style="margin-top:4px;font-size:.85em;opacity:.75">IPC/CPC: ' + p.ipc.map(escHtml).join(', ') + '</div>';
       if ((p.search_terms || []).length) html += '<div style="font-size:.85em;opacity:.75">Recherche: ' + p.search_terms.map(escHtml).join(', ') + '</div>';
       c._body.innerHTML = html || '<em>kein Entwurf</em>';
+      // Skizzen: Schema-Figuren (Mermaid) + optional KI-Konzeptbild + Bezugszeichenliste
+      const figs = p.figures || [];
+      if (figs.length) {
+        const fh = document.createElement('div');
+        fh.style.cssText = 'margin-top:8px';
+        fh.innerHTML = '<div style="font-weight:600;margin-bottom:4px">🖼 Skizzen (Entwurf – kein Einreichen)</div>';
+        figs.forEach(f => {
+          const cap = document.createElement('div');
+          cap.style.cssText = 'font-size:.9em;margin:6px 0 2px';
+          cap.textContent = f.caption || '';
+          fh.appendChild(cap);
+          if (f.mermaid) {
+            const holder = document.createElement('div'); holder.style.cssText = 'overflow-x:auto';
+            fh.appendChild(holder);
+            try { _renderMermaid(holder, f.mermaid); } catch (_) { holder.textContent = f.mermaid; }
+          }
+          if (f.image) {
+            const img = document.createElement('img');
+            img.src = f.image; img.alt = 'Konzeptskizze';
+            img.style.cssText = 'max-width:100%;border-radius:6px;margin-top:4px';
+            fh.appendChild(img);
+          }
+        });
+        if ((p.bezugszeichen || []).length) {
+          const bz = document.createElement('div');
+          bz.style.cssText = 'font-size:.85em;opacity:.85;margin-top:6px';
+          bz.innerHTML = '<strong>Bezugszeichen:</strong> ' + p.bezugszeichen.map(z => escHtml((z.n || '') + ' ' + (z.label || ''))).join(' · ');
+          fh.appendChild(bz);
+        }
+        if (p.figures_description) {
+          const fd = document.createElement('div');
+          fd.style.cssText = 'font-size:.85em;opacity:.8;margin-top:4px';
+          fd.textContent = p.figures_description;
+          fh.appendChild(fd);
+        }
+        c._body.appendChild(fh);
+      }
       ctx.cardsWrap.appendChild(c); ctx.cards.patente = c;
     } else if (ev.type === 'doku') {
       const d = ev.doku || {};

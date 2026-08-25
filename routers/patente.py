@@ -230,6 +230,29 @@ async def patente_project_create(body: PatProjectCreate):
     return {"name": safe}
 
 
+class PatSketchRequest(BaseModel):
+    description: str = ""
+    claim1: str = ""
+    want_image: bool = True
+    figures: int = 2
+
+
+@router.post("/api/patente/projects/{name}/sketches")
+async def patente_sketches(name: str, body: PatSketchRequest):
+    """Erzeugt Patent-SKIZZEN (Entwurf, kein Einreichen) zu einem Fall: beschriftete
+    Schema-Figuren mit Bezugszeichen (+ optional KI-Konzeptbild), Bezugszeichenliste und
+    Figurenbeschreibung. Nutzt den geteilten Kern ``_patent_figures_core``."""
+    _pat_project_dir(name)   # existiert der Fall? (404 sonst)
+    desc = (body.description or "").strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="Bitte eine Beschreibung der Erfindung angeben.")
+    res = await _patent_figures_core(desc, claim1=body.claim1, want_image=body.want_image,
+                                     n=body.figures)
+    if not res.get("figures"):
+        raise HTTPException(status_code=502, detail="Es konnten keine verwertbaren Skizzen erzeugt werden.")
+    return res
+
+
 @router.delete("/api/patente/projects/{name}")
 async def patente_project_delete(name: str):
     import shutil

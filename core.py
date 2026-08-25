@@ -2776,6 +2776,73 @@ async def _todo_ask_core(question: str, root: str = "", model: Optional[str] = N
     yield {"type": "result", "summary": answer, "tok": _tok}
 
 
+async def _patent_figures_core(description: str, claim1: str = "", model: Optional[str] = None,
+                              want_image: bool = False, n: int = 2):
+    """Erzeugt Patent-SKIZZEN als Entwurf (kein einreichungsfertiges Blatt): 1–3 Figuren
+    je als beschriftetes Schema (Mermaid-Flowchart mit NUMMERIERTEN Bezugszeichen im Label,
+    z. B. '1["Solarpanel (1)"]'), dazu eine Bezugszeichenliste und eine Figurenbeschreibung.
+    Optional zusätzlich eine grobe KI-Konzeptskizze (Bild) je Leitfigur — best-effort.
+
+    Geteilter Kern für den /projekt-Orchestrator UND den Patente-Tab. Rückgabe:
+    {figures:[{caption, mermaid, image?}], bezugszeichen:[{n,label}], description, tokens}."""
+    description = (description or "").strip()
+    n = max(1, min(int(n or 2), 3))
+    model = _pick_model(model, _model_for("general"))
+    tok = {"in": 0, "out": 0}
+    sys = (
+        "Du bist Patentzeichner und entwirfst SKIZZEN für eine Patentanmeldung (Entwurf, keine "
+        "amtliche Einreichung). Erzeuge " + str(n) + " ergänzende Figuren zu der Erfindung. JEDE "
+        "Figur ist ein beschriftetes SCHEMA als gültiger Mermaid-Code ('flowchart LR' oder 'TD'), "
+        "wobei die Bauteile NUMMERIERTE BEZUGSZEICHEN im Knoten-Label tragen, z. B. "
+        "1[\"Solarpanel (1)\"] --> 2[\"Laderegler (2)\"]. Verwende KEINE Sonderzeichen/Klammern im "
+        "Label außer der Bezugszeichen-Klammer. Liefere zusätzlich die Bezugszeichenliste "
+        "(Nummer -> Bauteil) und eine kurze Figurenbeschreibung (Patentstil: 'Fig. 1 zeigt …'). "
+        "Antworte NUR mit JSON: {\"figures\":[{\"caption\":\"Fig. 1: …\",\"mermaid\":\"flowchart LR\\n  "
+        "1[\\\"Bauteil (1)\\\"] --> 2[\\\"Bauteil (2)\\\"]\"}],\"bezugszeichen\":[{\"n\":1,\"label\":\"Bauteil\"}],"
+        "\"description\":\"Fig. 1 zeigt …\"}"
+    )
+    usr = (f"Erfindung:\n{description}" + (f"\n\nHauptanspruch:\n{claim1}" if (claim1 or '').strip() else ""))[:6000]
+    figures, bezug, fdesc = [], [], ""
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False, "format": "json",
+                "messages": [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        j = resp.json()
+        a, b = _llm_tok(j); tok["in"] += a; tok["out"] += b
+        d = _parse_llm_json(j.get("message", {}).get("content", "")) or {}
+        for f in (d.get("figures") or [])[:n]:
+            if not isinstance(f, dict):
+                continue
+            mm = str(f.get("mermaid", "") or "").strip()
+            if not re.match(r"^\s*(flowchart|graph)\b", mm):
+                continue
+            figures.append({"caption": str(f.get("caption", "") or "").strip()[:160], "mermaid": mm})
+        for z in (d.get("bezugszeichen") or [])[:40]:
+            if isinstance(z, dict) and z.get("label"):
+                try:
+                    bezug.append({"n": int(z.get("n", 0) or 0), "label": str(z["label"]).strip()[:80]})
+                except Exception:
+                    pass
+        fdesc = str(d.get("description", "") or "").strip()[:3000]
+    except Exception:
+        pass
+    # Optionale KI-Konzeptskizze (grobe Anschauung) für die Leitfigur — best-effort.
+    if want_image and figures and _image_model():
+        try:
+            _p = ("Grobe technische Konzeptskizze (Patent-Stil, klare Linien, beschriftete Bauteile) "
+                  "der Erfindung: " + description[:300])
+            _img = await _generate_image_core(_p, preset="landscape")
+            if isinstance(_img, dict) and _img.get("image"):
+                figures[0]["image"] = _img["image"]
+        except Exception:
+            pass
+    return {"figures": figures, "bezugszeichen": bezug, "description": fdesc, "tokens": tok}
+
+
 __all__ = [
     'APP_DIR', 'AgentDef',
     '_CONFIG_FILE', '_CONFIG', 'OLLAMA_BASE', 'ALLOWED_MODELS',
@@ -2819,4 +2886,5 @@ __all__ = [
     '_parse_llm_json', '_plan_rag_context', '_plan_path_by_id',
     'CAP_LISTS_FILE', '_load_capacity_file', '_coerce_cap_list', '_save_cap_lists', '_load_cap_lists', '_load_capacity', '_save_capacity', '_capacity_context', '_coerce_capacity',
     '_deep_research_core', '_workflow_core', '_todo_ask_core', '_TODO_ASK_CORE_SYSTEM',
+    '_patent_figures_core',
 ]
