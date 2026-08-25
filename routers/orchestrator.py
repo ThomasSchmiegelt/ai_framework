@@ -30,6 +30,7 @@ from fastapi import APIRouter
 import db as _db
 from tools import llm as _llm
 from tools import decision as _decision
+from tools import dokumente as _dok
 
 from core import *  # noqa: F401,F403  (geteilte Kernflaeche)
 import core as _core  # noqa: F401
@@ -295,13 +296,102 @@ async def _orchestrator_generator(req: OrchestratorRequest):
                             "items": items}
         yield _sse({"type": "todo", "todo": proposal["todo"]})
 
-    # ── Stage-2-Phasen: derzeit noch nicht implementiert → klar melden. ───────
-    for p in phases:
-        if p in _STAGE2_PHASES:
-            _labels = {"patente": "Patent-Analyse", "doku": "bebilderte Dokumentation",
-                       "angebot": "Angebot"}
-            yield _sse({"type": "notice",
-                        "message": f"Phase „{_labels.get(p, p)}“ folgt in Stufe 2 und ist noch nicht aktiv."})
+    best_name = (proposal.get("decision", {}).get("result", {}) or {}).get("best_name", "")
+    best_line = (f"\nBevorzugte Lösungsvariante aus der Bewertung: {best_name}." if best_name else "")
+
+    # ── Phase: Patent-Entwurf & Neuheitsanalyse (KEIN Einreichen!) ────────────
+    if "patente" in phases:
+        yield _sse({"type": "phase", "key": "patente", "label": "⚖ Patent-Entwurf & Neuheitsanalyse…"})
+        try:
+            d = await _llm_json(
+                model,
+                ("Du bist Patentingenieur und erstellst einen ENTWURF (keine amtliche Einreichung) "
+                 "für eine mögliche Patentanmeldung zu einem Vorhaben. Liefere: einen Titel, einen "
+                 "Hauptanspruch (Anspruch 1, ein Satz, merkmalsgegliedert), eine Kurzzusammenfassung "
+                 "(Abstract), eine kurze Neuheits-/erfinderische-Tätigkeit-Argumentation und "
+                 "vorgeschlagene Recherche-Stichworte sowie IPC/CPC-Klassen. Antworte NUR mit JSON: "
+                 '{"title":"…","claim1":"…","abstract":"…","novelty":"…",'
+                 '"search_terms":["…"],"ipc":["B60L"]}'),
+                f"Vorhaben:\n{task_text}{best_line}", tok)
+            proposal["patente"] = {
+                "title": str(d.get("title", "")).strip()[:200],
+                "claim1": str(d.get("claim1", "")).strip()[:2000],
+                "abstract": str(d.get("abstract", "")).strip()[:2000],
+                "novelty": str(d.get("novelty", "")).strip()[:2000],
+                "search_terms": [str(x).strip() for x in (d.get("search_terms") or []) if str(x).strip()][:10],
+                "ipc": [str(x).strip() for x in (d.get("ipc") or []) if str(x).strip()][:8],
+                "note": "Entwurf/Recherche — keine amtliche Einreichung.",
+            }
+        except Exception as e:
+            proposal["patente"] = {}
+            yield _sse({"type": "notice", "message": f"Patent-Entwurf übersprungen: {e}"})
+        yield _sse({"type": "patente", "patente": proposal.get("patente") or {}})
+
+    # ── Phase: Dokumentation (Markdown) + Präsentation (+ optional Titelbild) ──
+    if "doku" in phases:
+        yield _sse({"type": "phase", "key": "doku", "label": "📄 Bebilderte Dokumentation wird erstellt…"})
+        doc_md = ""
+        pres = None
+        try:
+            doc_md = await _llm_md(
+                model,
+                ("Du schreibst eine strukturierte Projekt-Dokumentation als Markdown (## Überschriften, "
+                 "**Fett**, Aufzählungen/Tabellen wo sinnvoll). Gliederung: Ziel & Kontext, Lösungsansatz, "
+                 "Bewertete Varianten & Entscheidung, Umsetzung/Vorgehen, Ausblick. Konkret und sachlich."),
+                (f"Vorhaben:\n{task_text}{best_line}\n\n"
+                 + (("Bewertete Varianten: " + ", ".join(v["name"] for v in proposal.get("decision", {}).get("variants", []))) if proposal.get("decision") else "")),
+                tok)
+            if doc_md:
+                pres = await _text_to_presentation(doc_md, model, tok=tok)
+        except Exception as e:
+            yield _sse({"type": "notice", "message": f"Dokumentation teilweise fehlgeschlagen: {e}"})
+        # Optionales Titelbild (best-effort; scheitert lautlos, z. B. ohne Bildmodell/SD-Server).
+        cover = ""
+        if pres and _image_model():
+            try:
+                yield _sse({"type": "phase", "key": "doku", "label": "🖼 Titelbild wird erzeugt…"})
+                _pname = (proposal.get("project", {}) or {}).get("name", "") or brief
+                _ip = (f"Professionelles, sauberes Titelbild für eine Projekt-Dokumentation zum Thema: "
+                       f"{_pname}. Moderne, sachliche Bildsprache, ohne Text.")
+                _img = await _generate_image_core(_ip, preset="landscape")
+                cover = _img.get("image", "") if isinstance(_img, dict) else ""
+                if cover and pres.get("slides"):
+                    pres["slides"][0]["image"] = cover
+            except Exception:
+                cover = ""
+        proposal["doku"] = {"format": req.doc_format, "markdown": doc_md,
+                            "presentation": pres or None, "has_cover": bool(cover)}
+        yield _sse({"type": "doku", "doku": {
+            "format": req.doc_format,
+            "has_markdown": bool(doc_md),
+            "n_slides": len((pres or {}).get("slides") or []) if pres else 0,
+            "has_cover": bool(cover),
+            "presentation": pres or None,
+            "markdown": doc_md,
+        }})
+
+    # ── Phase: Angebot (deterministisch aus dem Plan; erstellen, NICHT senden) ─
+    if "angebot" in phases:
+        yield _sse({"type": "phase", "key": "angebot", "label": "🧾 Angebot wird kalkuliert…"})
+        plan = proposal.get("plan") or {}
+        if plan.get("tasks"):
+            try:
+                positionen = _dok.plan_to_positions(plan)
+                comp = _dok.compute_invoice({"positionen": positionen, "ust_satz": 19,
+                                             "kleinunternehmer": False})
+                proposal["angebot"] = {
+                    "positionen": positionen, "ust_satz": 19,
+                    "summe_netto": _dok.fmt_eur(comp["summe_netto"]),
+                    "ust_betrag": _dok.fmt_eur(comp["ust_betrag"]),
+                    "summe_brutto": _dok.fmt_eur(comp["summe_brutto"]),
+                }
+            except Exception as e:
+                proposal["angebot"] = {}
+                yield _sse({"type": "notice", "message": f"Angebot nicht kalkulierbar: {e}"})
+        else:
+            proposal["angebot"] = {}
+            yield _sse({"type": "notice", "message": "Kein Plan mit bepreisten Vorgängen → kein Angebot."})
+        yield _sse({"type": "angebot", "angebot": proposal.get("angebot") or {}})
 
     yield _sse({"type": "proposal", "proposal": proposal})
     yield _sse({"type": "done", "tokens": tok})

@@ -4127,6 +4127,37 @@ const Chat = (() => {
           + (it.length > 15 ? '<li style="opacity:.6">… und ' + (it.length - 15) + ' weitere</li>' : '') + '</ul>'
         : '<em>keine Punkte</em>';
       ctx.cardsWrap.appendChild(c); ctx.cards.todo = c;
+    } else if (ev.type === 'patente') {
+      const p = ev.patente || {};
+      const c = _projCard('⚖ Patent-Entwurf (kein Einreichen)');
+      let html = '';
+      if (p.title) html += '<div><strong>' + escHtml(p.title) + '</strong></div>';
+      if (p.claim1) html += '<div style="margin-top:4px"><em>Anspruch 1:</em> ' + escHtml(p.claim1) + '</div>';
+      if (p.abstract) html += '<div style="margin-top:4px"><em>Abstract:</em> ' + escHtml(p.abstract) + '</div>';
+      if ((p.ipc || []).length) html += '<div style="margin-top:4px;font-size:.85em;opacity:.75">IPC/CPC: ' + p.ipc.map(escHtml).join(', ') + '</div>';
+      if ((p.search_terms || []).length) html += '<div style="font-size:.85em;opacity:.75">Recherche: ' + p.search_terms.map(escHtml).join(', ') + '</div>';
+      c._body.innerHTML = html || '<em>kein Entwurf</em>';
+      ctx.cardsWrap.appendChild(c); ctx.cards.patente = c;
+    } else if (ev.type === 'doku') {
+      const d = ev.doku || {};
+      const c = _projCard('📄 Dokumentation' + (d.n_slides ? ' + Präsentation (' + d.n_slides + ' Folien)' : ''));
+      c._body.innerHTML = (d.has_markdown ? '✓ Dokument (Markdown)' : '– kein Dokument')
+        + (d.n_slides ? '<br>✓ Foliensatz' + (d.has_cover ? ' inkl. Titelbild' : '') : '')
+        + '<div style="font-size:.85em;opacity:.7;margin-top:4px">Format: ' + escHtml(d.format || 'beides') + ' — öffnen/herunterladen nach dem Anlegen</div>';
+      ctx.cardsWrap.appendChild(c); ctx.cards.doku = c;
+    } else if (ev.type === 'angebot') {
+      const a = ev.angebot || {};
+      const c = _projCard('🧾 Angebot (erstellen, nicht senden)');
+      if ((a.positionen || []).length) {
+        c._body.innerHTML = '<ul style="margin:0;padding-left:18px">'
+          + a.positionen.slice(0, 10).map(p => '<li>' + escHtml(p.beschreibung) + ' — '
+              + (p.einzelpreis != null ? p.einzelpreis.toLocaleString('de-DE') + ' €' : '') + '</li>').join('')
+          + '</ul><div style="margin-top:6px"><strong>Netto:</strong> ' + escHtml(a.summe_netto || '')
+          + ' · <strong>Brutto:</strong> ' + escHtml(a.summe_brutto || '') + ' (inkl. ' + (a.ust_satz || 19) + '% USt)</div>';
+      } else {
+        c._body.innerHTML = '<em>kein Angebot (Plan ohne bepreiste Vorgänge)</em>';
+      }
+      ctx.cardsWrap.appendChild(c); ctx.cards.angebot = c;
     } else if (ev.type === 'proposal') {
       ctx.proposal = ev.proposal;
     } else if (ev.type === 'done') {
@@ -4215,6 +4246,31 @@ const Chat = (() => {
         }
       }
 
+      // 5) Patent-Projekt (Workspace für die echte Recherche; Entwurf steckt in der Doku)
+      let patName = null;
+      const pat = proposal.patente;
+      if (pat && (pat.title || pat.claim1)) {
+        const nm = (pmeta.name || 'Patente').replace(/[^\w \-]/g, '').trim().slice(0, 50) || 'Patente';
+        try {
+          const r = await fetch('/api/patente/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nm }) });
+          if (r.ok) { const s = await r.json(); patName = s.name || nm; made.push('Patent-Projekt'); }
+        } catch (_) {}
+      }
+
+      // 6) Angebot (erstellen, NICHT versenden) — deterministisch aus dem Plan
+      let angNr = null;
+      const ang = proposal.angebot;
+      if (ang && (ang.positionen || []).length) {
+        try {
+          const r = await fetch('/api/angebot/create', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ positionen: ang.positionen, ust_satz: ang.ust_satz || 19,
+              project_id: projectId, plan_id: planId || '' }),
+          });
+          if (r.ok) { const s = await r.json(); angNr = s.nummer; made.push('Angebot ' + (s.nummer || '')); }
+        } catch (_) {}
+      }
+
       // Projekt-Auswahl aktualisieren, aktuelle Unterhaltung zuordnen
       if (projectId && typeof Projects !== 'undefined') {
         try { await Projects.load(); } catch (_) {}
@@ -4229,6 +4285,25 @@ const Chat = (() => {
       if (planId) done.appendChild(_planBtn('btn-cancel', '📅 Plan', () => { if (typeof Planner !== 'undefined' && Planner.openPlan) Planner.openPlan(planId); else switchTab('planner'); }));
       if (varName) done.appendChild(_planBtn('btn-cancel', '🧮 Varianten', () => switchTab('varianten')));
       if (todoPid) done.appendChild(_planBtn('btn-cancel', '✅ To-Do', () => switchTab('todo')));
+      if (patName) done.appendChild(_planBtn('btn-cancel', '⚖ Patente', () => switchTab('patente')));
+      if (angNr) done.appendChild(_planBtn('btn-cancel', '🧾 Angebot', () => switchTab('rechnung')));
+      // Doku: Präsentation in Canvas öffnen + Dokument (.md) herunterladen
+      const doku = proposal.doku || {};
+      if (doku.presentation && (doku.presentation.slides || []).length) {
+        done.appendChild(_planBtn('btn-cancel', '📊 Präsentation', () => {
+          if (typeof CanvasRenderer !== 'undefined') { CanvasRenderer.render(doku.presentation); switchTab('canvas'); }
+        }));
+      }
+      if (doku.markdown) {
+        done.appendChild(_planBtn('btn-cancel', '📄 Doku (.md)', () => {
+          const blob = new Blob([doku.markdown], { type: 'text/markdown;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = ((pmeta.name || 'Dokumentation').replace(/[^\w \-]/g, '').trim() || 'Dokumentation') + '.md';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }));
+      }
       statusEl.appendChild(done);
       showToast('✓ Projekt angelegt: ' + made.length + ' Artefakte');
     } catch (e) {
