@@ -1713,3 +1713,70 @@ async def _execute_tool(name: str, args: dict) -> str:
 
 
 
+
+
+# ── Handoff-Aufbereitung („senden an …") ──────────────────────────────────────
+# Beim Weiterreichen einer Chat-Antwort an einen anderen Tab muss der Inhalt für das
+# Ziel passend AUFBEREITET werden (z. B. Patente → Recherche-Suchbegriff, Mathe →
+# reine Aufgabe). Das Frontend fragt zusätzlich „was soll dort passieren?" (action).
+# Lokal-bevorzugt (Geheim/Hartman → lokal); deterministischer Rückfall = Originaltext.
+
+_HANDOFF_PREP_SYSTEM = {
+    "patente": ("Formuliere aus dem Text einen prägnanten PATENT-RECHERCHE-SUCHBEGRIFF: "
+                "die zentrale technische Erfindung als 2–6 Schlagworte (bei Bedarf mit AND/OR), "
+                "keine Sätze, kein Fließtext."),
+    "mathe": ("Extrahiere NUR die eigentliche mathematische Aufgabe/Gleichung aus dem Text "
+              "(ohne Erklärungen), so dass sie direkt gelöst werden kann."),
+    "medizin": ("Fasse die medizinische Frage-/Fallbeschreibung knapp und sachlich zusammen, "
+                "so dass sie als Eingabe für eine medizinische Auswertung dient."),
+    "varianten": ("Formuliere aus dem Text die zu treffende ENTSCHEIDUNG als eine klare "
+                  "Fragestellung (eine Zeile), die sich mit Kriterien und Varianten bewerten lässt."),
+    "morph": ("Formuliere aus dem Text die GESTALTUNGS-/KONSTRUKTIONSAUFGABE als eine klare "
+              "Aufgabenstellung (1–2 Sätze) für einen morphologischen Kasten."),
+    "rfq": ("Bereite den Text als ANFRAGE/RFQ auf: worum geht es, was wird benötigt (knapp, sachlich)."),
+    "rechnung": ("Extrahiere die abrechenbaren POSITIONEN (Leistung + ggf. Menge/Preis) als kurze "
+                 "Aufzählung, so dass daraus eine Rechnung/ein Angebot erstellt werden kann."),
+    "zeugnis": ("Fasse die Angaben für ein ARBEITSZEUGNIS zusammen (Rolle, Aufgaben, Leistungen, "
+                "Zeitraum) — sachlich, als Stichpunkte."),
+}
+
+
+class HandoffPrepareRequest(BaseModel):
+    target: str
+    content: str
+    action: str = ""
+    model: Optional[str] = None
+
+
+@router.post("/api/handoff/prepare")
+async def handoff_prepare(req: HandoffPrepareRequest):
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Kein Inhalt zum Übernehmen.")
+    base = _HANDOFF_PREP_SYSTEM.get(req.target)
+    # Kein spezielles Aufbereitungsprofil → Text unverändert durchreichen.
+    if not base:
+        return {"prepared": content, "tokens": {"in": 0, "out": 0}}
+    sys = base + (f"\nZusätzlicher Wunsch des Nutzers: {req.action.strip()}" if (req.action or "").strip() else "") + \
+        "\nAntworte NUR mit dem aufbereiteten Text, ohne Vor-/Nachrede."
+    # Lokal-bevorzugt; ohne lokales LLM (und ohne erlaubtes Remote) → Originaltext.
+    model = await _local_model(_pick_model(req.model, _model_for("general")))
+    if not model:
+        model = _pick_model(req.model, _model_for("general"))
+    tok = {"in": 0, "out": 0}
+    try:
+        async with _model_session(model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": sys},
+                             {"role": "user", "content": content[:6000]}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        j = resp.json()
+        a, b = _llm_tok(j); tok["in"] += a; tok["out"] += b
+        prepared = re.sub(r"<think>.*?</think>", "", j.get("message", {}).get("content", ""),
+                          flags=re.DOTALL).strip()
+    except Exception:
+        prepared = ""
+    return {"prepared": prepared or content, "tokens": tok}
