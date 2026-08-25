@@ -123,6 +123,7 @@ VARIANTEN_DIR = DATA_DIR / "varianten"   # Variantenvergleich: ein Ordner je Ver
 COMPARE_DIR = DATA_DIR / "compare"   # Excel-Vergleich: ein Ordner je Vergleich (comparison.json)
 TODO_DIR = DATA_DIR / "todo"   # KI-To-Do-Listen mit Wissensgraph (ein Ordner je Liste, list.json)
 TODO_ATT_DIR = DATA_DIR / "todo_att"   # Original-Anlagen je Punkt (MD-Text in DB); Backup + Todo-Router nutzen es
+ORCHESTRATOR_DIR = DATA_DIR / "orchestrator"   # gespeicherte /projekt-Vorgänge (JSON) + Vorlagen (_templates/)
 MAIL_CONFIG_FILE = DATA_DIR / "mail.json"        # IMAP-Zugang (Mail-Router; Backup listet es)
 MAIL_RULES_FILE = DATA_DIR / "mail_rules.json"   # Mail-Automatikregeln (Mail-Router; Backup)
 MORPH_TRAIN_DIR = DATA_DIR / "morph_training"    # Morph-Kasten Trainingsbeispiele (Backup)
@@ -158,7 +159,7 @@ STT_DOWNLOAD_ROOT = (
     if _stt_root else (Path(__file__).parent / "models" / "whisper")
 )
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR, RAG_IMAGES_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR, RAG_IMAGES_DIR, ORCHESTRATOR_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -2785,7 +2786,7 @@ __all__ = [
     'DOSSIERS_DIR', 'CODE_DIR', 'JURIES_DIR', 'JURY_DOCS_DIR',
     'RFQ_DIR', 'PST_DIR', 'PATENTE_DIR', 'PAT_CACHE_DIR',
     'EPO_OPS_FILE', 'FIRMENPROFIL_FILE', 'RECHNUNGEN_DIR', 'ANGEBOTE_DIR',
-    'ZEUGNISSE_DIR', 'VARIANTEN_DIR', 'COMPARE_DIR', 'TODO_DIR', 'TODO_ATT_DIR',
+    'ZEUGNISSE_DIR', 'VARIANTEN_DIR', 'COMPARE_DIR', 'TODO_DIR', 'TODO_ATT_DIR', 'ORCHESTRATOR_DIR',
     'MAIL_CONFIG_FILE', 'MAIL_RULES_FILE', 'MORPH_TRAIN_DIR',
     '_safe_relpath', '_plan_path', '_jury_path_by_id', '_code_path_by_id', '_jury_doc_path_by_id',
     '_load_agent_dict', '_norm_name', '_match_catalog',
