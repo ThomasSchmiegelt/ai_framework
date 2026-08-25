@@ -13,7 +13,8 @@ const Pairing = (function () {
     if (!_info || !_info.entries || !_info.entries.length) {
       box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">' +
         'Keine Netzwerk-Adresse gefunden. Ist der Rechner mit dem WLAN verbunden und ' +
-        'läuft der Server mit <code>AI_HOST=0.0.0.0</code>?</div>';
+        'läuft der Server netz-erreichbar (Windows: <code>start_server.bat</code>, Linux: ' +
+        '<code>AI_HOST=0.0.0.0 ./start.sh</code>)?</div>';
       return;
     }
     const asst = _scope === 'assistant' ? 1 : 0;
@@ -53,9 +54,71 @@ const Pairing = (function () {
     });
   }
 
+  // Erreichbarkeits-Banner direkt über der Liste (wird bei Bedarf ein-/ausgeblendet).
+  function _diagBox() {
+    let d = $('pair-diag');
+    if (!d) {
+      const box = $('pair-list');
+      if (!box || !box.parentNode) return null;
+      d = document.createElement('div');
+      d.id = 'pair-diag';
+      d.style.cssText = 'display:none;margin-bottom:10px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.5';
+      box.parentNode.insertBefore(d, box);
+    }
+    return d;
+  }
+
+  // Prüft, ob die phone-seitige Adresse tatsächlich erreichbar ist. mode:'no-cors'
+  // löst nur auf, wenn die Verbindung auf Netzwerkebene zustande kommt (TCP+HTTP) —
+  // egal ob CORS-Header fehlen. Schlägt fehl bei „nur 127.0.0.1 gebunden" oder Firewall.
+  function _reachable(url, ms) {
+    return new Promise(resolve => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => { ctrl.abort(); resolve(false); }, ms || 2500);
+      fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal })
+        .then(() => { clearTimeout(t); resolve(true); })
+        .catch(() => { clearTimeout(t); resolve(false); });
+    });
+  }
+
+  async function _runReachabilityCheck() {
+    const d = _diagBox();
+    if (!d || !_info || !(_info.entries || []).length) return;
+    // Läuft die Seite selbst schon über die Netz-Adresse? Dann ist alles erreichbar.
+    const sameOrigin = _info.entries.some(e => location.origin === e.url_full.replace(/\/$/, ''));
+    const probe = (_info.entries.find(e => !e.hotspot) || _info.entries[0]).url_full;
+    if (sameOrigin) {
+      d.style.display = 'block';
+      d.style.background = 'rgba(34,197,94,.12)'; d.style.color = 'var(--text)';
+      d.innerHTML = '✅ Diese Seite läuft bereits über die Netzwerk-Adresse — das Handy sollte sie erreichen.';
+      return;
+    }
+    // Mixed-Content: https-Seite kann http nicht prüfen → nur Hinweis, kein Test.
+    if (location.protocol === 'https:' && probe.startsWith('http:')) return;
+    d.style.display = 'block';
+    d.style.background = 'var(--bg-main)'; d.style.color = 'var(--text-muted)';
+    d.innerHTML = '⏳ Prüfe Erreichbarkeit im Netzwerk …';
+    const ok = await _reachable(probe, 2600);
+    if (ok) {
+      d.style.background = 'rgba(34,197,94,.12)'; d.style.color = 'var(--text)';
+      d.innerHTML = '✅ Server ist im Netzwerk erreichbar — QR scannen und loslegen.';
+    } else {
+      d.style.background = 'rgba(239,68,68,.14)'; d.style.color = 'var(--text)';
+      d.innerHTML =
+        '<strong>⚠ Der Server ist im Netzwerk (noch) nicht erreichbar.</strong> Das Handy kann ihn so nicht öffnen. Meist eine dieser Ursachen:' +
+        '<ul style="margin:6px 0 0;padding-left:18px">' +
+        '<li><strong>Windows:</strong> mit <code>start_server.bat</code> starten (bindet <code>0.0.0.0</code>) — <code>start.bat</code> lauscht nur lokal.</li>' +
+        '<li><strong>Windows-Firewall</strong> für Port ' + (_info.port || 8780) + ' freigeben (einmalig, als Admin):<br>' +
+        '<code style="word-break:break-all">netsh advfirewall firewall add rule name="LOCAL AI ' + (_info.port || 8780) + '" dir=in action=allow protocol=TCP localport=' + (_info.port || 8780) + '</code></li>' +
+        '<li><strong>Fritz!Box:</strong> Handy im normalen WLAN, <em>nicht</em> im Gastzugang (der isoliert Geräte).</li>' +
+        '</ul>';
+    }
+  }
+
   async function open() {
     const ov = $('pair-overlay');
     if (ov) ov.classList.add('active');
+    const d = $('pair-diag'); if (d) d.style.display = 'none';
     const box = $('pair-list');
     if (box) box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">Suche Adressen …</div>';
     try {
@@ -65,8 +128,13 @@ const Pairing = (function () {
       _info = null;
     }
     const hint = $('pair-hint');
-    if (hint && _info && _info.hint) hint.textContent = 'ℹ ' + _info.hint;
+    if (hint) {
+      hint.innerHTML = 'ℹ ' + ((_info && _info.hint) ? _info.hint : 'Handy und Rechner müssen im selben WLAN sein.') +
+        '<br><span style="opacity:.8">Windows: mit <code>start_server.bat</code> starten und die Firewall für Port ' +
+        ((_info && _info.port) || 8780) + ' freigeben. Fritz!Box: kein Gastzugang.</span>';
+    }
     _renderList();
+    _runReachabilityCheck();
   }
 
   function close() {
