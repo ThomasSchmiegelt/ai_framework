@@ -2375,6 +2375,406 @@ async def _plan_rag_context(rag_collections, query: str) -> str:
     return ""
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Assistent-Modus: Tabs als aufrufbare Agenten (streamende Kern-Generatoren)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Diese drei Async-Generatoren kapseln je eine Tab-Fähigkeit als „Werkzeug", das der
+# Chat-Tool-Loop im Assistent-Modus eigenständig aufrufen kann. Sie liegen in core.py,
+# weil der Chat-Loop sie aufruft (Projektregel: Capability-Cores des Tool-Loops gehören
+# nach core, nicht in einen Feature-Router → sonst Router↔Router-Zyklus). Sie sind
+# BEWUSST eigenständig gehalten (kein Import der Tab-Endpoints in routers/research.py,
+# routers/workflow.py, routers/todo.py) — so bleiben die bestehenden Tabs unangetastet.
+#
+# Vertrag: jeder Generator yieldet dicts:
+#   {"type":"progress","message":str}  – Live-Statuszeile (Fortschritt)
+#   {"type":"notice","message":str}    – weicher Hinweis
+#   {"type":"text","content":str}      – Wort-für-Wort-Stream der Endantwort
+#   {"type":"image","data":str}        – optionales Bild (Workflow)
+#   {"type":"error","message":str}     – harter Fehler (Loop meldet ihn, beendet)
+#   {"type":"result","summary":str,"tok":{"in":int,"out":int}}  – Abschluss
+# Der Chat-Loop übersetzt progress/notice → tool_progress-Frames, reicht text/image
+# durch und übernimmt `summary` als Assistenten-Antwort (Terminal-Werkzeug).
+
+
+async def _deep_research_core(topic: str, depth: int = 6, words: int = 900,
+                             focus: str = "", model: Optional[str] = None):
+    """Tiefe Web-Recherche als Assistent-Werkzeug: Thema → Teilaspekte → je Aspekt
+    Websuche → quellen-gestützte Synthese. Eigenständige, schlanke Variante des
+    ``/api/deepresearch``-Generators (bewusst nicht importiert)."""
+    from tools.search import search_with_sources
+
+    topic = (topic or "").strip()
+    if not topic:
+        yield {"type": "error", "message": "Kein Thema für die Recherche angegeben."}
+        return
+    if not _web_search_allowed():
+        yield {"type": "error", "message": "Websuche ist im aktuellen Modus gesperrt "
+               "(z. B. Hartman-/Ausbildungsmodus) — tiefe Recherche nicht möglich."}
+        return
+    depth = max(3, min(int(depth or 6), 12))
+    target_words = max(200, min(int(words or 900), 4000))
+    focus = (focus or "").strip()
+
+    _r_model, _r_err = await _research_model(model)
+    if _r_err:
+        yield {"type": "error", "message": _r_err}
+        return
+
+    _tok = {"in": 0, "out": 0}
+    yield {"type": "progress", "message": f"🔎 Recherche „{topic}“ – zerlege in Teilaspekte…"}
+
+    _focus_line = f"\nSchwerpunkt/Fokus: {focus}" if focus else ""
+    _aspect_prompt = (
+        f"Thema: \"{topic}\"{_focus_line}\n\n"
+        f"Zerlege das Thema in genau {depth} prägnante, sich ergänzende Teilaspekte/Unterfragen "
+        f"für eine gründliche Web-Recherche (je 2–6 Wörter, deutsch, ohne Nummerierung).\n"
+        f'Antworte NUR mit JSON: {{"aspects":["…","…"]}}.'
+    )
+    aspects: list = []
+    try:
+        async with _model_session(_r_model), httpx.AsyncClient(timeout=120) as client:
+            resp = await _llm.chat(client, {
+                "model": _r_model, "think": False, "stream": False, "format": "json",
+                "messages": [{"role": "user", "content": _aspect_prompt}],
+                "options": {"num_ctx": _profile_num_ctx()}, "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _aj = resp.json()
+        _ti, _to = _llm_tok(_aj)
+        _tok["in"] += _ti; _tok["out"] += _to
+        _d = _parse_llm_json(_aj.get("message", {}).get("content", "")) or {}
+        aspects = [str(a).strip() for a in (_d.get("aspects") or []) if str(a).strip()][:depth]
+    except httpx.ConnectError:
+        yield {"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"}
+        return
+    except Exception:
+        aspects = []
+    if not aspects:
+        aspects = ["Überblick", "technische Daten", "Geschichte / Hintergrund",
+                   "Varianten / Modelle", "Preise / Markt", "Besonderheiten / Bewertung",
+                   "Vor- und Nachteile", "Alternativen"][:depth]
+
+    yield {"type": "progress", "message": "🌐 Durchsuche das Web zu " + str(len(aspects)) + " Aspekten…"}
+    tasks = [search_with_sources(f"{topic} {a}", 5) for a in aspects]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    aspect_data = []
+    for _n, (a, r) in enumerate(zip(aspects, raw_results), start=1):
+        if isinstance(r, Exception):
+            sources, text = [], f"Suchfehler: {r}"
+        else:
+            sources, text = r
+        yield {"type": "progress", "message": f"✓ Aspekt {_n}/{len(aspects)}: {a}"}
+        aspect_data.append((a, text))
+    yield {"type": "progress", "message": "🧩 Fasse die Quellen zu einem Bericht zusammen…"}
+
+    _ctx = _profile_num_ctx()
+    _out_reserve_tok = max(400, min(int(target_words * 1.7), int(_ctx * 0.5)))
+    _in_budget_chars = max(2500, int((_ctx - _out_reserve_tok - 700) * 3.3))
+    _per_aspect = max(400, min(2500, _in_budget_chars // max(1, len(aspect_data))))
+    _eff_words = max(250, min(target_words, int(_out_reserve_tok / 1.7)))
+    if _eff_words < int(target_words * 0.85):
+        yield {"type": "notice", "message":
+               f"Bericht auf ~{_eff_words} statt ~{target_words} Wörter begrenzt (Kontextfenster {_ctx})."}
+
+    _parts = [f"Thema: {topic}\n"]
+    if focus:
+        _parts.append(f"Schwerpunkt: {focus}\n")
+    for a, t in aspect_data:
+        _parts.append(f"### Suchergebnisse – {a}\n{t[:_per_aspect]}\n")
+    _synth = "\n".join(_parts) + (
+        f"\n\nSchreibe daraus einen AUSFÜHRLICHEN, gut strukturierten Recherchebericht über "
+        f"**{topic}** von **ca. {_eff_words} Wörtern** auf Deutsch (Markdown: ## Überschriften, "
+        f"**Fett**, Aufzählungen, bei Kennwerten gern eine Tabelle). Gliederung: kurze Übersicht, "
+        f"je ein Abschnitt pro Aspekt, abschließend ein Fazit. WICHTIG: Stütze JEDE konkrete Angabe "
+        f"(Zahlen, technische Daten, Baujahre, Preise, Eigennamen) AUSSCHLIESSLICH auf die obigen "
+        f"Suchergebnisse. Ist etwas nicht belegt oder widersprüchlich, kennzeichne es ausdrücklich "
+        f"als unsicher — erfinde nichts."
+    )
+    try:
+        _sys = "\n\n".join(p for p in (_SCIENCE_PROMPT,
+                                       _augment_prefix(topic + " " + " ".join(a for a, _ in aspect_data))) if p)
+        _msgs = ([{"role": "system", "content": _sys}] if _sys else []) + \
+                [{"role": "user", "content": _synth}]
+        async with _model_session(_r_model), httpx.AsyncClient(timeout=600) as client:
+            resp = await _llm.chat(client, {
+                "model": _r_model, "think": False, "stream": False,
+                "messages": _msgs,
+                "options": {"num_ctx": _ctx, "num_predict": _out_reserve_tok + 200},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+    except httpx.ConnectError:
+        yield {"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"}
+        return
+    except httpx.HTTPStatusError as e:
+        _sc = getattr(e.response, "status_code", 0) or 0
+        yield {"type": "error", "message": f"Modell abgelehnt (HTTP {_sc}) – weniger Tiefe/Umfang oder lokales Modell wählen."}
+        return
+    except Exception as e:
+        yield {"type": "error", "message": f"Synthese fehlgeschlagen: {e}"}
+        return
+
+    content = (_j.get("message", {}) or {}).get("content", "") or ""
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    _ti, _to = _llm_tok(_j)
+    _tok["in"] += _ti; _tok["out"] += _to
+    if not content:
+        yield {"type": "error", "message": "Die Recherche lieferte keinen Text."}
+        return
+    _words = content.split(" ")
+    for _i, _w in enumerate(_words):
+        yield {"type": "text", "content": _w + (" " if _i < len(_words) - 1 else "")}
+        await asyncio.sleep(0.003)
+    yield {"type": "result", "summary": content, "tok": _tok}
+
+
+async def _workflow_core(steps: list, goal: str = "", model: Optional[str] = None,
+                        web: bool = False):
+    """Mehrstufiger Arbeitsablauf als Assistent-Werkzeug: nummerierte Teilaufgaben
+    nacheinander (Zwischenergebnisse fließen als Kontext weiter) + Abschluss-Synthese.
+    Schlanke, eigenständige Variante des ``/api/workflow``-Generators."""
+    steps = [str(s).strip() for s in (steps or []) if str(s).strip()][:12]
+    goal = (goal or "").strip()
+    if not steps:
+        yield {"type": "error", "message": "Keine Schritte für den Arbeitsablauf angegeben."}
+        return
+    base_model = _pick_model(model, _model_for("general"))
+    _ctx = _profile_num_ctx()
+    _tok = {"in": 0, "out": 0}
+    _budget = max(2000, int((_ctx - 800) * 3.0))
+    _web_on = bool(web) and _web_search_allowed()
+    results: list = []  # [(step, result)]
+
+    yield {"type": "progress", "message": f"🧵 Arbeitsablauf mit {len(steps)} Schritten…"}
+
+    async def _run(sys_prompt: str, user_prompt: str, num_predict: int) -> str:
+        async with _model_session(base_model), httpx.AsyncClient(timeout=600) as client:
+            resp = await _llm.chat(client, {
+                "model": base_model, "think": False, "stream": False,
+                "messages": [{"role": "system", "content": sys_prompt},
+                             {"role": "user", "content": user_prompt}],
+                "options": {"num_ctx": _ctx, "num_predict": num_predict},
+                "keep_alive": KEEP_ALIVE,
+            })
+            resp.raise_for_status()
+        _j = resp.json()
+        _c = (_j.get("message", {}) or {}).get("content", "") or ""
+        _c = re.sub(r"<think>.*?</think>", "", _c, flags=re.DOTALL).strip()
+        _ti, _to = _llm_tok(_j)
+        _tok["in"] += _ti; _tok["out"] += _to
+        return _c
+
+    try:
+        for i, step in enumerate(steps):
+            yield {"type": "progress", "message": f"▶ Schritt {i + 1}/{len(steps)}: {step[:70]}"}
+            _web_ctx = ""
+            if _web_on:
+                try:
+                    from tools.search import search_with_sources
+                    _srcs, _stext = await search_with_sources(step[:200], 5)
+                    if _stext:
+                        _web_ctx = _stext[:min(_budget, 6000)]
+                    yield {"type": "progress", "message": f"  🌐 {len(_srcs or [])} Quellen zu Schritt {i + 1}"}
+                except Exception as _e:
+                    _web_ctx = ""
+            prior = ""
+            if results:
+                _p = [f"### Ergebnis Schritt {si + 1} ({s}):\n{r}" for si, (s, r) in enumerate(results)]
+                prior = "\n\n".join(_p)
+                if len(prior) > _budget:
+                    prior = "…\n" + prior[-_budget:]
+            _sys = ("Du arbeitest einen mehrstufigen Arbeitsablauf ab. Löse NUR den AKTUELLEN "
+                    "Schritt präzise und vollständig und baue dabei auf den bisherigen Ergebnissen "
+                    "auf. Antworte fokussiert auf Deutsch in Markdown, ohne den Schritt bloß zu wiederholen.")
+            if _web_ctx:
+                _sys += ("\n\nDir liegen Web-Suchergebnisse vor. Stütze konkrete Angaben (Zahlen, "
+                         "Daten, Namen, Preise) NUR auf diese Quellen; ist etwas nicht belegt, "
+                         "kennzeichne es als unsicher und erfinde nichts.")
+            if goal:
+                _sys += f"\n\nÜbergeordnetes Ziel des Ablaufs: {goal}"
+            _user = ((f"Bisherige Ergebnisse:\n{prior}\n\n---\n" if prior else "")
+                     + (f"Web-Suchergebnisse:\n{_web_ctx}\n\n---\n" if _web_ctx else "")
+                     + f"AKTUELLER SCHRITT {i + 1}/{len(steps)}: {step}")
+            _res = await _run(_sys, _user, max(300, min(int(_ctx * 0.35), 1500)))
+            results.append((step, _res))
+
+        yield {"type": "progress", "message": "🧩 Fasse die Teilergebnisse zusammen…"}
+        _all = "\n\n".join(f"### Schritt {i + 1}: {s}\n{r}" for i, (s, r) in enumerate(results))
+        if len(_all) > _budget:
+            _all = "…\n" + _all[-_budget:]
+        _ssys = ("Du fasst die Ergebnisse eines mehrstufigen Arbeitsablaufs zu EINEM "
+                 "zusammenhängenden, gut strukturierten Gesamtergebnis zusammen (Markdown: "
+                 "## Überschriften, **Fett**, Aufzählungen/Tabellen wo sinnvoll). Führe die "
+                 "Teilergebnisse logisch zusammen und schließe mit einem klaren Fazit ab.")
+        if goal:
+            _ssys += f"\n\nZiel des Ablaufs: {goal}"
+        _final = await _run(_ssys, f"Schritt-Ergebnisse:\n{_all}\n\n---\nErstelle das zusammenhängende Gesamtergebnis.",
+                            max(500, min(int(_ctx * 0.5), 2200)))
+    except httpx.ConnectError:
+        yield {"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"}
+        return
+    except httpx.HTTPStatusError as e:
+        _sc = getattr(e.response, "status_code", 0) or 0
+        yield {"type": "error", "message": f"Modell abgelehnt (HTTP {_sc}) – weniger/kürzere Schritte oder lokales Modell."}
+        return
+    except Exception as e:
+        yield {"type": "error", "message": f"Arbeitsablauf fehlgeschlagen: {e}"}
+        return
+
+    if not _final.strip():
+        yield {"type": "error", "message": "Der Arbeitsablauf lieferte kein Gesamtergebnis."}
+        return
+    _w = _final.split(" ")
+    for _i, _t in enumerate(_w):
+        yield {"type": "text", "content": _t + (" " if _i < len(_w) - 1 else "")}
+        await asyncio.sleep(0.003)
+    yield {"type": "result", "summary": _final, "tok": _tok}
+
+
+_TODO_ASK_CORE_SYSTEM = (
+    "Du beantwortest Fragen über einen To-Do-/Projektbestand ausschließlich anhand der "
+    "übergebenen Daten. Erfinde nichts. Bei Personen-/Kollegen-Auswertungen bleibe sachlich "
+    "und neutral. Antworte knapp und strukturiert auf Deutsch (Markdown)."
+)
+
+
+async def _todo_ask_core(question: str, root: str = "", model: Optional[str] = None):
+    """To-Do-Bestand befragen als Assistent-Werkzeug (lokal-bevorzugt). Schlanke Variante
+    von ``/api/todo/ask`` (Einzelabfrage oder Map-Reduce), yieldet Fortschritt + Antwort."""
+    question = (question or "").strip()
+    if not question:
+        yield {"type": "error", "message": "Keine Frage an den To-Do-Bestand angegeben."}
+        return
+    _model = await _analysis_model(model)
+    if not _model:
+        yield {"type": "error", "message": "Kein lokales LLM verfügbar – die To-Do-Auswertung läuft "
+               "standardmäßig lokal (Profil-Schalter „API-Modelle für vertrauliche Auswertungen“)."}
+        return
+    yield {"type": "progress", "message": "✅ Durchsuche den To-Do-Bestand…"}
+
+    root = (root or "").strip()
+    if root and root != "root":
+        ids = await _db.todo_descendants(root)
+    else:
+        ids = [p["id"] for p in await _db.todo_projects_all()]
+    data = await _db.todo_graph_data(ids)
+    att_by_item: dict = {}
+    try:
+        for a in (await _db.todo_export()).get("attachments", []):
+            txt = (a.get("md_text") or "").strip()
+            if txt:
+                att_by_item.setdefault(a.get("item_id"), []).append(txt)
+    except Exception:
+        att_by_item = {}
+    id2text = {}
+    for pr in data.get("projects", []):
+        for it in pr["items"]:
+            id2text[it["id"]] = it.get("text", "")
+    blocks, n_items, persons = [], 0, set()
+    for pr in data.get("projects", []):
+        if not pr["items"] and not pr["edges"]:
+            continue
+        lines = [f"### Projekt: {pr['title']}"]
+        for it in pr["items"]:
+            n_items += 1
+            asg = it.get("assignees") or []
+            for a in asg:
+                persons.add(a)
+            parts = [f"- [{it.get('status', 'offen')}] {it.get('text', '')}"]
+            if asg:
+                parts.append(f"(Zuständig: {', '.join(asg)})")
+            if (it.get("due") or "").strip():
+                parts.append(f"(Fällig: {it['due']})")
+            line = " ".join(parts)
+            if (it.get("detail") or "").strip():
+                line += f"\n    Notiz: {it['detail'].strip()[:600]}"
+            for txt in att_by_item.get(it["id"], []):
+                line += f"\n    Anhang: {txt[:600]}"
+            lines.append(line)
+        for e in pr["edges"]:
+            s = id2text.get(e["source"], ""); t = id2text.get(e["target"], "")
+            if s and t:
+                lines.append(f"- Abhängigkeit: „{s}“ {e.get('label', 'blockiert') or 'blockiert'} → „{t}“")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        _msg = "Es sind keine Aufgaben im gewählten Bereich vorhanden."
+        yield {"type": "text", "content": _msg}
+        yield {"type": "result", "summary": _msg, "tok": {"in": 0, "out": 0}}
+        return
+
+    scope_hint = (f"{n_items} Aufgaben, {len(persons)} Personen"
+                  + (f", Zuständige: {', '.join(sorted(persons))}" if persons else ""))
+    num_ctx = _profile_num_ctx()
+    budget = max(2000, int(num_ctx * 3.2))
+    MAX_GROUPS = 6
+    joined_all = "\n\n".join(blocks)
+    cap = MAX_GROUPS * budget
+    if len(joined_all) > cap:
+        kept, acc = [], 0
+        for blk in blocks:
+            if acc + len(blk) > cap:
+                break
+            kept.append(blk); acc += len(blk)
+        blocks = kept or [joined_all[:budget]]
+        yield {"type": "notice", "message": "Großer Bestand – nur ein Teil ausgewertet (für Details ein Einzelprojekt aktivieren)."}
+    _tok = {"in": 0, "out": 0}
+    try:
+        async with _model_session(_model), httpx.AsyncClient(timeout=300) as client:
+            async def _run(system: str, user: str) -> str:
+                r = await _llm.chat(client, {
+                    "model": _model, "think": False, "stream": False,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    "options": {"num_ctx": num_ctx}, "keep_alive": KEEP_ALIVE,
+                })
+                r.raise_for_status()
+                jj = r.json()
+                a, b = _llm_tok(jj)
+                _tok["in"] += a; _tok["out"] += b
+                return re.sub(r"<think>.*?</think>", "", jj.get("message", {}).get("content", ""), flags=re.DOTALL).strip()
+            joined = "\n\n".join(blocks)
+            if len(joined) <= budget:
+                answer = await _run(_TODO_ASK_CORE_SYSTEM,
+                                    f"To-Do-Daten (Überblick: {scope_hint}):\n\n{joined}\n\nFrage: {question}")
+            else:
+                groups, cur, cur_len = [], [], 0
+                for blk in blocks:
+                    if cur and cur_len + len(blk) > budget:
+                        groups.append("\n\n".join(cur)); cur, cur_len = [], 0
+                    cur.append(blk); cur_len += len(blk)
+                if cur:
+                    groups.append("\n\n".join(cur))
+                map_sys = (_TODO_ASK_CORE_SYSTEM + " Dies ist NUR EIN TEIL der Daten – sammle die für "
+                           "die Frage relevanten Fakten aus diesem Teil (noch keine Endantwort).")
+                partials = []
+                for _gi, g in enumerate(groups, start=1):
+                    yield {"type": "progress", "message": f"  Werte Bereich {_gi}/{len(groups)} aus…"}
+                    txt = await _run(map_sys, f"To-Do-Daten (Teil):\n\n{g}\n\nFrage: {question}")
+                    if txt:
+                        partials.append(txt)
+                reduce_usr = (f"Frage: {question}\n\nTeil-Befunde aus dem gesamten To-Do-Bestand "
+                              f"({scope_hint}):\n\n" + "\n\n---\n\n".join(partials))
+                answer = await _run(_TODO_ASK_CORE_SYSTEM, reduce_usr)
+    except httpx.ConnectError:
+        yield {"type": "error", "message": "Ollama nicht erreichbar – läuft der lokale Server?"}
+        return
+    except httpx.HTTPStatusError as e:
+        _sc = getattr(e.response, "status_code", 0) or 0
+        yield {"type": "error", "message": f"Modell abgelehnt (HTTP {_sc}, num_ctx/VRAM?)."}
+        return
+    except Exception as e:
+        yield {"type": "error", "message": f"To-Do-Auswertung fehlgeschlagen: {e}"}
+        return
+
+    answer = (answer or "").strip() or "Keine Antwort aus den Daten ableitbar."
+    _w = answer.split(" ")
+    for _i, _t in enumerate(_w):
+        yield {"type": "text", "content": _t + (" " if _i < len(_w) - 1 else "")}
+        await asyncio.sleep(0.003)
+    yield {"type": "result", "summary": answer, "tok": _tok}
+
+
 __all__ = [
     'APP_DIR', 'AgentDef',
     '_CONFIG_FILE', '_CONFIG', 'OLLAMA_BASE', 'ALLOWED_MODELS',
@@ -2417,4 +2817,5 @@ __all__ = [
     '_PROJECT_STATUS_LABELS', '_update_project_fields', '_sse', '_llm_tok',
     '_parse_llm_json', '_plan_rag_context', '_plan_path_by_id',
     'CAP_LISTS_FILE', '_load_capacity_file', '_coerce_cap_list', '_save_cap_lists', '_load_cap_lists', '_load_capacity', '_save_capacity', '_capacity_context', '_coerce_capacity',
+    '_deep_research_core', '_workflow_core', '_todo_ask_core', '_TODO_ASK_CORE_SYSTEM',
 ]

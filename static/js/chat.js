@@ -135,6 +135,17 @@ const Chat = (() => {
       return;
     }
 
+    // Projekt-Orchestrator: „/projekt <Beschreibung>" (Aliase /vorhaben, /projektplan)
+    // zerlegt ein Vorhaben phasenweise (Morph → Paarvergleich → Plan → To-Do → …) und
+    // legt auf Bestätigung EIN Projekt mit allen Artefakten an. Vorschau-Muster wie /plan.
+    const pj = _parseProjekt(text);
+    if (pj !== null) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runProjektOrchestrator(pj);
+      return;
+    }
+
     // Erweiterte Suche: „/such <Begriff>" (Aliase /suche, /finde, /search) lässt die KI
     // alternative Suchbegriffe erzeugen, durchsucht damit das Web und fasst zusammen.
     const se = _parseSearch(text);
@@ -387,9 +398,15 @@ const Chat = (() => {
             const event = JSON.parse(line.slice(6));
             handleStreamEvent(event, textEl, fullText, (t) => { fullText = t; });
             // Sobald echter Inhalt kommt, die „arbeitet…"-Anzeige entfernen
-            if (['text', 'image', 'map', 'canvas', 'diagram', 'done', 'error'].includes(event.type)) clearWorking();
+            if (['text', 'image', 'map', 'canvas', 'diagram', 'done', 'error', 'tool_progress'].includes(event.type)) clearWorking();
             if (event.type === 'tool_start') {
               toolStatusEl = showToolStatus(assistantRow, event.tool, event.args);
+            } else if (event.type === 'tool_progress') {
+              // Live-Fortschritt eines Tab-Agenten (tiefe Recherche/Arbeitsablauf/To-Do)
+              if (!toolStatusEl) toolStatusEl = showToolStatus(assistantRow, event.tool, {});
+              const _sp = toolStatusEl.querySelector('span');
+              if (_sp) _sp.textContent = event.message || '';
+              scrollToBottom();
             } else if (event.type === 'tool_done') {
               if (toolStatusEl) { toolStatusEl.remove(); toolStatusEl = null; }
             } else if (event.type === 'canvas') {
@@ -691,6 +708,10 @@ const Chat = (() => {
       generate_report:     `📄 Bericht erstellen: ${args?.title ?? ''}`,
       route_planner:       `🗺️ Route: ${args?.origin ?? ''} → ${args?.destination ?? ''}`,
       create_diagram:      `📐 Diagramm: ${args?.title || args?.diagram_type || ''}`,
+      solve_math:          `🧮 SymPy löst: ${args?.expression ?? ''}`,
+      deep_research:       `🔎 Tiefe Recherche: „${args?.topic || ''}“…`,
+      run_workflow:        `🧵 Arbeitsablauf (${(args?.steps || []).length || ''} Schritte)…`,
+      ask_todo:            `✅ To-Do-Bestand: „${args?.question || ''}“…`,
     };
     const status = document.createElement('div');
     status.className = 'tool-status';
@@ -3968,6 +3989,254 @@ const Chat = (() => {
     }
   }
 
+  // ── Projekt-Orchestrator (/projekt) ─────────────────────────────────────────
+  // Ein Prompt beschreibt ein Vorhaben; der Orchestrator zerlegt es phasenweise
+  // (Morph → Paarvergleich → Plan → To-Do → …) und legt auf Bestätigung EIN Projekt
+  // mit allen Artefakten an. Vorschau-/Anlege-Muster wie /plan.
+  function _parseProjekt(text) {
+    const m = String(text || '').match(/^\/(projekt|vorhaben|projektplan)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return (m[2] || '').trim();   // Beschreibung (kann leer sein)
+  }
+
+  function _projCard(title) {
+    const d = document.createElement('details');
+    d.open = true;
+    d.style.cssText = 'margin:8px 0;border:1px solid var(--border,#334);border-radius:8px;padding:6px 10px;background:var(--bg-input,#0e141b)';
+    const s = document.createElement('summary');
+    s.style.cssText = 'font-weight:600;cursor:pointer';
+    s.textContent = title;
+    d.appendChild(s);
+    const body = document.createElement('div');
+    body.style.cssText = 'margin-top:6px;font-size:.94em';
+    d.appendChild(body);
+    d._body = body;
+    return d;
+  }
+
+  async function runProjektOrchestrator(brief) {
+    if (isStreaming) return;
+    brief = (brief || '').trim();
+    if (!brief) { showToast('„/projekt" braucht eine Beschreibung, z. B. „/projekt Entwicklung einer …"'); return; }
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    appendMessage('user', '🗂 /projekt — ' + brief);
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const statusEl = document.createElement('div');
+    statusEl.innerHTML = '<em>⏳ Vorhaben wird zerlegt…</em>';
+    content.appendChild(statusEl);
+    const cardsWrap = document.createElement('div');
+    content.appendChild(cardsWrap);
+
+    const ctx = { statusEl, cardsWrap, cards: {}, proposal: null };
+
+    abortController = new AbortController();
+    try {
+      const resp = await fetch('/api/orchestrator/plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({ brief, model }),
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          _handleProjektEvent(ev, ctx);
+          scrollToBottom();
+        }
+      }
+      _finishProjektCard(ctx);
+    } catch (e) {
+      if (e.name !== 'AbortError') { statusEl.innerHTML = '<em style="color:#ef4444">Fehler: ' + escHtml(e.message || '') + '</em>'; }
+    } finally {
+      isStreaming = false;
+      setBtnSendState(true);
+    }
+  }
+
+  function _handleProjektEvent(ev, ctx) {
+    if (ev.type === 'phase') {
+      ctx.statusEl.innerHTML = '<em>' + escHtml(ev.label || '…') + '</em>';
+    } else if (ev.type === 'notice') {
+      const n = document.createElement('div');
+      n.style.cssText = 'margin:4px 0;font-size:.88em;color:var(--text-muted,#8b98a5)';
+      n.textContent = 'ⓘ ' + (ev.message || '');
+      ctx.cardsWrap.appendChild(n);
+    } else if (ev.type === 'project') {
+      const c = _projCard('🗂 Projekt: ' + (ev.project.name || ''));
+      c._body.innerHTML = escHtml(ev.project.description || '');
+      ctx.cardsWrap.appendChild(c); ctx.cards.project = c;
+    } else if (ev.type === 'morph') {
+      const c = _projCard('🧩 Zerlegung — morphologischer Kasten');
+      const params = (ev.morph.parameters || []);
+      c._body.innerHTML = params.length
+        ? '<ul style="margin:0;padding-left:18px">' + params.map(p =>
+            '<li><strong>' + escHtml(p.name) + ':</strong> ' + p.values.map(escHtml).join(' · ') + '</li>').join('') + '</ul>'
+        : '<em>keine Parameter</em>';
+      ctx.cardsWrap.appendChild(c); ctx.cards.morph = c;
+    } else if (ev.type === 'decision') {
+      const c = _projCard('⚖ Paarvergleich-Bewertung');
+      const d = ev.decision, res = d.result || {};
+      let html = '';
+      if ((d.criteria || []).length) {
+        html += '<div><strong>Kriterien (Gewicht):</strong> ' + d.criteria.map((cr, i) => {
+          const w = (res.weights && res.weights[i] != null) ? ' (' + Math.round(res.weights[i] * 100) + '%)' : '';
+          return escHtml(cr.name) + w;
+        }).join(', ') + '</div>';
+      }
+      if ((res.ranking || []).length && (d.variants || []).length) {
+        html += '<div style="margin-top:6px"><strong>Ranking:</strong><ol style="margin:4px 0;padding-left:20px">'
+          + res.ranking.map(r => {
+              const v = d.variants[r.index];
+              return '<li>' + escHtml(v ? v.name : '?') + ' — ' + (r.percent != null ? r.percent + '%' : '') + '</li>';
+            }).join('') + '</ol></div>';
+      }
+      if (res.cr != null) html += '<div style="font-size:.85em;opacity:.75">Konsistenz CR = ' + (Math.round(res.cr * 1000) / 1000)
+        + (res.consistent ? ' ✓' : ' ⚠ (prüfen)') + '</div>';
+      c._body.innerHTML = html || '<em>keine Bewertung</em>';
+      ctx.cardsWrap.appendChild(c); ctx.cards.decision = c;
+    } else if (ev.type === 'plan') {
+      const c = _projCard('📅 Projektplan (' + (ev.plan.tasks || []).length + ' Vorgänge)');
+      const t = ev.plan.tasks || [];
+      c._body.innerHTML = t.length
+        ? '<ol style="margin:0;padding-left:20px">' + t.slice(0, 12).map(x =>
+            '<li>' + escHtml(x.name) + ' <span style="opacity:.6">(' + x.duration + ' T'
+            + (x.area ? ', ' + escHtml(x.area) : '') + ')</span></li>').join('')
+          + (t.length > 12 ? '<li style="opacity:.6">… und ' + (t.length - 12) + ' weitere</li>' : '') + '</ol>'
+        : '<em>keine Vorgänge</em>';
+      ctx.cardsWrap.appendChild(c); ctx.cards.plan = c;
+    } else if (ev.type === 'todo') {
+      const c = _projCard('✅ To-Do-Liste (' + (ev.todo.items || []).length + ' Punkte)');
+      const it = ev.todo.items || [];
+      c._body.innerHTML = it.length
+        ? '<ul style="margin:0;padding-left:18px">' + it.slice(0, 15).map(x => '<li>' + escHtml(x) + '</li>').join('')
+          + (it.length > 15 ? '<li style="opacity:.6">… und ' + (it.length - 15) + ' weitere</li>' : '') + '</ul>'
+        : '<em>keine Punkte</em>';
+      ctx.cardsWrap.appendChild(c); ctx.cards.todo = c;
+    } else if (ev.type === 'proposal') {
+      ctx.proposal = ev.proposal;
+    } else if (ev.type === 'done') {
+      if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Projekt-Orchestrator');
+    } else if (ev.type === 'error') {
+      ctx.statusEl.innerHTML = '<em style="color:#ef4444">Fehler: ' + escHtml(ev.message || '') + '</em>';
+    }
+  }
+
+  function _finishProjektCard(ctx) {
+    if (!ctx.proposal) { if (!ctx.statusEl.textContent) ctx.statusEl.textContent = ''; return; }
+    ctx.statusEl.innerHTML = '<strong>Vorschau fertig.</strong> Alles als Projekt anlegen und verknüpfen?';
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
+    const doneStatus = document.createElement('div');
+    doneStatus.style.cssText = 'margin-top:8px;font-size:.94em';
+    const go = _planBtn('btn-cancel', '✅ Alles anlegen', () => _applyProjekt(ctx.proposal, bar, doneStatus));
+    go.style.cssText = 'background:var(--accent,#2d6cdf);color:#fff';
+    const cancel = _planBtn('btn-cancel', 'Verwerfen', () => { bar.remove(); doneStatus.textContent = 'Verworfen.'; });
+    bar.appendChild(go); bar.appendChild(cancel);
+    ctx.cardsWrap.appendChild(bar);
+    ctx.cardsWrap.appendChild(doneStatus);
+  }
+
+  async function _applyProjekt(proposal, bar, statusEl) {
+    bar.querySelectorAll('button').forEach(b => b.disabled = true);
+    statusEl.innerHTML = '<em>⏳ Projekt und Artefakte werden angelegt…</em>';
+    const made = [];
+    try {
+      // 1) Projekt
+      const pmeta = proposal.project || {};
+      const pr = await fetch('/api/projects', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: pmeta.name || 'Neues Projekt', description: pmeta.description || '' }),
+      });
+      const project = pr.ok ? await pr.json() : null;
+      const projectId = project ? project.id : null;
+      if (projectId) made.push('Projekt „' + (pmeta.name || '') + '"');
+
+      // 2) Plan (mit project_id verknüpft)
+      let planId = null;
+      if (proposal.plan && (proposal.plan.tasks || []).length) {
+        const r = await fetch('/api/plans', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: proposal.plan.name, description: proposal.plan.description || '',
+            tasks: proposal.plan.tasks, resource_catalog: proposal.plan.resource_catalog || [],
+            resource_mode: 'free', project_id: projectId,
+          }),
+        });
+        if (r.ok) { const s = await r.json(); planId = s.id; made.push('Plan (' + proposal.plan.tasks.length + ' Vorgänge)'); }
+        // Plan dem Projekt als plan_id eintragen
+        if (planId && projectId) {
+          try { await fetch('/api/projects/' + projectId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: planId }) }); } catch (_) {}
+        }
+      }
+
+      // 3) Varianten-Vergleich (Paarvergleich) — POST anlegen, dann PUT befüllen
+      let varName = null;
+      const dec = proposal.decision;
+      if (dec && (dec.criteria || []).length && (dec.variants || []).length) {
+        const nm = (pmeta.name || 'Vergleich').replace(/[^\w \-]/g, '').trim().slice(0, 50) || 'Vergleich';
+        try { await fetch('/api/varianten/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nm }) }); } catch (_) {}
+        const r = await fetch('/api/varianten/projects/' + encodeURIComponent(nm), {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: pmeta.name || nm, description: proposal.brief || '',
+            criteria: dec.criteria, variants: dec.variants,
+            pairwise: dec.pairwise_matrix || [], ratings: dec.ratings || [],
+          }),
+        });
+        if (r.ok) { varName = nm; made.push('Variantenvergleich'); }
+      }
+
+      // 4) To-Do-Liste
+      let todoPid = null;
+      if (proposal.todo && (proposal.todo.items || []).length) {
+        const name = proposal.todo.title || (pmeta.name || 'Aufgaben');
+        const cr = await fetch('/api/todo/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        if (cr.ok) {
+          const created = await cr.json();
+          todoPid = created.id;
+          const items = proposal.todo.items.map(t => ({ text: t }));
+          await fetch('/api/todo/projects/' + created.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'projekt', title: name, items }) });
+          made.push('To-Do (' + items.length + ' Punkte)');
+        }
+      }
+
+      // Projekt-Auswahl aktualisieren, aktuelle Unterhaltung zuordnen
+      if (projectId && typeof Projects !== 'undefined') {
+        try { await Projects.load(); } catch (_) {}
+        if (window._currentConvId && Projects.assignCurrentChat) { try { await Projects.assignCurrentChat(projectId); } catch (_) {} }
+      }
+      if (typeof Todo !== 'undefined' && Todo.refresh) { try { Todo.refresh(); } catch (_) {} }
+
+      statusEl.innerHTML = '<strong>✅ Angelegt:</strong> ' + made.map(escHtml).join(', ') + ' — alles mit dem Projekt verknüpft.';
+      const done = document.createElement('div');
+      done.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px';
+      if (projectId && typeof Projects !== 'undefined' && Projects.openModal) done.appendChild(_planBtn('btn-cancel', '📁 Projekt', () => Projects.openModal()));
+      if (planId) done.appendChild(_planBtn('btn-cancel', '📅 Plan', () => { if (typeof Planner !== 'undefined' && Planner.openPlan) Planner.openPlan(planId); else switchTab('planner'); }));
+      if (varName) done.appendChild(_planBtn('btn-cancel', '🧮 Varianten', () => switchTab('varianten')));
+      if (todoPid) done.appendChild(_planBtn('btn-cancel', '✅ To-Do', () => switchTab('todo')));
+      statusEl.appendChild(done);
+      showToast('✓ Projekt angelegt: ' + made.length + ' Artefakte');
+    } catch (e) {
+      statusEl.innerHTML = '<strong>⚠️ Fehler beim Anlegen:</strong> ' + escHtml(e.message || '');
+      bar.querySelectorAll('button').forEach(b => b.disabled = false);
+    }
+  }
+
   // ── Befehls-Autocomplete in der Chatbox („/") ───────────────────────────────
   // Beim Tippen eines führenden „/" erscheint über der Eingabe eine graue Liste der
   // verfügbaren Slash-Befehle. Auswahl per Klick, Tab oder ↑/↓+Tab; Esc schließt.
@@ -3988,6 +4257,7 @@ const Chat = (() => {
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },
+    { key: '/projekt', ins: '/projekt ', cmd: '/projekt <Beschreibung>', desc: 'Projekt-Orchestrator: zerlegt ein Vorhaben phasenweise (morphologischer Kasten → Paarvergleich-Bewertung → Plan → To-Do) als Vorschau und legt auf Bestätigung EIN Projekt mit allen verknüpften Artefakten an (auch /vorhaben). Weitere Phasen (Patente/Doku/Angebot) folgen.' },
     { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander. Pro Schritt Tags [lokal] [api] [web] [bild] [sprache] (z. B. „1. [lokal,web] recherchiere … 2. [api] verarbeite … 3. [bild] erzeuge ein Bild von … 4. [sprache] fasse es als Sprachnachricht"). Ergebnis → Chat/Präsentation/Planer' },
     { key: '/+',    ins: '/+ ',    cmd: '/+ …',    desc: 'Verbesserungsidee ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/-',    ins: '/- ',    cmd: '/- …',    desc: 'Fehler/Problem ins Feedback-Protokoll (nicht ans LLM)' },
