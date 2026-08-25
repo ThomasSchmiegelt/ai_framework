@@ -2831,11 +2831,17 @@ async def _patent_figures_core(description: str, claim1: str = "", model: Option
     except Exception:
         pass
     # Optionale KI-Konzeptskizze (grobe Anschauung) für die Leitfigur — best-effort.
+    # WICHTIG: KEIN Text/keine Beschriftungen im Bild — Bildmodelle rendern Wörter/Zahlen
+    # verstümmelt. Die (korrekte) Beschriftung liefert allein das Mermaid-Schema.
     if want_image and figures and _image_model():
         try:
-            _p = ("Grobe technische Konzeptskizze (Patent-Stil, klare Linien, beschriftete Bauteile) "
-                  "der Erfindung: " + description[:300])
-            _img = await _generate_image_core(_p, preset="landscape")
+            _p = ("Technische Konzeptskizze der Vorrichtung als reine Schwarz-Weiß-Strichzeichnung "
+                  "im Patentzeichnungs-Stil, klare Umrisslinien, KEIN Text, KEINE Beschriftungen, "
+                  "keine Wörter, keine Zahlen, keine Bezugszeichen — nur Form und Aufbau: "
+                  + description[:300])
+            _neg = ("text, words, letters, labels, captions, numbers, digits, typography, "
+                    "handwriting, watermark, signature, annotations, logo")
+            _img = await _generate_image_core(_p, negative=_neg, preset="landscape")
             if isinstance(_img, dict) and _img.get("image"):
                 figures[0]["image"] = _img["image"]
         except Exception:
