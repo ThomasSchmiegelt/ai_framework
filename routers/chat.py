@@ -503,6 +503,109 @@ _SEARCH_PATENTS_TOOL_DEF = {
     },
 }
 
+# ── Assistent-Modus: weitere Tabs als aufrufbare Agenten ──────────────────────
+# Diese vier Werkzeuge kapseln Tab-Fähigkeiten. Drei davon (deep_research,
+# run_workflow, ask_todo) sind TERMINAL-STREAMING-Agenten: ihr Ergebnis wird live in
+# die Chat-Blase gestreamt (Fortschritt + Endantwort), danach endet der Turn — das
+# Modell paraphrasiert NICHT nach. solve_math ist ein normales Werkzeug (verifiziertes
+# SymPy-Ergebnis zurück ans Modell). Alle NICHT in TOOL_DEFS (gated → nur im Assistent-Modus).
+
+# Namen der Terminal-Streaming-Agenten (Ergebnis = Antwort, Loop endet danach).
+_STREAM_AGENTS = {"deep_research", "run_workflow", "ask_todo"}
+
+_DEEP_RESEARCH_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "deep_research",
+        "description": (
+            "Führt eine TIEFE, mehrstufige WEB-RECHERCHE zu einem Thema durch: zerlegt es "
+            "automatisch in Teilaspekte, durchsucht das Web je Aspekt und schreibt einen "
+            "quellen-gestützten Recherchebericht. Nutze es für gründliche Recherchen mit "
+            "aktuellen Fakten (Marktüberblick, Technologievergleich, Hintergrundbericht) — "
+            "NICHT für einfache Einzelfragen (dafür web_search)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "Recherche-Thema"},
+                "focus": {"type": "string", "description": "Optionaler Schwerpunkt/Blickwinkel"},
+                "depth": {"type": "integer", "description": "Zahl der Teilaspekte (3–12, Standard 6)"},
+                "words": {"type": "integer", "description": "Ungefähre Länge des Berichts (200–4000, Standard 900)"},
+            },
+            "required": ["topic"],
+        },
+    },
+}
+
+_RUN_WORKFLOW_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "run_workflow",
+        "description": (
+            "Arbeitet eine AUFGABE IN MEHREREN SCHRITTEN ab: jede Teilaufgabe wird "
+            "nacheinander gelöst, Zwischenergebnisse fließen als Kontext in den nächsten "
+            "Schritt, am Ende entsteht ein zusammenhängendes Gesamtergebnis. Nutze es für "
+            "komplexe, mehrteilige Aufträge, die sich sinnvoll in eine Schrittfolge zerlegen "
+            "lassen (z. B. „recherchiere X, vergleiche mit Y, leite eine Empfehlung ab“). "
+            "Formuliere die Schritte selbst als knappe Anweisungen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "steps": {"type": "array", "items": {"type": "string"},
+                          "description": "Geordnete Liste knapper Schritt-Anweisungen (2–12)"},
+                "goal": {"type": "string", "description": "Optionales übergeordnetes Ziel des Ablaufs"},
+                "web": {"type": "boolean", "description": "Bei true je Schritt eine Websuche (nur wenn Websuche erlaubt)"},
+            },
+            "required": ["steps"],
+        },
+    },
+}
+
+_ASK_TODO_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "ask_todo",
+        "description": (
+            "Beantwortet eine Frage über den persönlichen TO-DO-/PROJEKTBESTAND des Nutzers "
+            "(Aufgaben, Fristen, Zuständige/Kollegen, Abhängigkeiten). Nutze es, wenn sich die "
+            "Frage auf die eigenen Aufgaben/Projekte/Termine oder auf beteiligte Personen "
+            "bezieht (z. B. „Was ist diese Woche fällig?“, „Woran arbeitet Kollege X?“). "
+            "Läuft lokal/vertraulich."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "Frage in natürlicher Sprache"},
+            },
+            "required": ["question"],
+        },
+    },
+}
+
+_SOLVE_MATH_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "solve_math",
+        "description": (
+            "Löst/prüft eine mathematische Aufgabe DETERMINISTISCH mit SymPy (Gleichung lösen, "
+            "Ableitung, Stammfunktion, Faktorisieren, Vereinfachen) und liefert das verifizierte "
+            "Ergebnis. Nutze es für symbolische/algebraische Aufgaben, damit die Lösung "
+            "garantiert korrekt ist. Gib den Ausdruck SymPy-auswertbar an (Potenz mit **, "
+            "Gleichungen mit =, keine Worte), z. B. \"x**2-5*x+6=0\" oder \"sin(x)*x\"."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string", "description": "SymPy-auswertbarer Ausdruck/Gleichung"},
+                "goal": {"type": "string", "enum": ["solve", "diff", "integrate", "factor", "simplify"],
+                         "description": "Was zu tun ist (Standard: passend zum Ausdruck)"},
+            },
+            "required": ["expression"],
+        },
+    },
+}
+
 
 # ── Pydantic-Modelle ──────────────────────────────────────────────────────────
 
@@ -769,6 +872,26 @@ async def _chat_generator(request: ChatRequest):
     if _assist_on and _web_search_allowed() and not any(t["function"]["name"] == "search_patents" for t in active_tools):
         active_tools = active_tools + [_SEARCH_PATENTS_TOOL_DEF]
 
+    # Assistent-Modus: weitere Tabs als aufrufbare Agenten.
+    if _assist_on:
+        # SymPy-Solver – immer verfügbar (rein lokal/deterministisch, kein LLM/Netz nötig).
+        if not any(t["function"]["name"] == "solve_math" for t in active_tools):
+            active_tools = active_tools + [_SOLVE_MATH_TOOL_DEF]
+        # Mehrstufiger Arbeitsablauf – braucht ein (lokales oder API-)LLM, immer anbietbar.
+        if not any(t["function"]["name"] == "run_workflow" for t in active_tools):
+            active_tools = active_tools + [_RUN_WORKFLOW_TOOL_DEF]
+        # Tiefe Recherche – nur mit Web-Zugang (Geheim-/Hartman-Modus sperrt sie).
+        if _web_search_allowed() and not any(t["function"]["name"] == "deep_research" for t in active_tools):
+            active_tools = active_tools + [_DEEP_RESEARCH_TOOL_DEF]
+        # To-Do-Bestand befragen – nur wenn überhaupt Projekte/Aufgaben vorhanden sind.
+        if not any(t["function"]["name"] == "ask_todo" for t in active_tools):
+            try:
+                _tp = await _db.todo_projects_all()
+            except Exception:
+                _tp = []
+            if any(p.get("id") not in (None, "", "root") for p in _tp):
+                active_tools = active_tools + [_ASK_TODO_TOOL_DEF]
+
     # Explizite Werkzeug-Wahl (z. B. eine Matrix-Spalte wählt „Websuche" oder „Wissensdatenbank"):
     # active_tools auf die gewünschten Namen einschränken – mit denselben Freigaben/Gates wie oben.
     if request.tools:
@@ -776,7 +899,9 @@ async def _chat_generator(request: ChatRequest):
         if _want:
             _registry = {t["function"]["name"]: t for t in TOOL_DEFS}
             for _gd in (_RUN_PYTHON_TOOL_DEF, _GENERATE_IMAGE_TOOL_DEF,
-                        _SEARCH_KB_TOOL_DEF, _SEARCH_PATENTS_TOOL_DEF):
+                        _SEARCH_KB_TOOL_DEF, _SEARCH_PATENTS_TOOL_DEF,
+                        _SOLVE_MATH_TOOL_DEF, _RUN_WORKFLOW_TOOL_DEF,
+                        _DEEP_RESEARCH_TOOL_DEF, _ASK_TODO_TOOL_DEF):
                 _registry[_gd["function"]["name"]] = _gd
             _picked = []
             for _n in _want:
@@ -819,6 +944,14 @@ async def _chat_generator(request: ChatRequest):
             _caps.append("Tabelle/Kalkulation → create_spreadsheet")
         if any(t["function"]["name"] == "route_planner" for t in active_tools):
             _caps.append("Route/Fahrtzeit → route_planner")
+        if any(t["function"]["name"] == "solve_math" for t in active_tools):
+            _caps.append("Gleichung/Ableitung/Integral symbolisch lösen → solve_math")
+        if any(t["function"]["name"] == "deep_research" for t in active_tools):
+            _caps.append("gründlicher, mehrstufiger Recherchebericht → deep_research")
+        if any(t["function"]["name"] == "run_workflow" for t in active_tools):
+            _caps.append("komplexe mehrteilige Aufgabe in Schritten abarbeiten → run_workflow")
+        if any(t["function"]["name"] == "ask_todo" for t in active_tools):
+            _caps.append("eigene Aufgaben/Termine/Kollegen aus dem To-Do-Bestand → ask_todo")
         _router_hint = ("ASSISTENT-MODUS: Du bist ein universeller Assistent und entscheidest "
                         "SELBST, welches Werkzeug eine Aufgabe am besten löst — rufe es dann "
                         "eigenständig auf, statt nur zu beschreiben. Verfügbare Fähigkeiten: "
@@ -1147,6 +1280,70 @@ async def _chat_generator(request: ChatRequest):
                 except Exception:
                     args = {}
 
+            # ── Terminal-Streaming-Agenten (Tab-als-Agent): tiefe Recherche, Arbeitsablauf,
+            # To-Do-Bestand befragen. Der zugehörige Kern-Generator (core.py) streamt
+            # Fortschritt (tool_progress) UND die Endantwort (text) live in die Chat-Blase;
+            # sein Ergebnis IST die Antwort → Turn danach beenden (kein Nach-Paraphrasieren).
+            if fn in _STREAM_AGENTS:
+                yield _sse({"type": "tool_start", "tool": fn, "args": args})
+                _tools_called.append(fn)
+                _ag_t0 = time.time()
+                _summary = ""
+                _ag_err = ""
+                try:
+                    if fn == "deep_research":
+                        _gen = _deep_research_core(
+                            str(args.get("topic", "") or ""),
+                            depth=int(args.get("depth", 6) or 6),
+                            words=int(args.get("words", 900) or 900),
+                            focus=str(args.get("focus", "") or ""),
+                            model=model if _llm.is_remote(model) else None)
+                    elif fn == "run_workflow":
+                        _gen = _workflow_core(
+                            args.get("steps") or [],
+                            goal=str(args.get("goal", "") or ""),
+                            model=model,
+                            web=bool(args.get("web", False)))
+                    else:  # ask_todo
+                        _gen = _todo_ask_core(
+                            str(args.get("question", "") or ""),
+                            model=model if _llm.is_remote(model) else None)
+                    async for _fr in _gen:
+                        _ft = _fr.get("type")
+                        if _ft == "progress":
+                            yield _sse({"type": "tool_progress", "tool": fn, "message": _fr.get("message", "")})
+                        elif _ft == "notice":
+                            yield _sse({"type": "tool_progress", "tool": fn, "message": "ⓘ " + _fr.get("message", "")})
+                        elif _ft == "text":
+                            yield _sse({"type": "text", "content": _fr.get("content", "")})
+                        elif _ft == "image":
+                            yield _sse({"type": "image", "data": _fr.get("data", "")})
+                            image_emitted = True
+                        elif _ft == "error":
+                            _ag_err = _fr.get("message", "") or "unbekannter Fehler"
+                        elif _ft == "result":
+                            _summary = _fr.get("summary", "") or ""
+                            _t = _fr.get("tok") or {}
+                            _tok_in += int(_t.get("in", 0) or 0)
+                            _tok_out += int(_t.get("out", 0) or 0)
+                except Exception as _e:
+                    _ag_err = str(_e)
+                _write_log({"type": "tool", "name": fn, "ms": int((time.time() - _ag_t0) * 1000),
+                            "result_len": len(_summary)})
+                yield _sse({"type": "tool_done", "tool": fn,
+                            "preview": (_summary[:300] or _ag_err[:300])})
+                if _ag_err and not _summary.strip():
+                    yield _sse({"type": "error", "message": _ag_err})
+                    yield _sse({"type": "done", "tokens": {"in": _tok_in, "out": _tok_out}})
+                    return
+                # Ergebnis als Assistenten-Antwort speichern und Turn beenden.
+                if request.conversation_id and _summary.strip():
+                    messages.append({"role": "assistant", "content": _summary})
+                    await _db.save_conversation(request.conversation_id, messages,
+                                                model=model, agent_id=request.agent_id)
+                yield _sse({"type": "done", "tokens": {"in": _tok_in, "out": _tok_out}})
+                return
+
             yield _sse({"type": "tool_start", "tool": fn, "args": args})
             _tool_t0 = time.time()
             tool_result = await _execute_tool(fn, args)
@@ -1293,6 +1490,19 @@ async def _execute_tool(name: str, args: dict) -> str:
 
     if name == "calculate":
         return _safe_exec(args.get("code", ""))
+
+    if name == "solve_math":
+        # Mathe-Tab als Werkzeug: deterministische, SymPy-verifizierte Grundwahrheit.
+        from tools.engineering import sympy_facts
+        _expr = str(args.get("expression", "") or "").strip()
+        _goal = str(args.get("goal", "") or "").strip().lower()
+        _kind = "equation" if ("=" in _expr and "==" not in _expr) else "expression"
+        _facts = sympy_facts(_kind, _expr, _goal)
+        if not _facts:
+            return ("Konnte den Ausdruck nicht deterministisch auswerten. Prüfe die Schreibweise "
+                    "(Potenz mit **, Gleichungen mit =, keine Worte) oder löse es per calculate/run_python.")
+        return ("Verifiziertes SymPy-Ergebnis (deterministisch berechnet – übernimm es als korrekt "
+                "und erkläre es dem Nutzer verständlich):\n" + _facts)
 
     if name == "run_python":
         # Code-Interpreter (Chat, per Profil-Häkchen): dieselbe Sandbox wie der Code-Tab.

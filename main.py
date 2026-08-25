@@ -75,6 +75,7 @@ from routers import dokumente as _r_dokumente
 from routers import varianten as _r_varianten
 from routers import compare as _r_compare
 from routers import pairing as _r_pairing
+from routers import orchestrator as _r_orchestrator
 
 
 app = FastAPI(title="AI_Framework_Thomas")
@@ -173,6 +174,7 @@ app.include_router(_r_dokumente.router)
 app.include_router(_r_varianten.router)
 app.include_router(_r_compare.router)
 app.include_router(_r_pairing.router)
+app.include_router(_r_orchestrator.router)
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────

@@ -53,67 +53,12 @@ router = APIRouter()
 
 def _mathe_sympy_facts(kind: str, sympy_str: str, goal: str) -> str:
     """Berechnet aus einem (vom LLM extrahierten) Ausdruck deterministisch die
-    Grundwahrheit mit SymPy. Gibt eine kurze Faktenliste oder "" zurück."""
-    if not sympy_str:
-        return ""
-    # Einfacher Zeichensatz-Schutz: nur mathematische Ausdrücke zulassen
-    if not re.fullmatch(r"[0-9A-Za-z_+\-*/^().,=<>\[\] ]+", sympy_str):
-        return ""
-    expr = sympy_str.replace("^", "**").strip()
-    expr = expr.replace("==", "=")  # Modell nutzt oft Python-Gleichheit „=="
-    # „f(x) = …"-Präfix entfernen (häufige Schreibweise), reine rechte Seite behalten
-    expr = re.sub(r"^[a-zA-Z]\s*\([a-zA-Z]\)\s*=\s*", "", expr)
-    try:
-        import sympy as sp
-        from sympy.parsing.sympy_parser import (
-            parse_expr, standard_transformations, implicit_multiplication_application)
-        _tf = standard_transformations + (implicit_multiplication_application,)
-        def _p(s):  # robust: versteht implizite Multiplikation (z. B. „2x" → 2*x)
-            return parse_expr(s, transformations=_tf)
-        facts: list[str] = []
-        # Fall A: Modell lieferte bereits einen SymPy-Funktionsaufruf (diff(...), integrate(...), …)
-        if re.match(r"^(diff|integrate|factor|expand|simplify|solve|limit|series|nsimplify)\s*\(", expr):
-            res = sp.sympify(expr)
-            facts.append(f"Ergebnis [SymPy]: {res}")
-            return "\n".join(facts)
-        # Fall B: Gleichung (enthält genau ein '=')
-        if "=" in expr and "==" not in expr:
-            lhs_s, rhs_s = expr.split("=", 1)
-            lhs, rhs = _p(lhs_s), _p(rhs_s)
-            eq = sp.Eq(lhs, rhs)
-            syms = sorted(eq.free_symbols, key=lambda s: s.name)
-            facts.append(f"Gleichung: {expr}")
-            if syms:
-                sols = sp.solve(eq, *syms)
-                if sols:
-                    facts.append(f"Lösung(en) [SymPy]: {sols}")
-            poly = sp.expand(lhs - rhs)
-            fac = sp.factor(poly)
-            if str(fac) != str(poly):
-                facts.append(f"Faktorisierung von ({poly}): {fac}")
-            return "\n".join(facts)
-        # Fall C: reiner Ausdruck – je nach Ziel ableiten/integrieren/faktorisieren
-        e = _p(expr)
-        facts.append(f"Ausdruck: {expr}")
-        if goal == "diff":
-            facts.append(f"Ableitung [SymPy]: {sp.diff(e)}")
-        elif goal == "integrate":
-            facts.append(f"Stammfunktion [SymPy]: {sp.integrate(e)} (+ C)")
-        elif goal == "factor":
-            facts.append(f"Faktorisiert [SymPy]: {sp.factor(e)}")
-        elif goal == "solve":
-            syms = sorted(e.free_symbols, key=lambda s: s.name)
-            if syms:
-                facts.append(f"Nullstellen [SymPy]: {sp.solve(e, *syms)}")
-        else:
-            simp = sp.simplify(e)
-            facts.append(f"Vereinfacht [SymPy]: {simp}")
-            fac = sp.factor(e)
-            if str(fac) != str(e) and str(fac) != str(simp):
-                facts.append(f"Faktorisiert [SymPy]: {fac}")
-        return "\n".join(facts)
-    except Exception:
-        return ""
+    Grundwahrheit mit SymPy. Gibt eine kurze Faktenliste oder "" zurück.
+
+    Die Implementierung liegt in ``tools/engineering.py:sympy_facts`` (EINE Quelle,
+    auch vom Chat-Werkzeug ``solve_math`` genutzt)."""
+    from tools.engineering import sympy_facts
+    return sympy_facts(kind, sympy_str, goal)
 
 
 async def _mathe_ground_facts(client, model, messages, tok: Optional[dict] = None) -> str:
