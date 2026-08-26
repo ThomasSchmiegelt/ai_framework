@@ -42,7 +42,7 @@ if _CONFIG_FILE.exists():
 
 OLLAMA_BASE: str = _CONFIG.get("ollama_base", "http://localhost:11434")
 ALLOWED_MODELS: list[str] = _CONFIG.get("allowed_models", [])
-DEFAULT_MODEL: str = _CONFIG.get("default_model", "ministral-3:3b")
+DEFAULT_MODEL: str = _CONFIG.get("default_model", "granite4.2:3b")
 # Kontextfenster (Tokens) für den Haupt-Chat/Dokumentengenerator. Ollama-Default ist
 # nur 4096 – das reicht bei Recherche-/RAG-Berichten nicht, sodass Antworten mitten im
 # Satz abbrechen. Höher kostet KV-Cache-VRAM (config.json: "chat_num_ctx").
@@ -437,7 +437,7 @@ def _mode_template_asset(kind: str, mode: str | None = None):
 
 # Drei Modell-Rollen im Profil: Allgemein / Programmieren / Wissenschaftlich.
 # Jede Rolle kann ein eigenes (bei Bedarf nachgeladenes) LLM zugewiesen bekommen;
-# leer → Standardmodell (ministral-3:3b).
+# leer → Standardmodell (DEFAULT_MODEL, Standard granite4.2:3b).
 _MODEL_ROLES = {
     "general": "model_general",
     "coding":  "model_coding",
@@ -708,7 +708,7 @@ async def _analyze_image_core(image_b64: str, system_prompt: str = "", filename:
 
 
 # ── Automatische Mathe-Weiche ────────────────────────────────────────────────
-# Wunsch: Solange im Chat nur das schwache Standardmodell (ministral-3:3b) aktiv
+# Wunsch: Solange im Chat nur das kleine Standardmodell (DEFAULT_MODEL) aktiv
 # ist, sollen erkannte Matheaufgaben automatisch an das (stärkere) Mathe-Modell
 # der Rolle „Programmieren / Mathe" durchgereicht werden. Wählt der Nutzer ein
 # stärkeres Allgemein-Modell, entfällt die Umleitung (model != DEFAULT_MODEL).

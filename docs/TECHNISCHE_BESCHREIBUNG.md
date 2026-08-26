@@ -51,7 +51,7 @@ Sämtliche Einstellungen stehen in `config.json` (keine Umgebungsvariablen):
 | Feld | Bedeutung |
 |---|---|
 | `allowed_models` | **Sortier-Reihenfolge** der Modelle (kein Filter mehr) — Auswahllisten zeigen alle installierten Ollama-Modelle |
-| `default_model` | Standard-Chatmodell (`ministral-3:3b`); Modell-Rollen je Einsatzzweck im Profil |
+| `default_model` | Standard-Chatmodell (`granite4.2:3b`; IBM, Apache-2.0, Tool-Use/JSON, 128K); Modell-Rollen je Einsatzzweck im Profil |
 | `ollama_base` | Ollama-URL (`http://localhost:11434`) |
 | `host` / `port` | Bind-Adresse (`127.0.0.1` Einzelplatz / `0.0.0.0` Server) und Port (`8780`) |
 
@@ -108,7 +108,7 @@ Jedes Frame ist eine JSON-Zeile `data: {...}\n\n` mit `type`-Feld:
 ## 5. VRAM-Schutz — nur EIN Modell gleichzeitig im Speicher
 
 Die Zielhardware hat begrenzten VRAM (~6 GB). Es darf **niemals mehr als ein** Modell
-gleichzeitig geladen sein. Standardmäßig ist nur `ministral-3:3b` installiert; je
+gleichzeitig geladen sein. Standardmodell ist `granite4.2:3b` (der Installer lädt zusätzlich `ministral-3:3b`); je
 Profil-Rolle (Allgemein / Programmieren·Mathe / Wissenschaftlich / Medizin) kann ein anderes
 Modell zugewiesen werden, das bei Bedarf nachgeladen wird (`model_coding` deckt Code-IDE
 **und** Mathe-Tab ab). Dafür gibt es in `main.py`:

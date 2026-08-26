@@ -122,6 +122,26 @@ async def _seed_todo_demo() -> None:
         print("[DB] Demo-To-Do-Seed übersprungen: " + str(e))
 
 
+def _seed_orchestrator_example() -> None:
+    """Mitgelieferten Beispiel-Vorgang einspielen (kompletter /projekt-Durchlauf).
+    Quelle: ``defaults/orchestrator_beispiel.json`` (Saved-Run-Schema). Wird nach
+    ``data/orchestrator/beispiel-vorgang.json`` kopiert, **wenn dort nicht vorhanden**
+    (idempotent, kein Config-Flag). Danach im Chat via ``/vorgang`` ladbar. Neu einspielen
+    (z. B. nach einer Aktualisierung der Datei): die geseedete Kopie löschen."""
+    try:
+        src = DEFAULTS_DIR / "orchestrator_beispiel.json"
+        if not src.exists():
+            return
+        ORCHESTRATOR_DIR.mkdir(parents=True, exist_ok=True)
+        dst = ORCHESTRATOR_DIR / "beispiel-vorgang.json"
+        if dst.exists():
+            return
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        print(f"[DB] Beispiel-Vorgang eingespielt -> {dst.name}")
+    except Exception as e:
+        print("[DB] Beispiel-Vorgang-Seed übersprungen: " + str(e))
+
+
 @app.on_event("startup")
 async def _startup():
     await _db.init()
@@ -130,6 +150,7 @@ async def _startup():
     # (Wurzelprojekt = Benutzername); Alt-JSON bleibt liegen, bis der DB-Betrieb steht.
     await _db.migrate_todo_json(TODO_DIR, _todo_root_name())
     await _seed_todo_demo()
+    _seed_orchestrator_example()
 
 
 # ── Feature-Router einhängen (VOR dem Static-Mount) ──────────────────────────

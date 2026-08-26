@@ -125,8 +125,8 @@ Server-Variante ist nicht auf die Standard-Modelle begrenzt.
 2. Optional `config.json` bearbeiten (nur Sortier-Reihenfolge / Standardmodell):
 ```json
 {
-  "allowed_models": ["ministral-3:3b", "llama3:8b"],
-  "default_model": "ministral-3:3b"
+  "allowed_models": ["granite4.2:3b", "llama3:8b"],
+  "default_model": "granite4.2:3b"
 }
 ```
 3. Server neu starten
@@ -139,8 +139,8 @@ Server-Variante ist nicht auf die Standard-Modelle begrenzt.
 
 ```json
 {
-  "allowed_models": ["ministral-3:3b"],
-  "default_model":  "ministral-3:3b",
+  "allowed_models": [],
+  "default_model":  "granite4.2:3b",
   "ollama_base":    "http://localhost:11434",
   "port":           8780,
   "host":           "0.0.0.0",

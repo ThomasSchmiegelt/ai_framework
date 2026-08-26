@@ -2,7 +2,7 @@
   "_comment": "Modell-Tags bitte auf https://ollama.com/library verifizieren",
   "version": "1.5.0",
   "allowed_models": [],
-  "default_model": "ministral-3:3b",
+  "default_model": "granite4.2:3b",
   "chat_num_ctx": 8192,
   "embed_model": "nomic-embed-text",
   "stt_model": "base",

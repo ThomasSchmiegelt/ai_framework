@@ -89,6 +89,13 @@ PYEOF
 fi
 
 echo ""
+echo "=== Empfohlene Modelle (per 'ollama pull' laden) ==="
+echo "  ollama pull ministral-3:3b     # Standardmodell (klein, schnell)"
+echo "  ollama pull granite4.2:3b      # IBM, Apache-2.0, ~2,2 GB, 128K Kontext — sehr gut fuer"
+echo "                                 #   Tool-Use/JSON + RAG, deutschsprachig (lokaler Einsatz)"
+echo "  ollama pull nomic-embed-text   # RAG-Embeddings"
+echo "  (grosse Rechner: zusaetzlich granite4.2:8b bzw. :30b)"
+echo ""
 echo "=== Installation abgeschlossen ==="
 echo "Starten mit:  ./start.sh"
 echo "Oder direkt:  source venv/bin/activate && uvicorn main:app --host 127.0.0.1 --port 8780 --reload"

@@ -1,0 +1,717 @@
+{
+  "version": 1,
+  "saved_at": 1787702400.0,
+  "project_id": "beispiel-vorgang",
+  "proposal": {
+    "brief": "Ich möchte eine autarke, wetterfeste Ladestation für E-Bikes entwickeln, die ihren Strom vollständig aus Sonnenenergie bezieht. Der Clou: das Solarpanel soll der Sonne PASSIV nachgeführt werden – ohne Motor, ohne Sensorik, ohne Elektronik –, indem ein temperaturabhängiger Bimetall-Aktor den Schwenkrahmen allein durch die Sonneneinstrahlung bewegt. Ein wechselbarer Akku-Puffer speichert die Energie für sonnenarme Zeiten. Bitte spiele das als kompletten Vorgang durch: Idee, Recherche, Skizze, Plan, To-Do, morphologischer Kasten und Paarvergleich, Patentrecherche, Angebot und eine Präsentation.",
+    "doc_format": "beides",
+    "project": {
+      "name": "Solar-Ladestation SunTrack für E-Bikes",
+      "description": "Autarke, wetterfeste Solar-Ladestation für E-Bikes mit passivem, elektronik- und motorlosem Sonnen-Nachführmodul (temperaturabhängiger Bimetall-Aktor) und wechselbarem Akku-Puffer. Die passive Nachführung ist das patentierbare Kernmerkmal."
+    },
+    "complexity": 4,
+    "flow": {
+      "steps": [
+        "Bedarf und Standort analysieren",
+        "Anforderungen und Lastprofil festlegen",
+        "Konzeptvarianten im morphologischen Kasten sammeln",
+        "Varianten im Paarvergleich bewerten",
+        "Vorzugskonzept detailliert konstruieren",
+        "Prototyp der passiven Nachfuehrung bauen",
+        "Feldtest und Ertragsmessung durchfuehren",
+        "Patententwurf und Recherche erstellen",
+        "Dokumentation, Praesentation und Angebot erstellen"
+      ],
+      "mermaid": "flowchart TD\n  A[\"Bedarf und Standort analysieren\"]\n  B[\"Anforderungen und Lastprofil festlegen\"]\n  C[\"Konzeptvarianten im morphologischen Kasten sammeln\"]\n  D[\"Varianten im Paarvergleich bewerten\"]\n  E[\"Vorzugskonzept detailliert konstruieren\"]\n  F[\"Prototyp der passiven Nachfuehrung bauen\"]\n  G[\"Feldtest und Ertragsmessung durchfuehren\"]\n  H[\"Patententwurf und Recherche erstellen\"]\n  I[\"Dokumentation, Praesentation und Angebot erstellen\"]\n  A --> B\n  B --> C\n  C --> D\n  D --> E\n  E --> F\n  F --> G\n  G --> H\n  H --> I"
+    },
+    "morph": {
+      "parameters": [
+        {
+          "name": "Energiequelle",
+          "values": [
+            "Monokristallines Panel",
+            "Polykristallines Panel",
+            "Duennschicht-Panel",
+            "Panel + Kleinwindturbine"
+          ]
+        },
+        {
+          "name": "Sonnen-Nachfuehrung",
+          "values": [
+            "Fest (keine Nachfuehrung)",
+            "Passiv thermisch (Bimetall)",
+            "Passiv Formgedaechtnis (SMA)",
+            "Motorisch elektronisch"
+          ]
+        },
+        {
+          "name": "Energiespeicher",
+          "values": [
+            "Fester LiFePO4-Puffer",
+            "Wechselakku-Kassette",
+            "Supercap-Puffer",
+            "Kein Speicher (Direktladung)"
+          ]
+        },
+        {
+          "name": "Ladeschnittstelle",
+          "values": [
+            "Universal-Steckdose 230V",
+            "USB-C Power Delivery",
+            "Herstellerspezifischer Stecker",
+            "Induktive Ladeflaeche"
+          ]
+        },
+        {
+          "name": "Gehaeuse/Schutz",
+          "values": [
+            "Stahl verzinkt",
+            "Aluminium eloxiert",
+            "GFK-Kunststoff",
+            "Beton-Sockel + Alu"
+          ]
+        },
+        {
+          "name": "Abrechnung",
+          "values": [
+            "Kostenlos/offen",
+            "Muenz/Token",
+            "App/QR-Bezahlung",
+            "RFID-Karte"
+          ]
+        }
+      ]
+    },
+    "decision": {
+      "criteria": [
+        {
+          "name": "Investitionskosten",
+          "direction": "cost"
+        },
+        {
+          "name": "Energieertrag",
+          "direction": "benefit"
+        },
+        {
+          "name": "Wartungsarmut",
+          "direction": "benefit"
+        },
+        {
+          "name": "Robustheit/Wetterfestigkeit",
+          "direction": "benefit"
+        },
+        {
+          "name": "Patentierbarkeit/Neuheit",
+          "direction": "benefit"
+        }
+      ],
+      "variants": [
+        {
+          "name": "Fest ohne Nachfuehrung",
+          "description": "Starr montiertes Panel mit LiFePO4-Puffer — einfachste und guenstigste Loesung."
+        },
+        {
+          "name": "Passive thermische Nachfuehrung",
+          "description": "Ein Bimetall-Aktor schwenkt das Panel ohne Motor/Elektronik der Sonne nach — Vorzugskonzept."
+        },
+        {
+          "name": "Motorische Nachfuehrung",
+          "description": "Elektromotor mit Sensorik fuehrt aktiv nach — hoechster Ertrag, aber teuer und wartungsintensiv."
+        }
+      ],
+      "pairwise_matrix": [
+        [
+          1.0,
+          0.5,
+          0.5,
+          1.0,
+          0.5
+        ],
+        [
+          2.0,
+          1.0,
+          1.0,
+          2.0,
+          1.0
+        ],
+        [
+          2.0,
+          1.0,
+          1.0,
+          2.0,
+          1.0
+        ],
+        [
+          1.0,
+          0.5,
+          0.5,
+          1.0,
+          0.5
+        ],
+        [
+          2.0,
+          1.0,
+          1.0,
+          2.0,
+          1.0
+        ]
+      ],
+      "ratings": [
+        [
+          9.0,
+          5.0,
+          9.0,
+          8.0,
+          3.0
+        ],
+        [
+          6.0,
+          8.0,
+          8.0,
+          7.0,
+          9.0
+        ],
+        [
+          3.0,
+          9.0,
+          4.0,
+          6.0,
+          5.0
+        ]
+      ],
+      "result": {
+        "weights": [
+          0.125,
+          0.25,
+          0.25,
+          0.125,
+          0.25
+        ],
+        "cr": 0.0,
+        "consistent": true,
+        "ranking": [
+          {
+            "index": 1,
+            "score": 7.875,
+            "percent": 100.0
+          },
+          {
+            "index": 0,
+            "score": 6.375,
+            "percent": 81.0
+          },
+          {
+            "index": 2,
+            "score": 5.625,
+            "percent": 71.4
+          }
+        ],
+        "best": 1,
+        "best_name": "Passive thermische Nachfuehrung"
+      }
+    },
+    "plan": {
+      "name": "Solar-Ladestation SunTrack — Umsetzung",
+      "description": "Einsatz- und Ressourcenplan von der Analyse bis zum Angebot.",
+      "tasks": [
+        {
+          "id": "T1",
+          "name": "Standort- und Bedarfsanalyse",
+          "duration": 3,
+          "predecessors": [],
+          "area": "Recherche",
+          "roles": [
+            "Projektingenieur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Projektingenieur",
+              "qty": 1,
+              "hours": 16,
+              "rate": 85
+            }
+          ]
+        },
+        {
+          "id": "T2",
+          "name": "Lastprofil und Anforderungen festlegen",
+          "duration": 2,
+          "predecessors": [
+            "T1"
+          ],
+          "area": "Planung",
+          "roles": [
+            "Projektingenieur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Projektingenieur",
+              "qty": 1,
+              "hours": 12,
+              "rate": 85
+            }
+          ]
+        },
+        {
+          "id": "T3",
+          "name": "Konzeptvarianten im morphologischen Kasten",
+          "duration": 3,
+          "predecessors": [
+            "T2"
+          ],
+          "area": "Planung",
+          "roles": [
+            "Konstrukteur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Konstrukteur",
+              "qty": 1,
+              "hours": 20,
+              "rate": 80
+            }
+          ]
+        },
+        {
+          "id": "T4",
+          "name": "Variantenbewertung (Paarvergleich)",
+          "duration": 1,
+          "predecessors": [
+            "T3"
+          ],
+          "area": "Planung",
+          "roles": [
+            "Projektleiter"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Projektleiter",
+              "qty": 1,
+              "hours": 8,
+              "rate": 95
+            }
+          ]
+        },
+        {
+          "id": "T5",
+          "name": "Detailkonstruktion passives Nachfuehrmodul",
+          "duration": 8,
+          "predecessors": [
+            "T4"
+          ],
+          "area": "Konstruktion",
+          "roles": [
+            "Konstrukteur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Konstrukteur",
+              "qty": 1,
+              "hours": 60,
+              "rate": 80
+            }
+          ]
+        },
+        {
+          "id": "T6",
+          "name": "Materialbeschaffung (Panel, Bimetall, Akku)",
+          "duration": 5,
+          "predecessors": [
+            "T5"
+          ],
+          "area": "Beschaffung",
+          "roles": [
+            "Einkauf"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Einkauf",
+              "qty": 1,
+              "hours": 10,
+              "rate": 60
+            },
+            {
+              "kind": "hardware",
+              "name": "Panel/Bimetall/Wechselakku (Material)",
+              "qty": 1,
+              "hours": 0,
+              "rate": 2400
+            }
+          ]
+        },
+        {
+          "id": "T7",
+          "name": "Prototypfertigung und Montage",
+          "duration": 6,
+          "predecessors": [
+            "T6"
+          ],
+          "area": "Fertigung/Montage",
+          "roles": [
+            "Techniker"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Techniker",
+              "qty": 2,
+              "hours": 80,
+              "rate": 65
+            }
+          ]
+        },
+        {
+          "id": "T8",
+          "name": "Feldtest und Ertragsmessung",
+          "duration": 10,
+          "predecessors": [
+            "T7"
+          ],
+          "area": "Pruefung/Qualitaetssicherung",
+          "roles": [
+            "Projektingenieur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Projektingenieur",
+              "qty": 1,
+              "hours": 40,
+              "rate": 85
+            }
+          ]
+        },
+        {
+          "id": "T9",
+          "name": "Patententwurf und Neuheitsrecherche",
+          "duration": 4,
+          "predecessors": [
+            "T5"
+          ],
+          "area": "Recherche",
+          "roles": [
+            "Patentingenieur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Patentingenieur",
+              "qty": 1,
+              "hours": 24,
+              "rate": 110
+            }
+          ]
+        },
+        {
+          "id": "T10",
+          "name": "Optimierung nach Feldtest",
+          "duration": 4,
+          "predecessors": [
+            "T8"
+          ],
+          "area": "Konstruktion",
+          "roles": [
+            "Konstrukteur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Konstrukteur",
+              "qty": 1,
+              "hours": 24,
+              "rate": 80
+            }
+          ]
+        },
+        {
+          "id": "T11",
+          "name": "Dokumentation und Praesentation",
+          "duration": 3,
+          "predecessors": [
+            "T8",
+            "T9"
+          ],
+          "area": "Dokumentation",
+          "roles": [
+            "Technischer Redakteur"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Technischer Redakteur",
+              "qty": 1,
+              "hours": 20,
+              "rate": 70
+            }
+          ]
+        },
+        {
+          "id": "T12",
+          "name": "Projektabschluss und Angebotserstellung",
+          "duration": 2,
+          "predecessors": [
+            "T10",
+            "T11"
+          ],
+          "area": "Projektmanagement",
+          "roles": [
+            "Projektleiter"
+          ],
+          "resource_list": [
+            {
+              "kind": "human",
+              "name": "Projektleiter",
+              "qty": 1,
+              "hours": 12,
+              "rate": 95
+            }
+          ]
+        }
+      ],
+      "resource_catalog": [
+        {
+          "kind": "human",
+          "name": "Projektleiter",
+          "rate": 95
+        },
+        {
+          "kind": "human",
+          "name": "Projektingenieur",
+          "rate": 85
+        },
+        {
+          "kind": "human",
+          "name": "Konstrukteur",
+          "rate": 80
+        },
+        {
+          "kind": "human",
+          "name": "Patentingenieur",
+          "rate": 110
+        },
+        {
+          "kind": "human",
+          "name": "Techniker",
+          "rate": 65
+        },
+        {
+          "kind": "human",
+          "name": "Einkauf",
+          "rate": 60
+        },
+        {
+          "kind": "human",
+          "name": "Technischer Redakteur",
+          "rate": 70
+        },
+        {
+          "kind": "hardware",
+          "name": "Panel/Bimetall/Wechselakku (Material)",
+          "rate": 2400
+        }
+      ],
+      "resource_mode": "free"
+    },
+    "todo": {
+      "title": "Solar-Ladestation SunTrack für E-Bikes",
+      "items": [
+        "Sonnenstands- und Verschattungsdaten fuer den Standort erfassen",
+        "Taegliches Lastprofil (Anzahl Ladungen, Wh je Ladung) festlegen",
+        "Morphologischen Kasten mit dem Team abstimmen",
+        "Paarvergleich der Kriterien final bewerten und Vorzugsvariante bestaetigen",
+        "Bimetall-Aktor auslegen (Auslenkung ueber Temperaturbereich)",
+        "Schwenkrahmen und Lagerung konstruieren",
+        "Wechselakku-Kassette und Laderegler auswaehlen",
+        "Material bestellen und Prototyp aufbauen",
+        "Feldtest planen (Messzeitraum, Ertragslogger)",
+        "Patent-Stichworte und IPC-Klassen fuer die Recherche zusammenstellen",
+        "Freedom-to-Operate grob pruefen (keine Einreichung)",
+        "Dokumentation, Praesentation und Angebot erstellen"
+      ]
+    },
+    "patente": {
+      "title": "Autarke E-Bike-Ladestation mit passiver thermischer Sonnennachfuehrung",
+      "claim1": "Autarke Ladestation fuer Elektrofahrraeder, umfassend ein Solarpanel (1), einen das Solarpanel (1) tragenden Schwenkrahmen (2), einen Energiespeicher (5) und eine Ladeschnittstelle (6), dadurch gekennzeichnet, dass der Schwenkrahmen (2) mit einem temperaturabhaengigen, motor- und elektroniklosen Bimetall-Aktor (3) gekoppelt ist, der das Solarpanel (1) allein aufgrund der einstrahlungsbedingten Erwaermung selbsttaetig der Sonne nachfuehrt.",
+      "abstract": "Die Erfindung betrifft eine solarbetriebene Ladestation fuer E-Bikes, deren Solarpanel ohne Motor, Sensorik oder Steuerelektronik der Sonne nachgefuehrt wird. Ein Bimetall-Aktor wandelt die einstrahlungsbedingte Erwaermung unmittelbar in eine Schwenkbewegung des Panelrahmens um. Ein wechselbarer Akku-Puffer speichert die Energie fuer sonnenarme Zeiten.",
+      "novelty": "Bekannte Nachfuehrsysteme arbeiten motorisch mit Lichtsensoren und Steuerelektronik. Neu ist die rein passive, energieautarke Nachfuehrung ueber einen thermischen Aktor, die keinen Hilfsstrom, keine beweglichen Verschleissteile eines Antriebs und keine Elektronik benoetigt und damit besonders wartungsarm und ausfallsicher ist.",
+      "search_terms": [
+        "solar tracking passive bimetal",
+        "E-Bike Ladestation solar",
+        "passive Nachfuehrung Solarpanel",
+        "thermischer Aktor Solarmodul",
+        "Formgedaechtnis Nachfuehrung",
+        "self-tracking solar panel"
+      ],
+      "ipc": [
+        "F24S30/00",
+        "F24S50/20",
+        "H02S20/32",
+        "B60L53/52"
+      ],
+      "note": "Entwurf/Recherche — keine amtliche Einreichung.",
+      "figures": [
+        {
+          "caption": "Fig. 1: Schematischer Aufbau der Ladestation mit passivem Nachfuehrmodul",
+          "mermaid": "flowchart LR\n  1[\"Solarpanel (1)\"] --> 2[\"Schwenkrahmen (2)\"]\n  3[\"Bimetall-Aktor (3)\"] --> 2\n  2 --> 4[\"Laderegler (4)\"]\n  4 --> 5[\"Wechselakku-Puffer (5)\"]\n  5 --> 6[\"Ladeschnittstelle (6)\"]\n  7[\"Wetterfestes Gehaeuse (7)\"] --> 1"
+        }
+      ],
+      "bezugszeichen": [
+        {
+          "n": 1,
+          "label": "Solarpanel"
+        },
+        {
+          "n": 2,
+          "label": "Schwenkrahmen"
+        },
+        {
+          "n": 3,
+          "label": "Bimetall-Aktor (passive Nachfuehrung)"
+        },
+        {
+          "n": 4,
+          "label": "Laderegler"
+        },
+        {
+          "n": 5,
+          "label": "Wechselakku-Puffer"
+        },
+        {
+          "n": 6,
+          "label": "Ladeschnittstelle"
+        },
+        {
+          "n": 7,
+          "label": "Wetterfestes Gehaeuse"
+        }
+      ],
+      "figures_description": "Fig. 1 zeigt den schematischen Aufbau: Das Solarpanel (1) ist auf einem Schwenkrahmen (2) gelagert, der von einem temperaturabhaengigen Bimetall-Aktor (3) ohne Motor oder Elektronik der Sonne nachgefuehrt wird. Der Laderegler (4) speist den wechselbaren Akku-Puffer (5), aus dem ueber die Ladeschnittstelle (6) E-Bikes geladen werden. Alle Komponenten sind im wetterfesten Gehaeuse (7) untergebracht."
+    },
+    "doku": {
+      "format": "beides",
+      "markdown": "# Solar-Ladestation SunTrack für E-Bikes\n\n## Ziel & Kontext\nAutarke, wetterfeste Ladestation für E-Bikes, die ihren Strom vollständig solar erzeugt. Kernidee ist eine **passive Sonnennachführung** ohne Motor, Sensorik oder Elektronik.\n\n## Lösungsansatz\nEin temperaturabhängiger **Bimetall-Aktor** schwenkt den Panelrahmen allein durch die Sonneneinstrahlung. Ein **wechselbarer Akku-Puffer** überbrückt sonnenarme Zeiten.\n\n## Bewertete Varianten & Entscheidung\n- Fest ohne Nachführung — günstig, aber geringer Ertrag und wenig Neuheit\n- **Passive thermische Nachführung — Vorzugskonzept** (bester Nutzwert)\n- Motorische Nachführung — höchster Ertrag, aber teuer und wartungsintensiv\n\nDie gewichtete Bewertung (AHP-Paarvergleich) weist die passive thermische Nachführung als beste Variante aus.\n\n## Umsetzung / Vorgehen\nAnalyse → Konzept (morphologischer Kasten) → Bewertung → Detailkonstruktion → Prototyp → Feldtest → Patententwurf → Dokumentation & Angebot.\n\n## Ausblick\nSkalierung zu einer Kleinserie, Feldvalidierung des Jahresertrags und Freedom-to-Operate-Prüfung vor einer möglichen Anmeldung.\n",
+      "presentation": {
+        "type": "presentation",
+        "title": "Solar-Ladestation SunTrack",
+        "theme": "dark",
+        "slides": [
+          {
+            "layout": "title",
+            "title": "Solar-Ladestation SunTrack",
+            "content": "Autarke E-Bike-Ladestation mit passiver Sonnen-Nachführung"
+          },
+          {
+            "layout": "bullets",
+            "title": "Ziel & Kontext",
+            "bullets": [
+              "Autarke, wetterfeste Ladestation für E-Bikes",
+              "Strom vollständig aus Sonnenenergie",
+              "Passive Nachführung ohne Motor/Elektronik",
+              "Wechselbarer Akku-Puffer für sonnenarme Zeiten"
+            ]
+          },
+          {
+            "layout": "bullets",
+            "title": "Lösungsansatz",
+            "bullets": [
+              "Bimetall-Aktor schwenkt das Panel thermisch der Sonne nach",
+              "Kein Hilfsstrom, keine Sensorik, keine Steuerung",
+              "Wartungsarm und ausfallsicher",
+              "Laderegler + Wechselakku + Universal-Ladeschnittstelle"
+            ]
+          },
+          {
+            "layout": "two-column",
+            "title": "Varianten & Entscheidung",
+            "left": "- Fest ohne Nachführung\n- Passive thermische Nachführung (Vorzug)\n- Motorische Nachführung",
+            "right": "Gewichtete AHP-Bewertung: die passive thermische Nachführung erreicht den besten Nutzwert — gutes Verhältnis aus Ertrag, Wartungsarmut und Neuheit."
+          },
+          {
+            "layout": "bullets",
+            "title": "Umsetzung",
+            "bullets": [
+              "Detailkonstruktion des Nachführmoduls",
+              "Prototypbau und Feldtest mit Ertragsmessung",
+              "Patententwurf und Neuheitsrecherche",
+              "Dokumentation, Präsentation und Angebot"
+            ]
+          },
+          {
+            "layout": "section",
+            "title": "Fazit"
+          }
+        ]
+      },
+      "has_cover": false
+    },
+    "angebot": {
+      "positionen": [
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Recherche",
+          "einzelpreis": 4000.0
+        },
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Planung",
+          "einzelpreis": 3380.0
+        },
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Konstruktion",
+          "einzelpreis": 6720.0
+        },
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Beschaffung",
+          "einzelpreis": 3000.0
+        },
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Fertigung/Montage",
+          "einzelpreis": 10400.0
+        },
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Pruefung/Qualitaetssicherung",
+          "einzelpreis": 3400.0
+        },
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Dokumentation",
+          "einzelpreis": 1400.0
+        },
+        {
+          "menge": 1,
+          "einheit": "pauschal",
+          "beschreibung": "Projektmanagement",
+          "einzelpreis": 1140.0
+        }
+      ],
+      "ust_satz": 19,
+      "summe_netto": "33.440,00 €",
+      "ust_betrag": "6.353,60 €",
+      "summe_brutto": "39.793,60 €"
+    }
+  },
+  "created": {
+    "plan_id": null,
+    "var_name": null,
+    "todo_pid": null,
+    "pat_name": null,
+    "angebot_nr": null
+  }
+}

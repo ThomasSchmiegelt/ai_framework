@@ -525,6 +525,31 @@ async def orchestrator_save(req: OrchestratorSaveRequest):
     return {"ok": True, "path": path.name, "template": tpl_name}
 
 
+@router.get("/api/orchestrator/runs")
+async def orchestrator_runs():
+    """Alle gespeicherten Vorgänge auflisten (Gegenstück zu ``save``). Rein lesend.
+    Muss VOR ``/runs/{project_id}`` stehen (Literal-vor-Parametrik-Regel)."""
+    out = []
+    if ORCHESTRATOR_DIR.exists():
+        for f in sorted(ORCHESTRATOR_DIR.glob("*.json")):
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            prop = d.get("proposal") or {}
+            phases = [k for k in _ALL_PHASES if k in prop]
+            out.append({
+                "project_id": d.get("project_id") or f.stem,
+                "file": f.stem,
+                "name": (prop.get("project") or {}).get("name") or f.stem,
+                "brief": (prop.get("brief") or "")[:200],
+                "phases": phases,
+                "saved_at": d.get("saved_at", 0),
+            })
+    out.sort(key=lambda x: x.get("saved_at", 0), reverse=True)
+    return out
+
+
 @router.get("/api/orchestrator/runs/{project_id}")
 async def orchestrator_run_get(project_id: str):
     path = ORCHESTRATOR_DIR / f"{_orch_safe(project_id)}.json"

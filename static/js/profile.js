@@ -5,7 +5,7 @@ const Profile = (() => {
   const KINDS = ['logo', 'cover', 'header'];
   const MODEL_ROLES = { general: 'model_general', coding: 'model_coding', science: 'model_science', medical: 'model_medical' };
 
-  // Das einer Rolle zugewiesene Modell (leer → Standardmodell ministral-3:3b).
+  // Das einer Rolle zugewiesene Modell (leer → Grundmodell aus config.json default_model, Standard granite4.2:3b).
   // Modelle werden ausschließlich im Profil pro Rolle gewählt — es gibt keine
   // Modell-Selektoren mehr in Seitenleiste/Planer/Medizin/Matrix.
   function modelFor(role) {
@@ -43,7 +43,7 @@ const Profile = (() => {
       const sel = document.getElementById('profile-model-' + role);
       if (!sel) continue;
       const current = _data[MODEL_ROLES[role]] || '';
-      sel.innerHTML = '<option value="">— Standard (ministral-3:3b) —</option>';
+      sel.innerHTML = '<option value="">— Standard (Grundmodell aus config.json) —</option>';
       for (const m of shown) {
         const opt = document.createElement('option');
         opt.value = m.name; opt.textContent = _label(m);

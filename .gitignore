@@ -44,6 +44,7 @@ data/todo/
 data/todo_att/
 data/varianten/
 data/transcripts/
+data/orchestrator/
 
 # Lokale Spracherkennungs-Modelle (faster-whisper, von HuggingFace geladen — groß, nicht ins Repo)
 models/

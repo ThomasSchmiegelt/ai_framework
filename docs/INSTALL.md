@@ -32,7 +32,8 @@ Doppelklick auf: install.bat
 2. **Ollama** für Windows (falls nicht vorhanden)
 3. Python-Abhängigkeiten in einer virtuellen Umgebung (`venv\`)
 4. **KI-Modelle** (Download mehrere GB):
-   - `ministral-3:3b` (Standardmodell)
+   - `granite4.2:3b` (Standardmodell; IBM, Apache-2.0, gutes Tool-Use/JSON, 128K Kontext)
+   - `ministral-3:3b` (kompaktes Allround-/Vision-Modell)
    - `qwen3.5:4b` (stärkeres kompaktes Chat-Modell)
    - `nomic-embed-text` (RAG-Embeddings)
 
@@ -59,8 +60,8 @@ Auswahllisten im Profil zeigen **alle** in Ollama installierten Modelle:
 
 ```json
 {
-  "allowed_models": ["ministral-3:3b", "qwen3.5:4b"],
-  "default_model": "ministral-3:3b"
+  "allowed_models": [],
+  "default_model": "granite4.2:3b"
 }
 ```
 
