@@ -235,7 +235,7 @@ Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
 | `/recherche <Thema>` · `/deep` · `/tief` | **Tiefe Recherche:** fragt zuerst **Suchtiefe** (Anzahl Teilaspekte) und **Umfang** (Wortzahl) ab, zerlegt das Thema dann in mehrere Aspekte, durchsucht **je Aspekt** das Web und schreibt einen **ausführlichen, quellen-gestützten Bericht** der gewünschten Länge. Liefert längere und faktisch belastbarere Antworten. Bei breiten Fakten-/Kauffragen bietet der Chat das **automatisch** an (im Profil abschaltbar). |
 | `/frag <Aufgabe>` | **Rückfragen-Maske:** die KI prüft, ob ihr Infos fehlen, und zeigt bei Bedarf eine **dynamische Eingabemaske** (Text-, Einfach- und Mehrfachauswahl). Deine Antworten werden an die Aufgabe gehängt und dann normal beantwortet. Auch in **Medizin** und **Mathe** verfügbar. |
 | `/workflow 1. … 2. …` · `/ablauf` · `/flow` | **Arbeitsablauf:** gib mehrere **nummerierte Schritte** ein. Die KI arbeitet sie **nacheinander** ab, speichert jedes Zwischenergebnis und nutzt es als Grundlage für den nächsten Schritt; am Ende fasst sie alles zu einem **Gesamtergebnis** zusammen. Jeder Schritt ist zum Aufklappen, darunter Buttons **→ Präsentation** (öffnet das Ergebnis als Folien im Canvas) und **→ Planer** (leitet daraus einen Projektplan ab). **Pro Schritt Modell & Websuche wählbar:** stelle einem Schritt eine Marke voran — `[lokal]` (lokales Modell), `[api]` (dein API-Modell mit größerem Kontextfenster) oder `[web]` (dieser Schritt sucht vorher im Internet), auch kombiniert wie `[lokal,web]`. Ohne Marke läuft der Schritt auf deinem Standardmodell. So kann z. B. das **lokale Modell recherchieren und die Ergebnisse zwischenspeichern**, die dann an ein **API-Modell zur Weiterverarbeitung** übergeben werden (spart Tokens, umgeht API-Modelle ohne Internetzugriff). Die Abschluss-Zusammenfassung nutzt bevorzugt das API-Modell. **Ein Schritt kann auch ein Bild erzeugen oder etwas vorlesen:** schreib einfach „generiere ein Bild von …" (oder Marke `[bild]`) — dann erzeugt der Schritt mit deinem eingestellten Bildmodell ein Bild; bzw. „… als Sprachnachricht" / „lies … vor" (oder `[sprache]`) — dann wird der Text des Schritts **vorgelesen** (mit einem „🔊 nochmal"-Knopf). Klappt die Bilderzeugung nicht (kein Bildmodell eingerichtet), erscheint ein Hinweis und der Ablauf läuft normal weiter. Beispiel: `/workflow Ziel: Kaufberatung 1. [lokal,web] Recherchiere aktuelle Gebrauchtpreise Ford Sierra 2. [api] Schreibe daraus eine strukturierte Kaufberatung 3. [bild] erzeuge ein Bild eines roten Ford Sierra 4. [sprache] fasse die Empfehlung als kurze Sprachnachricht`. |
-| `/bild <Beschreibung>` · `/image` | **Bildgenerierung:** erzeugt aus deiner Beschreibung ein Bild (lokaler Stable-Diffusion-Server oder ein API-Modell — siehe unten). Alternativ der **🎨 Bild**-Haken in der Toolbar: die nächste Nachricht wird dann als Bild-Prompt behandelt. |
+| `/bild <Beschreibung>` · `/image` | **Bildgenerierung:** erzeugt aus deiner Beschreibung ein Bild (lokaler Stable-Diffusion-Server oder ein API-Modell — siehe unten). Alternativ der **🎨 Bild**-Haken in der Toolbar: die nächste Nachricht wird dann als Bild-Prompt behandelt. *Während der Erzeugung zeigt die „arbeitet…"-Anzeige einen **mitlaufenden Sekundenzähler** und einen Fortschrittsbalken — solange die Sekunden hochzählen, läuft es noch (lokal ~30–60 s je Bild, beim ersten Mal lädt das Modell).* |
 | `/bildhelp` · `/imagehelp` | **Geführter Bild-Dialog:** ein Formular fragt **Motiv, Stil, Kameraperspektive, Beleuchtung, Seitenverhältnis** und einen optionalen **Negativ-Prompt** ab und baut daraus den Prompt. |
 | `/bildprompt [Stil]` · `/img2prompt` | **Bild → Prompt:** öffnet einen Bild-Picker; das **Vision-Modell** beschreibt das gewählte Bild als fertigen **Text-zu-Bild-Prompt**. Darunter Knöpfe **🎨 Bild daraus erzeugen** und **📋 kopieren**. Optional einen Zielstil anhängen (z. B. `/bildprompt Aquarell`). |
 | `/musik <Stil/Stimmung>` · `/music` · `/song` | **Musik erzeugen (ohne KI-Modell/GPU):** beschreibe Stil/Stimmung, z. B. `/musik fröhliche 8bit Abenteuermelodie`, `/musik traurige langsame Melodie` oder `/musik spannende Bossmusik`. Das Stück (Melodie, Akkorde, Bass, Beat) wird **algorithmisch aus Musiktheorie** erzeugt und **direkt im Chat abgespielt** (mit **💾 speichern** als WAV). Erkennt u. a. *fröhlich/traurig/spannend/chill/gruselig/8bit* und *schnell/langsam*. Läuft sofort, komplett lokal. (Dieselbe Engine gibt es auch als eigenständiges Werkzeug im Ordner `z-music/`.) |
@@ -245,6 +245,8 @@ Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
 | `/dd[N] [Zusatz]` · `/deepdive[N]` | **Deepdive:** vertieft die letzte Antwort mit *N* Folgefragen (ohne Zahl = 5), nacheinander recherchiert & beantwortet. |
 | `/ddd[N] [Zusatz]` · `/deepdivedocument[N]` | Wie Deepdive, aber **als Dokument** (Vorwort + Kapitel) im Dokumente-Tab. |
 | `/plan[N] [Zusatz] [/Kürzel …]` | **Strategie & Einsatzplan-Orchestrator:** baut aus dem Gesprächsverlauf eine Vorschau (Strategie + Agenten + Plan + Jury). `N` = Aufgabenzahl (4–60, Standard 12). `/Kürzel` erzwingt vorhandene Agenten. |
+| `/projekt <Beschreibung>` · `/vorhaben` | **Projekt-Orchestrator:** zerlegt EIN Vorhaben phasenweise als **Vorschau** (Projektrahmen → Ablaufdiagramm → morphologischer Kasten → Paarvergleich → Plan → To-Do → Patent-Entwurf & Skizze → Dokumentation/Präsentation → Angebot). Auf **„✅ Alles anlegen"** entsteht **ein Dach-Projekt** mit allen verknüpften Artefakten (Plan, Variantenvergleich, To-Do, Patent-Workspace, Angebot). Es wird **nichts** eingereicht/versendet — nur erstellt. Der ganze Durchlauf wird als Vorgang gespeichert. |
+| `/vorgang` · `/vorgänge` | **Gespeicherten Vorgang laden:** listet die per `/projekt` gespeicherten Durchläufe (inkl. mitgeliefertem Beispiel „Solar-Ladestation"), baut den gewählten wieder als Vorschau-Karten auf und bietet erneut **„✅ Alles anlegen"** — praktisch zum Ansehen des Beispiels, Reproduzieren oder als Blaupause. |
 | `/- <Text>` | **Feedback – Problem/Fehler** ins Protokoll `data/feedback.md` (nicht an die KI). |
 | `/+ <Text>` | **Feedback – Idee/Verbesserung** ins Protokoll `data/feedback.md` (nicht an die KI). |
 
@@ -793,7 +795,7 @@ Standardmäßig ist die **Experten-Pipeline** aktiv (Umschalter **🔬 Experten-
 in der Toolbar). Statt einer einfachen Antwort arbeiten **zwei Modelle** zusammen und
 stellen bei Bedarf Rückfragen:
 
-1. Das **Standardmodell** (z. B. Ministral) bereitet deine Frage medizinisch auf.
+1. Das **Standardmodell** (z. B. Granite/Ministral) bereitet deine Frage medizinisch auf.
 2. Das **Medizin-Modell** (z. B. MedGemma) prüft, ob für eine Einschätzung **wichtige
    Angaben fehlen** (Alter, Dauer, Begleitsymptome …).
 3. Fehlt etwas, formuliert das Standardmodell eine **freundliche Rückfrage** — du
@@ -856,7 +858,7 @@ Der Agent **Mathe-Experte** ist voreingestellt. **LaTeX-Formelsatz ist hier Stan
 *(Tab muss ggf. im Profil erst eingeblendet werden → Abschnitt 18, Tab-Sichtbarkeit.)*
 
 > **Modell:** Der Mathe-Tab teilt sich das Modell mit dem **Code-Tab** — eingestellt unter
-> **👤 Profil → 🧠 Modelle → „Programmieren / Mathe"** (leer = `ministral-3:3b`). Ein eigenes
+> **👤 Profil → 🧠 Modelle → „Programmieren / Mathe"** (leer = Standardmodell `granite4.2:3b`). Ein eigenes
 > Modell-Auswahlfeld gibt es im Mathe-Tab daher nicht.
 
 ### Chat & Plots
@@ -1462,9 +1464,10 @@ braucht, und ruft sie autonom auf:
 
 Die Ergebnisse landen wie gewohnt in der **Verlaufsliste links**. Ausschalten bringt alle Tabs zurück.
 
-> ⚠️ **Nur für fähige Modelle:** Das Selbst-Entscheiden verlangt ein starkes Modell unter „Allgemein"
-> (stark lokal oder API). Das kleine Standardmodell `ministral-3:3b` trifft die Werkzeugwahl oft nicht
-> — dann lieber im **Standard-Modus** mit den normalen Tabs arbeiten.
+> ⚠️ **Nur für fähige Modelle:** Das Selbst-Entscheiden verlangt ein Modell, das sauberes Tool-Use/JSON
+> beherrscht. Das Standardmodell **`granite4.2:3b`** ist genau dafür trainiert und eignet sich gut; sehr
+> kleine Modelle treffen die Werkzeugwahl oft nicht — dann lieber im **Standard-Modus** mit den normalen
+> Tabs arbeiten (oder unter „Allgemein" ein stärkeres lokales bzw. API-Modell wählen).
 
 ---
 
@@ -1808,7 +1811,7 @@ Im blau hinterlegten Feld beschreiben, was das Programm zeigen soll, dann
 **▶ Code erstellen** klicken. Die KI schreibt den Code, übernimmt ihn in den Editor
 und führt ihn sofort aus. Welches Modell der IDE-Assistent nutzt, legst du im
 **Profil → 🧠 Modelle → „Programmieren / Mathe"** fest (gemeinsam mit dem Mathe-Tab;
-leer = `ministral-3:3b`).
+leer = Standardmodell `granite4.2:3b`).
 
 > *„Zeige ein Balkendiagramm der Zugfestigkeit für Stahl, Alu und Titan"*
 > *„Erstelle eine Toleranzanalyse für drei Bauteile"*
@@ -1835,8 +1838,8 @@ erkannte Konsolenfehler automatisch (bis zu 2 Runden).
 
 > **Wichtig:** Der Agent braucht **zuverlässiges Werkzeug-Verhalten** — stelle unter
 > **Profil → 🧠 Modelle → „Programmieren / Mathe"** ein **fähiges** Modell ein (ein starkes
-> lokales oder ein API-Modell). Das kleine Standardmodell `ministral-3:3b` schafft einfache
-> Aufgaben, größere nur eingeschränkt. Ausgeführt wird ausschließlich in der **Python-Sandbox**
+> lokales oder ein API-Modell). Das Standardmodell `granite4.2:3b` (gutes Tool-Use/JSON) schafft
+> auch mittlere Aufgaben; sehr kleine Modelle nur einfache. Ausgeführt wird ausschließlich in der **Python-Sandbox**
 > bzw. im Browser-Canvas — **keine** echten Shell-/Systembefehle.
 
 **Adaptiv:** Mit dem Häkchen **„adaptiv"** analysiert die KI die Begrifflichkeiten der
@@ -2056,7 +2059,7 @@ Präsentations-Deckblatt.
 ### 🧠 Modelle (im Profil)
 
 Unter **👤 Profil → 🧠 Modelle** weist du je Einsatzzweck ein Modell zu
-(leer = Standardmodell `ministral-3:3b`):
+(leer = Standardmodell `granite4.2:3b`):
 
 | Rolle | Verwendet für |
 |-------|---------------|
@@ -2269,7 +2272,8 @@ Das aktive Modell wird unten in der Sidebar gewählt. Standardmäßig installier
 
 | Modell | Rolle |
 |--------|-------|
-| `ministral-3:3b` | Standardmodell für alles (auch Vision) |
+| `granite4.2:3b` | **Standardmodell** (empfohlen für lokal): IBM, Apache-2.0, ~2,2 GB, 128K Kontext, deutsch — sauberes **Tool-Use/JSON** + **RAG**. Große Rechner: zusätzlich `granite4.2:8b` / `:30b` |
+| `ministral-3:3b` | kleines Allround-/Vision-Modell (Rückfall) |
 | `qwen3.5:4b` | Stärkeres kompaktes Chat-Modell |
 | `nomic-embed-text` | RAG-Embeddings (klein; läuft auf kleinen Karten bewusst auf der CPU) |
 
@@ -2287,7 +2291,7 @@ Unter **👤 Profil → 🧠 Modelle** weist du je Einsatzzweck ein Modell zu:
 | **Wissenschaftlich** | Recherche, Patente-Tab und der wissenschaftliche/quellengebundene Modus |
 | **Medizin** | Medizin-Tab — voreingestelltes Modell für medizinische Anfragen |
 
-Leer = `ministral-3:3b`. **Andere Modelle vorher laden** (sie werden bei Bedarf
+Leer = Standardmodell `granite4.2:3b`. **Andere Modelle vorher laden** (sie werden bei Bedarf
 nachgeladen): `ollama pull <modell>` — danach erscheinen sie in den Auswahllisten.
 
 **Nur ein Modell gleichzeitig im Speicher:** AI_Framework_Thomas entlädt beim Modellwechsel

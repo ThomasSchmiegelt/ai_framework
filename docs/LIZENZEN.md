@@ -12,7 +12,7 @@ verbindlichen Lizenztext bitte die jeweilige `LICENSE`-Datei / PyPI-Seite prüfe
 
 | Komponente | Lizenz | Hinweis |
 |---|---|---|
-| **LLM-Modelle** (Standard: `ministral-3:3b`, `nomic-embed-text`; weitere bei Bedarf vom Nutzer geladen) | modellspezifisch | **Keine Standard-OSS-Lizenzen.** Mistral-/Ministral-Modelle je nach Variante *Apache-2.0* oder *Mistral Research/Commercial License*. Für selbst nachgeladene Modelle gilt deren jeweilige Lizenz (z. B. *Gemma Terms of Use* von Google mit Nutzungsbeschränkungen). **Exaktes Modell + Lizenz auf der Ollama-Modellseite verifizieren** (Tags sind anpassbar). |
+| **LLM-Modelle** (Standard: `granite4.2:3b`, `ministral-3:3b`, `nomic-embed-text`; weitere bei Bedarf vom Nutzer geladen) | modellspezifisch | **Keine Standard-OSS-Lizenzen.** Das Standardmodell **`granite4.2:3b`** (IBM Granite) ist **Apache-2.0** (permissiv, deckt sich mit der MIT/permissiv-Randbedingung). Mistral-/Ministral-Modelle je nach Variante *Apache-2.0* oder *Mistral Research/Commercial License*. Für selbst nachgeladene Modelle gilt deren jeweilige Lizenz (z. B. *Gemma Terms of Use* von Google mit Nutzungsbeschränkungen). **Exaktes Modell + Lizenz auf der Ollama-Modellseite verifizieren** (Tags sind anpassbar). |
 | **certifi** | **MPL-2.0** | Schwaches Copyleft auf Dateiebene — bei reiner Nutzung/Weitergabe i. d. R. unkritisch, aber zu beachten. |
 
 Alle übrigen Python-Pakete stehen unter **permissiven** Lizenzen (MIT, BSD,

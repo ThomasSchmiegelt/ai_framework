@@ -146,6 +146,17 @@ const Chat = (() => {
       return;
     }
 
+    // Vorgang laden: „/vorgang" (Aliase /vorgänge) listet gespeicherte /projekt-Vorgänge
+    // (inkl. mitgeliefertem Beispiel) und baut den gewählten als Vorschau-Karten neu auf
+    // → „✅ Alles anlegen" (Gegenstück zum Speichern des Orchestrators).
+    const vg = _parseVorgang(text);
+    if (vg !== null) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runVorgangLoader();
+      return;
+    }
+
     // Erweiterte Suche: „/such <Begriff>" (Aliase /suche, /finde, /search) lässt die KI
     // alternative Suchbegriffe erzeugen, durchsucht damit das Web und fasst zusammen.
     const se = _parseSearch(text);
@@ -686,11 +697,34 @@ const Chat = (() => {
   }
 
   // Sichtbare „arbeitet…"-Anzeige (Sanduhr + Spinner + laufende Punkte) für Chat & Bilderstellung
-  function makeWorking(label) {
+  // „arbeitet…"-Anzeige mit LIVE-Sekundenzähler + indeterminatem Fortschrittsbalken.
+  // Der Zähler beweist, dass der Vorgang lebt (wichtig bei langen Läufen wie der
+  // Bilderzeugung: 30–60 s je Bild). `opts.hintAfter` (Sekunden) blendet nach einer
+  // Weile `opts.hint` als beruhigenden Zusatztext ein. Der Timer räumt sich selbst
+  // auf, sobald das Element aus dem DOM entfernt/ersetzt wird (`isConnected`).
+  function makeWorking(label, opts) {
+    opts = opts || {};
     const el = document.createElement('div');
     el.className = 'chat-working';
     el.innerHTML = `<span class="hourglass">⏳</span><span class="spinner"></span>`
-      + `<span>${escHtml(label || 'arbeitet')}</span><span class="cw-dots"></span>`;
+      + `<span class="cw-label">${escHtml(label || 'arbeitet')}</span><span class="cw-dots"></span>`
+      + `<span class="cw-elapsed"> · 0s</span>`
+      + `<span class="cw-bar"><span class="cw-bar-fill"></span></span>`;
+    const t0 = Date.now();
+    const elapsedEl = el.querySelector('.cw-elapsed');
+    const labelEl = el.querySelector('.cw-label');
+    const hintAfter = Number(opts.hintAfter) || 0;
+    const hint = opts.hint || '';
+    let hintShown = false;
+    const iv = setInterval(() => {
+      if (!el.isConnected) { clearInterval(iv); return; }
+      const s = Math.round((Date.now() - t0) / 1000);
+      elapsedEl.textContent = ' · ' + s + 's';
+      if (hint && !hintShown && hintAfter && s >= hintAfter) {
+        hintShown = true;
+        labelEl.textContent = hint;
+      }
+    }, 1000);
     return el;
   }
 
@@ -2779,7 +2813,8 @@ const Chat = (() => {
     const row = appendMessage('assistant', '', [], true);
     const content = row.querySelector('.bubble-content');
     insertImage(content, dataUrl);   // Original
-    const workingEl = makeWorking(mask ? 'markierter Bereich wird verändert' : 'Bild wird verändert'); content.appendChild(workingEl);
+    const workingEl = makeWorking(mask ? 'markierter Bereich wird verändert' : 'Bild wird verändert',
+      { hintAfter: 20, hint: 'Bild wird verändert — das lokale Modell rechnet, das dauert ~30–60 s' }); content.appendChild(workingEl);
     const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
     try {
       const _body = { image: dataUrl, prompt: instruction, strength };
@@ -2875,7 +2910,8 @@ const Chat = (() => {
     appendMessage('user', `🔍 Bild hochskalieren (${mode === 'fast' ? 'schnell' : 'KI-Detail'})`);
     const row = appendMessage('assistant', '', [], true);
     const content = row.querySelector('.bubble-content');
-    const workingEl = makeWorking('Bild wird hochskaliert'); content.appendChild(workingEl);
+    const workingEl = makeWorking('Bild wird hochskaliert',
+      { hintAfter: 20, hint: 'Bild wird hochskaliert — die KI-Variante rechnet lokal, das dauert ~30–60 s' }); content.appendChild(workingEl);
     const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
     try {
       const resp = await fetch('/api/image/upscale', {
@@ -3487,7 +3523,10 @@ const Chat = (() => {
     const content = row.querySelector('.bubble-content');
     const textEl = document.createElement('div');
     textEl.className = 'bubble-text';
-    textEl.appendChild(makeWorking('🎨 Bild wird erzeugt (das kann etwas dauern)'));
+    textEl.appendChild(makeWorking('🎨 Bild wird erzeugt (das kann etwas dauern)', {
+      hintAfter: 20,
+      hint: '🎨 Bild wird erzeugt — beim ersten Mal lädt das lokale Modell (Z-Image), das dauert ~30–60 s',
+    }));
     content.appendChild(textEl);
     scrollToBottom();
 
@@ -4081,6 +4120,12 @@ const Chat = (() => {
     return (m[2] || '').trim();   // Beschreibung (kann leer sein)
   }
 
+  function _parseVorgang(text) {
+    const m = String(text || '').match(/^\/(vorgang|vorgaenge|vorgänge|vorgangladen)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return (m[2] || '').trim();   // (Argument derzeit ignoriert — es wird die Auswahl gezeigt)
+  }
+
   function _projCard(title) {
     const d = document.createElement('details');
     d.open = true;
@@ -4096,6 +4141,19 @@ const Chat = (() => {
     return d;
   }
 
+  // Baut die Assistenten-Blase + den Vorschau-Kontext (statusEl/cardsWrap/cards/proposal),
+  // den sowohl der Live-Orchestrator (Stream) als auch der Lader (/vorgang) befüllen.
+  function _newProjektCtx(initialStatusHtml) {
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const statusEl = document.createElement('div');
+    statusEl.innerHTML = initialStatusHtml || '';
+    content.appendChild(statusEl);
+    const cardsWrap = document.createElement('div');
+    content.appendChild(cardsWrap);
+    return { statusEl, cardsWrap, cards: {}, proposal: null };
+  }
+
   async function runProjektOrchestrator(brief) {
     if (isStreaming) return;
     brief = (brief || '').trim();
@@ -4107,15 +4165,7 @@ const Chat = (() => {
     const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
     appendMessage('user', '🗂 /projekt — ' + brief);
 
-    const row = appendMessage('assistant', '', [], true);
-    const content = row.querySelector('.bubble-content');
-    const statusEl = document.createElement('div');
-    statusEl.innerHTML = '<em>⏳ Vorhaben wird zerlegt…</em>';
-    content.appendChild(statusEl);
-    const cardsWrap = document.createElement('div');
-    content.appendChild(cardsWrap);
-
-    const ctx = { statusEl, cardsWrap, cards: {}, proposal: null };
+    const ctx = _newProjektCtx('<em>⏳ Vorhaben wird zerlegt…</em>');
 
     abortController = new AbortController();
     try {
@@ -4495,6 +4545,81 @@ const Chat = (() => {
     }
   }
 
+  // ── /vorgang: gespeicherten Orchestrator-Lauf laden und als Vorschau neu aufbauen ──
+  // Gegenstück zum Speichern (`/api/orchestrator/save`): listet alle Vorgänge und baut den
+  // gewählten über dieselben Karten (`_handleProjektEvent`) + „✅ Alles anlegen"
+  // (`_finishProjektCard`/`_applyProjekt`) wieder auf. Rein synthetische Frames.
+  async function runVorgangLoader() {
+    if (isStreaming) return;
+    showWelcome(false);
+    appendMessage('user', '📂 /vorgang');
+    let runs = [];
+    try {
+      const r = await fetch('/api/orchestrator/runs');
+      runs = r.ok ? await r.json() : [];
+    } catch (_) {}
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    if (!Array.isArray(runs) || !runs.length) {
+      content.innerHTML = '<em>Keine gespeicherten Vorgänge gefunden. Lege mit „/projekt &lt;Beschreibung&gt;" einen an.</em>';
+      scrollToBottom();
+      return;
+    }
+    const intro = document.createElement('div');
+    intro.innerHTML = '<strong>Gespeicherte Vorgänge</strong> — zum Laden anklicken:';
+    content.appendChild(intro);
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:8px';
+    runs.forEach(run => {
+      const b = document.createElement('button');
+      b.className = 'btn-cancel';
+      b.style.cssText = 'text-align:left;padding:8px 10px;line-height:1.35';
+      const dt = run.saved_at ? new Date(run.saved_at * 1000).toLocaleDateString('de-DE') : '';
+      const nPh = (run.phases || []).length;
+      b.innerHTML = '📂 <strong>' + escHtml(run.name || run.file || '') + '</strong>'
+        + (run.brief ? '<div style="font-size:.85em;opacity:.7;margin-top:2px">' + escHtml(String(run.brief).slice(0, 130)) + '</div>' : '')
+        + '<div style="font-size:.8em;opacity:.6;margin-top:2px">' + nPh + ' Phasen'
+        + (dt ? ' · ' + dt : '') + '</div>';
+      b.onclick = () => { b.disabled = true; _openVorgang(run.file || run.project_id); };
+      list.appendChild(b);
+    });
+    content.appendChild(list);
+    scrollToBottom();
+  }
+
+  async function _openVorgang(fileId) {
+    let rec = null;
+    try {
+      const r = await fetch('/api/orchestrator/runs/' + encodeURIComponent(fileId));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      rec = await r.json();
+    } catch (e) { showToast('Vorgang konnte nicht geladen werden: ' + (e.message || '')); return; }
+    const proposal = rec.proposal || {};
+    const ctx = _newProjektCtx('<em>📂 Vorgang „' + escHtml((proposal.project || {}).name || '') + '" wird geladen…</em>');
+    const emit = (f) => { try { _handleProjektEvent(f, ctx); } catch (_) {} };
+    // Karten in Phasenreihenfolge neu aufbauen (synthetische Frames wie im Stream).
+    if (proposal.project) emit({ type: 'project', project: proposal.project });
+    if (proposal.complexity != null) emit({ type: 'complexity', complexity: proposal.complexity,
+      label: proposal.complexity, plan_tasks: ((proposal.plan || {}).tasks || []).length, auto: true });
+    if (proposal.flow) emit({ type: 'flow', flow: proposal.flow });
+    if (proposal.morph) emit({ type: 'morph', morph: proposal.morph });
+    if (proposal.decision) emit({ type: 'decision', decision: proposal.decision });
+    if (proposal.plan) emit({ type: 'plan', plan: proposal.plan });
+    if (proposal.todo) emit({ type: 'todo', todo: proposal.todo });
+    if (proposal.patente) emit({ type: 'patente', patente: proposal.patente });
+    if (proposal.doku) {
+      const d = proposal.doku || {};
+      emit({ type: 'doku', doku: {
+        format: d.format, has_markdown: !!d.markdown,
+        n_slides: ((d.presentation || {}).slides || []).length,
+        has_cover: !!d.has_cover, presentation: d.presentation, markdown: d.markdown } });
+    }
+    if (proposal.angebot) emit({ type: 'angebot', angebot: proposal.angebot });
+    ctx.proposal = proposal;
+    _finishProjektCard(ctx);   // zeigt „✅ Alles anlegen"
+    scrollToBottom();
+  }
+
   // ── Befehls-Autocomplete in der Chatbox („/") ───────────────────────────────
   // Beim Tippen eines führenden „/" erscheint über der Eingabe eine graue Liste der
   // verfügbaren Slash-Befehle. Auswahl per Klick, Tab oder ↑/↓+Tab; Esc schließt.
@@ -4515,7 +4640,8 @@ const Chat = (() => {
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },
-    { key: '/projekt', ins: '/projekt ', cmd: '/projekt <Beschreibung>', desc: 'Projekt-Orchestrator: zerlegt ein Vorhaben phasenweise (morphologischer Kasten → Paarvergleich-Bewertung → Plan → To-Do) als Vorschau und legt auf Bestätigung EIN Projekt mit allen verknüpften Artefakten an (auch /vorhaben). Weitere Phasen (Patente/Doku/Angebot) folgen.' },
+    { key: '/projekt', ins: '/projekt ', cmd: '/projekt <Beschreibung>', desc: 'Projekt-Orchestrator: zerlegt ein Vorhaben phasenweise als Vorschau (Ablaufdiagramm → morphologischer Kasten → Paarvergleich → Plan → To-Do → Patent-Entwurf & Skizze → Doku/Präsentation → Angebot) und legt auf Bestätigung EIN Projekt mit allen verknüpften Artefakten an (auch /vorhaben). Nichts wird eingereicht/versendet.' },
+    { key: '/vorgang', ins: '/vorgang', cmd: '/vorgang', desc: 'Gespeicherten Projekt-Vorgang laden: listet die per /projekt gespeicherten Durchläufe (inkl. mitgeliefertem Beispiel), baut den gewählten als Vorschau-Karten neu auf und bietet „✅ Alles anlegen" (auch /vorgänge)' },
     { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander. Pro Schritt Tags [lokal] [api] [web] [bild] [sprache] (z. B. „1. [lokal,web] recherchiere … 2. [api] verarbeite … 3. [bild] erzeuge ein Bild von … 4. [sprache] fasse es als Sprachnachricht"). Ergebnis → Chat/Präsentation/Planer' },
     { key: '/+',    ins: '/+ ',    cmd: '/+ …',    desc: 'Verbesserungsidee ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/-',    ins: '/- ',    cmd: '/- …',    desc: 'Fehler/Problem ins Feedback-Protokoll (nicht ans LLM)' },

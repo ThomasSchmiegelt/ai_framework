@@ -12,7 +12,11 @@
 $ErrorActionPreference = "Stop"
 
 $APP_DIR       = $PSScriptRoot
-$MODELS        = @("ministral-3:3b", "qwen3.5:4b")   # Standardmodelle; weitere bei Bedarf via 'ollama pull'
+$MODELS        = @("ministral-3:3b", "qwen3.5:4b", "granite4.2:3b")   # Standardmodelle; weitere bei Bedarf via 'ollama pull'
+# granite4.2:3b (IBM, Apache-2.0, ~2,2 GB, 128K Kontext): auf sauberes Tool-Use/JSON + RAG
+# trainiert und deutschsprachig — sehr gut fuer den lokalen Einsatz (Werkzeug-Loop/Assistent-Modus).
+# Groessere Rechner: zusaetzlich 'ollama pull granite4.2:8b' bzw. ':30b'. Tag ggf. auf
+# https://ollama.com/library pruefen (fehlgeschlagener Pull ist unkritisch, s. u.).
 $EMBED_MODEL   = "nomic-embed-text"   # RAG-Embeddings (klein, CPU-tauglich)
 $STT_MODEL     = "base"               # Spracherkennung (faster-whisper), ~150 MB, laeuft auf CPU / 6 GB VRAM
 $PYTHON_MIN    = [Version]"3.11.0"

@@ -80,7 +80,7 @@ Der `/api/chat`-Endpunkt durchläuft maximal **8 Iterationen**:
 
 ### 2.3 VRAM-Schutz — nur EIN Modell gleichzeitig
 Bei begrenztem VRAM (z. B. 6 GB) darf nie mehr als ein Modell gleichzeitig
-geladen sein (Standard: nur `ministral-3:3b`; weitere Rollen-Modelle werden bei
+geladen sein (Standardmodell `granite4.2:3b`; weitere Rollen-Modelle werden bei
 Bedarf nachgeladen, siehe 2.4). Der Schutz sitzt zentral in `main.py`:
 
 ```python
@@ -104,7 +104,8 @@ Betroffene Stellen: Haupt-Chat, Recherche-Synthese, Gespräch-Komprimierung,
 Chat→Skill, Agent-Prompt-Generierung, Planer-KI (Streaming).
 
 #### Modell-Rollen (Profil)
-Es gibt kein fest verdrahtetes Modell außer `DEFAULT_MODEL` (`ministral-3:3b`).
+Es gibt kein fest verdrahtetes Modell außer `DEFAULT_MODEL` (aus `config.json` `default_model`,
+Standard **`granite4.2:3b`** — IBM, Apache-2.0, gutes Tool-Use/JSON + 128K Kontext; vorher `ministral-3:3b`).
 Das Profil hält **vier** optionale Zuweisungen: `model_general`, `model_coding`,
 `model_science`, `model_medical` (UI: **Allgemein / Programmieren · Mathe / Wissenschaftlich /
 Medizin**). `_model_for(role)` liefert das zugewiesene Modell oder `DEFAULT_MODEL`.
@@ -269,7 +270,7 @@ ai_framework_thomas_run(draw);   // PFLICHT am Ende — registriert + zeichnet, 
   unter dem Canvas und gibt den aktuellen Wert zurück; bei Änderung wird neu gezeichnet.
 - `ai_framework_thomas_run(fn)` registriert die Zeichenfunktion und ruft sie auf (auch bei Resize).
 - **KI-Assistent**: nutzt das Profil-Modell der Rolle **Programmieren / Mathe**
-  (`Profile.modelFor('coding')`, mit dem Mathe-Tab geteilt, Fallback `ministral-3:3b`). System-Prompt
+  (`Profile.modelFor('coding')`, mit dem Mathe-Tab geteilt, Fallback = Standardmodell `granite4.2:3b`). System-Prompt
   erzwingt reines Vanilla-JS (kein `require`/`import`/Chart.js).
 - **Auto-Repair**: bei Laufzeitfehlern in der Konsole erscheint ein Button, der
   Code + Fehlermeldung erneut an die KI schickt.

@@ -48,7 +48,8 @@ Standardmäßig wird **nur ein** kleines, lokal lauffähiges Modell installiert/
 
 | Modell | Rolle | Größe |
 |---|---|---|
-| `ministral-3:3b` | Standardmodell für alles (auch Vision) | ~2 GB |
+| `granite4.2:3b` | **Standardmodell (empfohlen für lokal)** (IBM, Apache-2.0): auf sauberes **Tool-Use/JSON** + **RAG** trainiert, **128K Kontext**, deutschsprachig — passt besonders gut zum Werkzeug-Loop (Assistent-Modus, Code-Interpreter), zu RAG/Postfach/To-Do-„fragen" und den kontextlastigen Wegen (Jury/Deepdive/Patent). Große Rechner: zusätzlich `granite4.2:8b` / `:30b` | ~2,2 GB |
+| `ministral-3:3b` | Kompaktes Allround-/Vision-Modell (Rückfall) | ~2 GB |
 | `qwen3.5:4b` | Stärkeres kompaktes Chat-Modell | ~2,5 GB |
 | `nomic-embed-text` | RAG-Embeddings (CPU) | ~0,3 GB |
 | `medgemma:4b` | medizinisches Modell für den 🩺 Medizin-Tab (in der **Portable-Variante mitgebündelt**, sonst optional) | ~2,5 GB |
@@ -56,7 +57,7 @@ Standardmäßig wird **nur ein** kleines, lokal lauffähiges Modell installiert/
 **Vier Modell-Rollen im Profil:** Unter **👤 Profil → 🧠 Modelle** lässt sich je
 Einsatzzweck — **Allgemein**, **Programmieren / Mathe** (gemeinsames Modell für Code-IDE und
 Mathe-Tab), **Wissenschaftlich**, **Medizin** — ein eigenes Modell zuweisen.
-Leer = `ministral-3:3b`. Weitere Modelle vorher bei Bedarf laden:
+Leer = Standardmodell (`granite4.2:3b`). Weitere Modelle vorher bei Bedarf laden:
 
 ```bash
 ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
@@ -327,8 +328,8 @@ Bedienung für Anwender: **[BEDIENUNGSANLEITUNG.md](BEDIENUNGSANLEITUNG.md)**
 
 ```json
 {
-  "allowed_models": ["ministral-3:3b"],
-  "default_model":  "ministral-3:3b",
+  "allowed_models": [],
+  "default_model":  "granite4.2:3b",
   "embed_model":    "nomic-embed-text",
   "ollama_base":    "http://localhost:11434",
   "port":           8780,
