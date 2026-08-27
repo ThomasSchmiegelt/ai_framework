@@ -57,8 +57,12 @@ $GETPIP_URL    = "https://bootstrap.pypa.io/get-pip.py"
 # Abschnitt 4) – nicht mehr das komplette lokale Modellverzeichnis. So landen z. B.
 # nur die freigegebenen Modelle im Bundle und keine versehentlich lokal gepullten.
 # Fehlt eines lokal, wird es vor dem Kopieren automatisch nachgezogen.
-$BUNDLE_MODELS = @("ministral-3:3b", "qwen3.5:4b", "medgemma:4b", "nomic-embed-text:latest")  # ins Bundle
-$MODELS        = @("ministral-3:3b", "qwen3.5:4b", "medgemma:4b")   # Modelle (fürs README): Chat + 🩺 Medizin
+# granite4.2:3b MUSS enthalten sein — es ist das Standardmodell (config.json
+# default_model). Ohne granite bootet das Bundle mit einem nicht installierten
+# Default -> Chat schlägt fehl. Im NoModels-Bundle lädt die start.bat genau diese
+# Liste beim Erststart nach, im Voll-Bundle werden genau diese kopiert.
+$BUNDLE_MODELS = @("granite4.2:3b", "ministral-3:3b", "qwen3.5:4b", "medgemma:4b", "nomic-embed-text:latest")  # ins Bundle
+$MODELS        = @("granite4.2:3b", "ministral-3:3b", "qwen3.5:4b", "medgemma:4b")   # Modelle (fürs README): Chat (Standard: granite) + 🩺 Medizin
 $EMBED_MODEL   = "nomic-embed-text:latest"           # RAG-Embeddings
 
 function Write-Step  { param($t) Write-Host "`n[►] $t" -ForegroundColor Cyan }
@@ -475,7 +479,7 @@ cd /d "%~dp0app"
 
 :: Nutzt das INSTALLIERTE Ollama (Standard-Port 11434, dessen Modellverzeichnis).
 :: Voraussetzung: Ollama ist installiert und die Modelle sind gezogen
-::   ollama pull ministral-3:3b   &   ollama pull qwen3.5:4b   &   ollama pull medgemma:4b   &   ollama pull nomic-embed-text
+::   ollama pull granite4.2:3b   &   ollama pull ministral-3:3b   &   ollama pull qwen3.5:4b   &   ollama pull medgemma:4b   &   ollama pull nomic-embed-text
 "%~dp0python\python.exe" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$OLLAMA_PORT/api/tags', timeout=2)" >nul 2>&1
 if not errorlevel 1 goto ollamaready
 
@@ -611,7 +615,7 @@ Doppelklick auf ``start.bat``
 
 ## Anforderungen
 - Windows 10/11 (64-bit), keine Installation, keine Admin-Rechte
-- **Beim ersten Start: Internetverbindung** (Modell-Download, einmalig ~7 GB):
+- **Beim ersten Start: Internetverbindung** (Modell-Download, einmalig ~9 GB):
 $(($BUNDLE_MODELS | ForEach-Object { "  - $_" }) -join "`n")
 - Danach läuft alles komplett offline
 

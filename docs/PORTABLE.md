@@ -11,7 +11,7 @@ AI_Framework_Thomas_Portable_YYYYMMDD\
 ├── ollama\
 │   ├── ollama.exe    ← Ollama Binary
 │   ├── lib\ollama\   ← Ollama-Laufzeit (ggml-Backends, CUDA/Vulkan-Runner) — PFLICHT bei neueren Ollama-Versionen
-│   └── models\       ← nur die Whitelist-Modelle (ministral-3:3b, qwen3.5:4b, medgemma:4b, nomic-embed-text)
+│   └── models\       ← nur die Whitelist-Modelle (granite4.2:3b, ministral-3:3b, qwen3.5:4b, medgemma:4b, nomic-embed-text)
 ├── start.bat         ← Starten
 └── README.md
 ```
@@ -44,7 +44,7 @@ als Selbstheilung, falls dort mal ein Modell fehlt.)
 Vor dem ersten Start die Modelle ziehen:
 
 ```
-ollama pull ministral-3:3b
+ollama pull granite4.2:3b
 ollama pull nomic-embed-text
 ```
 
@@ -180,14 +180,15 @@ OLLAMA_HOST   = 127.0.0.1:11500
 |---|---|
 | App + Python + Pakete | ~500 MB |
 | ollama.exe + Laufzeit `lib\` | ~1,9 GB (CPU+Vulkan+CUDA; +1,2 GB mit `-FullRuntime`/ROCm) |
+| granite4.2:3b (Standardmodell) | ~2,2 GB |
 | ministral-3:3b | ~2 GB |
 | qwen3.5:4b | ~2,5 GB |
 | medgemma:4b (🩺 Medizin) | ~2,5 GB |
 | nomic-embed-text | ~0,3 GB |
-| **Gesamt (Basis)** | **~7,5 GB** |
+| **Gesamt (Basis)** | **~9,7 GB** |
 
 > `make_portable.ps1` bündelt **gezielt nur** die Whitelist `$BUNDLE_MODELS`
-> (`ministral-3:3b`, `qwen3.5:4b`, `medgemma:4b`, `nomic-embed-text:latest`) — nicht mehr das
+> (`granite4.2:3b`, `ministral-3:3b`, `qwen3.5:4b`, `medgemma:4b`, `nomic-embed-text:latest`) — nicht mehr das
 > komplette lokale Modellverzeichnis. Fehlt eines lokal, wird es vor dem Kopieren
 > automatisch nachgezogen. Weitere Modelle in `$BUNDLE_MODELS` ergänzen, falls nötig.
 
@@ -199,7 +200,7 @@ OLLAMA_HOST   = 127.0.0.1:11500
 |---|---|
 | `ollama.exe` startet nicht / Bundle-Ollama „wird nicht gefunden" | Häufigste Ursache: `ollama\lib\ollama\` fehlt im Bundle (ältere `make_portable.ps1`-Versionen kopierten nur die Exe). Bundle mit der aktuellen `make_portable.bat` neu erstellen — oder `lib\` aus `%LOCALAPPDATA%\Programs\Ollama\lib` manuell nach `<bundle>\ollama\lib` kopieren. Sonst: Visual C++ Redistributables — `winget install Microsoft.VCRedist.2015+.x64` |
 | RAG funktioniert nicht / „Modell nicht gefunden" | `nomic-embed-text` fehlt im Bundle. Im Bundle-Ordner: `set OLLAMA_HOST=127.0.0.1:11500` & `set OLLAMA_MODELS=%CD%\ollama\models`, dann `ollama\ollama.exe pull nomic-embed-text`. Beim Neu-Erstellen zieht `make_portable.ps1` das Modell jetzt automatisch nach. |
-| Modelle fehlen | Wie oben, aber `ollama\ollama.exe pull ministral-3:3b` |
+| Modelle fehlen | Wie oben, aber `ollama\ollama.exe pull granite4.2:3b` (Standardmodell) |
 | App-Port 8780 belegt | In `app\config.json` `port` ändern und in `start.bat` anpassen |
 | Ollama-Port 11500 belegt | In `app\config.json` `ollama_base` und in `start.bat` (`OLLAMA_HOST`) gemeinsam anpassen |
 | **Läuft nur auf CPU statt GPU** | Diagnose: `ollama\server.log` (schreibt `start.bat` seit dieser Version) nach `inference compute` durchsuchen — dort steht die erkannte GPU (`library=CUDA`/`Vulkan`) bzw. `no compatible GPUs`. Ursachen je GPU-Typ: **NVIDIA** → Treiber zu alt für CUDA 12/13, NVIDIA-Treiber aktualisieren; **AMD/Intel-Grafikkarte** → läuft über Vulkan, aktuellen Grafiktreiber installieren (natives ROCm nur mit `-FullRuntime`-Bundle); **nur integrierte GPU (iGPU)** → wird von Ollama standardmäßig ignoriert (gewollt, oft langsamer als CPU) — testweise in `start.bat` die Zeile `:: set OLLAMA_IGPU_ENABLE=1` einkommentieren. Das Bundle selbst ist GPU-fähig: der Build-Smoke-Test meldet die auf dem Build-Rechner erkannte GPU. |
