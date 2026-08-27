@@ -242,6 +242,18 @@ const Chat = (() => {
       return;
     }
 
+    // Ziel-Loop: „/ziel <Beschreibung>" (Aliase /goal, /zi).  Anders als /workflow gibt
+    // man KEINE Schritte vor, sondern nur EIN Ziel — der Loop plant selbst, arbeitet in
+    // Runden (Handeln → Bewerten) darauf hin und entscheidet selbst, wann es erreicht ist.
+    const gl = _parseGoal(text);
+    if (gl) {
+      input.value = '';
+      autoResizeTextarea(input);
+      if (gl.goal) runGoalLoop(gl.goal, { rounds: gl.rounds, web: gl.web });
+      else showToast('Bitte nach „/ziel" ein Ziel angeben, z. B. /ziel Vergleiche 3 Akku-Chemien für ein E-Bike');
+      return;
+    }
+
     // Geführter Präsentationsassistent: „/praesentation <Thema>" öffnet ein kurzes
     // Interview (Zielgruppe/Ziel/Umfang), dann läuft Gliederung → Webrecherche je
     // Punkt → Bilder (flächiges Deckblatt + Abschluss) automatisch durch.
@@ -2149,6 +2161,161 @@ const Chat = (() => {
       if (typeof switchTab === 'function') switchTab('canvas');
       showToast('✓ Präsentation im Canvas erstellt');
     } catch (e) { showToast('Präsentation fehlgeschlagen: ' + e.message); }
+  }
+
+  // ── /ziel — zielgerichteter Loop im Chat ────────────────────────────────────
+  // „/ziel <Beschreibung>" (Aliase /goal, /zi): der Nutzer gibt NUR ein Ziel vor.
+  // Der Loop plant Teilziele, arbeitet in Runden (Handeln → Bewerten) darauf hin
+  // und entscheidet selbst, wann das Ziel erreicht ist (oder bricht am Runden-
+  // Deckel ab). Optionaler Tag am Anfang: [web] (Runden web-erden), [r7] (Deckel).
+  function _parseGoal(text) {
+    const m = text.match(/^\/(ziel|goal|zi)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    let body = (m[2] || '').trim();
+    let web = false, rounds = 0;
+    const tm = body.match(/^\s*\[([^\]]{1,40})\]\s*([\s\S]*)$/);
+    if (tm) {
+      for (const t of tm[1].toLowerCase().split(/[,\s/+]+/).filter(Boolean)) {
+        if (['web', 'internet', 'recherche', 'suche', 'search'].includes(t)) web = true;
+        else if (/^r?\d{1,2}$/.test(t)) rounds = parseInt(t.replace(/^r/, ''), 10);
+      }
+      body = (tm[2] || '').trim();
+    }
+    return { goal: body, web, rounds };
+  }
+
+  async function runGoalLoop(goal, opts) {
+    goal = (goal || '').trim();
+    opts = opts || {};
+    if (!goal) { showToast('Kein Ziel angegeben'); return; }
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false);
+    isStreaming = true;
+    setBtnSendState(false);
+
+    const head = '🎯 Ziel: ' + goal + (opts.web ? '  [🌐 Web]' : '');
+    appendMessage('user', head);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const logEl = document.createElement('div'); logEl.className = 'research-log'; content.appendChild(logEl);
+    // Sichtbarer Fortschrittsbalken (aus den Bewerten-Runden gespeist).
+    const prog = document.createElement('div'); prog.className = 'goal-progress';
+    prog.style.cssText = 'display:none;height:8px;border-radius:6px;background:var(--border,#2a2f3a);overflow:hidden;margin:8px 0';
+    const progFill = document.createElement('div');
+    progFill.style.cssText = 'height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#22c55e);transition:width .4s ease';
+    prog.appendChild(progFill); content.appendChild(prog);
+    const workingEl = makeWorking('plant und arbeitet auf das Ziel hin', { hintAfter: 25, hint: 'arbeitet weiter — jede Runde plant, handelt und prüft (bei langen Läufen etwas Geduld)' });
+    content.appendChild(workingEl);
+    const stepsEl = document.createElement('div'); content.appendChild(stepsEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    const _log = (t) => { const d = document.createElement('div'); d.className = 'research-log-line'; d.textContent = t; logEl.appendChild(d); scrollToBottom(); };
+    const setProg = (p) => { prog.style.display = 'block'; progFill.style.width = Math.max(0, Math.min(100, p)) + '%'; };
+
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    const roundResults = [];
+    let answer = '', workingCleared = false, reached = false;
+    const clearWorking = () => { if (!workingCleared) { workingCleared = true; workingEl.remove(); } };
+    abortController = new AbortController();
+    try {
+      const payload = { goal, web: !!opts.web, model };
+      if (opts.rounds) payload.max_rounds = opts.rounds;
+      const resp = await fetch('/api/goal', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify(payload),
+      });
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'goal_start') {
+            _log(`🎯 Ziel-Loop gestartet (max. ${ev.max_rounds} Runden${ev.web ? ', 🌐 Web' : ''})`);
+          } else if (ev.type === 'planning') {
+            _log('🧭 Teilziele werden geplant…');
+          } else if (ev.type === 'plan') {
+            const ul = document.createElement('ul'); ul.style.cssText = 'margin:4px 0 8px 1.2em;opacity:.85';
+            (ev.items || []).forEach(it => { const li = document.createElement('li'); li.textContent = it; ul.appendChild(li); });
+            const cap = document.createElement('div'); cap.style.cssText = 'font-size:.85em;opacity:.7'; cap.textContent = 'Plan:';
+            stepsEl.appendChild(cap); stepsEl.appendChild(ul); scrollToBottom();
+          } else if (ev.type === 'round_start') {
+            _log(`▶ Runde ${ev.index + 1}/${ev.total}: ${(ev.focus || '').slice(0, 70)}`);
+          } else if (ev.type === 'searching') {
+            _log(`  🔎 Websuche: ${(ev.query || '').slice(0, 70)}…`);
+          } else if (ev.type === 'search_done') {
+            _log(`  ✓ ${ev.count || 0} Quellen gefunden`);
+          } else if (ev.type === 'round_work') {
+            clearWorking();
+            const det = document.createElement('details'); det.className = 'wf-step';
+            const sum = document.createElement('summary');
+            sum.textContent = `✓ Runde ${ev.index + 1}: ${(ev.focus || '').slice(0, 70)}`;
+            det.appendChild(sum);
+            const bd = document.createElement('div'); bd.className = 'wf-step-body';
+            renderMarkdown(bd, ev.result || '');
+            det.appendChild(bd); stepsEl.appendChild(det); scrollToBottom();
+            roundResults.push({ focus: ev.focus, result: ev.result });
+          } else if (ev.type === 'evaluating') {
+            _log('  🧪 Bewertung: Ziel erreicht?');
+          } else if (ev.type === 'evaluate') {
+            setProg(ev.progress || 0);
+            const mark = ev.reached ? '✅ Ziel erreicht' : `↻ ${ev.progress || 0}% — offen: ${(ev.gap || '—').slice(0, 80)}`;
+            _log('  ' + mark);
+          } else if (ev.type === 'synthesizing') {
+            reached = !!ev.reached;
+            _log('📝 Gesamtergebnis wird zusammengeführt…');
+          } else if (ev.type === 'text') {
+            clearWorking();
+            answer += ev.content; textEl.textContent = answer; scrollToBottom();
+          } else if (ev.type === 'done') {
+            if (typeof ev.reached === 'boolean') reached = ev.reached;
+            if (typeof ev.progress === 'number') setProg(ev.progress);
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Ziel-Loop');
+          } else if (ev.type === 'error') {
+            clearWorking();
+            textEl.innerHTML = `<em style="color:#ef4444">Ziel-Loop fehlgeschlagen: ${escHtml(ev.message || '')}</em>`;
+          }
+        }
+      }
+      if (answer && typeof marked !== 'undefined') {
+        if (window._ensureKatexMarked) window._ensureKatexMarked();
+        textEl.innerHTML = marked.parse(answer, { gfm: true, breaks: true });
+        textEl.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+      }
+      const combined = `# ${goal}\n\n`
+        + roundResults.map((r, i) => `## Runde ${i + 1}: ${r.focus}\n\n${r.result}`).join('\n\n')
+        + (answer ? `\n\n## Gesamtergebnis\n\n${answer}` : '');
+      if (roundResults.length) {
+        const status = document.createElement('div');
+        status.style.cssText = 'font-size:.9em;margin:6px 0;opacity:.85';
+        status.textContent = reached ? '✅ Ziel als erreicht bewertet' : '↻ Runden-Deckel erreicht — Stand oben, offene Punkte im Fazit';
+        content.appendChild(status);
+        const bar = document.createElement('div'); bar.className = 'wf-actions';
+        const bPres = document.createElement('button'); bPres.className = 'wf-action-btn';
+        bPres.textContent = '🖥️ → Präsentation';
+        bPres.onclick = () => _workflowToPresentation(combined);
+        const bPlan = document.createElement('button'); bPlan.className = 'wf-action-btn';
+        bPlan.textContent = '🗂️ → Planer';
+        bPlan.onclick = () => { if (typeof Planner !== 'undefined' && Planner.openFromText) Planner.openFromText(combined, goal.slice(0, 60) || 'Ziel'); else showToast('Planer nicht verfügbar'); };
+        bar.appendChild(bPres); bar.appendChild(bPlan); content.appendChild(bar);
+      }
+      if (answer || roundResults.length) {
+        messages.push({ role: 'user', content: head });
+        messages.push({ role: 'assistant', content: combined });
+        loadConversationList();
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') textEl.innerHTML = `<em style="color:#ef4444">Ziel-Loop fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      clearWorking();
+      abortController = null;
+      isStreaming = false;
+      setBtnSendState(true);
+    }
   }
 
   // ── /praesentation — illustrierter Präsentationsassistent ───────────────────
@@ -4643,6 +4810,7 @@ const Chat = (() => {
     { key: '/projekt', ins: '/projekt ', cmd: '/projekt <Beschreibung>', desc: 'Projekt-Orchestrator: zerlegt ein Vorhaben phasenweise als Vorschau (Ablaufdiagramm → morphologischer Kasten → Paarvergleich → Plan → To-Do → Patent-Entwurf & Skizze → Doku/Präsentation → Angebot) und legt auf Bestätigung EIN Projekt mit allen verknüpften Artefakten an (auch /vorhaben). Nichts wird eingereicht/versendet.' },
     { key: '/vorgang', ins: '/vorgang', cmd: '/vorgang', desc: 'Gespeicherten Projekt-Vorgang laden: listet die per /projekt gespeicherten Durchläufe (inkl. mitgeliefertem Beispiel), baut den gewählten als Vorschau-Karten neu auf und bietet „✅ Alles anlegen" (auch /vorgänge)' },
     { key: '/workflow', ins: '/workflow ', cmd: '/workflow 1. … 2. …', desc: 'Arbeitsablauf: nummerierte Schritte nacheinander. Pro Schritt Tags [lokal] [api] [web] [bild] [sprache] (z. B. „1. [lokal,web] recherchiere … 2. [api] verarbeite … 3. [bild] erzeuge ein Bild von … 4. [sprache] fasse es als Sprachnachricht"). Ergebnis → Chat/Präsentation/Planer' },
+    { key: '/ziel', ins: '/ziel ', cmd: '/ziel <Beschreibung>', desc: 'Ziel-Loop: nur EIN Ziel vorgeben — der Loop plant Teilziele, arbeitet in Runden (Handeln → Bewerten) darauf hin und entscheidet selbst, wann es erreicht ist (Fortschrittsbalken). Optional [web] (Runden web-erden) und [r7] (Runden-Deckel), z. B. „/ziel [web,r6] Vergleiche 3 Akku-Chemien für ein E-Bike". Ergebnis → Chat/Präsentation/Planer (auch /goal)' },
     { key: '/+',    ins: '/+ ',    cmd: '/+ …',    desc: 'Verbesserungsidee ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/-',    ins: '/- ',    cmd: '/- …',    desc: 'Fehler/Problem ins Feedback-Protokoll (nicht ans LLM)' },
     { key: '/',     ins: '/',      cmd: '/<Agent>', desc: 'Agent nur für diese Nachricht (z. B. /datenschutz_berater)', info: true },
