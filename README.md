@@ -74,11 +74,13 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 💬 **Chat** mit Streaming (SSE), Websuche (standardmäßig **aus**), Berechnungen
 - ⌨️ **Chat-Befehle (Slash-Befehle)** am Zeilenanfang: `/<Agent> <Frage>` (Schnell-Agent),
   `/dd[N]` / `/ddd[N]` (Deepdive bzw. Deepdive-Dokument), `/plan[N] [/Kürzel …]`
-  (Strategie- & Einsatzplan-Orchestrator), **`/workflow`** (mehrstufiger Arbeitsablauf, s. u.),
-  **`/recherche`** (tiefe Recherche mit Quellen), **`/such`** (erweiterte Suche mit
-  Synonymen), **`/bild`** / **`/bildhelp`** (Bildgenerierung), **`/frag`** (dynamische
-  Rückfragen), sowie **`/- <Text>`** (Problem/Fehler) und **`/+ <Text>`** (Idee/Verbesserung)
-  — letztere sammeln Nutzer-Feedback als Markdown in `data/feedback.md`. Vollständige
+  (Strategie- & Einsatzplan-Orchestrator), **`/projekt`** & **`/vorgang`** (Projekt-Orchestrator:
+  Vorhaben phasenweise zerlegen bzw. gespeicherten Vorgang laden), **`/workflow`** (mehrstufiger
+  Arbeitsablauf, s. u.), **`/ziel`** (zielgetriebener Loop, s. u.), **`/recherche`** (tiefe
+  Recherche mit Quellen), **`/such`** (erweiterte Suche mit Synonymen), **`/bild`** / **`/bildhelp`**
+  (Bildgenerierung), **`/frag`** (dynamische Rückfragen), sowie **`/- <Text>`** (Problem/Fehler)
+  und **`/+ <Text>`** (Idee/Verbesserung) — letztere sammeln Nutzer-Feedback als Markdown in
+  `data/feedback.md`. Vollständige
   Übersicht in der [Bedienungsanleitung](BEDIENUNGSANLEITUNG.md#chat-befehle-slash-befehle-im-überblick)
 - 🔧 **Arbeitsablauf (`/workflow`)** — nummerierte Schritte werden **nacheinander**
   abgearbeitet, jedes Zwischenergebnis gespeichert und als Grundlage des nächsten Schritts
@@ -88,6 +90,13 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Internet und speichert die Ergebnisse zwischen, die dann an ein **API-Modell** mit größerem
   Kontextfenster zur Weiterverarbeitung übergeben werden — umgeht API-Modelle ohne
   Internetzugriff und spart Tokens
+- 🎯 **Ziel-Loop (`/ziel`)** — du gibst **nur ein Ziel** vor (keine Schritte). Der Loop plant
+  selbst Teilziele und arbeitet **in Runden** darauf hin: jede Runde erarbeitet einen Fortschritt
+  und **prüft anschließend selbst**, ob das Ziel erreicht ist — sonst geht er mit der offenen
+  Lücke weiter, bis zum Ziel **oder** zum Runden-Deckel. **Fortschrittsbalken**, jede Runde
+  aufklappbar, am Ende **Synthese** mit **→ Präsentation / → Planer**. Optional `[web]` (jede
+  Runde vorher im Web recherchieren) und `[r7]` (Runden-Deckel). Ideal, wenn du *weißt, was
+  herauskommen soll, aber nicht, welche Schritte nötig sind* (im Gegensatz zu `/workflow`)
 - 🔊 **Sprachausgabe (TTS)** — jede KI-Antwort vorlesen lassen (🔊-Knopf), mit einer zur
   gewählten **Persona** passenden Stimme. Standard: **Browser-Sprachausgabe** (lokal,
   kostenlos, nichts wird gespeichert); optional ein im Profil gewähltes **API-TTS-Modell**
@@ -182,11 +191,13 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Kontext einblenden, Regler „schnell↔gründlich" und „kreativ↔korrekt", einzelne
   Dokumente als **Markdown/TXT exportieren**
 - 📊 **Matrix-Recherche** — Recherche-Tabelle mit Live-Speicherung und **Agent je Spalte**
-  (z. B. Rechercheur/Bewerter oder Halluzinationsprüfer; nur Favoriten-Agenten)
-- 💻 **Code-Tab** — zwei Untertabs: **IDE** (HTML5-Canvas-Programme per KI-Chat
-  erstellen, ausführen, interaktive Eingabefelder, Auto-Fehlerreparatur) und
-  **JSON-Editor** (JSON-Dateien öffnen, live prüfen, formatieren, reparieren — auch
-  ohne Programmierkenntnisse)
+  (z. B. Rechercheur/Bewerter oder Halluzinationsprüfer; nur Favoriten-Agenten). **Import**
+  von **Excel/CSV** (als Firmenliste oder vollständige Tabelle) und **JSON-Export/-Import**
+- 💻 **Code-Tab** — **ein** chat-getriebener Arbeitsbereich: die KI ändert die aktive Datei
+  oder erzeugt per „🏗 Struktur" einen ganzen **Mehrdatei-Baum**; **▶ Ausführen** rendert
+  HTML/JS in der Canvas-Vorschau, führt Python serverseitig aus oder prüft/formatiert JSON.
+  Zusätzlich ein **autonomer 🤖 Coding-Agent**, der eigenständig Dateien liest/schreibt/ausführt
+  und bis zur Lösung iteriert (Auto-Vorschau + Auto-Fehlerreparatur); ZIP-Export
 - 🔢 **Mathe-Tab** — eigener Mathematik-Workspace: löst Gleichungen, rechnet mit
   SymPy/NumPy/SciPy, **LaTeX standardmäßig**, Export als **LaTeX/PDF**. **Funktionsgraphen**
   werden **zuverlässig deterministisch serverseitig** gezeichnet (nicht modellabhängig) — der
@@ -219,10 +230,18 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - ✅ **To-Do** — Projektbaum mit **Wissensgraph** (2D & 3D-Kugel): Aufgaben, Zuständige,
   Verknüpfungen, Anlagen; KI-Extraktion, Empfehlung „was als Nächstes", Daten-Chat über den
   Bestand (inkl. Personen-Auswertungen), Export/Import
+- 📊 **Excel-Vergleich** — zwei Excel-/CSV-Dateien über eine **Schlüsselspalte** matchen und
+  **Zelle für Zelle** vergleichen: **pro Spalte wählbar** *ignorieren / Logik / Logik + KI* — erst
+  ein billiger **Logikvergleich** (z. B. Zeichen ohne Leerzeichen), bei Unterschied eine
+  **KI-Bewertung je Zelle** (Kontext wird nach jeder Zelle zurückgesetzt → auch große Tabellen
+  bleiben im Kontextfenster). Ergebnis in **drei Untertabs** (Tabelle 1 mit Spaltenaktionen,
+  Tabelle 2, Ergebnis mit **Farbdiff** und Filtern), mit **Stop/Fortsetzen**, **laufendem Speichern**,
+  **CSV/JSON-Export** und einer **Mehrdatei-Job-Queue**. Im **Assistent-Modus**: hängst du zwei
+  Tabellen im Chat an, schlägt der Assistent den Vergleich von selbst vor. Auch per `/excelvergleich`
 - 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail, Logs, Verzeichnis-Analyse,
   Postfach, Patente, Angebote/Rechnungen, Arbeitszeugnisse, Morphologischer Kasten,
-  Jury, Anfrage, Matrix, **Varianten**, **To-Do** und **Transkription** lassen sich im
-  Profil ein-/ausblenden; beim **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
+  Jury, Anfrage, Matrix, **Varianten**, **Excel-Vergleich**, **To-Do** und **Transkription**
+  lassen sich im Profil ein-/ausblenden; beim **Erstaufruf** sind sie ausgeblendet (nur Kern-Tabs sichtbar)
 - 📋 **Diagnose-Logger** — zuschaltbares Protokoll zur Fehlersuche
 - 👤 **Nutzerprofil & Projekte** — Modell-Rollen, Dokument-Footer, Projektzuordnung
 - 💾 **Backup/Restore** — **alle** Nutzerdaten als ZIP: Profil, Projekte, Gespräche,
@@ -272,7 +291,7 @@ Ein Eindruck der wichtigsten Tabs (Screenshots aus der Anwendung):
 *📊 Matrix-Recherche — Recherche-Tabelle mit Agent je Spalte.*
 
 ![Code](static/onboarding/code.png)
-*💻 Code — IDE mit Canvas-Vorschau und JSON-Editor.*
+*💻 Code — chat-getriebener Arbeitsbereich mit Canvas-Vorschau und autonomem Coding-Agent.*
 
 ![Medizin](static/onboarding/medizin.png)
 *🩺 Medizin — Zwei-Modell-Pipeline mit Rückfragen und Patienten-Akten.*
@@ -393,7 +412,7 @@ AI_Framework_Thomas/
 ├── static/
 │   ├── index.html          Single-Page-App
 │   ├── css/app.css         Theme + 7 Modus-Farbschemata
-│   └── js/                 Frontend-Module (chat, canvas, ide, planner, …)
+│   └── js/                 Frontend-Module (chat, canvas, code_workspace, compare, matrix_research, planner, …)
 ├── bilder/                 (leer – Branding kommt aus dem Nutzerprofil)
 ├── data/                   Laufzeitdaten (DB, agents, plans, code, uploads, …)
 │   └── plans/              enthält ein 100-Aufgaben-Beispielprojekt
@@ -409,7 +428,7 @@ Dieses Projekt steht unter der **MIT-Lizenz** — siehe [LICENSE](LICENSE).
 
 Die verwendeten Python- und Frontend-Bibliotheken stehen unter permissiven Lizenzen
 (MIT, BSD, Apache-2.0, PSF); die vollständige Aufstellung mit Versionen findet sich in
-[docs/LIZENZEN.md](docs/LIZENZEN.md). Die LLM-Modelle (z. B. `ministral-3:3b`) unterliegen
+[docs/LIZENZEN.md](docs/LIZENZEN.md). Die LLM-Modelle (z. B. `granite4.2:3b`) unterliegen
 ihren eigenen, modellspezifischen Lizenzen — bitte auf der jeweiligen
 [Ollama-Modellseite](https://ollama.com/library) verifizieren.
 
