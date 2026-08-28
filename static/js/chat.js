@@ -306,6 +306,16 @@ const Chat = (() => {
       return;
     }
 
+    // Automatisches Angebot eines Tabellenvergleichs: sind ≥2 Excel-/CSV-Dateien
+    // angehängt (und kein Slash-Befehl), den zellenweisen Vergleich anbieten. Läuft
+    // auch im Assistent-Modus (reines Chat/Overlay).
+    const _cmpTables = pendingFiles.filter(_looksLikeTableFile);
+    if (!_bypassCompareOffer && _cmpTables.length >= 2 && !text.startsWith('/') && _compareOfferEnabled()) {
+      _offerCompare(_cmpTables.slice(0, 2), text);
+      return;
+    }
+    _bypassCompareOffer = false;
+
     // Automatisches Angebot einer tiefen Recherche bei breiten Fakten-/Recherchefragen
     // (Profil-Häkchen, Web erlaubt, kein Agent/keine Datei). Fragt Tiefe+Umfang ab.
     if (!_bypassResearchOffer && pendingFiles.length === 0 && _researchOfferEnabled()
@@ -1753,6 +1763,15 @@ const Chat = (() => {
     const m = text.match(/^\/(recherche|deepresearch|deep|tief)\b\s*([\s\S]*)$/i);
     if (!m) return null;
     return { topic: (m[2] || '').trim() };
+  }
+
+  let _bypassCompareOffer = false;
+  function _looksLikeTableFile(f) { return /\.(xlsx|xls|csv)$/i.test((f && f.filename) || ''); }
+  function _compareOfferEnabled() {
+    try {
+      const p = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}) : {};
+      return p.excel_compare_offer !== false;
+    } catch (_) { return true; }
   }
 
   function _researchOfferEnabled() {
@@ -3583,6 +3602,90 @@ const Chat = (() => {
         isStreaming = false; setBtnSendState(true);
       },
       onError: (msg) => { evalEl.innerHTML = `<em style="color:#ef4444">Vergleich fehlgeschlagen: ${escHtml(msg)}</em>`; isStreaming = false; setBtnSendState(true); },
+    });
+  }
+
+  // ── Assistent-Modus: zwei Tabellen erkannt → zellenweisen Vergleich anbieten ──
+  // Dezentes Angebot (wie _offerResearch); auf Zusage folgt ein kompaktes Inline-
+  // Formular (Schlüsselspalten + KI-Schalter) und der zellenweise Vergleich direkt
+  // in der Chat-Blase. Nutzt die geteilten Compare-Helfer (auch im Assistent-Modus).
+  function _offerCompare(files, origText) {
+    showWelcome(false);
+    const row = appendMessage('assistant', '', [], true);
+    const c = row.querySelector('.bubble-content');
+    const box = document.createElement('div');
+    box.className = 'research-offer';
+    box.innerHTML = `📊 Du hast zwei Tabellen angehängt (<b>${escHtml(files[0].filename)}</b> und `
+      + `<b>${escHtml(files[1].filename)}</b>). Sie <b>zellenweise vergleichen</b>? `
+      + '<button class="research-offer-yes">Vergleichen</button> '
+      + '<button class="research-offer-no">Normal senden</button>';
+    c.appendChild(box);
+    box.querySelector('.research-offer-yes').addEventListener('click', () => { row.remove(); _startInlineCompare(files); });
+    box.querySelector('.research-offer-no').addEventListener('click', () => {
+      row.remove(); _bypassCompareOffer = true; sendMessage();
+    });
+    scrollToBottom();
+  }
+
+  async function _startInlineCompare(files) {
+    if (typeof Compare === 'undefined') { showToast('Vergleichsmodul nicht geladen'); return; }
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false);
+    const row = appendMessage('assistant', '', [], true);
+    const c = row.querySelector('.bubble-content');
+    c.appendChild(makeWorking('lese Tabellen'));
+    let da, db;
+    try {
+      da = await Compare.preview(files[0].id, '', 0);
+      db = await Compare.preview(files[1].id, '', 0);
+    } catch (e) { c.innerHTML = `<em style="color:#ef4444">Konnte Tabellen nicht lesen: ${escHtml(e.message)}</em>`; return; }
+    const opt = (arr) => (arr || []).map((h, i) => `<option value="${i}">${escHtml(h || ('Spalte ' + (i + 1)))}</option>`).join('');
+    c.innerHTML =
+      `<div style="font-size:13px;margin-bottom:6px">📊 <b>${escHtml(da.filename)}</b> ↔ <b>${escHtml(db.filename)}</b></div>`
+      + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">'
+      + `<label style="font-size:12px">Schlüssel A<br><select id="cmpinl-key-a">${opt(da.headers)}</select></label>`
+      + `<label style="font-size:12px">Schlüssel B<br><select id="cmpinl-key-b">${opt(db.headers)}</select></label>`
+      + '<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="cmpinl-ki" checked> KI-Bewertung je geänderte Zelle</label>'
+      + '<button id="cmpinl-go" class="export-btn var-ai" style="font-size:12px">🔍 Vergleichen</button>'
+      + '</div><div id="cmpinl-out"></div>';
+    c.querySelector('#cmpinl-go').addEventListener('click', () => {
+      const ka = parseInt(c.querySelector('#cmpinl-key-a').value || '0', 10) || 0;
+      const kb = parseInt(c.querySelector('#cmpinl-key-b').value || '0', 10) || 0;
+      const kiOn = c.querySelector('#cmpinl-ki').checked;
+      const keyNameA = (da.headers[ka] || '').trim();
+      const nameSet = {}; (da.headers || []).forEach(h => nameSet[String(h || '').trim()] = true);
+      const common = (db.headers || []).map(h => String(h || '').trim()).filter(n => n && nameSet[n] && n !== keyNameA);
+      const columns = common.map(n => ({ name: n, mode: kiOn ? 'logic_llm' : 'logic', metric: 'nospace' }));
+      const params = {
+        file_id_a: files[0].id, sheet_a: da.sheet, header_row_a: 0, key_a: ka,
+        file_id_b: files[1].id, sheet_b: db.sheet, header_row_b: 0, key_b: kb,
+        columns, model: (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined,
+      };
+      _runInlineCompare(params, c.querySelector('#cmpinl-out'), da.filename, db.filename);
+    });
+    scrollToBottom();
+  }
+
+  async function _runInlineCompare(params, out, labelA, labelB) {
+    isStreaming = true; setBtnSendState(false);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+    out.innerHTML = ''; out.appendChild(makeWorking('🔍 vergleicht zellenweise'));
+    let meta = null; const cells = []; const cmap = {}; let tmr = 0;
+    const render = () => { out.innerHTML = Compare.renderCellsHtml(meta, cells, { onlyChanges: true }); };
+    const sched = () => { if (tmr) return; tmr = setTimeout(() => { tmr = 0; render(); }, 300); };
+    await Compare.runCellStream(params, {
+      onMeta: (ev) => { meta = ev; render(); },
+      onCell: (ev) => { const k = ev.key + ' ' + ev.column; if (!(k in cmap)) { cmap[k] = cells.length; cells.push(ev); } else cells[cmap[k]] = ev; sched(); },
+      onDone: (ev) => {
+        render();
+        if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Excel-Vergleich');
+        const changed = cells.filter(x => x.verdict === 'changed').length;
+        messages.push({ role: 'user', content: `📊 Excel-Vergleich: ${labelA} ↔ ${labelB}` });
+        messages.push({ role: 'assistant', content: `📊 Zellenweiser Vergleich abgeschlossen: ${changed} geänderte Zellen von ${cells.length} verglichenen.` });
+        _persistConversation(); loadConversationList();
+        isStreaming = false; setBtnSendState(true);
+      },
+      onError: (msg) => { out.innerHTML = `<em style="color:#ef4444">Vergleich fehlgeschlagen: ${escHtml(msg)}</em>`; isStreaming = false; setBtnSendState(true); },
     });
   }
 

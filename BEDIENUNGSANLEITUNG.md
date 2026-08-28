@@ -1272,21 +1272,28 @@ Das geht auch **aus dem Chat** mit **`/paarvergleich [Thema]`** (funktioniert au
 ## 11g.1 Excel-Listen vergleichen (📊 Excel-Vergleich)
 
 Tab **📊 Excel-Vergleich** — vergleicht **zwei Excel-/CSV-Dateien** (die je mehrere Tabellenblätter
-haben dürfen) und wertet die Unterschiede zusätzlich per **KI** aus.
+haben dürfen) **Zelle für Zelle** und formuliert die Unterschiede auf Wunsch per **KI**.
 
 1. **Datei A** und **Datei B** laden und je **⬆ einlesen**.
 2. Pro Datei das gewünschte **Blatt** und eine **Schlüsselspalte** wählen (z. B. eine ID- oder
    Namensspalte — darüber werden gleiche Zeilen einander zugeordnet).
-3. **🔍 Vergleichen** — es erscheint eine Übersicht: **nur in A**, **nur in B** und **geänderte Zeilen**
-   (Spalte, alter Wert → neuer Wert), darunter eine **KI-Bewertung** der wichtigsten Unterschiede.
-4. Mit einem Namen **💾 Speichern** — der Vergleich ist später über die Auswahl oben wieder abrufbar
-   (`data/compare/`). **⬇ CSV** exportiert die Unterschiede.
+3. Im Untertab **Tabelle 1** pro Spalte die **Aktion** festlegen:
+   - **ignorieren** — Spalte wird nicht verglichen,
+   - **Logik** — schneller, rechnerischer Vergleich (z. B. gleiche Zeichenzahl ohne Leerzeichen ⇒ „gleich"; Metrik wählbar: Zahl / exakt / Länge),
+   - **Logik + KI** — bei einem Unterschied bewertet zusätzlich die **KI jede betroffene Zelle einzeln** und beschreibt in einem Satz, was sich geändert hat. Der Kontext wird **nach jeder Zelle zurückgesetzt**, damit auch große Tabellen im gewählten Kontextfenster bleiben.
+4. **🔍 Vergleichen** — der Untertab **Ergebnis** zeigt die Spalten **nebeneinander**; geänderte Zellen erscheinen **zweifarbig** (A rot, B grün) samt KI-Zusammenfassung. Ein **Fortschrittsbalken** zeigt den Stand; mit **⏹ Stopp** anhalten und **▶ Fortsetzen** später weitermachen (bereits bewertete Zellen werden übersprungen). Filter: **nur Änderungen**, **nur KI-bewertete**, einzelne **Spalte**.
+5. Mit einem Namen **💾 Speichern** (läuft ohnehin **laufend** mit); **⬇ CSV** / **⬇ JSON** exportieren, **⬆ JSON** lädt ein Ergebnis zurück.
 
-> **Auch aus dem Chat:** Tippe **`/excelvergleich`** — es öffnet sich dasselbe Fenster (zwei Dateien +
-> Blatt/Schlüsselspalte), und das Ergebnis erscheint direkt im Chat. So funktioniert es auch im
-> **Assistent-Modus**, in dem nur der Chat sichtbar ist.
+> **Stapel-Job:** Unter **🗂 Stapel-Job** mehrere Dateipaare mit Namen in die Warteschlange legen und
+> **▶ Job starten** — sie werden nacheinander verglichen und einzeln gespeichert. Läuft das lokal, kannst
+> du nebenher weiter mit Cloud-Modellen im Chat arbeiten.
 
-Alles läuft **lokal**: der eigentliche Abgleich ist rein rechnerisch, nur die abschließende Bewertung
+> **Auch aus dem Chat / Assistent-Modus:** Hängst du im Chat **zwei Excel-/CSV-Dateien** an, schlägt der
+> Assistent den Vergleich von selbst vor — ein Klick, Schlüsselspalten wählen, fertig; das Ergebnis
+> erscheint direkt in der Antwort. (Abschaltbar im Profil: „Tabellenvergleich automatisch anbieten".)
+> Der Befehl **`/excelvergleich`** öffnet den klassischen Zeilen-Vergleich im Chat.
+
+Alles läuft **lokal**: der eigentliche Abgleich ist rein rechnerisch, nur die Zell-Bewertung
 nutzt das (lokal bevorzugte) Sprachmodell.
 
 ---
