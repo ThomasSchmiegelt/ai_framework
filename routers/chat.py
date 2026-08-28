@@ -961,7 +961,9 @@ async def _chat_generator(request: ChatRequest):
                         "verweise den Nutzer auf den passenden Chat-Befehl: gewichtete "
                         "Entscheidung/Variantenvergleich → /paarvergleich, zwei Excel-Tabellen "
                         "vergleichen → /excelvergleich, geführte Präsentation → /praesentation, "
-                        "mehrstufige Web-Recherche → /recherche. Eine Gesamtübersicht liefert /hilfe.")
+                        "mehrstufige Web-Recherche → /recherche. Eine Gesamtübersicht liefert /hilfe. "
+                        "Sind ZWEI Excel-/CSV-Dateien angehängt, biete von dir aus den zellenweisen "
+                        "Tabellenvergleich an (/excelvergleich).")
     _agent_hint = ""
     if _agent_tools_on and ALLOW_PYTHON_EXEC:
         _agent_hint = ("Du hast einen Code-Interpreter: Für rechen-/datenlastige oder komplexe "

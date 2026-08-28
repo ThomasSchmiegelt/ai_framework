@@ -803,6 +803,71 @@ const MatrixResearch = (() => {
       });
   }
 
+  // Excel-/CSV-Datei einlesen: als Firmenliste (erste Spalte) ODER als vollständige
+  // Tabelle (Kopfzeile → Spalten, Zeilen → Zellen). Server: /api/matrix/import-table.
+  async function _importExcel(file) {
+    if (!file) return;
+    const asTable = confirm(
+      'Als vollständige Tabelle importieren?\n\n' +
+      'OK = ganze Tabelle (Kopfzeile → Spalten, Zeilen → Zellen)\n' +
+      'Abbrechen = nur die erste Spalte als Firmen-/Themenliste');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('mode', asTable ? 'table' : 'companies');
+    showToast('⏳ Datei wird gelesen…');
+    let data;
+    try {
+      const r = await fetch('/api/matrix/import-table', { method: 'POST', body: fd });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { m = (await r.json()).detail || m; } catch (_) {} throw new Error(m); }
+      data = await r.json();
+    } catch (e) { showToast('Import fehlgeschlagen: ' + e.message); return; }
+    const headers = data.headers || [], rows = data.rows || [];
+    if (!rows.length) { showToast('Keine Zeilen gefunden'); return; }
+    if (_rows.some(r => r.topic && r.topic.trim()) &&
+        !confirm(`${rows.length} Zeilen importieren und bestehende ersetzen?`)) return;
+    if (asTable) {
+      _cols = headers.slice(1).map(h => ({ prompt: String(h || '').trim(), agent: '', tool: '' }));
+      if (!_cols.length) _cols = [{ prompt: '', agent: '', tool: '' }];
+      _rows = rows.map(r => ({ topic: String((r || [])[0] == null ? '' : r[0]).trim() }));
+      _cells = rows.map(r => _cols.map((_, c) => {
+        const v = String((r || [])[c + 1] == null ? '' : r[c + 1]).trim();
+        return { status: v ? 'done' : 'empty', text: v };
+      }));
+      showToast(`✓ Tabelle importiert: ${_rows.length} Zeilen, ${_cols.length} Spalten`);
+    } else {
+      _rows = rows.map(r => ({ topic: String((r || [])[0] == null ? '' : r[0]).trim() })).filter(r => r.topic);
+      _initCells();
+      showToast(`✓ ${_rows.length} Firmen eingelesen`);
+    }
+    _saveState();
+    _render();
+  }
+
+  // Matrix-Zustand als JSON exportieren / importieren (Spalten, Zeilen, Zellen).
+  function _exportJson() {
+    const payload = { version: 1, cols: _cols, rows: _rows, cells: _cells, exported_at: new Date().toISOString() };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    a.download = 'matrix_recherche.json'; a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function _importJson(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const d = JSON.parse(e.target.result);
+        if (!Array.isArray(d.cols) || !Array.isArray(d.rows) || !Array.isArray(d.cells))
+          throw new Error('Erwarte cols/rows/cells');
+        if (_rows.some(r => r.topic && r.topic.trim()) && !confirm('Bestehende Matrix ersetzen?')) return;
+        _cols = d.cols; _rows = d.rows; _cells = d.cells;
+        _saveState(); _render();
+        showToast(`✓ JSON importiert: ${_rows.length} Zeilen, ${_cols.length} Spalten`);
+      } catch (err) { showToast('JSON ungültig: ' + err.message); }
+    };
+    reader.readAsText(file, 'utf-8');
+  }
+
   // Partner-Vorlage einrichten: Agenten sicherstellen + vordefinierte Spalten setzen.
   async function _applyPartnerTemplate() {
     if (!confirm('Partner-Auswertung einrichten?\n\nDie aktuellen Spalten werden durch die Partner-Stufen ersetzt '
@@ -1322,6 +1387,14 @@ const MatrixResearch = (() => {
       if (e.target.files[0]) _importCsv(e.target.files[0]);
       e.target.value = '';
     });
+
+    const excelInput = document.getElementById('matrix-excel-input');
+    document.getElementById('btn-matrix-import-excel')?.addEventListener('click', () => excelInput?.click());
+    excelInput?.addEventListener('change', e => { if (e.target.files[0]) _importExcel(e.target.files[0]); e.target.value = ''; });
+    const jsonInput = document.getElementById('matrix-json-input');
+    document.getElementById('btn-matrix-export-json')?.addEventListener('click', _exportJson);
+    document.getElementById('btn-matrix-import-json')?.addEventListener('click', () => jsonInput?.click());
+    jsonInput?.addEventListener('change', e => { if (e.target.files[0]) _importJson(e.target.files[0]); e.target.value = ''; });
 
     document.querySelector('[data-tab="matrix"]')?.addEventListener('click', () => {
       _loadAgents();

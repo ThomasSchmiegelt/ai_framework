@@ -1207,6 +1207,11 @@
         <button id="btn-matrix-md-zip" class="export-btn" title="Jede Zelle als eigene thema_prompt.md, gesammelt als ZIP herunterladen">⬇ MD-ZIP (pro Zelle)</button>
         <button id="btn-matrix-import-csv" class="export-btn">⬆ CSV Import</button>
         <input type="file" id="matrix-csv-input" accept=".csv" style="display:none" />
+        <button id="btn-matrix-import-excel" class="export-btn" title="Excel-/CSV-Datei einlesen: als Firmenliste (erste Spalte) oder als vollständige Tabelle">⬆ Excel Import</button>
+        <input type="file" id="matrix-excel-input" accept=".xlsx,.xls,.csv" style="display:none" />
+        <button id="btn-matrix-export-json" class="export-btn" title="Matrix als JSON exportieren">⬇ JSON</button>
+        <button id="btn-matrix-import-json" class="export-btn" title="Matrix aus JSON laden">⬆ JSON Import</button>
+        <input type="file" id="matrix-json-input" accept=".json" style="display:none" />
         <button id="btn-matrix-graph" class="export-btn" style="font-size:12px" title="Wissensgraph ein-/ausblenden: Zeilen als Knoten, Verknüpfungen per KI-Vorschlag und manuell editierbar">🕸 Graph</button>
         <button id="btn-matrix-table-graph" class="export-btn" style="font-size:12px" title="2. Stufe: komplette bestehende Tabelle in einen Wissensgraphen überführen (öffnet den Graphen, schlägt Verknüpfungen über alle Zeilen vor) – ohne erneute Recherche">🕸 Tabelle → Graph</button>
         <button id="btn-matrix-clear" class="export-btn btn-danger-sm">✕ Leeren</button>
@@ -2507,13 +2512,72 @@
 
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0">
         <button id="btn-cmp-run" class="export-btn var-ai">🔍 Vergleichen</button>
-        <input type="text" id="cmp-save-name" placeholder="Name zum Speichern…" style="max-width:200px" />
+        <button id="btn-cmp-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
+        <button id="btn-cmp-resume" class="export-btn" style="display:none">▶ Fortsetzen</button>
+        <input type="text" id="cmp-save-name" placeholder="Name zum Speichern…" style="max-width:180px" />
         <button id="btn-cmp-save" class="export-btn">💾 Speichern</button>
         <button id="btn-cmp-csv" class="export-btn" title="Diff-Tabelle als CSV">⬇ CSV</button>
+        <button id="btn-cmp-json" class="export-btn" title="Vollständiges Ergebnis als JSON">⬇ JSON</button>
+        <button id="btn-cmp-json-import" class="export-btn" title="Ergebnis-JSON laden">⬆ JSON</button>
+        <input type="file" id="cmp-json-input" accept=".json" style="display:none" />
       </div>
 
-      <div id="cmp-diff"></div>
-      <div id="cmp-eval" class="var-explain" style="margin-top:12px"></div>
+      <!-- Mehrdatei-Job: mehrere Paare nacheinander abarbeiten -->
+      <details id="cmp-job" style="margin:4px 0 8px">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--text-muted)">🗂 Stapel-Job (mehrere Dateipaare nacheinander)</summary>
+        <div style="padding:8px 0">
+          <p class="planner-muted" style="font-size:11.5px;margin:0 0 6px">
+            Aktuell eingelesenes Paar mit einem Namen zur Warteschlange hinzufügen; „▶ Job starten"
+            arbeitet die Paare der Reihe nach ab (jedes wird als eigener Vergleich gespeichert). Läuft
+            lokal, bleibt paralleler Cloud-Chat nutzbar.</p>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+            <input type="text" id="cmp-job-name" placeholder="Name für dieses Paar…" style="max-width:200px" />
+            <button id="btn-cmp-job-add" class="export-btn" style="font-size:12px">＋ Paar in Warteschlange</button>
+            <button id="btn-cmp-job-run" class="export-btn var-ai" style="font-size:12px">▶ Job starten</button>
+            <button id="btn-cmp-job-clear" class="export-btn btn-danger-sm" style="font-size:12px">✕ Leeren</button>
+            <span id="cmp-job-status" class="planner-muted" style="font-size:11.5px"></span>
+          </div>
+          <div id="cmp-job-list"></div>
+        </div>
+      </details>
+
+      <div id="cmp-progress-wrap" style="display:none">
+        <div class="cmp-progress"><div id="cmp-progress-fill" class="cmp-progress-fill"></div></div>
+        <div id="cmp-progress-label" class="planner-muted" style="font-size:11.5px"></div>
+      </div>
+
+      <!-- Drei Untertabs -->
+      <div class="cmp-subbar">
+        <button class="cmp-subtab active" data-sub="a">Tabelle 1</button>
+        <button class="cmp-subtab" data-sub="b">Tabelle 2</button>
+        <button class="cmp-subtab" data-sub="result">Ergebnis</button>
+      </div>
+
+      <div id="cmp-sub-a" class="cmp-subpanel active">
+        <div class="var-sec-head">Spaltenaktionen (gelten für den Vergleich)</div>
+        <p class="planner-muted" style="font-size:11.5px;margin:2px 0 4px">
+          Pro Spalte wählen: <b>ignorieren</b> · <b>Logik</b> (billiger Vergleich, z. B. Zeichen ohne
+          Leerzeichen) · <b>Logik + KI</b> (bei Unterschied zusätzlich eine KI-Bewertung je Zelle,
+          Kontext wird nach jeder Zelle zurückgesetzt).</p>
+        <div id="cmp-colcfg-wrap" style="overflow-x:auto"><table class="cmp-colcfg"><tbody id="cmp-colcfg"></tbody></table></div>
+        <div class="var-sec-head" style="margin-top:12px">Tabelle 1 (Vorschau)</div>
+        <div id="cmp-table-a" style="overflow-x:auto"></div>
+      </div>
+
+      <div id="cmp-sub-b" class="cmp-subpanel">
+        <div class="var-sec-head">Tabelle 2 (Vorschau) — Aktionen aus Tabelle 1 gelten spaltenweise mit</div>
+        <div id="cmp-table-b" style="overflow-x:auto"></div>
+      </div>
+
+      <div id="cmp-sub-result" class="cmp-subpanel">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
+          <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="cmp-filter-changed"> nur Änderungen</label>
+          <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="cmp-filter-eval"> nur KI-bewertete</label>
+          <label style="display:flex;align-items:center;gap:4px">Spalte:
+            <select id="cmp-filter-col" style="font-size:12px"><option value="">alle</option></select></label>
+        </div>
+        <div id="cmp-result" style="overflow-x:auto"></div>
+      </div>
     </div><!-- /compare-panel -->
 
     <!-- ── KI-To-Do-Liste mit Wissensgraph ──────────────────────────────────── -->
@@ -3075,6 +3139,15 @@
         mehrere Aspekte werden im Web gesucht und quellen-gestützt zusammengefasst — das liefert
         längere und faktisch belastbarere Antworten. Der Befehl <code>/recherche &lt;Thema&gt;</code>
         geht immer. Standard: an. Im Hartman-Modus deaktiviert.</span>
+      </span>
+    </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-compare-offer" style="width:auto;margin-top:2px" />
+      <span>📊 <strong>Tabellenvergleich automatisch anbieten</strong>
+        <span class="planner-muted">— hängst du im Chat <strong>zwei Excel-/CSV-Dateien</strong> an,
+        schlägt der Assistent einen <strong>zellenweisen Vergleich</strong> vor (Schlüsselspalte +
+        optional KI-Bewertung je geänderte Zelle) und rendert das Ergebnis direkt in der Antwort.
+        Funktioniert auch im Assistent-Modus. Standard: an.</span>
       </span>
     </label>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
@@ -3645,7 +3718,7 @@
 <script src="/js/profile.js?v=20260826granite"></script>
 <script src="/js/projects.js?v=20260825links"></script>
 <script src="/js/planner.js?v=20260817workflow"></script>
-<script src="/js/matrix_research.js?v=20260823tool"></script>
+<script src="/js/matrix_research.js?v=20260828import"></script>
 <script src="/js/rfq.js?v=20260622"></script>
 <script src="/js/presentation_assistant.js?v=20260603"></script>
 <script src="/js/illustrated_presentation.js?v=20260610illus"></script>
@@ -3661,7 +3734,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260823lift"></script>
-<script src="/js/compare.js?v=20260821compare"></script>
+<script src="/js/compare.js?v=20260828cells"></script>
 <script src="/js/todo.js?v=20260818handoff"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>

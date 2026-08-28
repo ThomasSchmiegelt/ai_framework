@@ -79,6 +79,34 @@ async def matrix_export_md_zip(req: Request):
     )
 
 
+@router.post("/api/matrix/import-table")
+async def matrix_import_table(file: UploadFile = File(...), sheet: str = Form(""),
+                              header_row: int = Form(0), mode: str = Form("table")):
+    """Liest eine Excel-/CSV-Datei für den Matrix-Tab ein (kein LLM).
+
+    ``mode="companies"`` → das Frontend nimmt die erste Spalte als Firmen-/Themenliste;
+    ``mode="table"`` → volle Tabelle (Kopfzeile = Spalten, Zeilen = Zellen). Liefert
+    Kopfzeilen, Zeilen und die verfügbaren Blätter zurück."""
+    from tools.files import read_table
+    fid = f"matrix_{uuid.uuid4().hex[:8]}_{file.filename}"
+    fp = UPLOADS_DIR / fid
+    fp.write_bytes(await file.read())
+    try:
+        tbl = await asyncio.to_thread(read_table, fp, sheet or None, int(header_row), None)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Tabelle nicht lesbar: {e}")
+    if tbl.get("error"):
+        raise HTTPException(status_code=400, detail=tbl["error"])
+    return {
+        "filename": file.filename,
+        "sheets": tbl.get("sheets", []),
+        "sheet": tbl.get("sheet", ""),
+        "headers": tbl.get("headers", []),
+        "rows": tbl.get("rows", []),
+        "mode": str(mode or "table"),
+    }
+
+
 _MATRIX_GRAPH_SYSTEM = (
     "Du bist ein Analyst für Wissensgraphen. Du bekommst eine Liste von Knoten — jeder "
     "Knoten ist ein Thema bzw. eine Firma aus einer Recherche-Tabelle samt der dazu "
