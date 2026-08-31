@@ -68,6 +68,10 @@ function switchTab(tabId) {
     // Code-Editor (CodeMirror) neu vermessen, da das Panel vorher display:none war
     if (typeof CodeIDE !== 'undefined' && CodeIDE.refresh) setTimeout(CodeIDE.refresh, 0);
   }
+  if (tabId === 'bilderkennung') {
+    // Canvas/Bild neu vermessen, da das Panel vorher display:none (0px) war
+    if (typeof Bilderkennung !== 'undefined' && Bilderkennung.refresh) setTimeout(Bilderkennung.refresh, 0);
+  }
 }
 
 // ── Modelle laden ──────────────────────────────────────────────────────────
@@ -696,6 +700,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('TTS', () => { if (typeof TTS !== 'undefined') TTS.init(); });
   _safeInit('Jury', () => { if (typeof Jury !== 'undefined') Jury.init(); });
   _safeInit('Pairing', () => { if (typeof Pairing !== 'undefined') Pairing.init(); });
+  _safeInit('Bilderkennung', () => { if (typeof Bilderkennung !== 'undefined') Bilderkennung.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)
   (function wireGuide() {

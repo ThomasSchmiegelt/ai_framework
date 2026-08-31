@@ -12,9 +12,12 @@
 $ErrorActionPreference = "Stop"
 
 $APP_DIR       = $PSScriptRoot
-$MODELS        = @("ministral-3:3b", "qwen3.5:4b", "granite4.2:3b")   # Standardmodelle; weitere bei Bedarf via 'ollama pull'
+$MODELS        = @("ministral-3:3b", "qwen3.5:4b", "granite4.2:3b", "qwen2.5vl:3b")   # Standardmodelle; weitere bei Bedarf via 'ollama pull'
 # granite4.2:3b (IBM, Apache-2.0, ~2,2 GB, 128K Kontext): auf sauberes Tool-Use/JSON + RAG
 # trainiert und deutschsprachig — sehr gut fuer den lokalen Einsatz (Werkzeug-Loop/Assistent-Modus).
+# qwen2.5vl:3b (Alibaba, Apache-2.0, ~3,2 GB): multimodales Vision-Modell fuer ALLE Bild-
+# funktionen (Bilderkennung/Objekt-Markierung, Bild-RAG, Praesentation aus Bildern, Postfach-
+# Bildanalyse). Grounding-faehig (liefert Objekt-Koordinaten) — noetig fuer die Bilderkennung.
 # Groessere Rechner: zusaetzlich 'ollama pull granite4.2:8b' bzw. ':30b'. Tag ggf. auf
 # https://ollama.com/library pruefen (fehlgeschlagener Pull ist unkritisch, s. u.).
 $EMBED_MODEL   = "nomic-embed-text"   # RAG-Embeddings (klein, CPU-tauglich)

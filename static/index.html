@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260826progress" />
+  <link rel="stylesheet" href="/css/app.css?v=20260831bk" />
 </head>
 <body>
 
@@ -183,6 +183,7 @@
       <button class="tab-btn" data-tab="transcription">🎙 Transkription</button>
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
       <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
+      <button class="tab-btn" data-tab="bilderkennung">🖼 Bilderkennung</button>
     </div>
 
     <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
@@ -2580,6 +2581,35 @@
       </div>
     </div><!-- /compare-panel -->
 
+    <!-- ── Bilderkennung / Objekt-Grounding ─────────────────────────────────── -->
+    <div id="bilderkennung-panel" class="panel" style="overflow:auto;padding:12px 14px">
+      <h2 style="font-size:16px;margin:0 0 4px">🖼 Bilderkennung</h2>
+      <p class="planner-muted" style="font-size:12px;margin:0 0 12px">
+        Bild wählen, Suchbegriff eingeben (z. B. „das rote Auto") → das gefundene Objekt wird im
+        Bild <strong>markiert</strong>. Braucht ein grounding-fähiges Vision-Modell, z. B.
+        <code>ollama pull qwen2.5vl</code>. Im Chat geht auch <code>/finde &lt;Objekt&gt;</code>.
+      </p>
+      <div class="bk-controls">
+        <label class="bk-field" style="min-width:220px">Bild
+          <input type="file" id="bk-file" accept="image/*" class="bk-input"></label>
+        <label class="bk-field" style="flex:1 1 260px">Suchen / markieren
+          <input type="text" id="bk-query" class="bk-input" placeholder="Was soll gefunden werden?"></label>
+        <label class="bk-field" style="min-width:200px">Modell
+          <select id="bk-model" class="bk-input"></select></label>
+        <button id="bk-run" class="export-btn primary bk-run">🔎 Markieren</button>
+      </div>
+      <div id="bk-model-warn" class="bk-hint" style="display:none;margin-bottom:10px">
+        Kein lokales Vision-Modell gefunden. Bitte eines installieren, z. B.
+        <code>ollama pull qwen2.5vl</code>.
+      </div>
+      <div id="bk-answer" class="bk-answer" style="display:none"></div>
+      <div id="bk-stage" style="position:relative;line-height:0;margin:8px 0;max-width:100%">
+        <canvas id="bk-base" style="max-width:100%;border-radius:8px"></canvas>
+        <canvas id="bk-overlay" style="position:absolute;left:0;top:0;max-width:100%"></canvas>
+      </div>
+      <div id="bk-list" class="bk-hit-list"></div>
+    </div><!-- /bilderkennung-panel -->
+
     <!-- ── KI-To-Do-Liste mit Wissensgraph ──────────────────────────────────── -->
     <div id="todo-panel" class="panel">
       <div id="todo-toolbar">
@@ -3147,6 +3177,16 @@
         <span class="planner-muted">— hängst du im Chat <strong>zwei Excel-/CSV-Dateien</strong> an,
         schlägt der Assistent einen <strong>zellenweisen Vergleich</strong> vor (Schlüsselspalte +
         optional KI-Bewertung je geänderte Zelle) und rendert das Ergebnis direkt in der Antwort.
+        Funktioniert auch im Assistent-Modus. Standard: an.</span>
+      </span>
+    </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
+      <input type="checkbox" id="profile-detect-offer" style="width:auto;margin-top:2px" />
+      <span>🖼 <strong>Objektmarkierung automatisch anbieten</strong>
+        <span class="planner-muted">— hängst du im Chat ein <strong>Bild</strong> an und schreibst
+        „<strong>such/markiere/wo ist …</strong>", schlägt der Assistent vor, das gesuchte Objekt im
+        Bild zu <strong>markieren</strong> (Bilderkennung). Der Befehl <code>/finde &lt;Objekt&gt;</code>
+        geht immer. Braucht ein grounding-fähiges Vision-Modell (z. B. <code>qwen2.5vl</code>).
         Funktioniert auch im Assistent-Modus. Standard: an.</span>
       </span>
     </label>
@@ -3739,6 +3779,7 @@
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/pairing.js?v=20260825reach"></script>
+<script src="/js/bilderkennung.js?v=20260831boxes"></script>
 <script src="/js/app.js?v=20260824pair"></script>
 
 </body>

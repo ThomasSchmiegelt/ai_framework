@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $APP_DIR     = $PSScriptRoot
 $SERVER_DIR  = Join-Path (Split-Path $APP_DIR -Parent) "AI_Framework_Thomas_Server"
 $DATE_STAMP  = Get-Date -Format "yyyyMMdd"
-$BASE_MODELS = @("granite4.2:3b", "ministral-3:3b", "qwen3.5:4b")   # granite = Standardmodell (config.json default_model); weitere unten abfragbar
+$BASE_MODELS = @("granite4.2:3b", "ministral-3:3b", "qwen3.5:4b", "qwen2.5vl:3b")   # granite = Standardmodell (config.json default_model); qwen2.5vl = Vision/Bilderkennung; weitere unten abfragbar
 $EMBED_MODEL = "nomic-embed-text"   # RAG-Embeddings
 $STT_MODEL   = "base"               # Spracherkennung (faster-whisper), CPU-tauglich
 $NSSM_URL    = "https://nssm.cc/release/nssm-2.24.zip"

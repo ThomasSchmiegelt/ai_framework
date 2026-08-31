@@ -594,7 +594,7 @@ async def _images_presentation_generator(body: dict):
 
     model = await _vision_model(body.get("model"))
     if not model:
-        yield _sse({"type": "error", "message": "Kein lokales multimodales Modell verfügbar – die Bild-Präsentation braucht ein Vision-Modell (z. B. „qwen2.5-vl“/„llava“ in Ollama)."})
+        yield _sse({"type": "error", "message": "Kein lokales multimodales Modell verfügbar – die Bild-Präsentation braucht ein Vision-Modell (z. B. „qwen2.5vl“/„llava“ in Ollama)."})
         return
 
     persona = _pres_persona(style, address, audience)

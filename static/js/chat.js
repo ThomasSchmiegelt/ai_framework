@@ -157,6 +157,22 @@ const Chat = (() => {
       return;
     }
 
+    // Bilderkennung: „/markiere|/suchebild|/detect" markieren ein Objekt im Bild; „/finde"
+    // nur, wenn ein Bild angehängt ist (sonst bleibt „/finde" die Websuche, s. u.). Bild =
+    // angehängtes Chat-Bild oder eigener Picker (braucht ein Grounding-Vision-Modell).
+    const fd = _parseFinde(text);
+    if (fd) {
+      const imgFile = pendingFiles.find(f => f.is_image);
+      const bareFinde = /^\/finde\b/i.test(text);
+      if (imgFile || !bareFinde) {
+        input.value = '';
+        autoResizeTextarea(input);
+        runFinde(fd.query, imgFile ? imgFile.id : null);
+        return;
+      }
+      // „/finde" ohne Bild → unten an die Websuche durchreichen
+    }
+
     // Erweiterte Suche: „/such <Begriff>" (Aliase /suche, /finde, /search) lässt die KI
     // alternative Suchbegriffe erzeugen, durchsucht damit das Web und fasst zusammen.
     const se = _parseSearch(text);
@@ -315,6 +331,17 @@ const Chat = (() => {
       return;
     }
     _bypassCompareOffer = false;
+
+    // Automatisches Angebot der Objektmarkierung: ist ein Bild angehängt und der Text
+    // klingt nach „suchen/markieren/lokalisieren", die Bilderkennung anbieten. Läuft
+    // auch im Assistent-Modus (reines Chat/Overlay).
+    const _detImg = pendingFiles.find(f => f.is_image);
+    if (!_bypassDetectOffer && _detImg && !text.startsWith('/') && _detectOfferEnabled()
+        && _looksLikeFindQuery(text)) {
+      _offerDetect(_detImg, text);
+      return;
+    }
+    _bypassDetectOffer = false;
 
     // Automatisches Angebot einer tiefen Recherche bei breiten Fakten-/Recherchefragen
     // (Profil-Häkchen, Web erlaubt, kein Agent/keine Datei). Fragt Tiefe+Umfang ab.
@@ -3687,6 +3714,120 @@ const Chat = (() => {
       },
       onError: (msg) => { out.innerHTML = `<em style="color:#ef4444">Vergleich fehlgeschlagen: ${escHtml(msg)}</em>`; isStreaming = false; setBtnSendState(true); },
     });
+  }
+
+  // ── /finde — Objekt im Bild markieren (Bilderkennung / Grounding) ─────────────
+  let _bypassDetectOffer = false;
+  function _parseFinde(text) {
+    const m = text.match(/^\/(finde|markiere|suchebild|detect)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { query: (m[2] || '').trim() };
+  }
+  function _detectOfferEnabled() {
+    try {
+      const p = (typeof Profile !== 'undefined' && Profile.get) ? (Profile.get() || {}) : {};
+      return p.image_detect_offer !== false;
+    } catch (_) { return true; }
+  }
+  function _looksLikeFindQuery(text) {
+    return /\b(such|find|markier|lokalisier|wo ist|wo sind|zeig mir|umrand|umkreis|detect|locate|erkenn)/i.test(text || '');
+  }
+
+  // Angehängtes Upload-Bild (id) → Data-URL (das Grounding-Backend erwartet Bilddaten)
+  async function _uploadToDataUrl(id) {
+    const blob = await (await fetch('/api/uploads/' + encodeURIComponent(id))).blob();
+    return await new Promise((res, rej) => {
+      const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = rej;
+      r.readAsDataURL(blob);
+    });
+  }
+
+  // /finde ohne angehängtes Bild → eigener Picker; sonst das Chat-Bild verwenden.
+  function runFinde(query, imageId) {
+    if (imageId) {
+      _uploadToDataUrl(imageId)
+        .then(url => _doFinde(url, query))
+        .catch(() => showToast('Bild konnte nicht geladen werden'));
+      return;
+    }
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      const file = inp.files && inp.files[0];
+      inp.remove();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => _doFinde(String(reader.result || ''), query);
+      reader.readAsDataURL(file);
+    });
+    inp.click();
+  }
+
+  async function _doFinde(dataUrl, query) {
+    if (!dataUrl) return;
+    if (typeof Bilderkennung === 'undefined') { showToast('Bilderkennung nicht geladen'); return; }
+    let q = (query || '').trim();
+    if (!q) {
+      q = window.prompt('Was soll auf dem Bild markiert werden?') || '';
+      q = q.trim();
+      if (!q) return;
+    }
+    showWelcome(false);
+    appendMessage('user', `🖼 Bild durchsuchen: ${q}`);
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const workingEl = makeWorking('Objekt wird im Bild gesucht'); content.appendChild(workingEl);
+    const model = (typeof Profile !== 'undefined' ? Profile.modelFor('general') : '') || undefined;
+    try {
+      const data = await Bilderkennung.detect(dataUrl, q, model);
+      workingEl.remove();
+      if (data.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(data.tokens, 'Bilderkennung');
+      const annotated = await Bilderkennung.annotate(dataUrl, data.boxes || [], data);
+      insertImage(content, annotated);
+      const textEl = document.createElement('div'); textEl.className = 'bubble-text';
+      textEl.textContent = data.answer || '';
+      content.appendChild(textEl);
+      const boxes = data.boxes || [];
+      if (boxes.length) {
+        const list = document.createElement('div'); list.className = 'bk-hit-list';
+        boxes.forEach((b, i) => {
+          const r = document.createElement('div'); r.className = 'bk-hit';
+          r.innerHTML = `<span class="bk-dot" style="background:${['#ef4444','#22c55e','#3b82f6','#f59e0b','#a855f7','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6'][i%10]}"></span>`;
+          r.appendChild(document.createTextNode((b.label || '').trim() || ('Treffer ' + (i + 1))));
+          list.appendChild(r);
+        });
+        content.appendChild(list);
+      } else {
+        const hint = document.createElement('div'); hint.className = 'bk-hint';
+        hint.innerHTML = 'Keine Markierung erhalten — für zuverlässiges Markieren ein grounding-fähiges Vision-Modell nutzen, z. B. <code>ollama pull qwen2.5vl</code>.';
+        content.appendChild(hint);
+      }
+      messages.push({ role: 'user', content: `Bild durchsuchen: ${q}` });
+      messages.push({ role: 'assistant', content: '🖼 ' + (data.answer || 'Bild ausgewertet.') });
+      _persistConversation(); loadConversationList();
+    } catch (e) {
+      workingEl.remove();
+      const textEl = document.createElement('div'); textEl.className = 'bubble-text';
+      textEl.innerHTML = `<em style="color:#ef4444">Fehlgeschlagen: ${escHtml(e.message)}</em>`;
+      content.appendChild(textEl);
+    }
+  }
+
+  // Assistent-Modus: Bild angehängt + „such/markiere …" → Objektmarkierung anbieten.
+  function _offerDetect(imgFile, origText) {
+    showWelcome(false);
+    const row = appendMessage('assistant', '', [], true);
+    const c = row.querySelector('.bubble-content');
+    const box = document.createElement('div');
+    box.className = 'research-offer';
+    box.innerHTML = `🖼 Soll ich auf <b>${escHtml(imgFile.filename)}</b> das gesuchte Objekt <b>markieren</b>? `
+      + '<button class="research-offer-yes">Markieren</button> '
+      + '<button class="research-offer-no">Normal senden</button>';
+    c.appendChild(box);
+    box.querySelector('.research-offer-yes').addEventListener('click', () => { row.remove(); runFinde(origText, imgFile.id); });
+    box.querySelector('.research-offer-no').addEventListener('click', () => { row.remove(); _bypassDetectOffer = true; sendMessage(); });
+    scrollToBottom();
   }
 
   // ── /paarvergleich — schrittweiser Paarvergleich (Varianten-Overlay) ──────────
