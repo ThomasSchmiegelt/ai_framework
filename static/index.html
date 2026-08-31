@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260831bk" />
+  <link rel="stylesheet" href="/css/app.css?v=20260831ask" />
 </head>
 <body>
 
@@ -2584,19 +2584,31 @@
     <!-- ── Bilderkennung / Objekt-Grounding ─────────────────────────────────── -->
     <div id="bilderkennung-panel" class="panel" style="overflow:auto;padding:12px 14px">
       <h2 style="font-size:16px;margin:0 0 4px">🖼 Bilderkennung</h2>
-      <p class="planner-muted" style="font-size:12px;margin:0 0 12px">
-        Bild wählen, Suchbegriff eingeben (z. B. „das rote Auto") → das gefundene Objekt wird im
-        Bild <strong>markiert</strong>. Braucht ein grounding-fähiges Vision-Modell, z. B.
-        <code>ollama pull qwen2.5vl</code>. Im Chat geht auch <code>/finde &lt;Objekt&gt;</code>.
+      <p class="planner-muted" style="font-size:12px;margin:0 0 10px">
+        <strong>🔎 Objekt finden:</strong> Suchbegriff eingeben (z. B. „das rote Auto") → das
+        gefundene Objekt wird im Bild <strong>markiert</strong>.
+        <strong>❓ Bereich fragen:</strong> ein Rechteck aufs Bild ziehen und fragen, was darin ist.
+        Braucht ein grounding-fähiges Vision-Modell, z. B. <code>ollama pull qwen2.5vl</code>.
+        Im Chat geht auch <code>/finde &lt;Objekt&gt;</code>.
       </p>
+      <div class="bk-modes">
+        <button id="bk-mode-find" class="bk-mode active" type="button">🔎 Objekt finden</button>
+        <button id="bk-mode-ask" class="bk-mode" type="button">❓ Bereich fragen</button>
+      </div>
       <div class="bk-controls">
         <label class="bk-field" style="min-width:220px">Bild
           <input type="file" id="bk-file" accept="image/*" class="bk-input"></label>
-        <label class="bk-field" style="flex:1 1 260px">Suchen / markieren
+        <label class="bk-field bk-find-only" style="flex:1 1 260px">Suchen / markieren
           <input type="text" id="bk-query" class="bk-input" placeholder="Was soll gefunden werden?"></label>
+        <label class="bk-field bk-ask-only" style="flex:1 1 260px">Frage zum markierten Bereich
+          <input type="text" id="bk-question" class="bk-input" value="Was ist das?" placeholder="Was ist das?"></label>
         <label class="bk-field" style="min-width:200px">Modell
           <select id="bk-model" class="bk-input"></select></label>
-        <button id="bk-run" class="export-btn primary bk-run">🔎 Markieren</button>
+        <button id="bk-run" class="export-btn primary bk-run bk-find-only">🔎 Markieren</button>
+        <button id="bk-ask" class="export-btn primary bk-run bk-ask-only" disabled>❓ Fragen</button>
+      </div>
+      <div id="bk-ask-hint" class="bk-hint bk-ask-only" style="margin-bottom:10px">
+        Zieh mit der Maus ein <strong>Rechteck</strong> auf das Bild und klicke „❓ Fragen".
       </div>
       <div id="bk-model-warn" class="bk-hint" style="display:none;margin-bottom:10px">
         Kein lokales Vision-Modell gefunden. Bitte eines installieren, z. B.
@@ -3779,7 +3791,7 @@
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/pairing.js?v=20260825reach"></script>
-<script src="/js/bilderkennung.js?v=20260831boxes"></script>
+<script src="/js/bilderkennung.js?v=20260831ask"></script>
 <script src="/js/app.js?v=20260824pair"></script>
 
 </body>

@@ -163,3 +163,53 @@ async def bilderkennung_detect(req: Request):
 
     return {"found": found, "answer": answer, "boxes": boxes,
             "image_w": sw, "image_h": sh, "model": _model, "tokens": _tok}
+
+
+_ASK_SYSTEM = (
+    "Du beschreibst knapp und sachlich auf Deutsch, was auf dem gezeigten Bildausschnitt "
+    "zu sehen ist. Antworte in 1–3 Sätzen, gehe nur auf die Frage ein, ohne Vorrede und "
+    "ohne Aufzählungszeichen. Bist du unsicher, sage es offen."
+)
+
+
+@router.post("/api/bilderkennung/frage")
+async def bilderkennung_ask(req: Request):
+    """Umkehrfunktion zur Objektsuche: Der Nutzer zieht im Frontend ein Rechteck auf,
+    der Ausschnitt kommt als Bild hierher. Body ``{image (Ausschnitt als Data-URI),
+    question?, model?}`` → ``{answer, model, tokens}``. Freie Textantwort (kein JSON).
+    503 ohne lokales Vision-Modell."""
+    from tools.imaging import downscale
+    body = await req.json()
+    image_b64 = body.get("image") or ""
+    if not image_b64:
+        raise HTTPException(400, "Kein Bildausschnitt übergeben")
+    question = str(body.get("question", "") or "").strip() or \
+        "Was ist auf diesem Bildausschnitt zu sehen?"
+
+    _model = await _vision_model(_pick_model(body.get("model")))
+    if not _model:
+        raise HTTPException(503, "Kein lokales Vision-Modell verfügbar. "
+                                 "Bitte ein multimodales Modell installieren, z. B. "
+                                 "'ollama pull qwen2.5vl'.")
+
+    small = downscale(image_b64)
+    _tok = {"in": 0, "out": 0}
+    async with _model_session(_model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": _model, "think": False, "stream": False,
+            "messages": [{"role": "system", "content": _ASK_SYSTEM},
+                         {"role": "user", "content": question, "images": [small]}],
+            "options": {"num_ctx": _profile_num_ctx(), "num_predict": 240},
+            "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+        _j = resp.json()
+    _ti, _to = _llm_tok(_j)
+    _tok["in"] += _ti
+    _tok["out"] += _to
+
+    answer = (_j.get("message", {}) or {}).get("content", "") or ""
+    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
+    if not answer:
+        answer = "Der Bildausschnitt konnte nicht sicher beschrieben werden."
+    return {"answer": answer[:800], "model": _model, "tokens": _tok}
