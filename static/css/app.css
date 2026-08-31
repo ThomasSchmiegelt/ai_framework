@@ -4881,6 +4881,13 @@ select.bk-input { height: 34px; cursor: pointer; }
 input[type="file"].bk-input { padding: 6px 8px; cursor: pointer; }
 .bk-run { height: 34px; white-space: nowrap; }
 .bk-run[disabled] { opacity: .6; cursor: default; }
+.bk-modes { display: inline-flex; gap: 0; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.bk-mode { padding: 6px 14px; background: var(--bg-input); color: var(--text); border: none; border-right: 1px solid var(--border); cursor: pointer; font-size: 12.5px; }
+.bk-mode:last-child { border-right: none; }
+.bk-mode.active { background: var(--accent, #4A90D9); color: #fff; }
+/* Modus-abhängige Sichtbarkeit der Steuerelemente */
+#bilderkennung-panel[data-bkmode="find"] .bk-ask-only { display: none; }
+#bilderkennung-panel[data-bkmode="ask"] .bk-find-only { display: none; }
 .bk-answer { font-size: 13.5px; line-height: 1.45; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 6px 0; white-space: pre-wrap; }
 .bk-hint { font-size: 12px; color: var(--text-muted, #9aa4b2); background: var(--bg-input); border: 1px dashed var(--border); border-radius: 8px; padding: 7px 9px; margin: 6px 0; }
 .bk-hint code { background: #0004; padding: 1px 5px; border-radius: 4px; }
