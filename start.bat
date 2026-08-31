@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 title AI_Framework_Thomas
 cd /d "%~dp0"
@@ -27,8 +27,11 @@ if exist "venv\Scripts\activate.bat" (
 start /min "" cmd /c "timeout /t 2 >nul && start http://localhost:8780"
 
 echo.
-echo  AI_Framework_Thomas gestartet -> http://localhost:8780
+echo  AI_Framework_Thomas gestartet -^> http://localhost:8780
 echo  Fenster schliessen um zu beenden.
 echo.
 
-uvicorn main:app --host 127.0.0.1 --port 8780 --reload
+:: Server ueber den Python-Interpreter starten (python -m uvicorn) statt ueber die
+:: uvicorn.exe-Shim: manche Firmen-Sicherheitsrichtlinien (Device Guard / WDAC)
+:: blockieren unsignierte .exe im Nutzerprofil — python.exe ist erlaubt.
+python -m uvicorn main:app --host 127.0.0.1 --port 8780 --reload

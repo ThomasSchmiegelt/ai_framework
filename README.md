@@ -113,6 +113,11 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   Inhaltsfolien zweispaltig (halb Text, halb Bild) — alles direkt im Canvas
 - 🔍 **Bild → Prompt** — `/bildprompt`: ein Bild auswählen, das **Vision-Modell** leitet daraus
   einen Text-zu-Bild-Prompt ab (mit „🎨 Bild daraus erzeugen")
+- 🖼 **Bilderkennung / Objekt-Markierung** — eigener Tab **und** `/finde <Objekt>` im Chat: ein Bild
+  hochladen, sagen was gesucht wird → das gefundene Objekt wird mit **Rahmen** markiert. Hängst du
+  im Chat ein Bild an und schreibst „such/markiere …", schlägt der Assistent es von selbst vor.
+  Braucht ein **grounding-fähiges Vision-Modell** (z. B. `qwen2.5vl` — die Installer/Portable-
+  Bundles liefern es mit)
 - ✏️ **Bild bearbeiten (img2img)** — `/bildedit`: ein Bild hochladen und sagen, wie es verändert
   werden soll (z. B. „Himmel bei Sonnenuntergang", „im Aquarellstil"), mit wählbarer **Stärke**.
   Lokal über **Z-Image** (crash-sichere Brücke) oder ein **fähiges API-Bildmodell** (z. B.

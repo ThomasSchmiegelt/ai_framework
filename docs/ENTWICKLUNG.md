@@ -506,7 +506,7 @@ werden, ohne neues Embedding-Modell/Abhängigkeit:
   Beschreibung vorangestellt (eigenes Fachvokabular mit-embedden). Die Beschreibung läuft durch das
   normale `ingest_file(coll, desc, filename, doc_id, image_rel=…)` (clean/chunk/embed wie Text).
   Ohne lokales LLM → **HTTP 503**; ein reines Textmodell liefert eine schwächere Beschreibung
-  (multimodales Modell empfohlen, z. B. `llava`/`qwen2.5-vl`). Der Ordner-Import
+  (multimodales Modell empfohlen, z. B. `llava`/`qwen2.5vl`). Der Ordner-Import
   (`/api/rag/.../folder`) behandelt Bilder analog (Modell einmal vor der Schleife auflösen; ohne
   Modell werden Bilder übersprungen).
 - **Verknüpfung** (`db.py`): eine nullable Spalte `rag_documents.image_rel` (Migration wie

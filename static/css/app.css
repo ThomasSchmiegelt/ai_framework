@@ -4872,6 +4872,23 @@ select.ob-input option {
 .cmp-job-row { display: flex; gap: 6px; align-items: center; font-size: 12px; padding: 3px 0; }
 .bild-card select { width: 100%; box-sizing: border-box; background: var(--bg-card, var(--bg-input)); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
 
+/* ── Bilderkennung (Objekt-Grounding) ─────────────────────────────────────── */
+.bk-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; }
+.bk-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted, #9aa4b2); }
+.bk-input { box-sizing: border-box; width: 100%; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
+.bk-input:focus { outline: none; border-color: var(--accent); }
+select.bk-input { height: 34px; cursor: pointer; }
+input[type="file"].bk-input { padding: 6px 8px; cursor: pointer; }
+.bk-run { height: 34px; white-space: nowrap; }
+.bk-run[disabled] { opacity: .6; cursor: default; }
+.bk-answer { font-size: 13.5px; line-height: 1.45; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 6px 0; white-space: pre-wrap; }
+.bk-hint { font-size: 12px; color: var(--text-muted, #9aa4b2); background: var(--bg-input); border: 1px dashed var(--border); border-radius: 8px; padding: 7px 9px; margin: 6px 0; }
+.bk-hint code { background: #0004; padding: 1px 5px; border-radius: 4px; }
+.bk-hit-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.bk-hit { display: flex; align-items: center; gap: 6px; font-size: 12.5px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: default; }
+.bk-hit-list .bk-hit { cursor: pointer; }
+.bk-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+
 /* ── Geführte Bildgenerierung (/bildhelp) ────────────────────────────────────── */
 .bild-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; }
 .bild-card { position: relative; background: var(--bg-input, var(--bg-card)); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 22px 22px 18px; width: min(560px, 94vw); max-height: 90vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }

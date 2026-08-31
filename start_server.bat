@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 title AI_Framework_Thomas - Server
 cd /d "%~dp0"
@@ -33,7 +33,10 @@ echo.
 echo  AI_Framework_Thomas SERVER
 echo  Host:    %HOST%:%PORT%
 echo  Workers: %WORKERS%
-echo  Zugang:  http://<diese-IP>:%PORT%
+echo  Zugang:  http://^<diese-IP^>:%PORT%
 echo.
 
-uvicorn main:app --host %HOST% --port %PORT% --workers %WORKERS%
+:: Server ueber den Python-Interpreter starten (python -m uvicorn) statt ueber die
+:: uvicorn.exe-Shim: manche Firmen-Sicherheitsrichtlinien (Device Guard / WDAC)
+:: blockieren unsignierte .exe im Nutzerprofil — python.exe ist erlaubt.
+python -m uvicorn main:app --host %HOST% --port %PORT% --workers %WORKERS%

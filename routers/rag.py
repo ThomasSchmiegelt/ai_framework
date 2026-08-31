@@ -209,7 +209,7 @@ async def rag_add_document(cid: str, file: UploadFile = File(...), caption: str 
     if ext in _IMG_EXTS:
         model = await _pick_vision_model()
         if not model:
-            raise HTTPException(status_code=503, detail="Bild-Import benötigt ein lokales multimodales Modell (z. B. „llava“ oder „qwen2.5-vl“ in Ollama). Bitte ein solches Modell installieren/laden.")
+            raise HTTPException(status_code=503, detail="Bild-Import benötigt ein lokales multimodales Modell (z. B. „llava“ oder „qwen2.5vl“ in Ollama). Bitte ein solches Modell installieren/laden.")
         rel = f"{_safe_relpath(cid)}/{doc_id}{ext}"
         dest = RAG_IMAGES_DIR / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
