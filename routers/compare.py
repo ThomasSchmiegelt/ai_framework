@@ -472,6 +472,7 @@ async def compare_save_results(name: str, req: Request):
         "only_in_a": meta.get("only_in_a") or [],
         "only_in_b": meta.get("only_in_b") or [],
         "counts": meta.get("counts") or {},
+        "ki_prompts": meta.get("ki_prompts") or {},
         "cells": body.get("cells") or [],
         "updated_at": time.time(),
         "complete": bool(body.get("complete", True)),
@@ -483,26 +484,26 @@ async def compare_save_results(name: str, req: Request):
 @router.post("/api/compare/cell-ki")
 async def compare_cell_ki(req: Request):
     """On-demand-KI für EINE Zelle (Klick in eine leere Vergleichszelle / KI-Job).
-    Body ``{key, column, a, b, model?}`` → ``{summary, model, tokens}``. Frischer
-    ``_model_session``-Aufruf (Kontext-Reset je Zelle, ``_CELL_SYSTEM``). 503 ohne
-    lokales Modell."""
+    Body ``{key, column, a, b, model?, prompt?}`` → ``{summary, model, tokens}``. Frischer
+    ``_model_session``-Aufruf (Kontext-Reset je Zelle). Leerer ``prompt`` ⇒ Standard
+    ``_CELL_SYSTEM``; sonst der spaltenspezifische Prompt. 503 ohne lokales Modell."""
     body = await req.json()
     a = str(body.get("a", "") or "")
     b = str(body.get("b", "") or "")
     col = str(body.get("column", "") or "")
     key = str(body.get("key", "") or "")
+    sys_prompt = str(body.get("prompt", "") or "").strip() or _CELL_SYSTEM
     picked = str(body.get("model", "") or "").strip()
     model = _pick_model(picked, _model_for("general")) if picked else await _local_model(_model_for("general"))
     if not model:
         raise HTTPException(status_code=503, detail="Kein lokales Modell für die KI-Bewertung "
                             "verfügbar (Ollama/lokaler Server nötig).")
-    usr = (f"Spalte: {col}\nSchlüssel: {key}\n\nA:\n{a[:4000]}\n\nB:\n{b[:4000]}\n\n"
-           "Nenne den inhaltlichen Unterschied in einem Satz.")
+    usr = (f"Spalte: {col}\nSchlüssel: {key}\n\nA:\n{a[:4000]}\n\nB:\n{b[:4000]}")
     tok = {"in": 0, "out": 0}
     async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
         resp = await _llm.chat(client, {
             "model": model, "think": False, "stream": False,
-            "messages": [{"role": "system", "content": _CELL_SYSTEM},
+            "messages": [{"role": "system", "content": sys_prompt},
                          {"role": "user", "content": usr}],
             "options": {"num_ctx": _profile_num_ctx(), "num_predict": 160},
             "keep_alive": KEEP_ALIVE,

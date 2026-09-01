@@ -205,6 +205,10 @@ const Compare = (() => {
       if (rowsFilter === 'geaendert') return r.type === 'common' && visCols.some(c => (r.byCol[c].rec || {}).verdict === 'changed');
       return true;
     });
+    // Schnellfilter „nur Unterschiede": geänderte Zeilen + hinzugefügt + gelöscht
+    const finalRows = opts.onlyChanged
+      ? filtered.filter(r => r.type !== 'common' || visCols.some(c => (r.byCol[c].rec || {}).verdict === 'changed'))
+      : filtered;
 
     const c = meta.counts || {};
     let changedRows = 0;
@@ -223,7 +227,7 @@ const Compare = (() => {
       visCols.map(() => sub.map(s => `<th class="cmp-subh">${_SUBLABEL[s]}</th>`).join('')).join('') + '</tr></thead>';
 
     let body = '';
-    filtered.forEach(r => {
+    finalRows.forEach(r => {
       const badge = r.type === 'added' ? '<span class="cmp-badge cmp-add">＋</span> '
         : r.type === 'deleted' ? '<span class="cmp-badge cmp-del">－</span> ' : '';
       let tr = `<tr class="cmp-row-${r.type}"><td class="cmp-key">${badge}<b>${_esc(r.key)}</b></td>`;
@@ -253,7 +257,7 @@ const Compare = (() => {
       });
       body += tr + '</tr>';
     });
-    if (!filtered.length) body = `<tr><td colspan="${visCols.length * sub.length + 1}" class="planner-muted">Keine Zeilen für diesen Filter.</td></tr>`;
+    if (!finalRows.length) body = `<tr><td colspan="${visCols.length * sub.length + 1}" class="planner-muted">Keine Zeilen für diesen Filter.</td></tr>`;
 
     return html + `<div class="cmp-matrix-wrap"><table class="cmp-matrix">${head}<tbody>${body}</tbody></table></div>`;
   }
@@ -322,10 +326,11 @@ const Compare = (() => {
       const p = prev[name] || {};
       let mode = p.mode || (inA && inB ? 'logic' : 'ignore');
       if (!inA || !inB) mode = 'ignore';
-      return { name, inA, inB, mode, metric: p.metric || 'exact' };
+      const savedPrompt = (_meta && _meta.ki_prompts && _meta.ki_prompts[name]) || '';
+      return { name, inA, inB, mode, metric: p.metric || 'exact', kiPrompt: p.kiPrompt != null ? p.kiPrompt : savedPrompt };
     });
     const metricOpts = [['exact', 'Inhalt exakt'], ['nospace', 'ohne Leerzeichen'], ['numeric', 'Zahl'], ['length', 'nur Länge']];
-    let html = '<tr><th>Spalte</th><th>Aktion</th><th>Logik-Metrik</th></tr>';
+    let html = '<tr><th>Spalte</th><th>Aktion</th><th>Logik-Metrik</th><th>KI-Vergleich <span class="cmp-col-only">(leer = Standard, sonst eigener Prompt; nur bei Unterschied)</span></th></tr>';
     _cfg.forEach((c, i) => {
       const only = !c.inA || !c.inB;
       const badge = only ? ` <span class="cmp-col-only">(nur ${c.inA ? 'A' : 'B'})</span>` : (c.name === keyA ? ' <span class="cmp-col-only">(Schlüssel)</span>' : '');
@@ -338,11 +343,14 @@ const Compare = (() => {
         `<select data-i="${i}" class="cmp-metric">` +
         metricOpts.map(([v, l]) => `<option value="${v}"${c.metric === v ? ' selected' : ''}>${l}</option>`).join('') +
         '</select>';
-      html += `<tr><td>${_esc(c.name)}${badge}</td><td>${modeSel}</td><td>${metSel}</td></tr>`;
+      const kiInput = only ? '' :
+        `<input type="text" data-i="${i}" class="cmp-ki-prompt" value="${_esc(c.kiPrompt || '')}" placeholder="Standard – oder eigener Prompt, z. B. „Nur Zahlenänderung nennen"">`;
+      html += `<tr><td>${_esc(c.name)}${badge}</td><td>${modeSel}</td><td>${metSel}</td><td>${kiInput}</td></tr>`;
     });
     body.innerHTML = html;
     body.querySelectorAll('.cmp-mode').forEach(s => s.addEventListener('change', e => { _cfg[+e.target.dataset.i].mode = e.target.value; }));
     body.querySelectorAll('.cmp-metric').forEach(s => s.addEventListener('change', e => { _cfg[+e.target.dataset.i].metric = e.target.value; }));
+    body.querySelectorAll('.cmp-ki-prompt').forEach(s => s.addEventListener('input', e => { _cfg[+e.target.dataset.i].kiPrompt = e.target.value; }));
   }
 
   function _columnsForRun() {
@@ -394,9 +402,13 @@ const Compare = (() => {
       view: (_el('cmp-view') && _el('cmp-view').value) || 'alles',
       rows: (_el('cmp-rows') && _el('cmp-rows').value) || 'alle',
       cols: _visibleCols(),
+      onlyChanged: !!(_el('cmp-only-changed') && _el('cmp-only-changed').checked),
       ki: _kiOn,
     };
     const host = _el('cmp-result');
+    // Spaltenbreite je Teilspalte (langer Text bricht dann um → mehr Pakete nebeneinander)
+    const w = _el('cmp-cellw');
+    if (w) host.style.setProperty('--cmp-cellw', (parseInt(w.value, 10) || 220) + 'px');
     host.innerHTML = renderCellsHtml(_meta, _cells, opts);
     if (_kiOn) host.querySelectorAll('.cmp-ki-cell').forEach(td =>
       td.addEventListener('click', () => _kiCell(td.dataset.key, td.dataset.col)));
@@ -507,6 +519,7 @@ const Compare = (() => {
         _meta = {
           compared_columns: data.compared_columns || [], only_in_a: data.only_in_a || [], only_in_b: data.only_in_b || [],
           columns_only_a: data.columns_only_a || [], columns_only_b: data.columns_only_b || [], counts: data.counts || {},
+          ki_prompts: data.ki_prompts || {},
         };
         _cells = data.cells || []; _cellMap = {}; _cells.forEach((c, i) => _cellMap[c.key + '\u0000' + c.column] = i);
         _el('cmp-save-name').value = name;
@@ -562,10 +575,23 @@ const Compare = (() => {
     _renderResult();
   }
 
+  // Spaltenspezifischer KI-Prompt (aus der Einstellen-Konfig oder gespeichert); leer = Standard.
+  function _kiPromptFor(col) {
+    const c = _cfg.find(x => x.name === col);
+    if (c && c.kiPrompt) return c.kiPrompt;
+    if (_meta && _meta.ki_prompts && _meta.ki_prompts[col]) return _meta.ki_prompts[col];
+    return '';
+  }
+  function _collectKiPrompts() {
+    const m = Object.assign({}, (_meta && _meta.ki_prompts) || {});
+    _cfg.forEach(c => { if (c.kiPrompt) m[c.name] = c.kiPrompt; });
+    return m;
+  }
+
   async function _kiOne(rec) {
     const r = await fetch('/api/compare/cell-ki', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: rec.key, column: rec.column, a: rec.a, b: rec.b, model: _model() || undefined }),
+      body: JSON.stringify({ key: rec.key, column: rec.column, a: rec.a, b: rec.b, prompt: _kiPromptFor(rec.column) || undefined, model: _model() || undefined }),
     });
     if (!r.ok) { let m = 'HTTP ' + r.status; try { m = (await r.json()).detail || m; } catch (_) {} throw new Error(m); }
     const d = await r.json();
@@ -606,9 +632,10 @@ const Compare = (() => {
     _saveTimer = setTimeout(async () => {
       _saveTimer = 0;
       try {
+        const meta = Object.assign({}, _meta, { ki_prompts: _collectKiPrompts() });
         await fetch('/api/compare/projects/' + encodeURIComponent(name) + '/results', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ meta: _meta, cells: _cells, complete: true }),
+          body: JSON.stringify({ meta, cells: _cells, complete: true }),
         });
       } catch (_) {}
     }, 800);
@@ -692,10 +719,13 @@ const Compare = (() => {
     _on('btn-cmp-save', 'click', _save);
     _on('cmp-project', 'change', e => _openProject(e.target.value));
     _on('btn-cmp-delete', 'click', _deleteProject);
-    // Filter (Spalten-Ansicht / Zeilen / Anwenden) + KI + Export
+    // Filter (Spalten-Ansicht / Zeilen / nur Unterschiede / Anwenden) + KI + Export
     _on('cmp-view', 'change', _renderResult);
     _on('cmp-rows', 'change', _renderResult);
+    _on('cmp-only-changed', 'change', _renderResult);
     _on('btn-cmp-apply', 'click', _renderResult);
+    // Spaltenbreite: live (nur CSS-Variable setzen, kein Neu-Rendern nötig)
+    _on('cmp-cellw', 'input', () => { const h = _el('cmp-result'); const w = _el('cmp-cellw'); if (h && w) h.style.setProperty('--cmp-cellw', (parseInt(w.value, 10) || 220) + 'px'); });
     _on('cmp-ki-toggle', 'click', _toggleKi);
     _on('btn-cmp-ki-job', 'click', _kiJob);
     _on('btn-cmp-xlsx', 'click', () => _export('xlsx'));
