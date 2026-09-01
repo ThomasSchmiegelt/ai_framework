@@ -235,14 +235,17 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - ✅ **To-Do** — Projektbaum mit **Wissensgraph** (2D & 3D-Kugel): Aufgaben, Zuständige,
   Verknüpfungen, Anlagen; KI-Extraktion, Empfehlung „was als Nächstes", Daten-Chat über den
   Bestand (inkl. Personen-Auswertungen), Export/Import
-- 📊 **Excel-Vergleich** — zwei Excel-/CSV-Dateien über eine **Schlüsselspalte** matchen und
-  **Zelle für Zelle** vergleichen: **pro Spalte wählbar** *ignorieren / Logik / Logik + KI* — erst
-  ein billiger **Logikvergleich** (z. B. Zeichen ohne Leerzeichen), bei Unterschied eine
-  **KI-Bewertung je Zelle** (Kontext wird nach jeder Zelle zurückgesetzt → auch große Tabellen
-  bleiben im Kontextfenster). Ergebnis in **drei Untertabs** (Tabelle 1 mit Spaltenaktionen,
-  Tabelle 2, Ergebnis mit **Farbdiff** und Filtern), mit **Stop/Fortsetzen**, **laufendem Speichern**,
-  **CSV/JSON-Export** und einer **Mehrdatei-Job-Queue**. Im **Assistent-Modus**: hängst du zwei
-  Tabellen im Chat an, schlägt der Assistent den Vergleich von selbst vor. Auch per `/excelvergleich`
+- 📊 **Excel-Vergleich** — zwei Excel-/CSV-Dateien über eine **Schlüsselspalte** matchen; das
+  Ergebnis ist eine **Matrix** mit **fixierter Kopfzeile und Schlüsselspalte**: je Spalte
+  *Tabelle 1 · Tabelle 2 · Vergleich* (Logik: gleich/ungleich), inkl. **hinzugefügter/gelöschter**
+  Zeilen. **Pro Spalte** *ignorieren/vergleichen* + Metrik (Standard „Inhalt exakt") und ein
+  optionaler **eigener KI-Prompt**. Die **KI** erklärt Unterschiede – on-demand (Klick in eine Zelle)
+  oder **„KI automatisch"** (nach dem Vergleich alle Unterschiede, auch Job-Voreinstellung).
+  **Filter** (Spalten-Ansicht, Zeilen, „nur Unterschiede", Spalten ein/aus), **Spaltenbreite-Regler**,
+  Export als **Excel/CSV/JSON/HTML**, **laufendes Speichern**, **Stop/Fortsetzen** und ein
+  **Stapel-Job** (beliebig viele Paare → je Job ein **benannter Ergebnis-Reiter** + automatischer
+  Export). Im **Assistent-Modus**: hängst du zwei Tabellen im Chat an, schlägt der Assistent den
+  Vergleich von selbst vor. Auch per `/excelvergleich`
 - 👁 **Optionale Tabs** — RAG, Code, Mathe, Medizin, Mail, Logs, Verzeichnis-Analyse,
   Postfach, Patente, Angebote/Rechnungen, Arbeitszeugnisse, Morphologischer Kasten,
   Jury, Anfrage, Matrix, **Varianten**, **Excel-Vergleich**, **To-Do** und **Transkription**

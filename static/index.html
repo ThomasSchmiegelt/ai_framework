@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260901autoki" />
+  <link rel="stylesheet" href="/css/app.css?v=20260901jobtabs" />
 </head>
 <body>
 
@@ -2498,11 +2498,8 @@
         </div>
       </div>
 
-      <!-- Zwei Untertabs: Einstellen / Ergebnis -->
-      <div class="cmp-subbar">
-        <button class="cmp-subtab active" data-sub="settings">⚙ Einstellen</button>
-        <button class="cmp-subtab" data-sub="result">📊 Ergebnis</button>
-      </div>
+      <!-- Reiterleiste: „⚙ Einstellen" + je Lauf/Job ein Ergebnis-Reiter (JS-gefüllt) -->
+      <div class="cmp-subbar" id="cmp-subbar"></div>
 
       <div id="cmp-sub-settings" class="cmp-subpanel active">
         <div style="display:flex;gap:16px;flex-wrap:wrap">
@@ -3811,7 +3808,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260823lift"></script>
-<script src="/js/compare.js?v=20260901autoki"></script>
+<script src="/js/compare.js?v=20260901jobtabs"></script>
 <script src="/js/todo.js?v=20260818handoff"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
