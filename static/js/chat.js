@@ -3682,7 +3682,7 @@ const Chat = (() => {
       const keyNameA = (da.headers[ka] || '').trim();
       const nameSet = {}; (da.headers || []).forEach(h => nameSet[String(h || '').trim()] = true);
       const common = (db.headers || []).map(h => String(h || '').trim()).filter(n => n && nameSet[n] && n !== keyNameA);
-      const columns = common.map(n => ({ name: n, mode: kiOn ? 'logic_llm' : 'logic', metric: 'nospace' }));
+      const columns = common.map(n => ({ name: n, mode: kiOn ? 'logic_llm' : 'logic', metric: 'exact' }));
       const params = {
         file_id_a: files[0].id, sheet_a: da.sheet, header_row_a: 0, key_a: ka,
         file_id_b: files[1].id, sheet_b: db.sheet, header_row_b: 0, key_b: kb,

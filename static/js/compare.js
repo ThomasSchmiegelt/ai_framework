@@ -18,7 +18,8 @@ const Compare = (() => {
   let _cfg = [];                                  // [{name, mode, metric, inA, inB}]
   let _meta = null, _cellMap = {}, _keyOrder = [], _cells = [];
   let _reader = null, _running = false, _renderTimer = 0;
-  let _jobQueue = [];                             // [{name, params}]
+  let _jobQueue = [];
+  let _kiOn = false, _saveTimer = 0;                             // [{name, params}]
 
   function _el(id) { return document.getElementById(id); }
   function _model() { return (typeof Profile !== 'undefined' && Profile.modelFor) ? Profile.modelFor('general') : ''; }
@@ -161,60 +162,100 @@ const Compare = (() => {
   // ── Zellen-Ergebnis rendern (Tab + Chat) ───────────────────────────────────
   // meta: {compared_columns, only_in_a, only_in_b, columns_only_a/b, counts}
   // cells: [{key, column, a, b, verdict, detail, summary}]
+  // Matrix-Renderer: Schlüssel (fixiert) + je Spalte drei Teilspalten (Tab 1/Tab 2/
+  // Vergleich), Kopf fixiert, beidseitig scrollbar. opts: {view, rows, cols[], ki, onlyChanges}.
+  // Geteilt mit dem Chat-Overlay `/excelvergleich` (dort nur {onlyChanges:true}).
+  const _SUBS = { alles: ['a', 'b', 'v'], tabellen: ['a', 'b'], t1: ['a'], t2: ['b'], vergleich: ['v'], ohne_vergleich: ['a', 'b'] };
+  const _SUBLABEL = { a: 'Tab 1', b: 'Tab 2', v: 'Vergleich' };
   function renderCellsHtml(meta, cells, opts) {
     opts = opts || {};
     meta = meta || {};
-    const cols = meta.compared_columns || [];
-    // gruppieren key → col → rec (Reihenfolge des ersten Auftretens)
+    const allCols = meta.compared_columns || [];
+    const visCols = (opts.cols && opts.cols.length) ? allCols.filter(c => opts.cols.includes(c)) : allCols;
+    const view = opts.view || 'alles';
+    const sub = _SUBS[view] || _SUBS.alles;
+    const rowsFilter = opts.rows || (opts.onlyChanges ? 'geaendert' : 'alle');
+    const ki = !!opts.ki;
+
+    // Zeilen normalisieren: gemeinsame (aus cells) + gelöscht (only_in_a) + hinzugefügt (only_in_b)
     const order = [], map = {};
     (cells || []).forEach(rec => {
       if (!(rec.key in map)) { map[rec.key] = {}; order.push(rec.key); }
       map[rec.key][rec.column] = rec;
     });
+    const rows = [];
+    order.forEach(k => {
+      const byCol = {};
+      visCols.forEach(c => { const rec = map[k][c] || null; byCol[c] = { a: rec ? rec.a : '', b: rec ? rec.b : '', rec }; });
+      rows.push({ key: k, type: 'common', byCol });
+    });
+    (meta.only_in_a || []).forEach(it => {
+      const rd = it.row || {}, byCol = {};
+      visCols.forEach(c => { byCol[c] = { a: rd[c] != null ? rd[c] : '', b: '', rec: null }; });
+      rows.push({ key: it.key, type: 'deleted', byCol });
+    });
+    (meta.only_in_b || []).forEach(it => {
+      const rd = it.row || {}, byCol = {};
+      visCols.forEach(c => { byCol[c] = { a: '', b: rd[c] != null ? rd[c] : '', rec: null }; });
+      rows.push({ key: it.key, type: 'added', byCol });
+    });
+    const filtered = rows.filter(r => {
+      if (rowsFilter === 'hinzugefuegt') return r.type === 'added';
+      if (rowsFilter === 'geloescht') return r.type === 'deleted';
+      if (rowsFilter === 'geaendert') return r.type === 'common' && visCols.some(c => (r.byCol[c].rec || {}).verdict === 'changed');
+      return true;
+    });
+
     const c = meta.counts || {};
     let changedRows = 0;
-    order.forEach(k => { if (cols.some(col => (map[k][col] || {}).verdict === 'changed')) changedRows++; });
+    order.forEach(k => { if (allCols.some(col => (map[k][col] || {}).verdict === 'changed')) changedRows++; });
     let html = `<div class="cmp-summary">Gemeinsame Schlüssel: <b>${c.common != null ? c.common : order.length}</b> · ` +
-      `Zeilen mit Änderung: <b>${changedRows}</b> · nur in A: <b>${(meta.only_in_a || []).length}</b> · ` +
-      `nur in B: <b>${(meta.only_in_b || []).length}</b> · verglichene Spalten: <b>${cols.length}</b></div>`;
+      `Zeilen mit Änderung: <b>${changedRows}</b> · hinzugefügt: <b>${(meta.only_in_b || []).length}</b> · ` +
+      `gelöscht: <b>${(meta.only_in_a || []).length}</b> · Spalten: <b>${visCols.length}/${allCols.length}</b></div>`;
     if ((meta.columns_only_a || []).length)
       html += `<div class="planner-muted" style="font-size:11.5px">Spalten nur in A: ${meta.columns_only_a.map(_esc).join(', ')}</div>`;
     if ((meta.columns_only_b || []).length)
       html += `<div class="planner-muted" style="font-size:11.5px">Spalten nur in B: ${meta.columns_only_b.map(_esc).join(', ')}</div>`;
 
-    const colFilter = opts.col || '';
-    const showCols = colFilter ? cols.filter(x => x === colFilter) : cols;
-    html += '<table class="cmp-table"><thead><tr><th>Schlüssel</th>' +
-      showCols.map(x => `<th>${_esc(x)}</th>`).join('') + '</tr></thead><tbody>';
-    let shown = 0;
-    order.forEach(k => {
-      const row = map[k];
-      const rowChanged = showCols.some(col => (row[col] || {}).verdict === 'changed');
-      const rowEval = showCols.some(col => (row[col] || {}).summary);
-      if (opts.onlyChanges && !rowChanged) return;
-      if (opts.onlyEval && !rowEval) return;
-      shown++;
-      html += `<tr><td class="cmp-key"><b>${_esc(k)}</b></td>`;
-      showCols.forEach(col => {
-        const rec = row[col];
-        if (!rec) { html += '<td class="cmp-cell-eq">—</td>'; return; }
-        if (rec.verdict === 'changed') {
-          html += '<td><span class="cmp-cell-changed">' +
-            `<span class="cmp-a">A: ${_esc(rec.a)}</span>` +
-            `<span class="cmp-b">B: ${_esc(rec.b)}</span>` +
-            (rec.summary ? `<span class="cmp-cell-sum">🧠 ${_esc(rec.summary)}</span>` : '') +
-            '</span></td>';
-        } else {
-          html += `<td class="cmp-cell-eq">${_esc(rec.a)}</td>`;
-        }
+    // Kopf (zweizeilig, fixiert)
+    let head = `<thead><tr><th class="cmp-corner" rowspan="2">Schlüssel</th>` +
+      visCols.map(cn => `<th class="cmp-grp" colspan="${sub.length}">${_esc(cn)}</th>`).join('') + '</tr><tr>' +
+      visCols.map(() => sub.map(s => `<th class="cmp-subh">${_SUBLABEL[s]}</th>`).join('')).join('') + '</tr></thead>';
+
+    let body = '';
+    filtered.forEach(r => {
+      const badge = r.type === 'added' ? '<span class="cmp-badge cmp-add">＋</span> '
+        : r.type === 'deleted' ? '<span class="cmp-badge cmp-del">－</span> ' : '';
+      let tr = `<tr class="cmp-row-${r.type}"><td class="cmp-key">${badge}<b>${_esc(r.key)}</b></td>`;
+      visCols.forEach(cn => {
+        const o = r.byCol[cn], rec = o.rec;
+        sub.forEach(s => {
+          if (s === 'a') {
+            const cls = (rec && rec.verdict === 'changed') ? 'cmp-val cmp-a' : (r.type === 'deleted' ? 'cmp-val cmp-del' : 'cmp-val');
+            tr += `<td class="${cls}">${_esc(o.a)}</td>`;
+          } else if (s === 'b') {
+            const cls = (rec && rec.verdict === 'changed') ? 'cmp-val cmp-b' : (r.type === 'added' ? 'cmp-val cmp-add' : 'cmp-val');
+            tr += `<td class="${cls}">${_esc(o.b)}</td>`;
+          } else {
+            if (r.type === 'deleted') { tr += '<td class="cmp-v cmp-del">gelöscht</td>'; return; }
+            if (r.type === 'added') { tr += '<td class="cmp-v cmp-add">hinzugefügt</td>'; return; }
+            if (!rec) { tr += '<td class="cmp-v cmp-eq">—</td>'; return; }
+            if (rec.summary) { tr += `<td class="cmp-v cmp-ne"><span class="cmp-ki-sum">🧠 ${_esc(rec.summary)}</span></td>`; return; }
+            if (rec.verdict === 'changed') {
+              tr += ki
+                ? `<td class="cmp-v cmp-ne cmp-ki-cell" data-key="${_esc(r.key)}" data-col="${_esc(cn)}" title="Klicken: KI erklärt den Unterschied">✗ <span class="cmp-ki-hint">🧠</span></td>`
+                : '<td class="cmp-v cmp-ne">✗ ungleich</td>';
+              return;
+            }
+            tr += '<td class="cmp-v cmp-eq">✓</td>';
+          }
+        });
       });
-      html += '</tr>';
+      body += tr + '</tr>';
     });
-    if (!shown) html += '<tr><td colspan="' + (showCols.length + 1) + '" class="planner-muted">Keine Zeilen für diesen Filter.</td></tr>';
-    html += '</tbody></table>';
-    html += _listTable('Nur in A', meta.only_in_a);
-    html += _listTable('Nur in B', meta.only_in_b);
-    return html;
+    if (!filtered.length) body = `<tr><td colspan="${visCols.length * sub.length + 1}" class="planner-muted">Keine Zeilen für diesen Filter.</td></tr>`;
+
+    return html + `<div class="cmp-matrix-wrap"><table class="cmp-matrix">${head}<tbody>${body}</tbody></table></div>`;
   }
 
   // ── Tab-UI: Dateien einlesen ───────────────────────────────────────────────
@@ -281,9 +322,9 @@ const Compare = (() => {
       const p = prev[name] || {};
       let mode = p.mode || (inA && inB ? 'logic' : 'ignore');
       if (!inA || !inB) mode = 'ignore';
-      return { name, inA, inB, mode, metric: p.metric || 'nospace' };
+      return { name, inA, inB, mode, metric: p.metric || 'exact' };
     });
-    const metricOpts = [['nospace', 'Zeichen o. Leerz.'], ['numeric', 'Zahl'], ['exact', 'exakt'], ['length', 'Länge']];
+    const metricOpts = [['exact', 'Inhalt exakt'], ['nospace', 'ohne Leerzeichen'], ['numeric', 'Zahl'], ['length', 'nur Länge']];
     let html = '<tr><th>Spalte</th><th>Aktion</th><th>Logik-Metrik</th></tr>';
     _cfg.forEach((c, i) => {
       const only = !c.inA || !c.inB;
@@ -291,8 +332,7 @@ const Compare = (() => {
       const modeSel = only ? '<span class="cmp-col-only">ignoriert</span>' :
         `<select data-i="${i}" class="cmp-mode">
            <option value="ignore"${c.mode === 'ignore' ? ' selected' : ''}>ignorieren</option>
-           <option value="logic"${c.mode === 'logic' ? ' selected' : ''}>Logik</option>
-           <option value="logic_llm"${c.mode === 'logic_llm' ? ' selected' : ''}>Logik + KI</option>
+           <option value="logic"${c.mode === 'logic' ? ' selected' : ''}>vergleichen</option>
          </select>`;
       const metSel = only ? '' :
         `<select data-i="${i}" class="cmp-metric">` +
@@ -340,25 +380,47 @@ const Compare = (() => {
     _renderTimer = setTimeout(() => { _renderTimer = 0; _renderResult(); }, 300);
   }
 
-  function _renderResult() {
-    const opts = {
-      onlyChanges: _el('cmp-filter-changed').checked,
-      onlyEval: _el('cmp-filter-eval').checked,
-      col: _el('cmp-filter-col').value || '',
-    };
-    _el('cmp-result').innerHTML = renderCellsHtml(_meta, _cells, opts);
+  function _visibleCols() {
+    // Spalten-Ein/Ausblenden: angehakte Kästchen in #cmp-cols; keine → alle
+    const box = _el('cmp-cols');
+    if (!box) return null;
+    const on = [...box.querySelectorAll('input[type=checkbox]')].filter(c => c.checked).map(c => c.value);
+    const all = (_meta && _meta.compared_columns) || [];
+    return on.length ? all.filter(c => on.includes(c)) : all;
   }
 
+  function _renderResult() {
+    const opts = {
+      view: (_el('cmp-view') && _el('cmp-view').value) || 'alles',
+      rows: (_el('cmp-rows') && _el('cmp-rows').value) || 'alle',
+      cols: _visibleCols(),
+      ki: _kiOn,
+    };
+    const host = _el('cmp-result');
+    host.innerHTML = renderCellsHtml(_meta, _cells, opts);
+    if (_kiOn) host.querySelectorAll('.cmp-ki-cell').forEach(td =>
+      td.addEventListener('click', () => _kiCell(td.dataset.key, td.dataset.col)));
+  }
+
+  // Spalten-Ein/Ausblenden aus den verglichenen Spalten aufbauen (bei neuem Ergebnis)
   function _fillColFilter() {
-    const sel = _el('cmp-filter-col');
-    const cur = sel.value;
+    const box = _el('cmp-cols');
+    if (!box) return;
     const cols = (_meta && _meta.compared_columns) || [];
-    sel.innerHTML = '<option value="">alle</option>' + cols.map(c => `<option value="${_esc(c)}">${_esc(c)}</option>`).join('');
-    if (cols.includes(cur)) sel.value = cur;
+    box.innerHTML = cols.length
+      ? cols.map(c => `<label class="cmp-colchk"><input type="checkbox" value="${_esc(c)}" checked> ${_esc(c)}</label>`).join('')
+      : '<span class="planner-muted" style="font-size:11.5px">—</span>';
+    box.querySelectorAll('input').forEach(i => i.addEventListener('change', _renderResult));
   }
 
   async function _run(resume) {
-    if (!_A.file_id || !_B.file_id) { _status('Bitte beide Dateien einlesen.'); return; }
+    // Bequemlichkeit: sind Dateien gewählt, aber noch nicht eingelesen → automatisch nachholen.
+    if (!_A.file_id && _el('cmp-file-a').files && _el('cmp-file-a').files[0]) await _readSide('a', _A, false);
+    if (!_B.file_id && _el('cmp-file-b').files && _el('cmp-file-b').files[0]) await _readSide('b', _B, false);
+    if (!_A.file_id || !_B.file_id) {
+      const msg = 'Bitte zuerst beide Tabellen wählen und „Einlesen" klicken.';
+      _status(msg); if (typeof showToast === 'function') showToast(msg); return;
+    }
     if (_running) return;
     if (!resume) { _meta = null; _cellMap = {}; _keyOrder = []; _cells = []; _el('cmp-result').innerHTML = ''; }
     _switchSub('result');
@@ -368,7 +430,7 @@ const Compare = (() => {
       onReader: (r) => { _reader = r; },
       onMeta: (ev) => { _meta = ev; total = (ev.counts || {}).cells || 0; _fillColFilter(); _renderResult(); },
       onCell: (ev) => {
-        const key = ev.key + ' ' + ev.column;
+        const key = ev.key + '\u0000' + ev.column;
         if (!(key in _cellMap)) { _cellMap[key] = _cells.length; _cells.push(ev); }
         else _cells[_cellMap[key]] = ev;
         _scheduleResultRender();
@@ -398,7 +460,7 @@ const Compare = (() => {
   // ── Untertabs ──────────────────────────────────────────────────────────────
   function _switchSub(name) {
     document.querySelectorAll('#compare-panel .cmp-subtab').forEach(b => b.classList.toggle('active', b.dataset.sub === name));
-    ['a', 'b', 'result'].forEach(n => { const p = _el('cmp-sub-' + n); if (p) p.classList.toggle('active', n === name); });
+    ['settings', 'result'].forEach(n => { const p = _el('cmp-sub-' + n); if (p) p.classList.toggle('active', n === name); });
   }
 
   // ── Speichern / Laden / Löschen ────────────────────────────────────────────
@@ -446,7 +508,7 @@ const Compare = (() => {
           compared_columns: data.compared_columns || [], only_in_a: data.only_in_a || [], only_in_b: data.only_in_b || [],
           columns_only_a: data.columns_only_a || [], columns_only_b: data.columns_only_b || [], counts: data.counts || {},
         };
-        _cells = data.cells || []; _cellMap = {}; _cells.forEach((c, i) => _cellMap[c.key + ' ' + c.column] = i);
+        _cells = data.cells || []; _cellMap = {}; _cells.forEach((c, i) => _cellMap[c.key + '\u0000' + c.column] = i);
         _el('cmp-save-name').value = name;
         _fillColFilter(); _renderResult(); _switchSub('result');
         _el('btn-cmp-resume').style.display = (!data.complete && _cells.length) ? '' : 'none';
@@ -471,18 +533,85 @@ const Compare = (() => {
     a.download = name; a.click();
   }
 
-  function _exportCsv() {
-    if (!_cells.length) { _status('Erst vergleichen.'); return; }
-    const rows = [['Schlüssel', 'Spalte', 'Status', 'A', 'B', 'KI-Bewertung']];
-    _cells.forEach(c => rows.push([c.key, c.column, c.verdict, c.a, c.b, c.summary || '']));
-    const csv = '﻿' + rows.map(r => r.map(x => `"${String(x == null ? '' : x).replace(/"/g, '""')}"`).join(';')).join('\r\n');
-    _download(((_el('cmp-save-name').value || 'excel-vergleich').trim()) + '.csv', csv, 'text/csv');
+  // Matrix in einem der Formate (xlsx/csv/json/html) vom Server bauen lassen → Download.
+  async function _export(fmt) {
+    if (!_cells.length && !_meta) { _status('Erst vergleichen.'); return; }
+    const name = (_el('cmp-save-name').value || 'excel-vergleich').trim();
+    _status('Exportiere ' + fmt.toUpperCase() + '…');
+    try {
+      const r = await fetch('/api/compare/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format: fmt, meta: _meta, cells: _cells, name }),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { m = (await r.json()).detail || m; } catch (_) {} _status('Export-Fehler: ' + m); return; }
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name + '.' + fmt;
+      a.click();
+      _status('');
+    } catch (e) { _status('Export-Fehler: ' + e.message); }
   }
 
-  function _exportJson() {
-    if (!_cells.length && !_meta) { _status('Erst vergleichen.'); return; }
-    const payload = { version: 1, meta: _meta, cells: _cells, exported_at: new Date().toISOString() };
-    _download(((_el('cmp-save-name').value || 'excel-vergleich').trim()) + '.json', JSON.stringify(payload, null, 2), 'application/json');
+  // ── on-demand-KI (Klick in eine leere ungleich-Zelle · KI-Job) ─────────────
+  function _toggleKi() {
+    _kiOn = !_kiOn;
+    if (_el('cmp-ki-toggle')) _el('cmp-ki-toggle').classList.toggle('active', _kiOn);
+    if (_el('btn-cmp-ki-job')) _el('btn-cmp-ki-job').style.display = _kiOn ? '' : 'none';
+    if (_el('cmp-ki-hint')) _el('cmp-ki-hint').style.display = _kiOn ? '' : 'none';
+    _renderResult();
+  }
+
+  async function _kiOne(rec) {
+    const r = await fetch('/api/compare/cell-ki', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: rec.key, column: rec.column, a: rec.a, b: rec.b, model: _model() || undefined }),
+    });
+    if (!r.ok) { let m = 'HTTP ' + r.status; try { m = (await r.json()).detail || m; } catch (_) {} throw new Error(m); }
+    const d = await r.json();
+    rec.summary = d.summary || '(kein Unterschied benannt)';
+    if (d.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(d.tokens, 'Excel-Vergleich');
+  }
+
+  async function _kiCell(key, col) {
+    const rec = _cells.find(x => String(x.key) === String(key) && String(x.column) === String(col));
+    if (!rec || rec.verdict !== 'changed' || rec.summary) return;
+    _status('KI erklärt Zelle…');
+    try { await _kiOne(rec); _status(''); _renderResult(); _saveResults(); }
+    catch (e) { _status('KI-Fehler: ' + e.message); }
+  }
+
+  async function _kiJob() {
+    if (_running) return;
+    const targets = _cells.filter(c => c.verdict === 'changed' && !c.summary);
+    if (!targets.length) { _status('Keine offenen Unterschiede für die KI.'); return; }
+    _running = true; _spin(true);
+    _el('cmp-progress-wrap').style.display = '';
+    for (let i = 0; i < targets.length; i++) {
+      if (!_running) break;
+      _el('cmp-progress-label').textContent = `KI ${i + 1}/${targets.length}`;
+      _el('cmp-progress-fill').style.width = Math.round(i / targets.length * 100) + '%';
+      try { await _kiOne(targets[i]); } catch (e) { _status('KI-Fehler: ' + e.message); break; }
+      if (i % 5 === 0) { _renderResult(); _saveResults(); }
+    }
+    _el('cmp-progress-fill').style.width = '100%';
+    _running = false; _spin(false); _renderResult(); _saveResults();
+    _status('KI-Job fertig.');
+  }
+
+  // Live-Speichern der Ergebnisse (inkl. KI-summary), entprellt; nur bei gesetztem Namen.
+  function _saveResults() {
+    const name = (_el('cmp-save-name').value || '').trim();
+    if (!name || _saveTimer) return;
+    _saveTimer = setTimeout(async () => {
+      _saveTimer = 0;
+      try {
+        await fetch('/api/compare/projects/' + encodeURIComponent(name) + '/results', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ meta: _meta, cells: _cells, complete: true }),
+        });
+      } catch (_) {}
+    }, 800);
   }
 
   function _importJson(file) {
@@ -491,7 +620,7 @@ const Compare = (() => {
       try {
         const data = JSON.parse(e.target.result);
         _meta = data.meta || { compared_columns: [], only_in_a: [], only_in_b: [], counts: {} };
-        _cells = data.cells || []; _cellMap = {}; _cells.forEach((c, i) => _cellMap[c.key + ' ' + c.column] = i);
+        _cells = data.cells || []; _cellMap = {}; _cells.forEach((c, i) => _cellMap[c.key + '\u0000' + c.column] = i);
         _fillColFilter(); _renderResult(); _switchSub('result');
         _status('JSON geladen.');
       } catch (err) { _status('JSON ungültig: ' + err.message); }
@@ -535,7 +664,7 @@ const Compare = (() => {
         runCellStream(job.params, {
           onReader: (r) => { _reader = r; },
           onMeta: (ev) => { _meta = ev; _fillColFilter(); _renderResult(); },
-          onCell: (ev) => { const k = ev.key + ' ' + ev.column; if (!(k in _cellMap)) { _cellMap[k] = _cells.length; _cells.push(ev); } else _cells[_cellMap[k]] = ev; _scheduleResultRender(); },
+          onCell: (ev) => { const k = ev.key + '\u0000' + ev.column; if (!(k in _cellMap)) { _cellMap[k] = _cells.length; _cells.push(ev); } else _cells[_cellMap[k]] = ev; _scheduleResultRender(); },
           onProgress: (ev) => { const t = ev.total || 0; _el('cmp-progress-fill').style.width = (t ? Math.round(ev.done / t * 100) : 0) + '%'; _el('cmp-progress-label').textContent = `${job.name}: ${ev.done}/${t}`; },
           onDone: (ev) => { _renderResult(); if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Excel-Vergleich'); _save(); resolve(); },
           onError: (msg) => { _el('cmp-job-status').textContent = `Paar ${job.name}: ${msg}`; resolve(); },
@@ -550,29 +679,33 @@ const Compare = (() => {
   // ── Init ───────────────────────────────────────────────────────────────────
   function init() {
     if (!_el('compare-panel')) return;
-    _el('btn-cmp-read-a').addEventListener('click', () => _readSide('a', _A, false));
-    _el('btn-cmp-read-b').addEventListener('click', () => _readSide('b', _B, false));
-    _el('cmp-sheet-a').addEventListener('change', () => _readSide('a', _A, true));
-    _el('cmp-sheet-b').addEventListener('change', () => _readSide('b', _B, true));
-    _el('cmp-key-a').addEventListener('change', _buildColCfg);
-    _el('cmp-key-b').addEventListener('change', _buildColCfg);
-    _el('btn-cmp-run').addEventListener('click', () => _run(false));
-    _el('btn-cmp-stop').addEventListener('click', _stop);
-    _el('btn-cmp-resume').addEventListener('click', () => _run(true));
-    _el('btn-cmp-save').addEventListener('click', _save);
-    _el('btn-cmp-csv').addEventListener('click', _exportCsv);
-    _el('btn-cmp-json').addEventListener('click', _exportJson);
-    _el('btn-cmp-json-import').addEventListener('click', () => _el('cmp-json-input').click());
-    _el('cmp-json-input').addEventListener('change', e => { if (e.target.files[0]) _importJson(e.target.files[0]); e.target.value = ''; });
-    _el('cmp-project').addEventListener('change', e => _openProject(e.target.value));
-    _el('btn-cmp-delete').addEventListener('click', _deleteProject);
-    _el('cmp-filter-changed').addEventListener('change', _renderResult);
-    _el('cmp-filter-eval').addEventListener('change', _renderResult);
-    _el('cmp-filter-col').addEventListener('change', _renderResult);
+    const _on = (id, evt, fn) => { const e = _el(id); if (e) e.addEventListener(evt, fn); };
+    _on('btn-cmp-read-a', 'click', () => _readSide('a', _A, false));
+    _on('btn-cmp-read-b', 'click', () => _readSide('b', _B, false));
+    _on('cmp-sheet-a', 'change', () => _readSide('a', _A, true));
+    _on('cmp-sheet-b', 'change', () => _readSide('b', _B, true));
+    _on('cmp-key-a', 'change', _buildColCfg);
+    _on('cmp-key-b', 'change', _buildColCfg);
+    _on('btn-cmp-run', 'click', () => _run(false));
+    _on('btn-cmp-stop', 'click', _stop);
+    _on('btn-cmp-resume', 'click', () => _run(true));
+    _on('btn-cmp-save', 'click', _save);
+    _on('cmp-project', 'change', e => _openProject(e.target.value));
+    _on('btn-cmp-delete', 'click', _deleteProject);
+    // Filter (Spalten-Ansicht / Zeilen / Anwenden) + KI + Export
+    _on('cmp-view', 'change', _renderResult);
+    _on('cmp-rows', 'change', _renderResult);
+    _on('btn-cmp-apply', 'click', _renderResult);
+    _on('cmp-ki-toggle', 'click', _toggleKi);
+    _on('btn-cmp-ki-job', 'click', _kiJob);
+    _on('btn-cmp-xlsx', 'click', () => _export('xlsx'));
+    _on('btn-cmp-csv', 'click', () => _export('csv'));
+    _on('btn-cmp-json', 'click', () => _export('json'));
+    _on('btn-cmp-html', 'click', () => _export('html'));
     document.querySelectorAll('#compare-panel .cmp-subtab').forEach(b => b.addEventListener('click', () => _switchSub(b.dataset.sub)));
-    _el('btn-cmp-job-add').addEventListener('click', _jobAdd);
-    _el('btn-cmp-job-run').addEventListener('click', _jobRun);
-    _el('btn-cmp-job-clear').addEventListener('click', () => { _jobQueue = []; _renderJobList(); });
+    _on('btn-cmp-job-add', 'click', _jobAdd);
+    _on('btn-cmp-job-run', 'click', _jobRun);
+    _on('btn-cmp-job-clear', 'click', () => { _jobQueue = []; _renderJobList(); });
     _renderJobList();
     _loadProjects();
   }

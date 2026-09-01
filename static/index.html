@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260831ask" />
+  <link rel="stylesheet" href="/css/app.css?v=20260901matrix" />
 </head>
 <body>
 
@@ -2477,107 +2477,128 @@
       </div>
 
       <p class="planner-muted" style="font-size:12px;margin:0 0 10px">
-        Zwei Excel-/CSV-Dateien laden, je ein Blatt und eine <strong>Schlüsselspalte</strong> wählen
-        (z. B. ID/Name) — der Vergleich zeigt neue, entfernte und geänderte Zeilen und lässt die
-        Unterschiede zusätzlich von der KI bewerten. Alles lokal, deterministischer Diff.
+        Zwei Excel-/CSV-Dateien laden, je Blatt und <strong>Schlüsselspalte</strong> wählen → das
+        Ergebnis ist eine <strong>Matrix</strong>: je Spalte Tabelle&nbsp;1, Tabelle&nbsp;2 und der
+        Logik-Vergleich. Schlüsselspalte und Kopfzeile sind fixiert. Die <strong>KI</strong> erklärt
+        Unterschiede auf Wunsch (Klick in eine ungleiche Zelle bei aktivem KI-Schalter oder „KI-Job").
+        Alles lokal.
       </p>
 
-      <div style="display:flex;gap:16px;flex-wrap:wrap">
-        <!-- Datei A -->
-        <div class="cmp-side" style="flex:1;min-width:280px;border:1px solid var(--border);border-radius:8px;padding:10px">
-          <div class="var-sec-head">Datei A</div>
-          <input type="file" id="cmp-file-a" class="file-styled" accept=".xlsx,.xls,.csv" />
-          <button id="btn-cmp-read-a" class="export-btn">⬆ einlesen</button>
-          <div id="cmp-a-meta" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
-          <label class="var-lbl" style="margin-top:8px">Blatt</label>
-          <select id="cmp-sheet-a" class="var-input"></select>
-          <label class="var-lbl" style="margin-top:6px">Kopfzeile (0-basiert)</label>
-          <input type="number" id="cmp-header-a" class="var-input" value="0" min="0" step="1" style="max-width:90px" />
-          <label class="var-lbl" style="margin-top:6px">Schlüsselspalte</label>
-          <select id="cmp-key-a" class="var-input"></select>
-        </div>
-        <!-- Datei B -->
-        <div class="cmp-side" style="flex:1;min-width:280px;border:1px solid var(--border);border-radius:8px;padding:10px">
-          <div class="var-sec-head">Datei B</div>
-          <input type="file" id="cmp-file-b" class="file-styled" accept=".xlsx,.xls,.csv" />
-          <button id="btn-cmp-read-b" class="export-btn">⬆ einlesen</button>
-          <div id="cmp-b-meta" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
-          <label class="var-lbl" style="margin-top:8px">Blatt</label>
-          <select id="cmp-sheet-b" class="var-input"></select>
-          <label class="var-lbl" style="margin-top:6px">Kopfzeile (0-basiert)</label>
-          <input type="number" id="cmp-header-b" class="var-input" value="0" min="0" step="1" style="max-width:90px" />
-          <label class="var-lbl" style="margin-top:6px">Schlüsselspalte</label>
-          <select id="cmp-key-b" class="var-input"></select>
-        </div>
-      </div>
-
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0">
+      <!-- Gemeinsame Lauf-Leiste (immer sichtbar) -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
         <button id="btn-cmp-run" class="export-btn var-ai">🔍 Vergleichen</button>
         <button id="btn-cmp-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
         <button id="btn-cmp-resume" class="export-btn" style="display:none">▶ Fortsetzen</button>
         <input type="text" id="cmp-save-name" placeholder="Name zum Speichern…" style="max-width:180px" />
         <button id="btn-cmp-save" class="export-btn">💾 Speichern</button>
-        <button id="btn-cmp-csv" class="export-btn" title="Diff-Tabelle als CSV">⬇ CSV</button>
-        <button id="btn-cmp-json" class="export-btn" title="Vollständiges Ergebnis als JSON">⬇ JSON</button>
-        <button id="btn-cmp-json-import" class="export-btn" title="Ergebnis-JSON laden">⬆ JSON</button>
-        <input type="file" id="cmp-json-input" accept=".json" style="display:none" />
-      </div>
-
-      <!-- Mehrdatei-Job: mehrere Paare nacheinander abarbeiten -->
-      <details id="cmp-job" style="margin:4px 0 8px">
-        <summary style="cursor:pointer;font-size:12.5px;color:var(--text-muted)">🗂 Stapel-Job (mehrere Dateipaare nacheinander)</summary>
-        <div style="padding:8px 0">
-          <p class="planner-muted" style="font-size:11.5px;margin:0 0 6px">
-            Aktuell eingelesenes Paar mit einem Namen zur Warteschlange hinzufügen; „▶ Job starten"
-            arbeitet die Paare der Reihe nach ab (jedes wird als eigener Vergleich gespeichert). Läuft
-            lokal, bleibt paralleler Cloud-Chat nutzbar.</p>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-            <input type="text" id="cmp-job-name" placeholder="Name für dieses Paar…" style="max-width:200px" />
-            <button id="btn-cmp-job-add" class="export-btn" style="font-size:12px">＋ Paar in Warteschlange</button>
-            <button id="btn-cmp-job-run" class="export-btn var-ai" style="font-size:12px">▶ Job starten</button>
-            <button id="btn-cmp-job-clear" class="export-btn btn-danger-sm" style="font-size:12px">✕ Leeren</button>
-            <span id="cmp-job-status" class="planner-muted" style="font-size:11.5px"></span>
-          </div>
-          <div id="cmp-job-list"></div>
+        <div id="cmp-progress-wrap" style="display:none;flex:1;min-width:160px">
+          <div class="cmp-progress"><div id="cmp-progress-fill" class="cmp-progress-fill"></div></div>
+          <div id="cmp-progress-label" class="planner-muted" style="font-size:11.5px"></div>
         </div>
-      </details>
-
-      <div id="cmp-progress-wrap" style="display:none">
-        <div class="cmp-progress"><div id="cmp-progress-fill" class="cmp-progress-fill"></div></div>
-        <div id="cmp-progress-label" class="planner-muted" style="font-size:11.5px"></div>
       </div>
 
-      <!-- Drei Untertabs -->
+      <!-- Zwei Untertabs: Einstellen / Ergebnis -->
       <div class="cmp-subbar">
-        <button class="cmp-subtab active" data-sub="a">Tabelle 1</button>
-        <button class="cmp-subtab" data-sub="b">Tabelle 2</button>
-        <button class="cmp-subtab" data-sub="result">Ergebnis</button>
+        <button class="cmp-subtab active" data-sub="settings">⚙ Einstellen</button>
+        <button class="cmp-subtab" data-sub="result">📊 Ergebnis</button>
       </div>
 
-      <div id="cmp-sub-a" class="cmp-subpanel active">
-        <div class="var-sec-head">Spaltenaktionen (gelten für den Vergleich)</div>
+      <div id="cmp-sub-settings" class="cmp-subpanel active">
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <!-- Datei A -->
+          <div class="cmp-side" style="flex:1;min-width:280px;border:1px solid var(--border);border-radius:8px;padding:10px">
+            <div class="var-sec-head">Datei A</div>
+            <input type="file" id="cmp-file-a" class="file-styled" accept=".xlsx,.xls,.csv" />
+            <button id="btn-cmp-read-a" class="export-btn">⬆ einlesen</button>
+            <div id="cmp-a-meta" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
+            <label class="var-lbl" style="margin-top:8px">Blatt</label>
+            <select id="cmp-sheet-a" class="var-input"></select>
+            <label class="var-lbl" style="margin-top:6px">Kopfzeile (0-basiert)</label>
+            <input type="number" id="cmp-header-a" class="var-input" value="0" min="0" step="1" style="max-width:90px" />
+            <label class="var-lbl" style="margin-top:6px">Schlüsselspalte</label>
+            <select id="cmp-key-a" class="var-input"></select>
+          </div>
+          <!-- Datei B -->
+          <div class="cmp-side" style="flex:1;min-width:280px;border:1px solid var(--border);border-radius:8px;padding:10px">
+            <div class="var-sec-head">Datei B</div>
+            <input type="file" id="cmp-file-b" class="file-styled" accept=".xlsx,.xls,.csv" />
+            <button id="btn-cmp-read-b" class="export-btn">⬆ einlesen</button>
+            <div id="cmp-b-meta" class="planner-muted" style="font-size:11.5px;margin-top:6px"></div>
+            <label class="var-lbl" style="margin-top:8px">Blatt</label>
+            <select id="cmp-sheet-b" class="var-input"></select>
+            <label class="var-lbl" style="margin-top:6px">Kopfzeile (0-basiert)</label>
+            <input type="number" id="cmp-header-b" class="var-input" value="0" min="0" step="1" style="max-width:90px" />
+            <label class="var-lbl" style="margin-top:6px">Schlüsselspalte</label>
+            <select id="cmp-key-b" class="var-input"></select>
+          </div>
+        </div>
+
+        <div class="var-sec-head" style="margin-top:12px">Spalten (was verglichen wird)</div>
         <p class="planner-muted" style="font-size:11.5px;margin:2px 0 4px">
-          Pro Spalte wählen: <b>ignorieren</b> · <b>Logik</b> (billiger Vergleich, z. B. Zeichen ohne
-          Leerzeichen) · <b>Logik + KI</b> (bei Unterschied zusätzlich eine KI-Bewertung je Zelle,
-          Kontext wird nach jeder Zelle zurückgesetzt).</p>
+          Pro Spalte: <b>ignorieren</b> oder <b>vergleichen</b> (Logik-Metrik wählbar, z. B. Zeichen
+          ohne Leerzeichen). Die KI-Erklärung kommt später on-demand im Ergebnis-Tab.</p>
         <div id="cmp-colcfg-wrap" style="overflow-x:auto"><table class="cmp-colcfg"><tbody id="cmp-colcfg"></tbody></table></div>
-        <div class="var-sec-head" style="margin-top:12px">Tabelle 1 (Vorschau)</div>
-        <div id="cmp-table-a" style="overflow-x:auto"></div>
-      </div>
 
-      <div id="cmp-sub-b" class="cmp-subpanel">
-        <div class="var-sec-head">Tabelle 2 (Vorschau) — Aktionen aus Tabelle 1 gelten spaltenweise mit</div>
-        <div id="cmp-table-b" style="overflow-x:auto"></div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px">
+          <div style="flex:1;min-width:260px"><div class="var-sec-head">Tabelle 1 (Vorschau)</div><div id="cmp-table-a" style="overflow-x:auto"></div></div>
+          <div style="flex:1;min-width:260px"><div class="var-sec-head">Tabelle 2 (Vorschau)</div><div id="cmp-table-b" style="overflow-x:auto"></div></div>
+        </div>
+
+        <!-- Mehrdatei-Job: beliebig viele Paare nacheinander abarbeiten -->
+        <details id="cmp-job" style="margin:12px 0 8px">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--text-muted)">🗂 Stapel-Job (beliebig viele Dateipaare nacheinander)</summary>
+          <div style="padding:8px 0">
+            <p class="planner-muted" style="font-size:11.5px;margin:0 0 6px">
+              Aktuell eingelesenes Paar mit einem Namen zur Warteschlange hinzufügen; „▶ Job starten"
+              arbeitet die Paare der Reihe nach ab (jedes wird als eigener Vergleich gespeichert).</p>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+              <input type="text" id="cmp-job-name" placeholder="Name für dieses Paar…" style="max-width:200px" />
+              <button id="btn-cmp-job-add" class="export-btn" style="font-size:12px">＋ Paar in Warteschlange</button>
+              <button id="btn-cmp-job-run" class="export-btn var-ai" style="font-size:12px">▶ Job starten</button>
+              <button id="btn-cmp-job-clear" class="export-btn btn-danger-sm" style="font-size:12px">✕ Leeren</button>
+              <span id="cmp-job-status" class="planner-muted" style="font-size:11.5px"></span>
+            </div>
+            <div id="cmp-job-list"></div>
+          </div>
+        </details>
       </div>
 
       <div id="cmp-sub-result" class="cmp-subpanel">
-        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
-          <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="cmp-filter-changed"> nur Änderungen</label>
-          <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="cmp-filter-eval"> nur KI-bewertete</label>
-          <label style="display:flex;align-items:center;gap:4px">Spalte:
-            <select id="cmp-filter-col" style="font-size:12px"><option value="">alle</option></select></label>
+        <div class="cmp-filterbar">
+          <label>Spalten-Ansicht
+            <select id="cmp-view">
+              <option value="alles">Alles</option>
+              <option value="tabellen">nur Tabellen</option>
+              <option value="t1">nur Tabelle 1</option>
+              <option value="t2">nur Tabelle 2</option>
+              <option value="vergleich">nur Vergleich</option>
+              <option value="ohne_vergleich">ohne Vergleich</option>
+            </select></label>
+          <label>Zeilen
+            <select id="cmp-rows">
+              <option value="alle">Alle</option>
+              <option value="geaendert">nur geänderte</option>
+              <option value="hinzugefuegt">hinzugefügt</option>
+              <option value="geloescht">gelöscht</option>
+            </select></label>
+          <button id="btn-cmp-apply" class="export-btn">Filter anwenden</button>
+          <details class="cmp-colsdd"><summary>Spalten ein/aus</summary><div id="cmp-cols" class="cmp-colsbox"></div></details>
+          <span style="flex:1"></span>
+          <button id="cmp-ki-toggle" class="export-btn" title="KI-Modus: Klick in eine ungleiche Zelle erklärt den Unterschied">🧠 KI</button>
+          <button id="btn-cmp-ki-job" class="export-btn var-ai" style="display:none">KI-Job (alle erklären)</button>
         </div>
-        <div id="cmp-result" style="overflow-x:auto"></div>
+        <div id="cmp-ki-hint" class="planner-muted" style="display:none;font-size:11.5px;margin:0 0 6px">
+          KI aktiv: In eine <b>ungleiche</b> Vergleichszelle klicken → die KI erklärt den Unterschied
+          (nur wenn die Logik sie als ungleich markiert hat).
+        </div>
+        <div class="cmp-exportbar">
+          <span class="planner-muted" style="font-size:11.5px">Export:</span>
+          <button id="btn-cmp-xlsx" class="export-btn">⬇ Excel</button>
+          <button id="btn-cmp-csv" class="export-btn">⬇ CSV</button>
+          <button id="btn-cmp-json" class="export-btn">⬇ JSON</button>
+          <button id="btn-cmp-html" class="export-btn">⬇ HTML</button>
+        </div>
+        <div id="cmp-result"></div>
       </div>
     </div><!-- /compare-panel -->
 
@@ -3786,7 +3807,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260823lift"></script>
-<script src="/js/compare.js?v=20260828cells"></script>
+<script src="/js/compare.js?v=20260901matrix2"></script>
 <script src="/js/todo.js?v=20260818handoff"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>

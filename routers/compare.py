@@ -322,6 +322,9 @@ async def compare_run_cells(req: Request):
                     "counts": prep.get("counts", {})})
 
         total = prep.get("counts", {}).get("cells", 0)
+        # Sofort einen Fortschritts-Frame senden, damit der Balken erscheint (der erste
+        # KI-Zellen-Aufruf kann das Modell erst laden → sonst wirkt es „hängt/startet nicht").
+        yield _sse({"type": "progress", "done": 0, "total": total})
         cells_out, done, tok = [], 0, {"in": 0, "out": 0}
         _nc = _profile_num_ctx()
 
@@ -389,9 +392,11 @@ async def compare_run_cells(req: Request):
                        "verdict": verdict, "detail": detail, "summary": summary}
                 cells_out.append(rec)
                 yield _sse({"type": "cell", **rec})
+                # Fortschritt nach JEDER Zelle melden (Balken bewegt sich sichtbar, auch
+                # bei langsamen KI-Zellen); Zwischenspeichern nur alle 20 Zellen.
                 if done % 20 == 0:
                     _persist(False)
-                    yield _sse({"type": "progress", "done": done, "total": total})
+                yield _sse({"type": "progress", "done": done, "total": total})
         _persist(True)
         yield _sse({"type": "progress", "done": done, "total": total})
         yield _sse({"type": "done", "counts": prep.get("counts", {}), "tokens": tok, "complete": True})
@@ -446,6 +451,190 @@ async def compare_results(name: str):
     """Zellenweise Ergebnisdatei (results.json) fürs Wieder-Öffnen/JSON-Export."""
     _cmp_dir(name)  # 404, falls es den Vergleich nicht gibt
     return _cmp_load_results(name) or {"cells": [], "complete": False}
+
+
+@router.post("/api/compare/projects/{name}/results")
+async def compare_save_results(name: str, req: Request):
+    """Ergebnisse (inkl. on-demand-KI-``summary``) live nach results.json schreiben.
+    Body ``{meta, cells, complete?}`` → flaches Schema wie der Lauf-Persistenz-Pfad,
+    damit „gespeicherten Vergleich öffnen" es unverändert wieder lädt."""
+    _cmp_dir(name, create=True)
+    p = _cmp_results_path(name)
+    if not p:
+        raise HTTPException(status_code=400, detail="Ungültiger Name")
+    body = await req.json()
+    meta = body.get("meta") or {}
+    payload = {
+        "version": 1, "name": _cmp_safe_name(name),
+        "compared_columns": meta.get("compared_columns") or [],
+        "columns_only_a": meta.get("columns_only_a") or [],
+        "columns_only_b": meta.get("columns_only_b") or [],
+        "only_in_a": meta.get("only_in_a") or [],
+        "only_in_b": meta.get("only_in_b") or [],
+        "counts": meta.get("counts") or {},
+        "cells": body.get("cells") or [],
+        "updated_at": time.time(),
+        "complete": bool(body.get("complete", True)),
+    }
+    p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return {"ok": True}
+
+
+@router.post("/api/compare/cell-ki")
+async def compare_cell_ki(req: Request):
+    """On-demand-KI für EINE Zelle (Klick in eine leere Vergleichszelle / KI-Job).
+    Body ``{key, column, a, b, model?}`` → ``{summary, model, tokens}``. Frischer
+    ``_model_session``-Aufruf (Kontext-Reset je Zelle, ``_CELL_SYSTEM``). 503 ohne
+    lokales Modell."""
+    body = await req.json()
+    a = str(body.get("a", "") or "")
+    b = str(body.get("b", "") or "")
+    col = str(body.get("column", "") or "")
+    key = str(body.get("key", "") or "")
+    picked = str(body.get("model", "") or "").strip()
+    model = _pick_model(picked, _model_for("general")) if picked else await _local_model(_model_for("general"))
+    if not model:
+        raise HTTPException(status_code=503, detail="Kein lokales Modell für die KI-Bewertung "
+                            "verfügbar (Ollama/lokaler Server nötig).")
+    usr = (f"Spalte: {col}\nSchlüssel: {key}\n\nA:\n{a[:4000]}\n\nB:\n{b[:4000]}\n\n"
+           "Nenne den inhaltlichen Unterschied in einem Satz.")
+    tok = {"in": 0, "out": 0}
+    async with _model_session(model), httpx.AsyncClient(timeout=180) as client:
+        resp = await _llm.chat(client, {
+            "model": model, "think": False, "stream": False,
+            "messages": [{"role": "system", "content": _CELL_SYSTEM},
+                         {"role": "user", "content": usr}],
+            "options": {"num_ctx": _profile_num_ctx(), "num_predict": 160},
+            "keep_alive": KEEP_ALIVE,
+        })
+        resp.raise_for_status()
+        j = resp.json()
+    summary = re.sub(r"<think>.*?</think>", "", str(j.get("message", {}).get("content", "")),
+                     flags=re.DOTALL).strip()
+    ti, to = _llm_tok(j)
+    tok["in"] += ti
+    tok["out"] += to
+    return {"summary": summary, "model": model, "tokens": tok}
+
+
+def _cmp_build_matrix(meta: dict, cells: list) -> Tuple[List[str], List[dict]]:
+    """Baut die Export-Matrix: Schlüssel + je verglichener Spalte drei Teilspalten
+    (Tab 1 / Tab 2 / Vergleich), plus Zeilen ``gelöscht`` (nur in A) und
+    ``hinzugefügt`` (nur in B). Einmal deterministisch, für alle Exportformate."""
+    meta = meta or {}
+    cols = meta.get("compared_columns") or []
+    order: List[str] = []
+    grp: Dict[str, dict] = {}
+    for rec in (cells or []):
+        k = rec.get("key")
+        if k not in grp:
+            grp[k] = {}
+            order.append(k)
+        grp[k][rec.get("column")] = rec
+    headers = ["Schlüssel"]
+    for c in cols:
+        headers += [f"{c} · Tab 1", f"{c} · Tab 2", f"{c} · Vergleich"]
+    rows: List[dict] = []
+
+    def _verdict_text(rec: dict) -> str:
+        if not rec:
+            return ""
+        if rec.get("summary"):
+            return "≠ " + str(rec.get("summary"))
+        return "ungleich" if rec.get("verdict") == "changed" else "gleich"
+
+    for k in order:
+        line = [k]
+        for c in cols:
+            rec = grp[k].get(c) or {}
+            line += [rec.get("a", ""), rec.get("b", ""), _verdict_text(rec)]
+        rows.append({"key": k, "type": "common", "cells": line})
+    for item in (meta.get("only_in_a") or []):
+        rd = item.get("row") or {}
+        line = [item.get("key")]
+        for c in cols:
+            line += [rd.get(c, ""), "", "gelöscht"]
+        rows.append({"key": item.get("key"), "type": "deleted", "cells": line})
+    for item in (meta.get("only_in_b") or []):
+        rd = item.get("row") or {}
+        line = [item.get("key")]
+        for c in cols:
+            line += ["", rd.get(c, ""), "hinzugefügt"]
+        rows.append({"key": item.get("key"), "type": "added", "cells": line})
+    return headers, rows
+
+
+@router.post("/api/compare/export")
+async def compare_export(req: Request):
+    """Verglichene Matrix exportieren. Body ``{format: xlsx|csv|json|html, meta, cells,
+    name?}`` → Datei-Download (Content-Disposition)."""
+    body = await req.json()
+    fmt = str(body.get("format", "csv") or "csv").lower()
+    base = "".join(c for c in str(body.get("name", "") or "excel-vergleich")
+                   if c.isalnum() or c in (" ", "_", "-")).strip() or "excel-vergleich"
+    headers, rows = _cmp_build_matrix(body.get("meta") or {}, body.get("cells") or [])
+
+    def _s(v) -> str:
+        return "" if v is None else str(v)
+
+    if fmt == "xlsx":
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Vergleich"
+        ws.append(headers)
+        for r in rows:
+            ws.append([_s(x) for x in r["cells"]])
+        ws.freeze_panes = "B2"   # erste Zeile + erste Spalte fixiert
+        buf = io.BytesIO()
+        wb.save(buf)
+        return Response(content=buf.getvalue(),
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f'attachment; filename="{base}.xlsx"'})
+
+    if fmt == "csv":
+        import csv as _csv
+        sio = io.StringIO()
+        w = _csv.writer(sio, delimiter=";")
+        w.writerow(headers)
+        for r in rows:
+            w.writerow([_s(x) for x in r["cells"]])
+        data = ("﻿" + sio.getvalue()).encode("utf-8")
+        return Response(content=data, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{base}.csv"'})
+
+    if fmt == "json":
+        payload = {"headers": headers,
+                   "rows": [{"key": r["key"], "type": r["type"], "cells": [_s(x) for x in r["cells"]]}
+                            for r in rows]}
+        return Response(content=json.dumps(payload, ensure_ascii=False, indent=2),
+                        media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="{base}.json"'})
+
+    # html (Default-Fallback)
+    import html as _html
+    th = "".join(f"<th>{_html.escape(h)}</th>" for h in headers)
+    trs = []
+    for r in rows:
+        cls = {"deleted": ' class="del"', "added": ' class="add"'}.get(r["type"], "")
+        tds = "".join(f"<td>{_html.escape(_s(x))}</td>" for x in r["cells"])
+        trs.append(f"<tr{cls}>{tds}</tr>")
+    doc = (
+        "<!doctype html><html lang=de><head><meta charset=utf-8>"
+        f"<title>{_html.escape(base)}</title><style>"
+        "body{font:13px system-ui,sans-serif;margin:0;background:#fff;color:#111}"
+        ".wrap{overflow:auto;max-height:100vh}"
+        "table{border-collapse:collapse}"
+        "th,td{border:1px solid #ccc;padding:4px 8px;white-space:nowrap}"
+        "thead th{position:sticky;top:0;background:#f3f4f6;z-index:2}"
+        "tbody td:first-child,thead th:first-child{position:sticky;left:0;background:#f3f4f6;z-index:1}"
+        "thead th:first-child{z-index:3}"
+        "tr.del{background:#fee2e2}tr.add{background:#dcfce7}"
+        "</style></head><body><div class=wrap><table><thead><tr>"
+        f"{th}</tr></thead><tbody>{''.join(trs)}</tbody></table></div></body></html>"
+    )
+    return Response(content=doc, media_type="text/html; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{base}.html"'})
 
 
 @router.put("/api/compare/projects/{name}")
