@@ -78,6 +78,7 @@ from routers import pairing as _r_pairing
 from routers import orchestrator as _r_orchestrator
 from routers import goal as _r_goal
 from routers import bilderkennung as _r_bilderkennung
+from routers import video as _r_video
 
 
 app = FastAPI(title="AI_Framework_Thomas")
@@ -200,6 +201,7 @@ app.include_router(_r_pairing.router)
 app.include_router(_r_orchestrator.router)
 app.include_router(_r_goal.router)
 app.include_router(_r_bilderkennung.router)
+app.include_router(_r_video.router)
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────

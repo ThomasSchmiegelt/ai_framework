@@ -46,6 +46,7 @@ data/todo_att/
 data/varianten/
 data/transcripts/
 data/orchestrator/
+data/videos/
 
 # Lokale Spracherkennungs-Modelle (faster-whisper, von HuggingFace geladen — groß, nicht ins Repo)
 models/
@@ -99,6 +100,12 @@ z-image/hf_token.txt
 
 # Musik-Generator: erzeugte Audiodateien nicht versionieren
 z-music/outputs/
+
+# Wan-Videogenerierung (lokales Videomodell): venv/Ausgaben/Token nicht versionieren.
+z-video/outputs/
+z-video/venv/
+# Hugging-Face-Token (GEHEIM!) — niemals versionieren
+z-video/hf_token.txt
 
 # Betriebssystem / Editor
 Thumbs.db

@@ -126,6 +126,13 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
 - 🔍 **Upscaling** — `/upscale`: Bild hochskalieren (2×, max 2048). **KI-Detail** ergänzt echte
   Schärfe lokal über Z-Image (img2img mit niedriger Stärke), **Schnell** vergrößert sofort per
   Lanczos (Pillow). Keine neue Abhängigkeit; bei fehlendem lokalem Server Rückfall auf Lanczos
+- 🎬 **Videoerzeugung (lokal, optional)** — eigener Tab **🎬 Videoerzeugung** und `/video` im Chat:
+  Video **komplett lokal auf der GPU** erzeugen — **Start- + Endbild** vorgeben (das Modell
+  interpoliert dazwischen), **ein Startbild animieren** oder **nur aus Text**. Nutzt das
+  eigenständige, **optionale** Werkzeug [`z-video/`](z-video/README.md) (Modell **Wan**, Apache-2.0,
+  eigener Installer/venv, crash-sichere Brücke — getrennt vom Backend, wie z-image). **Braucht eine
+  starke GPU** (Modellgewichte ~30–70 GB) und ist deshalb **nicht** Teil der Haupt-Installer; im
+  Profil unter **🎬 Videoerzeugung** „Lokal · Wan" + Server-URL wählen
 - ↪ **Chat → anderer Tab** — jede Antwort hat ein Menü **„↪ senden an…"**: übernimm das Ergebnis in
   **To-Do** (Rückfrage neu/ergänzen), **Planer** (als Projektplan), **Code**, **Mathe**, **Medizin**,
   **Varianten**, **Morph-Kasten**, **Patente**, **Anfrage** (füllt das Eingabefeld vor) oder
@@ -427,6 +434,7 @@ AI_Framework_Thomas/
 ├── samples/                Beispiel-Ressourcenliste (CSV, importierbar)
 ├── scripts/                Hilfsskripte (Demo-Plan erzeugen, Release-ZIP bauen)
 ├── z-image/                Optionales lokales Bildmodell Z-Image-Turbo (eigene venv, eigener Installer)
+├── z-video/                Optionale lokale Videoerzeugung (Wan; eigene venv, eigener Installer)
 └── docs/                   INSTALL · PORTABLE · SERVER · ENTWICKLUNG · …
 ```
 

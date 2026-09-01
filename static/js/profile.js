@@ -107,6 +107,32 @@ const Profile = (() => {
     if (urlEl) urlEl.value = _data.sd_webui_url || '';
   }
 
+  // Video-Auswahl (Videogenerierung): „Aus" + „Lokal · Wan".
+  async function _fillVideoSelect() {
+    const sel = document.getElementById('profile-video-model');
+    if (!sel) return;
+    let cfg = null;
+    try { cfg = await (await fetch('/api/video/config')).json(); } catch (_) {}
+    const current = _data.video_model || '';
+    const options = (cfg && cfg.options) || [{ value: '', label: 'Aus (keine Videogenerierung)' }];
+    sel.innerHTML = '';
+    for (const o of options) {
+      const opt = document.createElement('option');
+      opt.value = o.value; opt.textContent = o.label;
+      sel.appendChild(opt);
+    }
+    if (current && !options.some(o => o.value === current)) {
+      const opt = document.createElement('option');
+      opt.value = current; opt.textContent = current;
+      sel.appendChild(opt);
+    }
+    sel.value = current;
+    const urlEl = document.getElementById('profile-video-url');
+    if (urlEl) urlEl.value = _data.video_server_url || '';
+    const autoEl = document.getElementById('profile-video-autostart');
+    if (autoEl) autoEl.checked = _data.video_autostart !== false;
+  }
+
   function applyTabVisibility(hiddenTabs) {
     hiddenTabs = hiddenTabs || [];
     const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'postfach', 'patente', 'rechnung', 'zeugnis', 'morph', 'jury'];
@@ -259,6 +285,7 @@ const Profile = (() => {
     _fillModelSelects();
     _fillTtsSelect();
     _fillImageSelect();
+    _fillVideoSelect();
     _loadProviders();
     _refreshPreviews();
     // Tab-Sichtbarkeit: ein Häkchen kann mehrere Tabs steuern (data-tabs="ide,mathe").
@@ -356,6 +383,9 @@ const Profile = (() => {
       tts_model:      document.getElementById('profile-tts-model')?.value || '',
       image_model:    document.getElementById('profile-image-model')?.value || '',
       sd_webui_url:   document.getElementById('profile-sd-url')?.value.trim() || '',
+      video_model:      document.getElementById('profile-video-model')?.value || '',
+      video_server_url: document.getElementById('profile-video-url')?.value.trim() || '',
+      video_autostart:  document.getElementById('profile-video-autostart')?.checked !== false,
       hidden_tabs: [...new Set(
         Array.from(document.querySelectorAll('#profile-tab-vis input[type="checkbox"]'))
           .filter(cb => !cb.checked)
@@ -433,6 +463,7 @@ const Profile = (() => {
       await _fillModelSelects();   // neue Remote-Modelle in den Rollen-Listen anzeigen
       await _fillTtsSelect();      // neuer Anbieter → TTS-Vorschläge aktualisieren
       await _fillImageSelect();    // neuer Anbieter → Bild-Vorschläge aktualisieren
+      await _fillVideoSelect();
     } catch (e) {
       msg.textContent = 'Fehler: ' + e.message;
     }
@@ -446,6 +477,7 @@ const Profile = (() => {
       await _fillModelSelects();
       await _fillTtsSelect();
       await _fillImageSelect();
+      await _fillVideoSelect();
     } catch (_) {}
   }
 

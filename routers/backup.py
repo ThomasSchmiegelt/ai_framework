@@ -79,6 +79,7 @@ def _backup_dirs_bulk() -> list:
     return [(UPLOADS_DIR, "uploads"), (REPORTS_DIR, "reports"),
             (DOSSIERS_DIR, "dossiers"),
             (TRANSCRIPTS_DIR, "transcripts"),   # Audiodateien der Transkription (Sprach-EINGABE)
+            (VIDEOS_DIR, "videos"),   # erzeugte Videos (Videogenerierung; können groß werden)
             (DATA_DIR / "todo_backups", "todo_backups")]   # Reset-Sicherungen der To-Do-Liste
 
 

@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260901jobtabs" />
+  <link rel="stylesheet" href="/css/app.css?v=20260901video3" />
 </head>
 <body>
 
@@ -184,6 +184,7 @@
       <button class="tab-btn" data-tab="morph">🧩 Morph-Kasten</button>
       <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
       <button class="tab-btn" data-tab="bilderkennung">🖼 Bilderkennung</button>
+      <button class="tab-btn" data-tab="video">🎬 Videoerzeugung</button>
     </div>
 
     <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
@@ -2644,6 +2645,72 @@
       <div id="bk-list" class="bk-hit-list"></div>
     </div><!-- /bilderkennung-panel -->
 
+    <!-- ── Videoerzeugung (lokal Wan über z-video) ──────────────────────────── -->
+    <div id="video-panel" class="panel" style="overflow:auto;padding:12px 14px">
+      <h2 style="font-size:16px;margin:0 0 4px">🎬 Videoerzeugung</h2>
+      <p class="planner-muted" style="font-size:12px;margin:0 0 10px">
+        Erzeugt Videos <strong>lokal auf der GPU</strong> (Wan, Apache-2.0). Drei Modi:
+        <strong>Erst- + Letztbild</strong> (das Modell interpoliert dazwischen),
+        <strong>Einzelbild</strong> (wird animiert) oder <strong>nur Text</strong>. Braucht das
+        optionale Werkzeug <code>z-video</code> (starke GPU, eigener Installer) und im Profil unter
+        <strong>🎬 Videoerzeugung</strong> „Lokal · Wan" + die Server-URL. Im Chat geht auch
+        <code>/video</code>.
+      </p>
+      <div class="vg-modes">
+        <button id="vg-mode-flf2v" class="vg-mode active" type="button">🎞 Erst- + Letztbild</button>
+        <button id="vg-mode-i2v" class="vg-mode" type="button">🖼 Einzelbild → Video</button>
+        <button id="vg-mode-t2v" class="vg-mode" type="button">📝 Text → Video</button>
+      </div>
+      <div class="vg-images">
+        <div class="vg-imgfield" id="vg-first-field">
+          <span>Startbild <span class="planner-muted">(erstes Bild — im Rahmen ziehen/zoomen, kein Verzerren)</span></span>
+          <input type="file" id="vg-first" accept="image/*" class="vg-input">
+          <div id="vg-first-frame" class="vg-frameholder"></div>
+        </div>
+        <div class="vg-imgfield" id="vg-last-field">
+          <span>Endbild <span class="planner-muted">(letztes Bild)</span></span>
+          <input type="file" id="vg-last" accept="image/*" class="vg-input">
+          <div id="vg-last-frame" class="vg-frameholder"></div>
+        </div>
+      </div>
+      <label class="vg-field">Beschreibung / Bewegung (Prompt)
+        <textarea id="vg-prompt" class="vg-input" rows="2"
+          placeholder="z. B. sanfte Kamerafahrt nach rechts, leichter Wind"></textarea></label>
+      <div class="vg-presets-row">
+        <span class="planner-muted" style="font-size:11px">Vorlagen:</span>
+        <div id="vg-presets" class="vg-presets"></div>
+      </div>
+      <label class="vg-check" title="Ein LLM formuliert deine Beschreibung zu einem anschaulichen Video-Prompt aus (optional, lokal im Geheim-Modus).">
+        <input type="checkbox" id="vg-enhance"> ✨ Prompt vor der Erzeugung per LLM verbessern
+      </label>
+      <div class="vg-controls">
+        <label class="vg-field" style="min-width:150px">Auflösung
+          <select id="vg-size" class="vg-input"></select></label>
+        <label class="vg-field" style="min-width:120px">Länge (Frames)
+          <input type="number" id="vg-frames" class="vg-input" value="81" min="9" max="200"></label>
+        <label class="vg-field" style="min-width:90px">FPS
+          <input type="number" id="vg-fps" class="vg-input" value="16" min="1" max="60"></label>
+        <label class="vg-field" style="min-width:110px">Schritte
+          <input type="number" id="vg-steps" class="vg-input" value="30" min="1" max="80"></label>
+        <label class="vg-field" style="min-width:110px">Seed <span class="planner-muted">(optional)</span>
+          <input type="number" id="vg-seed" class="vg-input" placeholder="zufällig"></label>
+        <button id="vg-run" class="export-btn primary vg-run">🎬 Video erzeugen</button>
+      </div>
+      <div id="vg-config-warn" class="bk-hint" style="display:none;margin-bottom:10px">
+        Kein lokales Videomodell konfiguriert. Bitte das optionale Werkzeug <code>z-video</code>
+        installieren/starten und im Profil unter <strong>🎬 Videoerzeugung</strong> „Lokal · Wan"
+        samt Server-URL wählen.
+      </div>
+      <div id="vg-firstrun" class="bk-hint" style="display:none;margin-bottom:10px">
+        ⏳ <strong>Erststart:</strong> Beim ersten Video werden die Modellgewichte
+        <strong>einmalig geladen (mehrere GB)</strong> — das Netzwerk ist dann voll ausgelastet und es
+        dauert. Es gibt <strong>kein Zeitlimit</strong>; folgende Videos sind schnell. Tipp: den Download
+        einmal sichtbar per <code>z-video\video.bat</code> vorziehen.
+      </div>
+      <div id="vg-status" class="bk-answer" style="display:none"></div>
+      <div id="vg-result" style="margin-top:10px"></div>
+    </div><!-- /video-panel -->
+
     <!-- ── KI-To-Do-Liste mit Wissensgraph ──────────────────────────────────── -->
     <div id="todo-panel" class="panel">
       <div id="todo-toolbar">
@@ -3181,6 +3248,23 @@
           <strong>lokalen</strong> Stable-Diffusion-WebUI-Server (AUTOMATIC1111/Forge, mit
           <code>--api</code> gestartet). Im <strong>Geheim-Modus</strong> sind API-Modelle gesperrt
           (nur lokal). Nutzung im Chat per 🎨-Haken oder <code>/bild</code> / <code>/bildhelp</code>.</span>
+      </div>
+      <div class="form-group">
+        <label>🎬 Videoerzeugung <span class="planner-muted" style="font-size:11px">Video aus Bildern/Text (lokal)</span></label>
+        <select id="profile-video-model" class="sidebar-select"></select>
+        <input type="text" id="profile-video-url" placeholder="http://127.0.0.1:7870"
+          style="margin-top:6px" />
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px;cursor:pointer">
+          <input type="checkbox" id="profile-video-autostart" style="width:auto" checked />
+          <span>Video-Server bei Bedarf automatisch starten</span>
+        </label>
+        <span class="planner-muted" style="font-size:11px;display:block;margin-top:4px">Standard =
+          <strong>aus</strong>. „Lokal · Wan" nutzt das <strong>optionale</strong> Werkzeug
+          <code>z-video</code> (Wan, Apache-2.0) auf einer <strong>starken GPU</strong> — eigener
+          Installer, ~30–70 GB Modellgewichte. Die URL zeigt auf den lokalen Video-Server
+          (<code>video_server</code>, Standard <code>http://127.0.0.1:7870</code>). Erst-/Letztbild,
+          Einzelbild oder Text → Video. Nutzung im Tab <strong>🎬 Videoerzeugung</strong> oder im
+          Chat per <code>/video</code>. Alles lokal (kein Cloud-Dienst).</span>
       </div>
     </div>
     <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:10px 0 0;cursor:pointer">
@@ -3783,7 +3867,7 @@
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
 <script src="/js/tts.js?v=20260818wfmodel"></script>
-<script src="/js/chat.js?v=20260827ziel"></script>
+<script src="/js/chat.js?v=20260901video4"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260823ragimg"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
@@ -3814,7 +3898,8 @@
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/pairing.js?v=20260825reach"></script>
 <script src="/js/bilderkennung.js?v=20260831ask"></script>
-<script src="/js/app.js?v=20260824pair"></script>
+<script src="/js/video.js?v=20260901video5"></script>
+<script src="/js/app.js?v=20260901video"></script>
 
 </body>
 </html>

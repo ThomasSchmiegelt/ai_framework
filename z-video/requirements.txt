@@ -1,0 +1,22 @@
+# Wan - Videogenerierung · Python-Abhaengigkeiten (ohne PyTorch, das wird im
+# Installer mit passendem CUDA-Index installiert: siehe install_zvideo.ps1 / .sh).
+#
+# diffusers muss AUS DEM QUELLCODE kommen: die Wan-Unterstuetzung (WanPipeline,
+# WanImageToVideoPipeline, AutoencoderKLWan, First-Last-Frame) ist teils noch
+# nicht Teil eines veroeffentlichten Releases.
+git+https://github.com/huggingface/diffusers.git
+transformers
+accelerate
+# NumPy < 2.3 erzwingen (torch-CUDA-Build-Kompatibilitaet; siehe z-image).
+numpy<2.3
+safetensors
+sentencepiece
+protobuf
+ftfy
+Pillow
+huggingface_hub
+# mp4-Export der erzeugten Frames. imageio-ffmpeg (BSD) bringt statische
+# ffmpeg-Bibliotheken (LGPL, dynamisch gelinkt, unveraendert) mit - dieselbe
+# dokumentierte weak-copyleft-Ausnahme wie PyAV/faster-whisper (siehe CLAUDE.md).
+imageio
+imageio-ffmpeg
