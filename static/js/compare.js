@@ -543,8 +543,8 @@ const Compare = (() => {
       evaluation: '',
     };
     try {
-      let r = await fetch('/api/compare/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (r.status === 409) r = await fetch('/api/compare/projects/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      // PUT legt an ODER aktualisiert (kein POST→409→PUT mehr → saubere Logs, eine Anfrage weniger).
+      const r = await fetch('/api/compare/projects/' + encodeURIComponent(name), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       _status('Gespeichert.');
       await _loadProjects(name);
