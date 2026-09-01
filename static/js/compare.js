@@ -18,8 +18,9 @@ const Compare = (() => {
   let _cfg = [];                                  // [{name, mode, metric, inA, inB}]
   let _meta = null, _cellMap = {}, _keyOrder = [], _cells = [];
   let _reader = null, _running = false, _renderTimer = 0;
-  let _jobQueue = [];
-  let _kiOn = false, _saveTimer = 0, _kiStop = false;                             // [{name, params}]
+  let _jobQueue = [];                             // [{name, params}]
+  let _kiOn = false, _saveTimer = 0, _kiStop = false;
+  let _results = [], _activeResult = -1, _view = 'settings';   // Ergebnis-Reiter je Lauf/Job
 
   function _el(id) { return document.getElementById(id); }
   function _model() { return (typeof Profile !== 'undefined' && Profile.modelFor) ? Profile.modelFor('general') : ''; }
@@ -434,13 +435,14 @@ const Compare = (() => {
       _status(msg); if (typeof showToast === 'function') showToast(msg); return;
     }
     if (_running) return;
+    const _rname = (_el('cmp-save-name').value || '').trim() || 'Ergebnis';
     if (!resume) { _meta = null; _cellMap = {}; _keyOrder = []; _cells = []; _el('cmp-result').innerHTML = ''; }
     _switchSub('result');
     _setRunning(true); _status('Vergleiche zellenweise…');
     let total = 0, _done = false, _errored = false;
     await runCellStream(_params(resume), {
       onReader: (r) => { _reader = r; },
-      onMeta: (ev) => { _meta = ev; total = (ev.counts || {}).cells || 0; _fillColFilter(); _renderResult(); },
+      onMeta: (ev) => { _meta = ev; total = (ev.counts || {}).cells || 0; _upsertResult(_rname, _meta, _cells); _renderSubbar(); _fillColFilter(); _renderResult(); },
       onCell: (ev) => {
         const key = ev.key + '\u0000' + ev.column;
         if (!(key in _cellMap)) { _cellMap[key] = _cells.length; _cells.push(ev); }
@@ -481,10 +483,49 @@ const Compare = (() => {
     _setRunning(false); _status('Angehalten — „▶ Fortsetzen" setzt fort.');
   }
 
-  // ── Untertabs ──────────────────────────────────────────────────────────────
+  // ── Untertabs: „⚙ Einstellen" + je Lauf/Job ein Ergebnis-Reiter (mit Namen) ──
   function _switchSub(name) {
-    document.querySelectorAll('#compare-panel .cmp-subtab').forEach(b => b.classList.toggle('active', b.dataset.sub === name));
-    ['settings', 'result'].forEach(n => { const p = _el('cmp-sub-' + n); if (p) p.classList.toggle('active', n === name); });
+    _view = (name === 'settings') ? 'settings' : 'result';
+    const ps = _el('cmp-sub-settings'), pr = _el('cmp-sub-result');
+    if (ps) ps.classList.toggle('active', _view === 'settings');
+    if (pr) pr.classList.toggle('active', _view === 'result');
+    _renderSubbar();
+  }
+
+  function _renderSubbar() {
+    const bar = _el('cmp-subbar');
+    if (!bar) return;
+    let h = `<button class="cmp-subtab ${_view === 'settings' ? 'active' : ''}" data-nav="settings">⚙ Einstellen</button>`;
+    _results.forEach((r, i) => {
+      h += `<button class="cmp-subtab ${(_view === 'result' && _activeResult === i) ? 'active' : ''}" data-nav="result" data-ri="${i}" title="Ergebnis: ${_esc(r.name)}">📊 ${_esc(r.name || 'Ergebnis')}</button>`;
+    });
+    bar.innerHTML = h;
+    bar.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      if (b.dataset.nav === 'settings') _switchSub('settings'); else _selectResult(+b.dataset.ri);
+    }));
+  }
+
+  // Ein Ergebnis (Name → meta+cells) anlegen/aktualisieren und aktiv setzen.
+  function _upsertResult(name, meta, cells) {
+    name = (name || 'Ergebnis');
+    let i = _results.findIndex(r => r.name === name);
+    if (i < 0) { _results.push({ name, meta, cells }); i = _results.length - 1; }
+    else { _results[i].meta = meta; _results[i].cells = cells; }
+    _activeResult = i;
+    return i;
+  }
+
+  // Zu einem Ergebnis-Reiter wechseln → dessen Daten in die Anzeige laden.
+  function _selectResult(i) {
+    if (i < 0 || i >= _results.length) return;
+    _activeResult = i;
+    const r = _results[i];
+    _meta = r.meta; _cells = r.cells;
+    _cellMap = {}; _cells.forEach((c, k) => _cellMap[c.key + '\u0000' + c.column] = k);
+    if (_el('cmp-save-name')) _el('cmp-save-name').value = r.name || '';
+    _fillColFilter();
+    _switchSub('result');
+    _renderResult();
   }
 
   // ── Speichern / Laden / Löschen ────────────────────────────────────────────
@@ -535,6 +576,7 @@ const Compare = (() => {
         };
         _cells = data.cells || []; _cellMap = {}; _cells.forEach((c, i) => _cellMap[c.key + '\u0000' + c.column] = i);
         _el('cmp-save-name').value = name;
+        _upsertResult(name, _meta, _cells); _renderSubbar();
         _fillColFilter(); _renderResult(); _switchSub('result');
         _el('btn-cmp-resume').style.display = (!data.complete && _cells.length) ? '' : 'none';
         _status(data.complete ? 'Geladen.' : 'Geladen (unvollständig — „▶ Fortsetzen").');
@@ -709,7 +751,7 @@ const Compare = (() => {
       await new Promise(resolve => {
         runCellStream(job.params, {
           onReader: (r) => { _reader = r; },
-          onMeta: (ev) => { _meta = ev; _fillColFilter(); _renderResult(); },
+          onMeta: (ev) => { _meta = ev; _upsertResult(job.name, _meta, _cells); _renderSubbar(); _fillColFilter(); _renderResult(); },
           onCell: (ev) => { const k = ev.key + '\u0000' + ev.column; if (!(k in _cellMap)) { _cellMap[k] = _cells.length; _cells.push(ev); } else _cells[_cellMap[k]] = ev; _scheduleResultRender(); },
           onProgress: (ev) => { const t = ev.total || 0; _el('cmp-progress-fill').style.width = (t ? Math.round(ev.done / t * 100) : 0) + '%'; _el('cmp-progress-label').textContent = `${job.name}: ${ev.done}/${t}`; },
           onDone: (ev) => { _renderResult(); if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Excel-Vergleich'); _save(); resolve(); },
@@ -721,9 +763,12 @@ const Compare = (() => {
         _el('cmp-job-status').textContent = `Paar ${i + 1}/${queue.length}: ${job.name} — KI…`;
         await _kiExplainAll(_cells.filter(c => c.verdict === 'changed' && !c.summary));
       }
+      // Job-Ergebnisse sofort ungefiltert in ALLEN Formaten exportieren (Excel/CSV/JSON/HTML)
+      _el('cmp-job-status').textContent = `Paar ${i + 1}/${queue.length}: ${job.name} — Export…`;
+      for (const fmt of ['xlsx', 'csv', 'json', 'html']) { try { await _export(fmt); } catch (_) {} }
       _setRunning(false);
     }
-    _el('cmp-job-status').textContent = `Job fertig (${queue.length} Paar(e)).`;
+    _el('cmp-job-status').textContent = `Job fertig (${queue.length} Paar(e)) — exportiert.`;
     await _loadProjects();
   }
 
@@ -756,11 +801,11 @@ const Compare = (() => {
     _on('btn-cmp-csv', 'click', () => _export('csv'));
     _on('btn-cmp-json', 'click', () => _export('json'));
     _on('btn-cmp-html', 'click', () => _export('html'));
-    document.querySelectorAll('#compare-panel .cmp-subtab').forEach(b => b.addEventListener('click', () => _switchSub(b.dataset.sub)));
     _on('btn-cmp-job-add', 'click', _jobAdd);
     _on('btn-cmp-job-run', 'click', _jobRun);
     _on('btn-cmp-job-clear', 'click', () => { _jobQueue = []; _renderJobList(); });
     _renderJobList();
+    _renderSubbar();   // dynamische Reiterleiste (Einstellen + je Ergebnis)
     _loadProjects();
   }
 

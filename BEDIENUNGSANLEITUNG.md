@@ -110,7 +110,7 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | 🧾 Angebot / Rechnung | Angebote & Rechnungen mit exakter Betragsrechnung (§14 UStG) *(optional)* |
 | 📜 Zeugnisse | Qualifizierte Arbeitszeugnisse in Zeugnissprache *(optional)* |
 | 🧮 Varianten | Gewichteter Variantenvergleich (Paarvergleich/AHP) mit KI-Hilfe, Schnell- & Schritt-für-Schritt-Vergleich & Auto-Tabelle aus Problembeschreibung *(optional)* |
-| 📊 Excel-Vergleich | Zwei Excel-/CSV-Blätter über eine Schlüsselspalte vergleichen (neue/entfernte/geänderte Zeilen) + KI-Bewertung; auch per `/excelvergleich` im Chat *(optional)* |
+| 📊 Excel-Vergleich | Zwei Excel-/CSV-Blätter über eine Schlüsselspalte als **Matrix** vergleichen (fixierter Kopf/Schlüssel, je Spalte Tabelle 1/2/Vergleich), KI erklärt Unterschiede (on-demand oder automatisch), Filter + Export Excel/CSV/JSON/HTML, Stapel-Job mit Ergebnis-Reitern; auch per `/excelvergleich` im Chat *(optional)* |
 | 🖼 Bilderkennung | Bild hochladen, Objekt/Merkmal benennen → es wird im Bild **markiert** (Rahmen). Auch per `/finde` im Chat. Braucht ein grounding-fähiges Vision-Modell (z. B. `qwen2.5vl`) |
 | ✅ To-Do | KI-Aufgabenliste (Besprechung/Projekt) mit Wissensgraph (2D & rotierende 3D-Kugel) *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
@@ -1274,21 +1274,38 @@ Das geht auch **aus dem Chat** mit **`/paarvergleich [Thema]`** (funktioniert au
 ## 11g.1 Excel-Listen vergleichen (📊 Excel-Vergleich)
 
 Tab **📊 Excel-Vergleich** — vergleicht **zwei Excel-/CSV-Dateien** (die je mehrere Tabellenblätter
-haben dürfen) **Zelle für Zelle** und formuliert die Unterschiede auf Wunsch per **KI**.
+haben dürfen) **Zelle für Zelle** und zeigt das Ergebnis als **Matrix**; die Unterschiede erklärt auf
+Wunsch die **KI**.
 
+**Untertab „⚙ Einstellen":**
 1. **Datei A** und **Datei B** laden und je **⬆ einlesen**.
 2. Pro Datei das gewünschte **Blatt** und eine **Schlüsselspalte** wählen (z. B. eine ID- oder
    Namensspalte — darüber werden gleiche Zeilen einander zugeordnet).
-3. Im Untertab **Tabelle 1** pro Spalte die **Aktion** festlegen:
-   - **ignorieren** — Spalte wird nicht verglichen,
-   - **Logik** — schneller, rechnerischer Vergleich (z. B. gleiche Zeichenzahl ohne Leerzeichen ⇒ „gleich"; Metrik wählbar: Zahl / exakt / Länge),
-   - **Logik + KI** — bei einem Unterschied bewertet zusätzlich die **KI jede betroffene Zelle einzeln** und beschreibt in einem Satz, was sich geändert hat. Der Kontext wird **nach jeder Zelle zurückgesetzt**, damit auch große Tabellen im gewählten Kontextfenster bleiben.
-4. **🔍 Vergleichen** — der Untertab **Ergebnis** zeigt die Spalten **nebeneinander**; geänderte Zellen erscheinen **zweifarbig** (A rot, B grün) samt KI-Zusammenfassung. Ein **Fortschrittsbalken** zeigt den Stand; mit **⏹ Stopp** anhalten und **▶ Fortsetzen** später weitermachen (bereits bewertete Zellen werden übersprungen). Filter: **nur Änderungen**, **nur KI-bewertete**, einzelne **Spalte**.
-5. Mit einem Namen **💾 Speichern** (läuft ohnehin **laufend** mit); **⬇ CSV** / **⬇ JSON** exportieren, **⬆ JSON** lädt ein Ergebnis zurück.
+3. In der Spalten-Konfig je Spalte festlegen:
+   - **Aktion** — *ignorieren* oder *vergleichen*.
+   - **Logik-Metrik** — *Inhalt exakt* (Standard: „ist der Inhalt derselbe"), *ohne Leerzeichen*, *Zahl* oder *nur Länge*.
+   - **KI-Vergleich** — leer lassen = Standard-Erklärung; oder einen **eigenen Prompt** eintragen
+     (z. B. „Nenne nur die Zahlenänderung"). Er wird **nur bei einem Unterschied** genutzt.
 
-> **Stapel-Job:** Unter **🗂 Stapel-Job** mehrere Dateipaare mit Namen in die Warteschlange legen und
-> **▶ Job starten** — sie werden nacheinander verglichen und einzeln gespeichert. Läuft das lokal, kannst
-> du nebenher weiter mit Cloud-Modellen im Chat arbeiten.
+**Vergleichen & Ergebnis:**
+4. **🔍 Vergleichen** — der Untertab **„📊 Ergebnis"** zeigt die **Matrix**: **Schlüsselspalte links
+   und Kopfzeile oben bleiben fixiert**, je Spalte drei Teilspalten **Tabelle 1 · Tabelle 2 · Vergleich**
+   (gleich ✓ / ungleich ✗). **Hinzugefügte** und **gelöschte** Zeilen werden mit angezeigt und markiert.
+5. **🧠 KI automatisch** (Häkchen, standardmäßig an): nach dem Logikvergleich erklärt die KI **alle
+   Unterschiede automatisch**. Alternativ den **🧠 KI**-Schalter setzen und einzeln in eine **ungleiche**
+   Zelle klicken, oder **„KI-Job"** drücken.
+6. **Filter:** *Spalten-Ansicht* (Alles / nur Tabellen / nur Tabelle 1 / nur Tabelle 2 / nur Vergleich /
+   ohne Vergleich), *Zeilen* (Alle / geänderte / hinzugefügt / gelöscht), **„nur Unterschiede"**,
+   **Spalten ein/aus** und **„Filter anwenden"**. Mit dem **Spaltenbreite-Regler** schmaler stellen →
+   langer Text bricht um, mehrere Spaltenpakete passen nebeneinander.
+7. **Export:** die verglichene Tabelle als **⬇ Excel / CSV / JSON / HTML**. Mit einem Namen
+   **💾 Speichern** (läuft ohnehin **laufend** mit), **⏹ Stopp** / **▶ Fortsetzen**.
+
+> **Stapel-Job:** Unter **🗂 Stapel-Job** beliebig viele Dateipaare mit Namen in die Warteschlange legen
+> und **▶ Job starten** — sie werden nacheinander verglichen; **jedes Paar bekommt einen eigenen
+> Ergebnis-Reiter mit seinem Namen**, wird (bei „KI automatisch") erklärt und **sofort in allen vier
+> Formaten (Excel/CSV/JSON/HTML) exportiert**. Läuft das lokal, kannst du nebenher weiter mit
+> Cloud-Modellen im Chat arbeiten.
 
 > **Auch aus dem Chat / Assistent-Modus:** Hängst du im Chat **zwei Excel-/CSV-Dateien** an, schlägt der
 > Assistent den Vergleich von selbst vor — ein Klick, Schlüsselspalten wählen, fertig; das Ergebnis
