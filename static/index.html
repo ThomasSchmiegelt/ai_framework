@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260901kiprompt" />
+  <link rel="stylesheet" href="/css/app.css?v=20260901autoki" />
 </head>
 <body>
 
@@ -2487,6 +2487,7 @@
       <!-- Gemeinsame Lauf-Leiste (immer sichtbar) -->
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px">
         <button id="btn-cmp-run" class="export-btn var-ai">🔍 Vergleichen</button>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px" title="Nach dem Logikvergleich erklärt die KI automatisch alle Unterschiede (auch Voreinstellung für Stapel-Jobs)"><input type="checkbox" id="cmp-ki-auto" checked> 🧠 KI automatisch</label>
         <button id="btn-cmp-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
         <button id="btn-cmp-resume" class="export-btn" style="display:none">▶ Fortsetzen</button>
         <input type="text" id="cmp-save-name" placeholder="Name zum Speichern…" style="max-width:180px" />
@@ -3810,7 +3811,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260823lift"></script>
-<script src="/js/compare.js?v=20260901kiprompt"></script>
+<script src="/js/compare.js?v=20260901autoki"></script>
 <script src="/js/todo.js?v=20260818handoff"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>
