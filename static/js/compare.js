@@ -19,7 +19,7 @@ const Compare = (() => {
   let _meta = null, _cellMap = {}, _keyOrder = [], _cells = [];
   let _reader = null, _running = false, _renderTimer = 0;
   let _jobQueue = [];
-  let _kiOn = false, _saveTimer = 0;                             // [{name, params}]
+  let _kiOn = false, _saveTimer = 0, _kiStop = false;                             // [{name, params}]
 
   function _el(id) { return document.getElementById(id); }
   function _model() { return (typeof Profile !== 'undefined' && Profile.modelFor) ? Profile.modelFor('general') : ''; }
@@ -236,15 +236,15 @@ const Compare = (() => {
         sub.forEach(s => {
           if (s === 'a') {
             const cls = (rec && rec.verdict === 'changed') ? 'cmp-val cmp-a' : (r.type === 'deleted' ? 'cmp-val cmp-del' : 'cmp-val');
-            tr += `<td class="${cls}">${_esc(o.a)}</td>`;
+            tr += `<td class="${cls}"><span class="cmp-cellbox">${_esc(o.a)}</span></td>`;
           } else if (s === 'b') {
             const cls = (rec && rec.verdict === 'changed') ? 'cmp-val cmp-b' : (r.type === 'added' ? 'cmp-val cmp-add' : 'cmp-val');
-            tr += `<td class="${cls}">${_esc(o.b)}</td>`;
+            tr += `<td class="${cls}"><span class="cmp-cellbox">${_esc(o.b)}</span></td>`;
           } else {
             if (r.type === 'deleted') { tr += '<td class="cmp-v cmp-del">gelöscht</td>'; return; }
             if (r.type === 'added') { tr += '<td class="cmp-v cmp-add">hinzugefügt</td>'; return; }
             if (!rec) { tr += '<td class="cmp-v cmp-eq">—</td>'; return; }
-            if (rec.summary) { tr += `<td class="cmp-v cmp-ne"><span class="cmp-ki-sum">🧠 ${_esc(rec.summary)}</span></td>`; return; }
+            if (rec.summary) { tr += `<td class="cmp-v cmp-ne"><span class="cmp-cellbox cmp-ki-sum">🧠 ${_esc(rec.summary)}</span></td>`; return; }
             if (rec.verdict === 'changed') {
               tr += ki
                 ? `<td class="cmp-v cmp-ne cmp-ki-cell" data-key="${_esc(r.key)}" data-col="${_esc(cn)}" title="Klicken: KI erklärt den Unterschied">✗ <span class="cmp-ki-hint">🧠</span></td>`
@@ -437,7 +437,7 @@ const Compare = (() => {
     if (!resume) { _meta = null; _cellMap = {}; _keyOrder = []; _cells = []; _el('cmp-result').innerHTML = ''; }
     _switchSub('result');
     _setRunning(true); _status('Vergleiche zellenweise…');
-    let total = 0;
+    let total = 0, _done = false, _errored = false;
     await runCellStream(_params(resume), {
       onReader: (r) => { _reader = r; },
       onMeta: (ev) => { _meta = ev; total = (ev.counts || {}).cells || 0; _fillColFilter(); _renderResult(); },
@@ -457,14 +457,26 @@ const Compare = (() => {
         _renderResult();
         if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Excel-Vergleich');
         _el('cmp-progress-fill').style.width = '100%';
-        _setRunning(false); _status('Fertig.');
+        _done = true;
       },
-      onError: (msg) => { _setRunning(false); _status('Fehler: ' + msg); _el('cmp-result').innerHTML += `<div class="var-cr-bad">Fehler: ${_esc(msg)}</div>`; },
+      onError: (msg) => { _errored = true; _setRunning(false); _status('Fehler: ' + msg); _el('cmp-result').innerHTML += `<div class="var-cr-bad">Fehler: ${_esc(msg)}</div>`; },
     });
-    if (_running) { _setRunning(false); _status('Angehalten.'); }   // Stream endete ohne done
+    if (_errored) return;
+    if (!_done) { _setRunning(false); _status('Angehalten.'); return; }   // Stream endete ohne done
+    // KI automatisch: nach dem Logikvergleich alle Unterschiede erklären (Voreinstellung).
+    if (_autoKiEnabled()) {
+      _status('KI erklärt Unterschiede…');
+      await _kiExplainAll(_cells.filter(c => c.verdict === 'changed' && !c.summary));
+      _setRunning(false); _status('Fertig (inkl. KI).');
+    } else {
+      _setRunning(false); _status('Fertig.');
+    }
   }
 
+  function _autoKiEnabled() { return !!(_el('cmp-ki-auto') && _el('cmp-ki-auto').checked); }
+
   function _stop() {
+    _kiStop = true;
     if (_reader) { try { _reader.cancel(); } catch (_) {} }
     _setRunning(false); _status('Angehalten — „▶ Fortsetzen" setzt fort.');
   }
@@ -607,22 +619,29 @@ const Compare = (() => {
     catch (e) { _status('KI-Fehler: ' + e.message); }
   }
 
-  async function _kiJob() {
-    if (_running) return;
-    const targets = _cells.filter(c => c.verdict === 'changed' && !c.summary);
-    if (!targets.length) { _status('Keine offenen Unterschiede für die KI.'); return; }
-    _running = true; _spin(true);
+  // Erklärt eine Liste geänderter Zellen seriell (geteilt: KI-Job, KI-automatisch, Stapel-Job).
+  async function _kiExplainAll(targets) {
+    if (!targets || !targets.length) return;
+    _kiStop = false;
     _el('cmp-progress-wrap').style.display = '';
     for (let i = 0; i < targets.length; i++) {
-      if (!_running) break;
+      if (_kiStop) break;
       _el('cmp-progress-label').textContent = `KI ${i + 1}/${targets.length}`;
       _el('cmp-progress-fill').style.width = Math.round(i / targets.length * 100) + '%';
       try { await _kiOne(targets[i]); } catch (e) { _status('KI-Fehler: ' + e.message); break; }
       if (i % 5 === 0) { _renderResult(); _saveResults(); }
     }
     _el('cmp-progress-fill').style.width = '100%';
-    _running = false; _spin(false); _renderResult(); _saveResults();
-    _status('KI-Job fertig.');
+    _renderResult(); _saveResults();
+  }
+
+  async function _kiJob() {
+    if (_running) return;
+    const targets = _cells.filter(c => c.verdict === 'changed' && !c.summary);
+    if (!targets.length) { _status('Keine offenen Unterschiede für die KI.'); return; }
+    _running = true; _spin(true);
+    await _kiExplainAll(targets);
+    _running = false; _spin(false); _status('KI-Job fertig.');
   }
 
   // Live-Speichern der Ergebnisse (inkl. KI-summary), entprellt; nur bei gesetztem Namen.
@@ -697,6 +716,11 @@ const Compare = (() => {
           onError: (msg) => { _el('cmp-job-status').textContent = `Paar ${job.name}: ${msg}`; resolve(); },
         });
       });
+      // KI automatisch je Paar (Voreinstellung bei Jobs): Unterschiede erklären + speichern
+      if (_autoKiEnabled()) {
+        _el('cmp-job-status').textContent = `Paar ${i + 1}/${queue.length}: ${job.name} — KI…`;
+        await _kiExplainAll(_cells.filter(c => c.verdict === 'changed' && !c.summary));
+      }
       _setRunning(false);
     }
     _el('cmp-job-status').textContent = `Job fertig (${queue.length} Paar(e)).`;
