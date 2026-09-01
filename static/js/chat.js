@@ -194,6 +194,16 @@ const Chat = (() => {
       return;
     }
 
+    // Videoerzeugung: „/video [Beschreibung]" (Aliase /film, /clip) öffnet ein Overlay
+    // (Modus + Start-/Endbild + Prompt) und erzeugt lokal ein Video (Wan über z-video).
+    const vd = _parseVideo(text);
+    if (vd) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runVideo(vd.prompt);
+      return;
+    }
+
     // Musik: „/musik <Stil/Stimmung>" (Aliase /music, /song) erzeugt ein kurzes Stück
     // (algorithmisch, tools/music.py) und spielt es als Audio im Chat ab.
     const mu = _parseMusik(text);
@@ -3058,6 +3068,200 @@ const Chat = (() => {
     }
   }
 
+  // ── /video — Videoerzeugung (lokal Wan über z-video) ───────────────────────
+  // „/video [Beschreibung]" (Aliase /film, /clip) öffnet ein Overlay: Modus wählen
+  // (Erst-/Letztbild · Einzelbild · Text), Bilder + Prompt angeben, dann lokal erzeugen.
+  function _parseVideo(text) {
+    const m = text.match(/^\/(video|film|clip)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { prompt: (m[2] || '').trim() };
+  }
+
+  function runVideo(prompt) { _openVideoForm(prompt || ''); }
+
+  function _openVideoForm(prompt) {
+    const old = document.getElementById('video-form'); if (old) old.remove();
+    const ov = document.createElement('div');
+    ov.id = 'video-form';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    const fld = 'width:100%;padding:7px 9px;border-radius:7px;border:1px solid var(--border,#334);background:var(--bg-input,#0e141b);color:var(--text,#e6edf3);box-sizing:border-box';
+    ov.innerHTML = `
+      <div style="background:var(--bg-panel,#1b2330);color:var(--text,#e6edf3);border:1px solid var(--border,#334);border-radius:12px;max-width:520px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px;box-shadow:0 10px 40px #000a">
+        <div style="font-weight:700;font-size:1.1em;margin-bottom:4px">🎬 Video erzeugen</div>
+        <div class="planner-muted" style="font-size:12px;margin-bottom:10px">Lokal auf der GPU (Wan). Braucht das optionale Werkzeug <code>z-video</code> + Profil „Lokal · Wan".</div>
+        <div id="vf-modes" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          <button type="button" data-mode="flf2v" class="wf-action-btn vf-mode">🎞 Erst- + Letztbild</button>
+          <button type="button" data-mode="i2v" class="wf-action-btn vf-mode">🖼 Einzelbild</button>
+          <button type="button" data-mode="t2v" class="wf-action-btn vf-mode">📝 nur Text</button>
+        </div>
+        <div id="vf-first-row" style="margin-bottom:8px">
+          <label style="display:block;margin:0 0 3px">Startbild <span class="planner-muted" style="font-size:11px">(im Rahmen ziehen/zoomen — kein Verzerren)</span></label>
+          <input type="file" id="vf-first" accept="image/*" style="${fld}">
+          <div id="vf-first-frame" class="vg-frameholder"></div>
+        </div>
+        <div id="vf-last-row" style="margin-bottom:8px">
+          <label style="display:block;margin:0 0 3px">Endbild</label>
+          <input type="file" id="vf-last" accept="image/*" style="${fld}">
+          <div id="vf-last-frame" class="vg-frameholder"></div>
+        </div>
+        <label style="display:block;margin:6px 0 3px">Beschreibung / Bewegung</label>
+        <textarea id="vf-prompt" rows="2" style="${fld}" placeholder="z. B. sanfte Kamerafahrt, leichter Wind"></textarea>
+        <div class="vg-presets-row"><span class="planner-muted" style="font-size:11px">Vorlagen:</span><div id="vf-presets" class="vg-presets"></div></div>
+        <label class="vg-check" style="margin:8px 0 0"><input type="checkbox" id="vf-enhance"> ✨ Prompt vor der Erzeugung per LLM verbessern</label>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <label style="flex:1">Auflösung
+            <select id="vf-size" style="${fld}">
+              <option value="720p">Quer 720p</option>
+              <option value="480p">Quer 480p</option>
+              <option value="square">Quadrat</option>
+            </select></label>
+          <label style="flex:1">Länge (Frames)
+            <input type="number" id="vf-frames" value="81" min="9" max="200" style="${fld}"></label>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button id="vf-cancel" class="wf-action-btn">Abbrechen</button>
+          <button id="vf-go" class="wf-action-btn" style="background:var(--accent,#2d6cdf);color:#fff">Erzeugen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#vf-prompt').value = prompt || '';
+
+    const VWH = { '720p': [1280, 720], '480p': [832, 480], square: [624, 624] };
+    const _canFrame = () => typeof Video !== 'undefined' && Video.frameImage;
+    let mode = 'flf2v', firstFr = null, lastFr = null, firstUrl = '', lastUrl = '';
+    const _target = () => VWH[ov.querySelector('#vf-size').value] || [1280, 720];
+    const applyMode = () => {
+      ov.querySelectorAll('.vf-mode').forEach(b => {
+        const on = b.dataset.mode === mode;
+        b.style.background = on ? 'var(--accent,#2d6cdf)' : '';
+        b.style.color = on ? '#fff' : '';
+      });
+      ov.querySelector('#vf-first-row').style.display = (mode === 't2v') ? 'none' : '';
+      ov.querySelector('#vf-last-row').style.display = (mode === 'flf2v') ? '' : 'none';
+      _renderVfPresets();
+    };
+    const _renderVfPresets = () => {
+      const host = ov.querySelector('#vf-presets'); if (!host) return;
+      host.innerHTML = '';
+      const list = (typeof Video !== 'undefined' && Video.promptPresets) ? Video.promptPresets(mode) : [];
+      list.forEach((p) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'vg-chip'; b.textContent = p.label; b.title = p.text;
+        b.onclick = () => {
+          const t = ov.querySelector('#vf-prompt');
+          if (typeof Video !== 'undefined' && Video.appendPrompt) Video.appendPrompt(t, p.text);
+          else if (t) { t.value = p.text; t.focus(); }
+        };
+        host.appendChild(b);
+      });
+    };
+    ov.querySelectorAll('.vf-mode').forEach(b => {
+      b.onclick = () => { mode = b.dataset.mode; applyMode(); };
+    });
+    applyMode();
+    const _readFile = (inp, holderId, setFr, setUrl) => {
+      inp.addEventListener('change', () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        const r = new FileReader();
+        r.onload = () => {
+          const url = String(r.result || '');
+          setUrl(url);
+          const [w, h] = _target();
+          if (_canFrame()) setFr(Video.frameImage(ov.querySelector('#' + holderId), url, w, h));
+        };
+        r.readAsDataURL(f);
+      });
+    };
+    _readFile(ov.querySelector('#vf-first'), 'vf-first-frame', (fr) => { firstFr = fr; }, (u) => { firstUrl = u; });
+    _readFile(ov.querySelector('#vf-last'), 'vf-last-frame', (fr) => { lastFr = fr; }, (u) => { lastUrl = u; });
+    ov.querySelector('#vf-size').addEventListener('change', () => {
+      const [w, h] = _target();
+      if (firstFr) firstFr.setTarget(w, h);
+      if (lastFr) lastFr.setTarget(w, h);
+    });
+
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+    ov.querySelector('#vf-cancel').onclick = close;
+    ov.querySelector('#vf-go').onclick = async () => {
+      const p = ov.querySelector('#vf-prompt').value.trim();
+      if (mode === 't2v' && !p) { showToast('Bitte eine Beschreibung eingeben'); return; }
+      if ((mode === 'i2v' || mode === 'flf2v') && !firstUrl) { showToast('Bitte ein Startbild wählen'); return; }
+      if (mode === 'flf2v' && !lastUrl) { showToast('Bitte auch ein Endbild wählen'); return; }
+      const body = {
+        mode, prompt: p,
+        size: ov.querySelector('#vf-size').value,
+        frames: parseInt(ov.querySelector('#vf-frames').value, 10) || 81,
+      };
+      if (mode !== 't2v') body.first = firstFr ? firstFr.export() : firstUrl;
+      if (mode === 'flf2v') body.last = lastFr ? lastFr.export() : lastUrl;
+      const enhance = ov.querySelector('#vf-enhance').checked && p;
+      close();
+      if (enhance && typeof Video !== 'undefined' && Video.enhancePrompt) {
+        const e = await Video.enhancePrompt(p, mode);
+        body.prompt = e.prompt || p;
+      }
+      _doVideo(body);
+    };
+  }
+
+  async function _doVideo(body) {
+    showWelcome(false);
+    const _labels = { flf2v: 'Erst-/Letztbild → Video', i2v: 'Einzelbild → Video', t2v: 'Text → Video' };
+    appendMessage('user', `🎬 Video (${_labels[body.mode] || body.mode})${body.prompt ? ': ' + body.prompt : ''}`);
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const workingEl = makeWorking('Video wird erzeugt',
+      { hintAfter: 15, hint: 'Beim ersten Lauf wird das Modell geladen (mehrere GB, Netzwerk ausgelastet) — kein Zeitlimit; folgende Videos sind schnell. Sonst rechnet das lokale Modell einige Minuten.' });
+    content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text'; content.appendChild(textEl);
+    try {
+      const resp = await fetch('/api/video/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok || !resp.body) {
+        let m = 'HTTP ' + resp.status; try { m = (await resp.json()).detail || m; } catch (_) {}
+        throw new Error(m);
+      }
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '', url = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'progress') {
+            /* makeWorking zeigt bereits einen Live-Sekundenzähler — nichts zu tun */
+          } else if (ev.type === 'video') {
+            url = ev.video_url || '';
+          } else if (ev.type === 'error') {
+            throw new Error(ev.message || 'unbekannter Fehler');
+          }
+        }
+      }
+      workingEl.remove();
+      if (!url) throw new Error('kein Video erhalten');
+      textEl.textContent = '→ Ergebnis:';
+      const vid = document.createElement('video');
+      vid.src = url; vid.controls = true; vid.autoplay = true; vid.loop = true; vid.muted = true;
+      vid.style.cssText = 'max-width:100%;border-radius:8px;display:block;margin-top:6px';
+      content.appendChild(vid);
+      const bar = document.createElement('div'); bar.className = 'wf-actions';
+      const dl = document.createElement('a');
+      dl.href = url; dl.download = 'video.mp4'; dl.className = 'wf-action-btn'; dl.textContent = '⬇ Herunterladen';
+      bar.appendChild(dl); content.appendChild(bar);
+      messages.push({ role: 'user', content: `Video erzeugen: ${body.prompt || body.mode}` });
+      messages.push({ role: 'assistant', content: '(erzeugtes Video)' });
+      _persistConversation();
+    } catch (e) {
+      workingEl.remove();
+      textEl.innerHTML = `<em style="color:#ef4444">Videoerzeugung fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    }
+  }
+
   // ── /upscale — Bild hochskalieren (KI-Detail über Z-Image oder schnell/Lanczos) ─
   function _parseUpscale(text) {
     const m = text.match(/^\/(upscale|hochskalieren|vergroessern|vergrößern)\b\s*([\s\S]*)$/i);
@@ -5046,6 +5250,7 @@ const Chat = (() => {
     { key: '/upscale', ins: '/upscale', cmd: '/upscale', desc: 'Bild hochskalieren (2×, max 2048): „KI-Detail" ergänzt echte Schärfe lokal über Z-Image, „Schnell" vergrößert sofort per Lanczos' },
     { key: '/finde', ins: '/finde ', cmd: '/finde <Objekt>', desc: 'Bilderkennung: gesuchtes Objekt im angehängten Bild markieren (Rahmen). Auch /markiere, /suchebild, /detect. Braucht ein grounding-fähiges Vision-Modell (z. B. qwen2.5vl). Ohne angehängtes Bild bleibt /finde die Websuche' },
     { key: '/musik', ins: '/musik ', cmd: '/musik <Stil/Stimmung>', desc: 'Musik erzeugen (algorithmisch, ohne GPU): z. B. „/musik fröhliche 8bit Abenteuermelodie", „/musik traurig langsam" – spielt das Stück als Audio ab (💾 speichern)' },
+    { key: '/video', ins: '/video ', cmd: '/video [Beschreibung]', desc: 'Video erzeugen (lokal Wan): Overlay mit Modus Erst-/Letztbild · Einzelbild · nur Text. Braucht das optionale Werkzeug z-video (starke GPU) + Profil „Lokal · Wan". Auch /film, /clip' },
     { key: '/excelvergleich', ins: '/excelvergleich', cmd: '/excelvergleich', desc: 'Excel-Vergleich: zwei Tabellen laden, je Blatt + Schlüsselspalte wählen → neue/entfernte/geänderte Zeilen + KI-Bewertung im Chat (auch /xlsvergleich, /excel)' },
     { key: '/paarvergleich', ins: '/paarvergleich ', cmd: '/paarvergleich [Thema]', desc: 'Schrittweiser Paarvergleich: Merkmal für Merkmal eingeben, Wichtigkeit gegen die vorherigen bewerten (Gewichte + Konsistenzcheck). Auch /entscheidung, /ahp' },
     { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Präsentationsassistent (Interview): OHNE Bilder aus dem Thema (Gliederung + Webrecherche); MIT hochgeladenen Bildern eine Präsentation AUS den Bildern (Vision je Bild, Dateiname-Hinweis, sortierbar) + optional .md/.txt, Mermaid-Diagramme, Sprechernotizen, Start/Abschluss generiert → Canvas' },

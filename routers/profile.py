@@ -121,6 +121,14 @@ async def save_profile(req: Request):
         profile["sd_autostart"] = bool(body.get("sd_autostart"))
     if "sd_server_dir" in body:
         profile["sd_server_dir"] = str(body.get("sd_server_dir", "") or "").strip()
+    # Videogenerierung: gewähltes Modell (local::wan) + lokale Video-Server-URL
+    _vidm = str(body.get("video_model", "") or "").strip()
+    profile["video_model"] = "" if _vidm in _MODEL_PLACEHOLDERS else _vidm
+    profile["video_server_url"] = str(body.get("video_server_url", "") or "").strip()
+    if "video_autostart" in body:
+        profile["video_autostart"] = bool(body.get("video_autostart"))
+    if "video_server_dir" in body:
+        profile["video_server_dir"] = str(body.get("video_server_dir", "") or "").strip()
     # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
     profile["auto_compress"] = bool(body.get("auto_compress", False))
     try:

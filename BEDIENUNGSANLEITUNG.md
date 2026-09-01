@@ -112,6 +112,7 @@ Oben verläuft die **Tab-Leiste** (umbruchfähig) mit folgenden Bereichen:
 | 🧮 Varianten | Gewichteter Variantenvergleich (Paarvergleich/AHP) mit KI-Hilfe, Schnell- & Schritt-für-Schritt-Vergleich & Auto-Tabelle aus Problembeschreibung *(optional)* |
 | 📊 Excel-Vergleich | Zwei Excel-/CSV-Blätter über eine Schlüsselspalte als **Matrix** vergleichen (fixierter Kopf/Schlüssel, je Spalte Tabelle 1/2/Vergleich), KI erklärt Unterschiede (on-demand oder automatisch), Filter + Export Excel/CSV/JSON/HTML, Stapel-Job mit Ergebnis-Reitern; auch per `/excelvergleich` im Chat *(optional)* |
 | 🖼 Bilderkennung | Bild hochladen, Objekt/Merkmal benennen → es wird im Bild **markiert** (Rahmen). Auch per `/finde` im Chat. Braucht ein grounding-fähiges Vision-Modell (z. B. `qwen2.5vl`) |
+| 🎬 Videoerzeugung | Video **lokal auf der GPU** erzeugen: **Start- + Endbild** vorgeben (Modell interpoliert dazwischen), ein **Startbild animieren** oder **nur aus Text**. Auch per `/video` im Chat. Braucht das optionale Werkzeug `z-video` (Modell Wan) + eine **starke GPU** *(optional)* |
 | ✅ To-Do | KI-Aufgabenliste (Besprechung/Projekt) mit Wissensgraph (2D & rotierende 3D-Kugel) *(optional)* |
 | 📋 Logs | Diagnose-Protokoll *(optional)* |
 
@@ -242,6 +243,7 @@ Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
 | `/bildprompt [Stil]` · `/img2prompt` | **Bild → Prompt:** öffnet einen Bild-Picker; das **Vision-Modell** beschreibt das gewählte Bild als fertigen **Text-zu-Bild-Prompt**. Darunter Knöpfe **🎨 Bild daraus erzeugen** und **📋 kopieren**. Optional einen Zielstil anhängen (z. B. `/bildprompt Aquarell`). |
 | `/finde <Objekt>` · `/markiere` · `/suchebild` · `/detect` | **Bilderkennung (Objekt markieren):** benenne, was gesucht wird — das gefundene Objekt wird im Bild mit einem **Rahmen** markiert (mit kurzer Antwort und Trefferliste). Bild = ein **angehängtes** Chat-Bild oder ein Bild-Picker. `/markiere`/`/suchebild`/`/detect` öffnen immer den Picker; `/finde` löst die Bilderkennung nur mit angehängtem Bild aus (sonst Websuche). Hängst du ein Bild an und schreibst „such/markiere/wo ist …", **schlägt der Assistent** die Markierung von selbst vor (im Profil abschaltbar). Braucht ein **grounding-fähiges Vision-Modell** (z. B. `qwen2.5vl`); ein reines Beschreib-Modell liefert nur Text ohne Rahmen. Siehe auch den Tab **🖼 Bilderkennung**. |
 | `/musik <Stil/Stimmung>` · `/music` · `/song` | **Musik erzeugen (ohne KI-Modell/GPU):** beschreibe Stil/Stimmung, z. B. `/musik fröhliche 8bit Abenteuermelodie`, `/musik traurige langsame Melodie` oder `/musik spannende Bossmusik`. Das Stück (Melodie, Akkorde, Bass, Beat) wird **algorithmisch aus Musiktheorie** erzeugt und **direkt im Chat abgespielt** (mit **💾 speichern** als WAV). Erkennt u. a. *fröhlich/traurig/spannend/chill/gruselig/8bit* und *schnell/langsam*. Läuft sofort, komplett lokal. (Dieselbe Engine gibt es auch als eigenständiges Werkzeug im Ordner `z-music/`.) |
+| `/video [Beschreibung]` · `/film` · `/clip` | **Video erzeugen (lokal):** öffnet ein kleines Fenster — Modus wählen (**🎞 Erst- + Letztbild**, **🖼 Einzelbild**, **📝 nur Text**), Bilder + Beschreibung angeben, dann wird das Video **lokal auf der GPU** erzeugt (Modell **Wan**) und direkt im Chat abgespielt (mit **⬇ Herunterladen**). Braucht das optionale Werkzeug **`z-video`** (eigener Installer, **starke GPU**) und im Profil unter **🎬 Videoerzeugung** „Lokal · Wan" + Server-URL. Videoerzeugung dauert je nach Länge/Auflösung **einige Minuten**. |
 | `/upscale` · `/hochskalieren` | **Bild hochskalieren (2×, max 2048 px):** Bild wählen und die Methode festlegen — **✨ KI-Detail** rechnet das Bild lokal über Z-Image neu und ergänzt **echte Schärfe/Details** (~30–50 s), **⚡ Schnell** vergrößert nur per Lanczos (sofort, ohne neue Details). Auch als Knopf **🔍 hochskalieren** direkt am Ergebnis von `/bildedit`. Ist kein lokaler Bild-Server aktiv, wird automatisch die schnelle Vergrößerung genutzt (mit Hinweis). |
 | `/bildedit [Anweisung]` · `/bildbearbeiten` | **Bild bearbeiten (img2img):** ein Bild hochladen und in einem kleinen Dialog sagen, **wie** es verändert werden soll (z. B. „Himmel bei Sonnenuntergang", „im Aquarellstil", „das Auto entfernen") – dazu die **Stärke** der Veränderung wählen (leicht/mittel/stark). Läuft **lokal über Z-Image** (crash-sichere Brücke) oder über ein **API-Bildmodell, das Bildbearbeitung kann** (z. B. `gpt-image-1`; `dall-e-3` z. B. **nicht** – dann kommt eine klare Meldung). Mit **✏️ weiter bearbeiten** kannst du das Ergebnis gleich noch einmal verändern. **Nur einen Ausschnitt ändern (Inpainting):** im Dialog **„🖌 Bereich markieren"** anklicken und den Bereich, der sich ändern soll, mit dem Pinsel übermalen (Pinselgröße einstellbar, „🗑 löschen" setzt zurück) — dann wird **nur** der markierte Bereich neu erzeugt, der Rest bleibt. Im Geheim-/Hartman-Modus nur lokal. |
 | `/praesentation <Thema>` · `/vortrag` · `/slides` | **Geführter Präsentationsassistent:** öffnet erst ein kurzes **Interview** (Zielgruppe, Ziel/Zweck, Umfang, Bild-Umfang, Bildwünsche, Webrecherche an/aus). Dann erstellt das System eine **schlüssige Gliederung mit Inhaltsverzeichnis**, **recherchiert zu jedem Punkt im Web** und fasst das als Folieninhalt zusammen. Bebilderung: **Deckblatt flächig** und **Abschlussfolie mit Bild**; Inhaltsfolien bekommen ein Bild, wenn es sinnvoll ist (mit Zufallskomponente) — dann **halb Text, halb Bild**. Alles landet im **Canvas** (PPTX-Export inkl. flächigem Deckblatt). Bild-Umfang im Interview wählbar (KI entscheidet / alle / keine). *Hinweis: über die lokale Z-Image-Brücke dauert jedes Bild ~30–50 s; mit einem API-Bildmodell schnell.* |
@@ -1599,6 +1601,45 @@ einer eigenen Umgebung.
 > erste Aufruf dauert dadurch etwas länger (Server hochfahren). Abschaltbar über das Profil-Flag
 > **„Bild-Server automatisch starten"** (`sd_autostart`); den Ordner kannst du bei Bedarf über `sd_server_dir`
 > festlegen, sonst wird er automatisch gefunden (`z-image/` oder `~/z-image`).
+
+### 🎬 Videoerzeugung — lokal Video aus Bildern/Text (optional)
+
+Der Tab **🎬 Videoerzeugung** (und der Chat-Befehl **`/video`**) erzeugt Videos **komplett lokal auf
+deiner GPU** — ohne Cloud, ohne API-Schlüssel. Drei Modi:
+
+- **🎞 Erst- + Letztbild → Video:** Du gibst ein **Startbild** und ein **Endbild** vor; das Modell
+  erzeugt die Bewegung dazwischen (dazu optional eine kurze Beschreibung, z. B. „sanfte Kamerafahrt").
+- **🖼 Einzelbild → Video:** Ein Startbild wird animiert (kein Endbild nötig).
+- **📝 nur Text → Video:** Nur eine Beschreibung, ohne Bilder.
+
+Einstellbar sind **Auflösung** (480p/720p/quadratisch), **Länge** (Frames), **FPS**, **Schritte** und
+ein optionaler **Seed**. Das fertige Video wird direkt abgespielt und lässt sich herunterladen.
+
+- **Bilder werden nicht verzerrt:** Jedes hochgeladene Bild erscheint in einem **Rahmen im
+  Ziel-Seitenverhältnis**. Du kannst es **mit der Maus verschieben** (ziehen) und mit dem
+  **Zoom-Regler** vergrößern, um den gewünschten Ausschnitt zu wählen. Beim Erzeugen wird genau
+  dieser Ausschnitt passgenau auf die Zielauflösung zugeschnitten (kein Strecken). Wechselst du die
+  Auflösung, passt sich der Rahmen automatisch an.
+- **✨ Prompt verbessern (optional):** Ein Häkchen lässt vor der Erzeugung ein **LLM** deine kurze
+  Beschreibung zu einem anschaulichen Video-Prompt **ausformulieren** (Kamera, Licht, Stil, Tempo).
+  Standard aus; nutzt das im Profil eingestellte Modell (im Geheim-Modus lokal). Das Videomodell
+  selbst braucht **kein** separates LLM — dies ist nur eine optionale Prompt-Politur.
+- **Vorlagen (Chips):** Unter dem Prompt gibt es fertige Vorlagen passend zum Modus — beim
+  Erst-/Letztbild z. B. **🌀 Morph**, sowie **technische/Maschinenbau-Vorlagen** (🔩 Explosionsdarstellung,
+  📐 Querschnitt, ⚙️ Technische Animation, 🏭 Fertigung, 🤖 Roboterarm, 🔄 360°-Turntable u. a.). Ein
+  Klick **hängt** den Text an das Prompt-Feld an, sodass du mehrere Vorlagen **kombinieren** kannst.
+
+- **Voraussetzung:** das eigenständige, **optionale** Werkzeug im Ordner **`z-video/`** (Modell **Wan**,
+  Alibaba, Apache-2.0) — mit **eigenem Installer/eigener Umgebung**, getrennt vom Framework (wie
+  Z-Image). Es braucht eine **starke NVIDIA-GPU**; die Modellgewichte sind groß (~30–70 GB) und werden
+  beim ersten Lauf geladen. Deshalb ist `z-video` **nicht** Teil der normalen Installation.
+- **Installation:** im Ordner `z-video` einmalig `install_zvideo.bat` (Windows) bzw. `./install_zvideo.sh`
+  (Linux). Details: [`z-video/README.md`](z-video/README.md).
+- **Aktivieren:** im **Profil** unter **🎬 Videoerzeugung** „**Lokal · Wan**" wählen und die Server-URL
+  eintragen (Standard `http://127.0.0.1:7870`). Wie beim Bild-Server startet das Framework die
+  Video-„Brücke" bei Bedarf **selbst** (abschaltbar über **„Video-Server automatisch starten"**).
+- **Dauer:** Videoerzeugung dauert je nach Länge/Auflösung **einige Minuten** — eine Anzeige zeigt die
+  laufenden Sekunden. Wie bei Bildern verbraucht das **keine Tokens** (kein Cloud-Modell).
 
 ---
 

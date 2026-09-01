@@ -4938,6 +4938,33 @@ input[type="file"].bk-input { padding: 6px 8px; cursor: pointer; }
 .bk-hit-list .bk-hit { cursor: pointer; }
 .bk-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
 
+/* ── Videoerzeugung (Tab) ─────────────────────────────────────────────────── */
+.vg-modes { display: inline-flex; gap: 0; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.vg-mode { padding: 6px 14px; background: var(--bg-input); color: var(--text); border: none; border-right: 1px solid var(--border); cursor: pointer; font-size: 12.5px; }
+.vg-mode:last-child { border-right: none; }
+.vg-mode.active { background: var(--accent, #4A90D9); color: #fff; }
+.vg-images { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.vg-imgfield { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted, #9aa4b2); min-width: 240px; flex: 1 1 240px; }
+.vg-frameholder { margin-top: 6px; }
+.vg-frame { position: relative; width: 100%; max-width: 460px; background: #0006; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; touch-action: none; cursor: grab; }
+.vg-frame:active { cursor: grabbing; }
+.vg-frame canvas { display: block; width: 100%; height: 100%; }
+.vg-zoom { width: 100%; max-width: 460px; margin-top: 6px; accent-color: var(--accent, #4A90D9); }
+.vg-frame-hint { font-size: 11px; color: var(--text-muted, #9aa4b2); margin-top: 2px; }
+.vg-check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); margin: 4px 0 10px; cursor: pointer; }
+.vg-check input { width: auto; }
+.vg-presets-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px; }
+.vg-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.vg-chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); cursor: pointer; font-size: 12px; }
+.vg-chip:hover { border-color: var(--accent, #4A90D9); }
+.vg-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted, #9aa4b2); margin-bottom: 10px; }
+.vg-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; }
+.vg-input { box-sizing: border-box; width: 100%; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
+.vg-input:focus { outline: none; border-color: var(--accent); }
+select.vg-input { height: 34px; cursor: pointer; }
+input[type="file"].vg-input { padding: 6px 8px; cursor: pointer; }
+textarea.vg-input { resize: vertical; min-height: 44px; }
+
 /* ── Geführte Bildgenerierung (/bildhelp) ────────────────────────────────────── */
 .bild-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; }
 .bild-card { position: relative; background: var(--bg-input, var(--bg-card)); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 22px 22px 18px; width: min(560px, 94vw); max-height: 90vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.4); }

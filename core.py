@@ -143,6 +143,7 @@ TRANSCRIPTS_DIR = DATA_DIR / "transcripts"   # hochgeladene/aufgenommene Audioda
 API_PROVIDERS_FILE = DATA_DIR / "api_providers.json"
 LOG_FILE = DATA_DIR / "ai_framework_thomas.log"
 RAG_IMAGES_DIR = DATA_DIR / "rag_images"   # Bild-aware RAG: Originalbilder je Sammlung/Dokument (Backup-Ordner)
+VIDEOS_DIR = DATA_DIR / "videos"   # Videogenerierung: erzeugte mp4-Clips (lokal Wan über z-video-Brücke)
 # RAG-Embedding-Modell (Default). Cross-Feature (RAG, Verzeichnis-Analyse, Chat-Upload,
 # To-Do, Planer) → in core, damit alle Router es über ``from core import *`` erhalten.
 EMBED_MODEL: str = _CONFIG.get("embed_model", "nomic-embed-text")
@@ -159,7 +160,7 @@ STT_DOWNLOAD_ROOT = (
     if _stt_root else (Path(__file__).parent / "models" / "whisper")
 )
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR, RAG_IMAGES_DIR, ORCHESTRATOR_DIR]:
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR, RAG_IMAGES_DIR, ORCHESTRATOR_DIR, VIDEOS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -1709,6 +1710,209 @@ def _api_image_size(real_model: str, preset: str) -> str:
 
 
 
+# ── Videogenerierung (lokal Wan über die z-video-Brücke) ─────────────────────
+# Spiegelt exakt das Bild-Muster (SD-WebUI/Z-Image): eigenständiger GPU-Prozess,
+# vom Backend bei Bedarf selbst gestartet, kein VRAM-Lock/_model_session (separater
+# Server). Profil-Weg ``video_model = local::wan`` + ``video_server_url``.
+_VIDEO_SIZES = {
+    "720p":   {"label": "Quer 720p (16:9)", "size": "720p",   "wh": (1280, 720)},
+    "480p":   {"label": "Quer 480p (16:9)", "size": "480p",   "wh": (832, 480)},
+    "square": {"label": "Quadrat",          "size": "square", "wh": (624, 624)},
+}
+_VIDEO_MODES = {
+    "flf2v": "Erst- + Letztbild → Video",
+    "i2v":   "Einzelbild → Video",
+    "t2v":   "Text → Video",
+}
+
+
+def _video_model() -> str:
+    """Im Profil gewähltes Videomodell (``local::wan``) oder leer."""
+    m = str(_load_profile().get("video_model", "") or "").strip()
+    return "" if m in _MODEL_PLACEHOLDERS else m
+
+
+def _video_model_cached() -> bool:
+    """Best-effort: liegt bereits ein Wan-Modell im Hugging-Face-Cache? Dient nur dem
+    UI-Hinweis „Modell wird beim ersten Lauf geladen". Bei Unsicherheit → True (nicht
+    unnötig warnen). Prüft ``models--Wan-AI--*`` mit nicht-leerem ``snapshots``-Ordner."""
+    try:
+        base = os.environ.get("HUGGINGFACE_HUB_CACHE") or os.environ.get("HF_HOME") or ""
+        if base and os.path.basename(base.rstrip("/\\")) != "hub":
+            base = os.path.join(base, "hub")
+        if not base:
+            base = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+        if not os.path.isdir(base):
+            return False
+        for name in os.listdir(base):
+            if name.startswith("models--Wan-AI--"):
+                snap = os.path.join(base, name, "snapshots")
+                if os.path.isdir(snap) and any(os.scandir(snap)):
+                    return True
+        return False
+    except Exception:
+        return True
+
+
+def _video_url() -> str:
+    """URL des lokalen Wan-Video-Servers (Profil; Standard 127.0.0.1:7870)."""
+    u = str(_load_profile().get("video_server_url", "") or "").strip().rstrip("/")
+    return u or "http://127.0.0.1:7870"
+
+
+async def _video_reachable() -> bool:
+    """Ist der lokale Video-Server (z-video-Brücke) erreichbar? Jede HTTP-Antwort =
+    erreichbar; nur Verbindungsfehler/Timeout = nicht erreichbar."""
+    base = _video_url()
+    if not base:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            await client.get(f"{base}/health")
+        return True
+    except Exception:
+        return False
+
+
+def _video_server_python(d: str) -> Optional[str]:
+    """venv-Python der z-video-Brücke im Ordner ``d`` (Windows/Linux)."""
+    for rel in ("venv/Scripts/python.exe", "venv/bin/python"):
+        p = os.path.join(d, *rel.split("/"))
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _video_server_dir() -> Optional[str]:
+    """Ordner mit ``video_server.py`` + eigener venv der z-video-Brücke. Reihenfolge:
+    Profil ``video_server_dir`` → Repo-Ordner ``z-video`` → ``~/z-video``."""
+    cands = []
+    cfg = str(_load_profile().get("video_server_dir", "") or "").strip()
+    if cfg:
+        cands.append(cfg)
+    cands.append(os.path.join(str(APP_DIR), "z-video"))
+    cands.append(os.path.join(os.path.expanduser("~"), "z-video"))
+    for c in cands:
+        try:
+            if c and os.path.exists(os.path.join(c, "video_server.py")) and _video_server_python(c):
+                return c
+        except Exception:
+            pass
+    return None
+
+
+_video_launch_lock = asyncio.Lock()
+
+
+async def _ensure_video_server() -> bool:
+    """Stellt sicher, dass der lokale Video-Server läuft – **startet ihn bei Bedarf
+    selbst** (crash-sichere z-video-Brücke, torch-frei, schneller Start; Modell lädt
+    erst pro Video). Nur wenn eine Video-URL gesetzt ist und Profil ``video_autostart``
+    (Standard an) nicht abgeschaltet wurde. Gibt True zurück, wenn (jetzt) erreichbar."""
+    if await _video_reachable():
+        return True
+    if not bool(_load_profile().get("video_autostart", True)):
+        return False
+    d = _video_server_dir()
+    if not d:
+        return False
+    py = _video_server_python(d)
+    script = os.path.join(d, "video_server.py")
+    if not (py and os.path.exists(script)):
+        return False
+    port = _url_port(_video_url()) or 7870
+    async with _video_launch_lock:
+        if await _video_reachable():
+            return True
+        try:
+            _launch_detached([py, script, "--port", str(port)], cwd=d)
+        except Exception:
+            return False
+        for _ in range(30):              # torch-frei -> i. d. R. < 2 s
+            await asyncio.sleep(0.5)
+            if await _video_reachable():
+                return True
+    return False
+
+
+async def _generate_video_core(mode: str, prompt: str = "", first_b64: str = "",
+                               last_b64: str = "", opts: Optional[dict] = None) -> dict:
+    """Kern der Videogenerierung – lokal über die z-video-Brücke (Wan). Genutzt vom
+    Endpoint ``/api/video/generate`` UND dem Chat-Befehl ``/video``. Antwort:
+    ``{video_url, mode, prompt, file}``. Wirft HTTPException (503 Brücke nicht
+    erreichbar, 400 fehlende Eingaben). Video ist immer lokal → Geheim/Hartman
+    unkritisch. **Kein** ``_model_session`` (separater GPU-Prozess)."""
+    opts = opts or {}
+    mode = str(mode or "t2v").strip().lower()
+    if mode not in _VIDEO_MODES:
+        mode = "t2v"
+    prompt = str(prompt or "").strip()
+    first_b64 = str(first_b64 or "").strip()
+    last_b64 = str(last_b64 or "").strip()
+    if mode in ("i2v", "flf2v") and not first_b64:
+        raise HTTPException(400, "Für diesen Modus wird ein Startbild benötigt.")
+    if mode == "flf2v" and not last_b64:
+        raise HTTPException(400, "Für den Modus Erst-/Letztbild wird auch ein Endbild benötigt.")
+    if mode == "t2v" and not prompt:
+        raise HTTPException(400, "Für Text-zu-Video wird eine Beschreibung benötigt.")
+
+    if not await _ensure_video_server():
+        raise HTTPException(503, "Lokaler Video-Server (z-video/Wan) nicht erreichbar. "
+                                 "Bitte z-video installieren und starten (video_server) "
+                                 "und im Profil die Video-URL eintragen.")
+
+    size = str(opts.get("size", "720p") or "720p")
+    if size in _VIDEO_SIZES:
+        size = _VIDEO_SIZES[size]["size"]
+    payload = {
+        "mode": mode, "prompt": prompt,
+        "negative": str(opts.get("negative", "") or ""),
+        "size": size,
+    }
+    for k in ("frames", "fps", "steps", "seed"):
+        if opts.get(k) not in (None, ""):
+            try:
+                payload[k] = int(opts[k])
+            except (TypeError, ValueError):
+                pass
+    if first_b64:
+        payload["first_b64"] = first_b64
+    if last_b64:
+        payload["last_b64"] = last_b64
+
+    base = _video_url()
+    try:
+        # KEIN Timeout: der erste Lauf lädt die Modellgewichte (mehrere GB) herunter,
+        # das kann lange dauern. Der SSE-progress-Heartbeat hält die Verbindung wach.
+        async with httpx.AsyncClient(timeout=None) as client:
+            resp = await client.post(f"{base}/generate", json=payload)
+        if resp.status_code >= 400:
+            raise HTTPException(502, f"Video-Server-Fehler (HTTP {resp.status_code}): "
+                                     f"{resp.text[:300]}")
+        data = resp.json()
+    except HTTPException:
+        raise
+    except httpx.ConnectError:
+        raise HTTPException(503, f"Video-Server nicht erreichbar unter {base}.")
+    except Exception as e:
+        raise HTTPException(502, f"Lokale Videogenerierung fehlgeschlagen: {e}")
+
+    b64 = data.get("video_b64") or ""
+    if not b64:
+        raise HTTPException(502, "Video-Server lieferte kein Video zurück.")
+    if "," in b64 and b64.strip().startswith("data:"):
+        b64 = b64.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(502, "Video-Antwort ließ sich nicht dekodieren.")
+    vid = uuid.uuid4().hex
+    out = VIDEOS_DIR / f"{vid}.mp4"
+    out.write_bytes(raw)
+    return {"video_url": f"/api/video/file/{vid}", "mode": mode, "prompt": prompt,
+            "file": out.name}
+
+
 async def _generate_image_core(prompt: str, negative: str = "", preset: str = "square",
                                model: Optional[str] = None) -> dict:
     """Kern der Bildgenerierung – lokal (SD-WebUI) oder OpenAI-kompatible Bild-API.
@@ -2877,6 +3081,7 @@ __all__ = [
     '_load_agent_dict', '_norm_name', '_match_catalog',
     '_extract_canvas_json', '_strip_canvas_json', '_normalize_presentation', '_parse_prose_presentation', '_text_to_presentation',
     '_IMAGE_SIZES', '_image_model', '_sd_url', '_sd_reachable', '_sd_server_python', '_sd_server_dir', '_url_port', '_launch_detached', '_ensure_sd_server', '_api_image_size', '_generate_image_core', '_edit_image_core', '_upscale_image_core',
+    'VIDEOS_DIR', '_VIDEO_SIZES', '_VIDEO_MODES', '_video_model', '_video_model_cached', '_video_url', '_video_reachable', '_video_server_python', '_video_server_dir', '_ensure_video_server', '_generate_video_core',
     'CAPACITY_FILE', 'BILDER_DIR', 'PROFILE_FILE', 'PROFILE_ASSETS_DIR',
     'MODE_TEMPLATES_DIR', '_mode_template_asset',
     'PROJECTS_FILE', 'FEEDBACK_FILE', 'TRANSCRIPTS_DIR', 'API_PROVIDERS_FILE',
