@@ -49,7 +49,7 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/javascript-hint.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/hint/anyword-hint.min.js"></script>
 
-  <link rel="stylesheet" href="/css/app.css?v=20260901matrix" />
+  <link rel="stylesheet" href="/css/app.css?v=20260901kiprompt" />
 </head>
 <body>
 
@@ -2581,8 +2581,11 @@
               <option value="hinzugefuegt">hinzugefügt</option>
               <option value="geloescht">gelöscht</option>
             </select></label>
+          <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="cmp-only-changed"> nur Unterschiede</label>
           <button id="btn-cmp-apply" class="export-btn">Filter anwenden</button>
           <details class="cmp-colsdd"><summary>Spalten ein/aus</summary><div id="cmp-cols" class="cmp-colsbox"></div></details>
+          <label style="min-width:150px">Spaltenbreite
+            <input type="range" id="cmp-cellw" min="90" max="520" value="220" title="Teilspalten schmaler → mehr Pakete nebeneinander (Text bricht um)"></label>
           <span style="flex:1"></span>
           <button id="cmp-ki-toggle" class="export-btn" title="KI-Modus: Klick in eine ungleiche Zelle erklärt den Unterschied">🧠 KI</button>
           <button id="btn-cmp-ki-job" class="export-btn var-ai" style="display:none">KI-Job (alle erklären)</button>
@@ -3807,7 +3810,7 @@
 <script src="/js/zeugnis.js?v=20260712"></script>
 <script src="/js/morph_box.js?v=20260607noten2"></script>
 <script src="/js/varianten.js?v=20260823lift"></script>
-<script src="/js/compare.js?v=20260901matrix2"></script>
+<script src="/js/compare.js?v=20260901kiprompt"></script>
 <script src="/js/todo.js?v=20260818handoff"></script>
 <script src="/js/transcription.js?v=20260815tts"></script>
 <script src="/js/tokens.js?v=20260622"></script>

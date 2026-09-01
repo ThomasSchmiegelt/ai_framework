@@ -4865,6 +4865,7 @@ select.ob-input option {
 .cmp-colcfg th { background: var(--bg-hover, rgba(128,128,128,0.12)); font-weight: 600; }
 .cmp-colcfg select { padding: 3px 6px; font-size: 12px; }
 .cmp-colcfg .cmp-col-only { color: var(--text-muted); font-style: italic; }
+.cmp-colcfg .cmp-ki-prompt { width: 100%; min-width: 240px; box-sizing: border-box; padding: 3px 6px; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
 .cmp-cell-changed { display: block; }
 .cmp-cell-changed .cmp-a, .cmp-cell-changed .cmp-b { display: block; }
 .cmp-cell-eq { color: var(--text-muted); }
@@ -4886,6 +4887,8 @@ select.ob-input option {
 .cmp-matrix-wrap { overflow: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: 8px; }
 .cmp-matrix { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .cmp-matrix th, .cmp-matrix td { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 4px 8px; white-space: nowrap; vertical-align: top; }
+/* Wert-/Vergleichszellen skalierbar: Breite via Slider (--cmp-cellw), langer Text bricht um */
+.cmp-matrix td.cmp-val, .cmp-matrix td.cmp-v { max-width: var(--cmp-cellw, 240px); white-space: normal; overflow-wrap: anywhere; }
 .cmp-matrix thead th { position: sticky; top: 0; background: var(--bg-hover, #2a2f3a); z-index: 2; }
 .cmp-matrix thead tr:nth-child(2) th { top: 27px; }   /* zweite Kopfzeile unter der ersten kleben */
 .cmp-matrix .cmp-grp { text-align: center; font-weight: 700; }
@@ -4898,7 +4901,7 @@ select.ob-input option {
 .cmp-matrix .cmp-v { text-align: center; }
 .cmp-matrix .cmp-eq { color: #22c55e; }
 .cmp-matrix .cmp-ne { color: #ef4444; }
-.cmp-matrix .cmp-ki-sum { color: var(--accent); font-size: 11.5px; white-space: normal; display: inline-block; max-width: 320px; }
+.cmp-matrix .cmp-ki-sum { color: var(--accent); font-size: 11.5px; white-space: normal; display: inline-block; max-width: 100%; }
 .cmp-matrix .cmp-ki-cell { cursor: pointer; }
 .cmp-matrix .cmp-ki-cell:hover { background: var(--accent-soft, rgba(79,140,255,0.18)); }
 .cmp-matrix .cmp-ki-hint { opacity: .7; }
