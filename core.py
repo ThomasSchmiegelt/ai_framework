@@ -1868,6 +1868,9 @@ async def _generate_video_core(mode: str, prompt: str = "", first_b64: str = "",
         "mode": mode, "prompt": prompt,
         "negative": str(opts.get("negative", "") or ""),
         "size": size,
+        # „Speicher sparen": sequenzieller CPU-Offload (minimaler VRAM, langsamer) statt
+        # modellweisem Offload. Reicht die Brücke an generate_video.py durch.
+        "memory_saver": bool(opts.get("memory_saver")),
     }
     for k in ("frames", "fps", "steps", "seed"):
         if opts.get(k) not in (None, ""):
@@ -1880,11 +1883,22 @@ async def _generate_video_core(mode: str, prompt: str = "", first_b64: str = "",
     if last_b64:
         payload["last_b64"] = last_b64
 
+    # Zeitlimit: Standard 0 = KEIN Limit (der erste Lauf lädt die Modellgewichte,
+    # mehrere GB — das kann lange dauern; der SSE-progress-Heartbeat hält die Verbindung
+    # wach). Über das Profil (``video_timeout``, Sekunden) kann der Nutzer ein hartes Limit
+    # setzen. Wert wird auch an die Brücke gereicht, damit der Unterprozess mit-abbricht.
+    try:
+        _vto = int(_load_profile().get("video_timeout") or 0)
+    except (TypeError, ValueError):
+        _vto = 0
+    if _vto and _vto > 0:
+        payload["timeout"] = _vto
+    # HTTP-Timeout etwas großzügiger als das Erzeugungs-Limit, damit die Brücke ihre
+    # eigene, sauberere Fehlermeldung liefern kann, bevor der Client abbricht.
+    _http_to = (_vto + 120) if (_vto and _vto > 0) else None
     base = _video_url()
     try:
-        # KEIN Timeout: der erste Lauf lädt die Modellgewichte (mehrere GB) herunter,
-        # das kann lange dauern. Der SSE-progress-Heartbeat hält die Verbindung wach.
-        async with httpx.AsyncClient(timeout=None) as client:
+        async with httpx.AsyncClient(timeout=_http_to) as client:
             resp = await client.post(f"{base}/generate", json=payload)
         if resp.status_code >= 400:
             raise HTTPException(502, f"Video-Server-Fehler (HTTP {resp.status_code}): "

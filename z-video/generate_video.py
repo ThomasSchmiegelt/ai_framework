@@ -242,7 +242,9 @@ def main():
         print("CPU-Offload: modellweise")
     else:
         pipe.to(device)
-    for _m in ("enable_vae_slicing", "enable_vae_tiling"):
+    # Speicher-Spitzen senken (jeweils best-effort, je nach Pipeline-Version vorhanden):
+    # VAE-Slicing/-Tiling zerstueckelt den Decode, Attention-Slicing die Attention-Matrix.
+    for _m in ("enable_vae_slicing", "enable_vae_tiling", "enable_attention_slicing"):
         try:
             getattr(pipe, _m)()
         except Exception:

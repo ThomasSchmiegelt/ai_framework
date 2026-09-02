@@ -61,9 +61,11 @@ def _decode(b):
 
 
 def _run_generate(mode, prompt, negative, first_b64, last_b64,
-                  frames, fps, steps, size, seed):
+                  frames, fps, steps, size, seed, timeout=None, memory_saver=False):
     """generate_video.py in einem frischen Unterprozess ausfuehren -> base64-mp4.
-    Wirft RuntimeError bei Fehler/Timeout (der Server bleibt am Leben)."""
+    Wirft RuntimeError bei Fehler/Timeout (der Server bleibt am Leben).
+    ``timeout`` (Sekunden, aus dem Request) hat Vorrang vor dem Server-Flag; 0/None =
+    KEIN Limit. ``memory_saver`` = sequenzieller CPU-Offload (minimaler VRAM, langsamer)."""
     with _lock:
         with tempfile.TemporaryDirectory() as td:
             out = os.path.join(td, "clip.mp4")
@@ -90,13 +92,19 @@ def _run_generate(mode, prompt, negative, first_b64, last_b64,
                 with open(lp, "wb") as _f:
                     _f.write(_decode(last_b64))
                 cmd += ["--last", lp]
-            if not _cfg.full_gpu:
+            if memory_saver:
+                cmd.append("--offload-seq")       # minimaler VRAM (langsamer) - "Speicher sparen"
+            elif not _cfg.full_gpu:
                 cmd.append("--offload")          # niedriger Spitzen-VRAM (Standard: sicher)
             if _cfg.keep_ollama:
                 cmd.append("--keep-ollama")
             t0 = time.time()
             # timeout 0 / negativ = KEIN Limit (erster Lauf laedt mehrere GB Gewichte).
-            to = _cfg.timeout if (_cfg.timeout and _cfg.timeout > 0) else None
+            # Request-Timeout (aus dem Framework-Profil) hat Vorrang vor dem Server-Flag.
+            if timeout and timeout > 0:
+                to = timeout
+            else:
+                to = _cfg.timeout if (_cfg.timeout and _cfg.timeout > 0) else None
             try:
                 p = subprocess.run(cmd, capture_output=True, text=True,
                                    timeout=to, cwd=_HERE)
@@ -171,10 +179,18 @@ class _Handler(BaseHTTPRequestHandler):
             seed = int(seed) if seed not in (None, "") else None
         except Exception:
             seed = None
-        print(f"generate: mode={mode} \"{prompt[:60]}\" size={size} frames={frames}")
+        try:
+            req_to = int(req.get("timeout") or 0)
+        except Exception:
+            req_to = 0
+        mem_saver = bool(req.get("memory_saver"))
+        print(f"generate: mode={mode} \"{prompt[:60]}\" size={size} frames={frames}"
+              + (" [Speicher sparen]" if mem_saver else ""))
         try:
             b64 = _run_generate(mode, prompt, negative, first_b64, last_b64,
-                                frames, fps, steps, size, seed)
+                                frames, fps, steps, size, seed,
+                                timeout=req_to if req_to > 0 else None,
+                                memory_saver=mem_saver)
         except Exception as e:
             print(f"  FEHLER: {e}")
             self._send_json(500, {"error": str(e)})

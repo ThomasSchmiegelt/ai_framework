@@ -2683,6 +2683,9 @@
       <label class="vg-check" title="Ein LLM formuliert deine Beschreibung zu einem anschaulichen Video-Prompt aus (optional, lokal im Geheim-Modus).">
         <input type="checkbox" id="vg-enhance"> ✨ Prompt vor der Erzeugung per LLM verbessern
       </label>
+      <label class="vg-check" title="Sequenzieller CPU-Offload + Attention-Slicing: minimaler VRAM-Bedarf für schwächere/knappe GPUs. Deutlich langsamer. Tipp: dazu eine niedrigere Auflösung (480p) und weniger Frames wählen.">
+        <input type="checkbox" id="vg-memsave"> 🧠 Speicher sparen (minimaler VRAM, langsamer)
+      </label>
       <div class="vg-controls">
         <label class="vg-field" style="min-width:150px">Auflösung
           <select id="vg-size" class="vg-input"></select></label>
@@ -3258,6 +3261,16 @@
           <input type="checkbox" id="profile-video-autostart" style="width:auto" checked />
           <span>Video-Server bei Bedarf automatisch starten</span>
         </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px;cursor:pointer">
+          <input type="checkbox" id="profile-video-timeout-on" style="width:auto" />
+          <span>Zeitlimit je Video:</span>
+          <input type="number" id="profile-video-timeout" min="1" step="1" value="30"
+            style="width:70px" disabled /> <span>Minuten</span>
+        </label>
+        <span class="planner-muted" style="font-size:11px;display:block;margin-top:2px">
+          Standard <strong>aus</strong> = kein Limit. Der <strong>erste</strong> Lauf lädt die
+          Modellgewichte (mehrere GB) und dauert lange — nur einschalten, wenn ein Lauf hart
+          abgebrochen werden soll. Tipp: Modell vorab per <code>download_model</code> laden.</span>
         <span class="planner-muted" style="font-size:11px;display:block;margin-top:4px">Standard =
           <strong>aus</strong>. „Lokal · Wan" nutzt das <strong>optionale</strong> Werkzeug
           <code>z-video</code> (Wan, Apache-2.0) auf einer <strong>starken GPU</strong> — eigener
@@ -3867,13 +3880,13 @@
 <script src="/js/jury.js?v=20260622"></script>
 <script src="/js/clarify.js?v=20260714"></script>
 <script src="/js/tts.js?v=20260818wfmodel"></script>
-<script src="/js/chat.js?v=20260901video4"></script>
+<script src="/js/chat.js?v=20260902memsave"></script>
 <script src="/js/research.js?v=20260603"></script>
 <script src="/js/rag.js?v=20260823ragimg"></script>
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260826granite"></script>
+<script src="/js/profile.js?v=20260902vidtimeout"></script>
 <script src="/js/projects.js?v=20260825links"></script>
 <script src="/js/planner.js?v=20260817workflow"></script>
 <script src="/js/matrix_research.js?v=20260828import"></script>
@@ -3898,7 +3911,7 @@
 <script src="/js/tokens.js?v=20260622"></script>
 <script src="/js/pairing.js?v=20260825reach"></script>
 <script src="/js/bilderkennung.js?v=20260831ask"></script>
-<script src="/js/video.js?v=20260901video5"></script>
+<script src="/js/video.js?v=20260902memsave"></script>
 <script src="/js/app.js?v=20260901video"></script>
 
 </body>

@@ -243,6 +243,7 @@ const Video = (function () {
       frames: parseInt(_el('vg-frames')?.value, 10) || 81,
       fps: parseInt(_el('vg-fps')?.value, 10) || 16,
       steps: parseInt(_el('vg-steps')?.value, 10) || 30,
+      memory_saver: !!_el('vg-memsave')?.checked,
     };
     const seed = parseInt(_el('vg-seed')?.value, 10);
     if (!Number.isNaN(seed)) body.seed = seed;

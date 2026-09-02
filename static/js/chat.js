@@ -3108,6 +3108,7 @@ const Chat = (() => {
         <textarea id="vf-prompt" rows="2" style="${fld}" placeholder="z. B. sanfte Kamerafahrt, leichter Wind"></textarea>
         <div class="vg-presets-row"><span class="planner-muted" style="font-size:11px">Vorlagen:</span><div id="vf-presets" class="vg-presets"></div></div>
         <label class="vg-check" style="margin:8px 0 0"><input type="checkbox" id="vf-enhance"> ✨ Prompt vor der Erzeugung per LLM verbessern</label>
+        <label class="vg-check" style="margin:6px 0 0" title="Sequenzieller CPU-Offload + Attention-Slicing: minimaler VRAM, langsamer. Am besten mit 480p und wenigen Frames."><input type="checkbox" id="vf-memsave"> 🧠 Speicher sparen (minimaler VRAM, langsamer)</label>
         <div style="display:flex;gap:8px;margin-top:8px">
           <label style="flex:1">Auflösung
             <select id="vf-size" style="${fld}">
@@ -3193,6 +3194,7 @@ const Chat = (() => {
         mode, prompt: p,
         size: ov.querySelector('#vf-size').value,
         frames: parseInt(ov.querySelector('#vf-frames').value, 10) || 81,
+        memory_saver: !!ov.querySelector('#vf-memsave')?.checked,
       };
       if (mode !== 't2v') body.first = firstFr ? firstFr.export() : firstUrl;
       if (mode === 'flf2v') body.last = lastFr ? lastFr.export() : lastUrl;

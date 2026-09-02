@@ -129,6 +129,11 @@ async def save_profile(req: Request):
         profile["video_autostart"] = bool(body.get("video_autostart"))
     if "video_server_dir" in body:
         profile["video_server_dir"] = str(body.get("video_server_dir", "") or "").strip()
+    if "video_timeout" in body:
+        try:
+            profile["video_timeout"] = max(0, int(body.get("video_timeout") or 0))
+        except (TypeError, ValueError):
+            profile["video_timeout"] = 0
     # Automatische Komprimierung langer Verläufe (Überlauf + Leerlauf)
     profile["auto_compress"] = bool(body.get("auto_compress", False))
     try:
