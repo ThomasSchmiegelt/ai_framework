@@ -49,6 +49,10 @@ for _s in (sys.stdout, sys.stderr):
 # ist zuverlaessiger. Ueberschreibbar, falls der Nutzer die Variable selbst setzt.
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
+# Netz-Check beim Laden aus dem Cache grosszuegiger takten: bei langsamer/blockierter
+# HF-Verbindung lief der ETag/Metadaten-Abgleich sonst in einen ReadTimeout (Standard
+# 10 s), obwohl das Modell bereits vollstaendig lokal liegt.
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
 
 # Standard-Modelle je Modus (Diffusers-Format). Ueber --model ueberschreibbar.
 DEFAULT_MODELS = {
@@ -84,6 +88,32 @@ def _load_hf_token():
         os.environ["HF_TOKEN"] = tok
         return "file"
     return None
+
+
+def _hf_cache_root():
+    """Wurzel des HF-Hub-Caches (respektiert HF_HUB_CACHE / HF_HOME, sonst Standard)."""
+    root = os.environ.get("HF_HUB_CACHE")
+    if root:
+        return root
+    home = os.environ.get("HF_HOME")
+    if home:
+        return os.path.join(home, "hub")
+    return os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+
+
+def _model_in_cache(model_id):
+    """True, wenn das Modell (grob) schon lokal liegt: ein Snapshot mit model_index.json
+    (Diffusers-Pipeline). Rein ueber das Dateisystem, OHNE huggingface_hub zu importieren -
+    damit die Offline-Entscheidung VOR dem HF-Import fallen kann."""
+    folder = "models--" + model_id.replace("/", "--")
+    snaps = os.path.join(_hf_cache_root(), folder, "snapshots")
+    try:
+        for d in os.listdir(snaps):
+            if os.path.exists(os.path.join(snaps, d, "model_index.json")):
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def _ollama_loaded():
@@ -166,6 +196,18 @@ def main():
     if _load_hf_token() == "file":
         print("Hugging-Face-Token aus hf_token.txt geladen (schnellere Downloads).")
 
+    # Liegt das Modell bereits komplett im Cache, KOMPLETT offline arbeiten -> kein
+    # einziger HF-Netzzugriff (kein WLAN, kein ReadTimeout beim Metadaten-/Komponenten-
+    # Check). MUSS vor dem huggingface_hub/diffusers-Import gesetzt werden (die Offline-
+    # Konstante wird beim Import gelesen). Nur wenn nichts im Cache ist, online bleiben
+    # (Erstlauf laedt herunter). Ueberschreibbar, falls der Nutzer die Variable selbst setzt.
+    if _model_in_cache(model_id):
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        print("Modell im Cache -> arbeite OFFLINE (kein HF-Netzzugriff).")
+    else:
+        print("Modell nicht (vollstaendig) im Cache -> Laden ggf. mit Download (online).")
+
     # Import erst hier, damit --help ohne geladene Bibliotheken funktioniert.
     import torch
     from diffusers.utils import export_to_video
@@ -229,8 +271,20 @@ def main():
                  "flf2v": "Erst-+Letztbild->Video"}[args.mode]
     print(f"Lade Modell {model_id} ... ({_mode_txt}; erster Start laedt die Gewichte herunter)")
     t0 = time.time()
-    vae = AutoencoderKLWan.from_pretrained(model_id, subfolder="vae", torch_dtype=torch.float32)
-    pipe = _Pipe.from_pretrained(model_id, vae=vae, torch_dtype=dtype)
+
+    def _load_cached_first(loader, *a, **kw):
+        """Erst OFFLINE aus dem lokalen Cache laden (local_files_only=True): kein Netz-
+        Zugriff -> kein ReadTimeout, wenn das Modell schon geladen ist. Nur wenn lokal
+        nichts liegt, online nachladen (Erstlauf/fehlende Dateien)."""
+        try:
+            return loader(*a, local_files_only=True, **kw)
+        except Exception as e:
+            print(f"  (nicht vollstaendig im Cache -> lade online nach: {type(e).__name__})")
+            return loader(*a, **kw)
+
+    vae = _load_cached_first(AutoencoderKLWan.from_pretrained, model_id,
+                             subfolder="vae", torch_dtype=torch.float32)
+    pipe = _load_cached_first(_Pipe.from_pretrained, model_id, vae=vae, torch_dtype=dtype)
 
     if device == "cpu":
         pipe.to("cpu")
