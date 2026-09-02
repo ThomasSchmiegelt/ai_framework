@@ -92,6 +92,7 @@ async def _video_generate_generator(body: dict):
     first_b64 = str(body.get("first", "") or body.get("first_b64", "") or "")
     last_b64 = str(body.get("last", "") or body.get("last_b64", "") or "")
     opts = {k: body.get(k) for k in ("negative", "size", "frames", "fps", "steps", "seed")}
+    opts["memory_saver"] = bool(body.get("memory_saver"))
 
     yield _sse({"type": "start", "mode": mode})
     task = asyncio.create_task(

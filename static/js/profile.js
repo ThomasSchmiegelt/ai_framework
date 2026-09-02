@@ -131,6 +131,16 @@ const Profile = (() => {
     if (urlEl) urlEl.value = _data.video_server_url || '';
     const autoEl = document.getElementById('profile-video-autostart');
     if (autoEl) autoEl.checked = _data.video_autostart !== false;
+    // Zeitlimit (Sekunden im Profil; UI in Minuten). 0/leer = aus (kein Limit).
+    const toOn = document.getElementById('profile-video-timeout-on');
+    const toEl = document.getElementById('profile-video-timeout');
+    const secs = parseInt(_data.video_timeout, 10) || 0;
+    if (toOn && toEl) {
+      toOn.checked = secs > 0;
+      if (secs > 0) toEl.value = Math.max(1, Math.round(secs / 60));
+      toEl.disabled = !toOn.checked;
+      toOn.onchange = () => { toEl.disabled = !toOn.checked; };
+    }
   }
 
   function applyTabVisibility(hiddenTabs) {
@@ -386,6 +396,9 @@ const Profile = (() => {
       video_model:      document.getElementById('profile-video-model')?.value || '',
       video_server_url: document.getElementById('profile-video-url')?.value.trim() || '',
       video_autostart:  document.getElementById('profile-video-autostart')?.checked !== false,
+      video_timeout:    (document.getElementById('profile-video-timeout-on')?.checked)
+        ? Math.max(60, (parseInt(document.getElementById('profile-video-timeout')?.value, 10) || 30) * 60)
+        : 0,
       hidden_tabs: [...new Set(
         Array.from(document.querySelectorAll('#profile-tab-vis input[type="checkbox"]'))
           .filter(cb => !cb.checked)
