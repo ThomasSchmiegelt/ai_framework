@@ -1864,6 +1864,160 @@ class HandoffPrepareRequest(BaseModel):
     model: Optional[str] = None
 
 
+# ── Werkzeug-Registry nach aussen (fuer den Pi-Tab / pi-agent CLI) ───────────
+#
+# Der externe Agenten-Harness soll dieselben Werkzeuge benutzen koennen wie der
+# Chat. Darum wird hier die vorhandene Registry geoeffnet statt sie zu kopieren:
+# TOOL_DEFS = Schemas, _execute_tool = Ausfuehrung. Neue Chat-Werkzeuge stehen
+# damit automatisch auch dem Agenten zur Verfuegung.
+#
+# NICHT nach aussen gegeben:
+#   run_python                     -- beliebiger Code ueber HTTP, nie.
+#   deep_research/run_workflow/ask_todo -- das sind streamende Generatoren
+#       (_STREAM_AGENTS), kein _execute_tool-Fall; dafuer hat die CLI das
+#       eigene Verb "recherche" (SSE /api/deepresearch).
+_AGENT_TOOL_DENY = {"run_python", "deep_research", "run_workflow", "ask_todo"}
+
+
+async def _agent_tool_defs() -> list:
+    """Werkzeuge, die der Agent nutzen darf -- inkl. der gated Extras, jeweils
+    nur wenn die Voraussetzung erfuellt ist (dieselben Gates wie im Chat-Loop)."""
+    defs = [t for t in TOOL_DEFS
+            if t["function"]["name"] not in _AGENT_TOOL_DENY
+            and (t["function"]["name"] != "web_search" or _web_search_allowed())]
+    defs.append(_SOLVE_MATH_TOOL_DEF)
+    if _image_model():
+        defs.append(_GENERATE_IMAGE_TOOL_DEF)
+    if _web_search_allowed():
+        defs.append(_SEARCH_PATENTS_TOOL_DEF)
+    # Wissensdatenbank nur, wenn ueberhaupt etwas indiziert ist (wie im Chat-Loop)
+    try:
+        _kb = await _db.rag_list_collections()
+        if any(int(c.get("n_chunks", 0) or 0) > 0 for c in _kb):
+            defs.append(_SEARCH_KB_TOOL_DEF)
+    except Exception:
+        pass
+    return defs
+
+
+def _agent_gate() -> None:
+    """Der Werkzeug-Zugang haengt an derselben Stufe wie die pi-agent-CLI."""
+    if _pi_agent_access() == "off":
+        raise HTTPException(
+            403,
+            "Der Agenten-Zugriff ist abgeschaltet (config.json: pi_agent_access = \"off\"). "
+            "Im Profil unter \u201cInstallation\u201d steht die aktuelle Stufe.",
+        )
+
+
+@router.get("/api/tools/list")
+async def tools_list():
+    """Verfuegbare Werkzeuge mit Namen, Beschreibung und Parameter-Schema."""
+    _agent_gate()
+    out = []
+    for t in await _agent_tool_defs():
+        f = t["function"]
+        out.append({
+            "name": f["name"],
+            "description": f.get("description", ""),
+            "parameters": f.get("parameters", {}),
+        })
+    return {"tools": out, "zugriff": _pi_agent_access()}
+
+
+@router.post("/api/tools/run")
+async def tools_run(req: Request):
+    """EIN Werkzeug der Chat-Registry ausfuehren: {"name": ..., "arguments": {...}}.
+
+    Ergebnis ist der Text, den auch das Chat-Modell zurueckbekommt. Enthaelt er
+    ein eingebettetes Bild (Data-URI, z. B. plot_chart/generate_image), wird es
+    als Datei abgelegt und nur der Pfad gemeldet -- ein Agent mit kleinem
+    Kontextfenster soll kein Megabyte Base64 in seinen Verlauf bekommen.
+    """
+    _agent_gate()
+    body = await req.json()
+    name = str(body.get("name", "") or "").strip()
+    args = body.get("arguments") or {}
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            args = {}
+    if not isinstance(args, dict):
+        args = {}
+
+    erlaubt = {t["function"]["name"] for t in await _agent_tool_defs()}
+    if name not in erlaubt:
+        if name in _AGENT_TOOL_DENY:
+            raise HTTPException(
+                403,
+                f"Das Werkzeug '{name}' steht dem Agenten nicht zur Verfuegung. "
+                "Mehrstufige Recherche laeuft ueber das CLI-Verb 'recherche'.",
+            )
+        raise HTTPException(
+            404,
+            f"Unbekanntes oder derzeit nicht verfuegbares Werkzeug '{name}'. "
+            "Verfuegbare Werkzeuge: GET /api/tools/list",
+        )
+
+    try:
+        result = await _execute_tool(name, args)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
+
+    text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+    dateien = _extract_data_uris(text)
+    for rel, ersetzung in dateien:
+        text = text.replace(ersetzung["uri"], ersetzung["hinweis"])
+    return {"tool": name, "result": text,
+            "dateien": [rel for rel, _ in dateien]}
+
+
+def _extract_data_uris(text: str):
+    """Data-URIs aus einem Werkzeugergebnis in Dateien auslagern.
+
+    Gibt [(relativer_pfad, {uri, hinweis})] zurueck. Ziel ist AGENT_FILES_DIR
+    (``data/agent_files/``), abrufbar ueber ``GET /api/tools/file/{name}``.
+    """
+    import base64 as _b64
+    import re as _re
+    import uuid as _uuid
+    raus = []
+    for m in _re.finditer(r"data:(image/(png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=]{64,})", text):
+        mime, ext, b64 = m.group(1), m.group(2), m.group(3)
+        ext = "jpg" if ext == "jpeg" else ext
+        try:
+            roh = _b64.b64decode(b64, validate=False)
+        except Exception:
+            continue
+        fname = f"{_uuid.uuid4().hex[:12]}.{ext}"
+        try:
+            AGENT_FILES_DIR.mkdir(parents=True, exist_ok=True)
+            (AGENT_FILES_DIR / fname).write_bytes(roh)
+        except Exception:
+            continue
+        raus.append((fname, {
+            "uri": m.group(0),
+            "hinweis": f"[Bild gespeichert: {fname} ({len(roh)//1024} KB), "
+                       f"abrufbar unter /api/tools/file/{fname}]",
+        }))
+    return raus
+
+
+@router.get("/api/tools/file/{name}")
+async def tools_file(name: str):
+    """Von einem Werkzeug erzeugte Datei ausliefern (Bild/Diagramm)."""
+    _agent_gate()
+    if not re.fullmatch(r"[0-9a-f]{6,32}\.(png|jpg|webp|gif)", name or ""):
+        raise HTTPException(400, "Ungueltiger Dateiname.")
+    f = AGENT_FILES_DIR / name
+    if not f.is_file():
+        raise HTTPException(404, "Datei nicht gefunden.")
+    return FileResponse(str(f))
+
+
 @router.post("/api/handoff/prepare")
 async def handoff_prepare(req: HandoffPrepareRequest):
     content = (req.content or "").strip()

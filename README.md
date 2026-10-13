@@ -169,8 +169,15 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   hochladen (werden automatisch auf die Sollgröße skaliert)
 - 🖼️ **Bebilderte Präsentation** — Bilderordner wählen; ein Vision-Modell
   beschreibt jedes Bild fachkundig (Analyse-Persona aus der Beschreibung) → Bildfolien
-- 🤝 **Pi-Anbindung (optional)** — ein externer Agenten-Harness ([Pi](https://pi.dev), MIT)
-  kann das Framework über eine Kommandozeile benutzen: `pi-agent/framework_cli.py`.
+- 🤝 **Pi-Agent (eigener Tab, optional)** — ein externer Agenten-Harness
+  ([Pi](https://pi.dev), MIT) arbeitet **innerhalb** des Frameworks: er plant selbst und
+  benutzt dabei **alle Werkzeuge der Anwendung** — Websuche, Schraubenauslegung nach
+  VDI 2230, Festigkeits- und Maschinenelemente-Rechnung, Werkstoffe, Einheiten, Diagramme,
+  Routen, Berichte, Patentsuche — und liest deinen Bestand (Projekte, Pläne, Aufgaben,
+  Wissensdatenbanken). Jeder Werkzeugaufruf ist im Tab aufklappbar sichtbar, **gerechnet
+  wird im Framework, nicht vom Sprachmodell**. Läuft als Unterprozess in einer Sandbox
+  (`data/pi/workspace`), mit lokalem Modell vollständig offline. Dieselben Fähigkeiten gibt
+  es auch als Kommandozeile: `pi-agent/framework_cli.py`.
   Pi plant, das Framework rechnet und verwaltet. Gebunden wird es als **ein** Werkzeug
   (CLI + Beschreibung), weil >100 Endpunkte nicht als Tool-Schemas in den Kontext eines
   lokalen Modells passen. **Zugriffsstufe wird beim Installieren festgelegt:** `off`

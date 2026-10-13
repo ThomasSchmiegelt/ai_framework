@@ -397,6 +397,91 @@ def v_einheit(args):
     return EXIT_OK
 
 
+# ── Die komplette Werkzeug-Registry des Frameworks ──────────────────────────
+# Hier hängt der Agent an DENSELBEN Werkzeugen, die auch der Chat benutzt
+# (Websuche, Schraubenauslegung VDI 2230, Rechenkerne, Diagramme, Werkstoffe,
+# Einheiten, Routen, Berichte, Tabellen, Präsentationen, Diagramme, Patente …).
+# Kein Verb je Werkzeug: neue Chat-Werkzeuge stehen automatisch zur Verfügung.
+
+def v_werkzeuge(args):
+    """werkzeuge [name] — verfügbare Werkzeuge; mit <name> dessen Parameter."""
+    d = _hole("/api/tools/list")
+    tools = d.get("tools", [])
+    if args:
+        gesucht = args[0].strip().lower()
+        for t in tools:
+            if t["name"].lower() == gesucht:
+                aus(t)
+                return EXIT_OK
+        nah = [t["name"] for t in tools if gesucht[:4] in t["name"]]
+        print(f"Werkzeug '{args[0]}' nicht verfügbar."
+              + (f" Gemeint: {', '.join(nah)}?" if nah else ""), file=sys.stderr)
+        return EXIT_USAGE
+    if _ALS_JSON:
+        aus(tools)
+        return EXIT_OK
+    for t in tools:
+        kurz = " ".join(str(t.get("description", "")).split())[:150]
+        print(f"{t['name']:<22} {kurz}")
+    print("")
+    print(f"({len(tools)} Werkzeuge · 'werkzeuge <name>' zeigt die Parameter)")
+    return EXIT_OK
+
+
+def v_werkzeug(args):
+    """werkzeug <name> <json-argumente> — ein Framework-Werkzeug ausführen.
+
+    Beispiele:
+      werkzeug web_search '{"query": "VDI 2230", "num_results": 3}'
+      werkzeug bolt_calculator '{"d_nom": 12, "pitch": 1.75, "f_axial": 20}'
+    """
+    if not args:
+        return _fehlt("werkzeug <name> <json-argumente>   ('werkzeuge' listet alle)")
+    name = args[0]
+    roh = " ".join(args[1:]).strip() or "{}"
+    if roh == "-":
+        roh = sys.stdin.read()
+    try:
+        argumente = json.loads(roh)
+    except Exception as e:
+        beispiel = '{"schluessel": "wert"}'
+        print(f"Die Argumente sind kein gültiges JSON ({e}).", file=sys.stderr)
+        print(f"Erwartet: werkzeug {name} '{beispiel}'", file=sys.stderr)
+        print(f"Parameter dieses Werkzeugs: framework_cli.py werkzeuge {name}",
+              file=sys.stderr)
+        return EXIT_USAGE
+    antwort = _sende("/api/tools/run", {"name": name, "arguments": argumente})
+    if isinstance(antwort, dict):
+        aus(antwort.get("result", antwort))
+        for f in (antwort.get("dateien") or []):
+            print(f"[Datei: {basis_url()}/api/tools/file/{f}]", file=sys.stderr)
+    else:
+        aus(antwort)
+    return EXIT_OK
+
+
+def v_suche(args):
+    """suche <begriff> — Websuche (Kurzform für werkzeug web_search)."""
+    if not args:
+        return _fehlt("suche <begriff>")
+    return v_werkzeug(["web_search", json.dumps({"query": " ".join(args), "num_results": 6})])
+
+
+def v_schraube(args):
+    """schraube <d> <steigung> <axialkraft_kN> [festigkeitsklasse] — VDI 2230.
+
+    Beispiel: schraube 12 1.75 20 8.8   (M12, Steigung 1,75 mm, 20 kN)
+    """
+    if len(args) < 3:
+        return _fehlt("schraube <nenndurchmesser_mm> <steigung_mm> <axialkraft_kN> [klasse]")
+    a = {"d_nom": float(args[0].replace(",", ".")),
+         "pitch": float(args[1].replace(",", ".")),
+         "f_axial": float(args[2].replace(",", "."))}
+    if len(args) > 3:
+        a["material_class"] = args[3]
+    return v_werkzeug(["bolt_calculator", json.dumps(a)])
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SCHREIBENDE VERBEN — nur bei pi_agent_access = "write"
 # Anlegen und Ändern. Kein Löschen, kein Versenden (siehe Kopf).
@@ -475,6 +560,10 @@ VERBEN: dict[str, tuple[str, object, str]] = {
     "varianten":        ("read", v_varianten, "Variantenvergleiche"),
     "recherche":        ("read", v_recherche, "mehrstufige Web-Recherche (speichert nichts)"),
     "rechne":           ("read", v_rechne, "Maschinenbau-Rechenkerne (lokal, deterministisch)"),
+    "werkzeuge":        ("read", v_werkzeuge, "ALLE Framework-Werkzeuge auflisten"),
+    "werkzeug":         ("read", v_werkzeug, "ein Framework-Werkzeug ausführen"),
+    "suche":            ("read", v_suche, "Websuche (Kurzform von werkzeug web_search)"),
+    "schraube":         ("read", v_schraube, "Schraubenauslegung VDI 2230 (Kurzform)"),
     "werkstoff":        ("read", v_werkstoff, "Werkstoffkennwerte (lokal)"),
     "einheit":          ("read", v_einheit, "Einheitenumrechnung (lokal)"),
     # schreiben

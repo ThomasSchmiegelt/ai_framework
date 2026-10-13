@@ -40,7 +40,7 @@
 - [JSON-Editor](#json-editor)
 15. [Diagnose-Logger](#15-diagnose-logger)
 16.0b [Funktionen beim Installieren abwählen](#11-0b-funktionen-beim-installieren-abwählen)
-16.0c [Pi — externen Agenten mitarbeiten lassen](#11-0c-pi--einen-externen-agenten-mitarbeiten-lassen)
+16.0c [Pi-Agent — ein Agent, der deine Werkzeuge benutzt](#11-0c--pi-agent--ein-agent-der-deine-werkzeuge-benutzt)
 16.0 [Maschinenbau-Assistent](#11-0-maschinenbau-assistent--rechnen-statt-schätzen)
 16. [Agenten](#16-agenten)
 - [Bewertungs-Jurys](#16a-bewertungs-jurys-)
@@ -1038,81 +1038,88 @@ Die Tab-Sichtbarkeit stellst du außerdem jederzeit im **Profil** unter
 
 ---
 
-## 11-0c. Pi — einen externen Agenten mitarbeiten lassen
+## 11-0c. 🤝 Pi-Agent — ein Agent, der deine Werkzeuge benutzt
 
-**Optional.** Wenn du [Pi](https://pi.dev) benutzt (ein schlanker Agenten-Harness für
-die Kommandozeile), kann er dieses Framework als Werkzeug verwenden: Pi plant und
-entscheidet, das Framework rechnet und verwaltet. Pi wird **nicht** mitgeliefert und
-von keinem Installer installiert.
+**Optional.** Im Tab **🤝 Pi-Agent** arbeitet ein eigenständiger Agent
+([Pi](https://pi.dev), MIT) **innerhalb** des Frameworks: Du gibst eine Aufgabe
+vor, er plant selbst und benutzt dabei **alle Werkzeuge der Anwendung**.
 
-**Pi installieren und verbinden — der einfache Weg**
+**Was er kann**
 
-Im Programmordner:
+- **Im Internet suchen** — mit Quellenangaben, über die Websuche des Frameworks
+- **Schrauben auslegen** nach VDI 2230, **Festigkeit, Biegung, Wellen, Knickung,
+  Lager, Zahnräder, Antriebe** rechnen
+- **Werkstoffdaten** nachschlagen, **Einheiten** umrechnen, **Gleichungen** lösen
+- **Diagramme**, Ablaufdiagramme, **Routen**, **Berichte** (PDF/DOCX), Tabellen
+  und Präsentationen erzeugen
+- **Patente** recherchieren
+- **Deinen Bestand lesen**: Projekte, Pläne, Aufgaben, Wissensdatenbanken,
+  frühere Gespräche, Variantenvergleiche
 
-```
-pi-agent\install_pi.ps1      (Windows)
-./pi-agent/install_pi.sh      (Linux)
-```
+**Das Entscheidende: gerechnet wird im Framework, nicht vom Sprachmodell.**
+Jeder Werkzeugaufruf erscheint als aufklappbarer Block — du siehst also
+schwarz auf weiß, woher eine Zahl kommt. Ein Block mit 🧩 ist ein
+Framework-Werkzeug.
 
-Das Skript prüft, ob Pi schon da ist, installiert es sonst auf Rückfrage (es
-zeigt den Befehl vorher an), legt die Beschreibung in dein Pi-Projekt und fragt
-die Zugriffsstufe ab. Pi selbst braucht **Node.js 22.19 oder neuer**; das
-Framework braucht kein Node — das kommt nur für Pi dazu.
+> **Warum das wichtig ist:** Ohne diese Werkzeuge erfinden kleine Modelle
+> technische Zahlen. Im Test lieferte dasselbe Modell für eine M12-Schraube
+> „204–253 Nm" aus dem Gedächtnis — richtig sind **87,4 Nm**. Mit dem
+> Framework-Werkzeug kam genau dieser Wert heraus.
 
-Von Hand ginge es so: Pi über `curl -fsSL https://pi.dev/install.sh | sh` (Linux)
-bzw. `powershell -c "irm https://pi.dev/install.ps1 | iex"` (Windows)
-installieren, dann die Schritte unten.
+### Voraussetzungen
 
-**Wo finde ich Pi im Framework?**
+1. **Pi installieren** (einmalig): `pi-agent\install_pi.ps1` (Windows) bzw.
+   `./pi-agent/install_pi.sh` (Linux). Braucht Node.js 22.19 oder neuer; das
+   Framework selbst braucht kein Node.
+2. **Zugriffsstufe setzen** — beim Installieren abgefragt, sonst in der
+   `config.json`: `"pi_agent_access": "read"` (lesen und rechnen) oder
+   `"write"` (zusätzlich anlegen und ändern). Steht auch im Profil unter
+   „🔧 Installation".
 
-Pi ist ein **Kommandozeilen-Werkzeug** und hat keine eigene Oberfläche — es gibt
-also keinen Tab dafür. Was du in der Anwendung siehst, ist die eingestellte
-Zugriffsstufe: **Profil → 🔧 Installation**. Dort steht, ob Bildgenerierung,
-Videoerzeugung und die Pi-Anbindung aktiv sind und wo man das ändert. Gearbeitet
-wird mit Pi im Terminal (`pi`), und Pi greift von dort über
-`pi-agent/framework_cli.py` auf das Framework zu.
+Fehlt eines von beidem, sagt dir der Tab genau das und wie du es behebst.
 
-**Einrichten**
+### So benutzt du ihn
 
-1. Zugriffsstufe setzen — beim Installieren abgefragt, sonst in der `config.json`
-   (`"pi_agent_access": "read"` oder `"write"`).
-2. Die Anwendung starten.
-3. Prüfen, ob es greift:
+1. Tab **🤝 Pi-Agent** öffnen.
+2. **Modell wählen.** Oben stehen deine **lokalen Modelle** — nimm ein kleines,
+   schnelles. Vorausgewählt ist das Standardmodell des Frameworks.
+   Darunter stehen die Modelle aus Pis eigenem Katalog; die sind hier meist
+   sehr groß und entsprechend langsam.
+3. Aufgabe eingeben und **▶ Agent starten** (oder Strg+Enter).
 
-   ```
-   python pi-agent/framework_cli.py status
-   python pi-agent/framework_cli.py --hilfe
-   ```
+Beispiele:
 
-   Die Hilfe zeigt alle Befehle und markiert mit `x`, was deine Stufe sperrt.
-4. Pi die Beschreibung geben: `pi-agent/skills/framework-cli.md` in den
-   Skills-Ordner deines Pi-Projekts kopieren oder verlinken (bei Pi meist
-   `.agents/skills/`).
+- „Berechne die Schraube M12, Steigung 1,75 mm, Axialkraft 20 kN, Klasse 8.8."
+- „Suche im Internet, welche Festigkeitsklasse für Flanschschrauben üblich ist,
+  und lege damit die Schraube aus."
+- „Welche meiner Projekte haben offene Aufgaben ohne Zuständigen?"
+- „Ist eine Rohrstütze 60×50 mm, 2 m lang, mit 50 kN knicksicher? Erzeuge
+  anschließend ein Diagramm der Knicklast über der Länge."
 
-**Was der Agent darf**
+**Denktiefe** steuert, wie ausführlich das Modell vorher überlegt — „aus" ist
+am schnellsten. **Vorherige Sitzung fortsetzen** knüpft an den letzten Lauf an,
+statt neu anzufangen. **⏹ Stopp** bricht ab und beendet den Agenten wirklich.
 
-- **Stufe `read`:** Projekte, Pläne, Aufgaben, Wissensdatenbanken, Patent-Vorgänge,
-  Variantenvergleiche und Chatverläufe lesen; Web-Recherchen anstoßen; Maschinenbau-
-  Größen, Werkstoffwerte und Einheiten berechnen.
-- **Stufe `write`:** zusätzlich Projekte, Aufgabenlisten und Wissensdatenbanken
-  anlegen und ändern.
+### Was er nicht darf
 
-**Was er in keiner Stufe darf:** löschen, Mails versenden, Angebote oder Rechnungen
-versenden, Patente einreichen, dein Profil oder die Einstellungen ändern, Python
-ausführen, Aufgaben zurücksetzen. Diese Befehle gibt es nicht — es führt also kein
-Umweg dorthin.
+Löschen, Mails/Angebote/Rechnungen versenden, Patente einreichen, deine
+Einstellungen ändern, Python ausführen. Diese Befehle existieren nicht — es
+führt kein Umweg dorthin. Bei Stufe `read` kann er zusätzlich nichts anlegen
+oder ändern.
 
-**Zwei Dinge, die du wissen solltest**
+Er arbeitet in einem **eigenen Ordner** (`data/pi/workspace`), nicht im
+Programmordner. Eine Shell hat er standardmäßig **nicht** — er braucht sie
+nicht, weil er die Framework-Werkzeuge direkt aufruft. (Wer sie doch will:
+`"pi_allow_bash": true` im Profil; dann kann der Agent allerdings beliebige
+Befehle unter deinem Benutzerkonto ausführen.)
 
-- Die Zugriffsstufe ist eine **Leitplanke, keine Sicherheitssperre.** Die
-  Kommandozeile hält sich daran. Sie verhindert nicht, dass ein anderes Programm auf
-  demselben Rechner die lokale Schnittstelle direkt anspricht — das konnte es vorher
-  auch schon. Für eine echte Grenze müsste die Anwendung hinter eine Anmeldung oder
-  Pi in einen Container.
-- Der **Geheim-Modus gilt nicht für Pi.** Er erzwingt lokale Modelle *innerhalb* des
-  Frameworks. Welches Modell Pi selbst benutzt, entscheidet Pis eigene Einstellung.
-  Soll wirklich alles auf deinem Rechner bleiben, muss auch Pis Anbieter auf einen
-  lokalen Server zeigen.
+### Bleibt alles lokal?
+
+Mit einem lokalen Modell ja — dann läuft der ganze Lauf auf deinem Rechner.
+**Aber Achtung:** Der Geheim-Modus des Frameworks gilt **nicht** für Pi. Er
+erzwingt lokale Modelle *innerhalb* des Frameworks; welches Modell Pi benutzt,
+steht in der Modellauswahl dieses Tabs. Wähle dort ein lokales Modell, wenn
+nichts den Rechner verlassen soll.
 
 ---
 

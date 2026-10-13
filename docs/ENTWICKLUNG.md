@@ -1201,3 +1201,77 @@ fällt ohne erreichbare Brücke ohnehin auf Lanczos (reines Pillow) zurück.
 > `ALLOW_PYTHON_EXEC`, in `__all__` aufnehmen, **Chokepoint** in den zentralen Getter
 > legen und die Kerne zusätzlich hart abriegeln. Nicht an den Endpoints einzeln
 > prüfen — das wird beim nächsten Feature vergessen.
+
+---
+
+## 30. Pi-Agent-Tab (`routers/pi_agent.py`, `pi_agent.js`, `pi-agent/extensions/`)
+
+Pi läuft **im** Framework: eigener Tab, Unterprozess je Lauf, und — das
+Entscheidende — mit den Werkzeugen des Frameworks als **echten Pi-Werkzeugen**.
+
+### 30.1 Warum nicht „skill = CLI + bash"
+
+Der erste Entwurf band das Framework als Skill-Beschreibung ein: Pi liest sie
+und ruft die CLI über sein `bash`-Werkzeug auf. **Gemessen mit `qwen3.5:4b` ist
+das gescheitert:** das Modell rief Pis eigenes `web_search` auf (gehosteter
+Ollama-Dienst, hier nicht angemeldet → „Unauthorized"), und **erfand** danach
+die Zahlen — „~204–253 Nm" für eine M12-Schraube, richtig sind 87,4 Nm.
+Selbstbewusst formatiert mit Tabellen.
+
+Mit `pi-agent/extensions/framework-tools.ts` stehen dieselben Fähigkeiten als
+Werkzeuge mit Namen, Beschreibung und Schema bereit — und das Modell trifft die
+Auswahl zuverlässig. Dieselbe Lektion wie beim `kind`-Enum von `mechanik_calc`
+(§28.2): **eine Auswahl aus einer Liste ist die Stärke kleiner Modelle, freies
+Formulieren ihre Schwäche.**
+
+Die Erweiterung liest beim `session_start` `GET /api/tools/list` und registriert
+jedes Werkzeug als `fw_<name>` mit dem **echten JSON-Schema**; ausgeführt wird
+über `POST /api/tools/run`. Dazu `fw_cli` für die lesenden Verben. Keine
+Abhängigkeit, kein Build — `--extension` lädt die `.ts` direkt, Importe lösen
+gegen Pis eigene Installation auf.
+
+> **Folge:** neue Chat-Werkzeuge stehen dem Agenten automatisch zur Verfügung.
+> Die Registry ist die einzige Quelle; `framework-tools.ts` kennt kein einziges
+> Werkzeug beim Namen.
+
+### 30.2 Drei Fallen beim Starten von Pi als Unterprozess
+
+| Falle | Symptom | Lösung |
+|---|---|---|
+| **stdin** | Mit aktivierten Werkzeugen gibt Pi **keine einzige Zeile** aus und läuft ins Zeitlimit. Mit `--no-tools` lief es sofort. | `stdin=asyncio.subprocess.DEVNULL` (entspricht `< /dev/null`) |
+| **`cmd.exe`** | Pi beendet sich kommentarlos direkt nach dem `session`-Frame, Exit-Code 0. | `shutil.which("pi")` liefert unter Windows `pi.CMD`, einen Batch-Wrapper mit `%*` — jedes Argument läuft durch cmd.exe, und ein `<` im Systemprompt (`<verb>`) wurde als Umleitung gedeutet. `_pi_command()` ruft daher `node.exe … dist/bundle/cli.js` **direkt** auf. Nebeneffekt: auch Nutzereingaben mit `<`/`>`/`&`/`|` sind sicher. |
+| **Frame-Namen** | Werkzeugblöcke ohne Namen bzw. mit rohem JSON als Ergebnis | Name **und** Argumente stehen nur im Top-Level-Frame `tool_execution_start` (`toolName`/`args`); die `assistantMessageEvent`-Varianten `toolcall_start/_delta/_end` tragen den Namen nur im ersten und die Argumente nur im zweiten Frame. Ergebnisse kommen in `turn_end.toolResults` als `content:[{type:"text",text}]` → Helfer `_inhalt`. |
+
+### 30.3 Werkzeuge, die ausgeschlossen werden
+
+- **`web_search` immer.** Pis eigenes läuft über einen gehosteten Ollama-Dienst
+  („Unauthorized. Run `ollama signin`"). `fw_web_search` ist der Weg — mit
+  Quellen und denselben Gates wie im Chat.
+- **`bash` standardmäßig** (Profil `pi_allow_bash` schaltet es ein). Die
+  Erweiterung startet die CLI selbst, Pi braucht für die Framework-Fähigkeiten
+  keine Shell. Gemessen: **mit** bash versuchte das Modell zuerst zweimal, die
+  Schraube mit selbstgeschriebenem Python auszurechnen (scheiterte am
+  Windows-Python-Platzhalter), bevor es das richtige Werkzeug nahm. Ohne bash
+  entfällt der Umweg **und** der beliebige Shell-Zugriff — die „ehrliche Grenze"
+  aus §29.3 schrumpft damit erheblich.
+
+### 30.4 Modellwahl
+
+`GET /api/pi/config` liefert Pis Katalog **plus** alle lokalen Ollama-Modelle
+(ohne Embedding-Modelle). Pi akzeptiert Modelle außerhalb seines Katalogs mit
+dem Hinweis „Using custom model id" — und genau das ist hier nötig: Pis Katalog
+kannte auf der Testmaschine nur zwei 27B-Modelle, bei denen ein Lauf **15
+Minuten ohne eine einzige Ausgabezeile** brauchte, während `qwen3.5:4b`
+dieselbe Schraubenaufgabe in **14 Sekunden** löste. Vorausgewählt wird
+`DEFAULT_MODEL` (Feld `empfohlen`).
+
+### 30.5 Sandbox, Gates, Token
+
+Arbeitsordner ist `data/pi/workspace`, **nicht** der Programmordner — Pi hat
+eingebaute `read`/`write`/`edit`-Werkzeuge. Der Zugang hängt an
+`pi_agent_access` (§29.2): `off` blockt `/api/pi/run` und `/api/tools/*`,
+`read`/`write` steuern, was die CLI und `fw_cli` herausgeben; der generierte
+Systemprompt (`_context_prompt()`) nennt die Stufe ausdrücklich.
+Kein `_model_session`/VRAM-Lock — Pi spricht Ollama über seinen eigenen
+Provider an, wie die `z-image`/`z-video`-Brücken. Token aus Pis `usage`-Feldern
+landen im `done`-Frame, Label „Pi-Agent".

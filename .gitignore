@@ -18,6 +18,10 @@ data/uploads/*
 data/reports/*
 data/conversations/*
 data/code/*
+# Von Werkzeugen fuer den Pi-Agenten erzeugte Dateien (Diagramme, Bilder)
+data/agent_files/*
+# Arbeitsordner des Pi-Agenten (seine Notizen/Entwuerfe, keine Programmdateien)
+data/pi/*
 data/plans/*
 data/dossiers/*
 data/compare/*

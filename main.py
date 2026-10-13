@@ -79,6 +79,7 @@ from routers import orchestrator as _r_orchestrator
 from routers import goal as _r_goal
 from routers import bilderkennung as _r_bilderkennung
 from routers import video as _r_video
+from routers import pi_agent as _r_pi_agent
 
 
 app = FastAPI(title="AI_Framework_Thomas")
@@ -202,6 +203,7 @@ app.include_router(_r_orchestrator.router)
 app.include_router(_r_goal.router)
 app.include_router(_r_bilderkennung.router)
 app.include_router(_r_video.router)
+app.include_router(_r_pi_agent.router)
 
 
 # ── Static Files (muss zuletzt kommen) ───────────────────────────────────────

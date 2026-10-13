@@ -706,6 +706,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _safeInit('Pairing', () => { if (typeof Pairing !== 'undefined') Pairing.init(); });
   _safeInit('Bilderkennung', () => { if (typeof Bilderkennung !== 'undefined') Bilderkennung.init(); });
   _safeInit('Video', () => { if (typeof Video !== 'undefined') Video.init(); });
+  _safeInit('PiAgent', () => { if (typeof PiAgent !== 'undefined') PiAgent.init(); });
 
   // Anleitung „Handy & FritzBox" als Fenster (Button im Nutzerprofil)
   (function wireGuide() {

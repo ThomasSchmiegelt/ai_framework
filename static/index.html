@@ -186,6 +186,7 @@
       <button class="tab-btn" data-tab="jury">⚖️ Jury</button>
       <button class="tab-btn" data-tab="bilderkennung">🖼 Bilderkennung</button>
       <button class="tab-btn" data-tab="video">🎬 Videoerzeugung</button>
+      <button class="tab-btn" data-tab="pi">🤝 Pi-Agent</button>
     </div>
 
     <!-- ── Chat-Panel ──────────────────────────────────────────────────── -->
@@ -2716,6 +2717,79 @@
     </div><!-- /video-panel -->
 
     <!-- ── KI-To-Do-Liste mit Wissensgraph ──────────────────────────────────── -->
+    <div id="pi-panel" class="panel" style="overflow:auto;padding:12px 14px">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+        <h3 style="margin:0">🤝 Pi-Agent</h3>
+        <span id="pi-status" class="planner-muted" style="font-size:12px">wird geprüft …</span>
+      </div>
+      <p class="planner-muted" style="font-size:12px;margin:0 0 10px;max-width:960px">
+        Ein eigenständiger Agent (<a href="https://pi.dev" target="_blank" rel="noopener noreferrer">Pi</a>,
+        MIT) arbeitet <strong>innerhalb</strong> dieses Frameworks: er plant selbst und benutzt dabei
+        <strong>alle Werkzeuge</strong> der Anwendung — Websuche, Schraubenauslegung nach VDI&nbsp;2230,
+        Festigkeits- und Maschinenelemente-Rechnung, Werkstoffdaten, Einheiten, Diagramme, Routen,
+        Berichte, Patentsuche — und liest deinen Bestand (Projekte, Pläne, Aufgaben, Wissensdatenbanken).
+        Gerechnet wird dabei vom Framework, nicht vom Sprachmodell.
+      </p>
+
+      <div id="pi-missing" class="var-sec" style="display:none;margin-bottom:10px">
+        <div style="padding:10px 12px;font-size:12.5px">
+          <strong>Pi ist nicht installiert.</strong>
+          <div class="planner-muted" style="margin-top:6px">
+            Der Installer liegt im Programmordner bei. Er prüft erst, installiert nur nach
+            Rückfrage und zeigt den Befehl vorher an:
+            <pre class="mathe-stage-pre" style="margin:6px 0">pi-agent\install_pi.ps1      (Windows)
+./pi-agent/install_pi.sh      (Linux)</pre>
+            Pi braucht Node.js 22.19 oder neuer; das Framework selbst braucht kein Node.
+          </div>
+        </div>
+      </div>
+
+      <div id="pi-off" class="var-sec" style="display:none;margin-bottom:10px">
+        <div style="padding:10px 12px;font-size:12.5px">
+          <strong>Der Pi-Zugriff ist abgeschaltet.</strong>
+          <div class="planner-muted" style="margin-top:6px">
+            Setze <code>pi_agent_access</code> in der <code>config.json</code> auf
+            <code>"read"</code> (nur lesen und rechnen) oder <code>"write"</code>
+            (zusätzlich anlegen und ändern) — oder lass den Installer erneut laufen.
+            Die aktuelle Stufe steht auch im Profil unter „🔧 Installation".
+          </div>
+        </div>
+      </div>
+
+      <div id="pi-controls" style="display:none">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+          <label style="font-size:12px">Modell
+            <select id="pi-model" class="sidebar-select" style="min-width:260px;display:block"></select>
+          </label>
+          <label style="font-size:12px">Denktiefe
+            <select id="pi-thinking" class="sidebar-select" style="display:block">
+              <option value="">Standard</option>
+              <option value="off">aus</option>
+              <option value="low">niedrig</option>
+              <option value="medium">mittel</option>
+              <option value="high">hoch</option>
+            </select>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+            <input type="checkbox" id="pi-continue" /> vorherige Sitzung fortsetzen
+          </label>
+        </div>
+
+        <textarea id="pi-task" rows="3"
+          placeholder="Aufgabe für den Agenten — z. B. „Lege die Schrauben für einen Flansch mit 25 kN Axialkraft aus und prüfe im Internet, welche Festigkeitsklasse dafür üblich ist" oder „Welche meiner Projekte haben offene Aufgaben ohne Zuständigen?""
+          style="width:100%;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font:inherit;font-size:13px;resize:vertical"></textarea>
+
+        <div style="display:flex;gap:8px;align-items:center;margin:8px 0">
+          <button id="pi-run" class="export-btn">▶ Agent starten</button>
+          <button id="pi-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
+          <button id="pi-clear" class="export-btn">🧹 Leeren</button>
+          <span id="pi-live" class="planner-muted" style="font-size:12px"></span>
+        </div>
+
+        <div id="pi-out"></div>
+      </div>
+    </div>
+
     <div id="todo-panel" class="panel">
       <div id="todo-toolbar">
         <h2 style="font-size:16px;margin:0">✅ To-Do</h2>
@@ -3653,6 +3727,9 @@
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="video" /> 🎬 Videoerzeugung
       </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="pi" /> 🤝 Pi-Agent
+      </label>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
@@ -3968,7 +4045,8 @@
 <script src="/js/pairing.js?v=20260825reach"></script>
 <script src="/js/bilderkennung.js?v=20260831ask"></script>
 <script src="/js/video.js?v=20260902memsave"></script>
-<script src="/js/app.js?v=20260901video"></script>
+<script src="/js/pi_agent.js?v=20261013pi2"></script>
+<script src="/js/app.js?v=20261013pi"></script>
 
 </body>
 </html>

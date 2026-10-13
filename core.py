@@ -191,7 +191,12 @@ STT_DOWNLOAD_ROOT = (
     if _stt_root else (Path(__file__).parent / "models" / "whisper")
 )
 
-for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR, RAG_IMAGES_DIR, ORCHESTRATOR_DIR, VIDEOS_DIR]:
+# Dateien, die Werkzeuge fuer den externen Agenten erzeugen (Diagramme, Bilder).
+# Eigener Ordner statt UPLOADS_DIR: es sind Maschinen-Artefakte, keine
+# Nutzer-Uploads, und sie sollen separat aufraeumbar/sicherbar sein.
+AGENT_FILES_DIR = DATA_DIR / "agent_files"
+
+for _d in [UPLOADS_DIR, CONVERSATIONS_DIR, AGENTS_DIR, REPORTS_DIR, PLANS_DIR, DOSSIERS_DIR, CODE_DIR, JURIES_DIR, JURY_DOCS_DIR, RFQ_DIR, PST_DIR, RECHNUNGEN_DIR, ANGEBOTE_DIR, ZEUGNISSE_DIR, VARIANTEN_DIR, COMPARE_DIR, TODO_DIR, PROFILE_ASSETS_DIR, TRANSCRIPTS_DIR, RAG_IMAGES_DIR, ORCHESTRATOR_DIR, VIDEOS_DIR, AGENT_FILES_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Mitgelieferte Standard-Agenten (Referenz-Quelle, getrennt von DATA_DIR, damit sie
@@ -3163,7 +3168,7 @@ __all__ = [
     '_CONFIG_FILE', '_CONFIG', 'OLLAMA_BASE', 'ALLOWED_MODELS',
     'DEFAULT_MODEL', 'CHAT_NUM_CTX', '_ALLOWED_NUM_CTX', 'KEEP_ALIVE',
     'ALLOW_PYTHON_EXEC', 'ENABLE_IMAGE_GEN', 'ENABLE_VIDEO_GEN', 'PI_AGENT_ACCESS',
-    '_pi_agent_access',
+    '_pi_agent_access', 'AGENT_FILES_DIR',
     '_read_version', 'APP_VERSION', '_MODEL_PLACEHOLDERS',
     '_pick_model', '_raw_data_dir', 'DATA_DIR', 'UPLOADS_DIR',
     'CONVERSATIONS_DIR', 'AGENTS_DIR', 'REPORTS_DIR', 'PLANS_DIR',
