@@ -5228,3 +5228,16 @@ body.secret-mode #sidebar-brand::after {
   animation: tts-pulse 1.1s ease-in-out infinite;
 }
 @keyframes tts-pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+
+/* ── Pi-Agent-Tab ──────────────────────────────────────────────────────────── */
+
+/* Dieselbe Falle wie beim Medizin-Panel oben, diesmal mit Inline-Style:
+   stand `display:flex` im style-Attribut, gewann es gegen
+   ".panel { display:none }" und der Pi-Tab war in JEDEM Tab sichtbar.
+   display gehoert daher AUSSCHLIESSLICH an .active. */
+#pi-panel {
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px 12px;
+}
+#pi-panel.active { display: flex; }
