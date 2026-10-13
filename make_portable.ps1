@@ -444,10 +444,12 @@ foreach ($d in @("conversations","uploads","agents","reports","code","plans","do
     New-Item -ItemType Directory -Path "$BUNDLE_DIR\app\data\$d" -Force | Out-Null
 }
 
-# Default-Agenten kopieren falls vorhanden
-if (Test-Path "$APP_DIR\data\agents") {
-    Copy-Item "$APP_DIR\data\agents\*" "$BUNDLE_DIR\app\data\agents\" -Force -ErrorAction SilentlyContinue
-}
+# Die Standard-Agenten werden NICHT vom Baurechner kopiert. Grund: data\ des
+# Baurechners ist oben bewusst ausgeschlossen (private Daten), und _seed_defaults()
+# in core.py befuellt data\agents beim ersten Start NUR, wenn dort noch keine
+# *.json liegt. Wuerde hier kopiert, bliebe das Seeding aus und die mitgelieferten
+# defaults\agents\ (inkl. neu hinzugefuegter) landeten nie im Bundle.
+# defaults\agents\ ist als Teil der App im Bundle -> der erste Start seedet daraus.
 
 # ── 5b. config.json im Bundle auf den eigenen Ollama-Port umschreiben ──────────
 # (Bei -UseSystemOllama nicht nötig — config bleibt auf dem Standard-Port 11434.)

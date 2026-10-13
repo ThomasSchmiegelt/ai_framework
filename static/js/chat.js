@@ -234,6 +234,26 @@ const Chat = (() => {
       return;
     }
 
+    // Mathe: „/mathe <Aufgabe>" (Alias /math) löst über den SymPy-verifizierten Loop
+    // des Mathe-Tabs; „/mathe [tutor] …" leitet stattdessen sokratisch an.
+    const ma = _parseMathe(text);
+    if (ma) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runMathe(ma.task, ma.tutor);
+      return;
+    }
+
+    // Medizin: „/medizin <Frage>" (Aliase /med, /arzt) fährt die 2-Modell-Pipeline
+    // des Medizin-Tabs (Aufbereiten → Analyse → ggf. Rückfrage → Einschätzung).
+    const mz = _parseMedizin(text);
+    if (mz) {
+      input.value = '';
+      autoResizeTextarea(input);
+      runMedizin(mz.question);
+      return;
+    }
+
     // Bild-Modus per Toolbar-Haken (🎨): die nächste normale Nachricht wird zum
     // Bild-Prompt. One-shot – der Haken wird danach zurückgesetzt.
     const imgToggle = document.getElementById('btn-image-toggle');
@@ -4124,6 +4144,392 @@ const Chat = (() => {
     }
   }
 
+  // ── /mathe — Mathe-Fähigkeit im Chat (verifizierter Weg + Tutor) ─────────────
+  // „/mathe <Aufgabe>" nutzt den SymPy-verifizierten Loop des Mathe-Tabs
+  // (/api/mathe/solve-verified): deterministische Grundwahrheit → Lösungsversuch →
+  // Korrekturrunden, mit Verifikations-Abzeichen und LaTeX/PDF-Export.
+  // „/mathe [tutor] <Aufgabe>" fragt stattdessen sokratisch (Agent mathe_tutor,
+  // SymPy-Fakten aus /api/mathe/ground als intern geprüfte Grundlage).
+  // Der Mathe-Tab bleibt unverändert — hier laufen genau dieselben Endpoints.
+  function _parseMathe(text) {
+    const m = text.match(/^\/(mathe|math)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    let rest = (m[2] || '').trim();
+    let tutor = false;
+    // Optionaler Tag am Anfang: [tutor] bzw. [loesung] (Muster wie /workflow, /ziel).
+    const tm = rest.match(/^\[([^\]]{1,40})\]\s*/);
+    if (tm) {
+      const tags = tm[1].toLowerCase().split(/[,;\s]+/).filter(Boolean);
+      const known = ['tutor', 'loesung', 'lösung', 'solve'];
+      if (tags.length && tags.every(t => known.includes(t))) {
+        tutor = tags.includes('tutor');
+        rest = rest.slice(tm[0].length).trim();
+      }
+    }
+    return { task: rest, tutor };
+  }
+
+  // Export-Leiste (PDF/LaTeX) unter eine Mathe-Lösung hängen — spiegelt
+  // mathe.js `_offerLatexExport`, nur im Chat-Container.
+  function _matheExportBar(host, text) {
+    if (!host || !text || !text.includes('$')) return;
+    const bar = document.createElement('div');
+    bar.className = 'mathe-export-bar';
+    const mk = (label, fmt) => {
+      const b = document.createElement('button');
+      b.className = 'export-btn'; b.style.fontSize = '12px'; b.textContent = label;
+      b.onclick = () => _matheExport(fmt, text);
+      return b;
+    };
+    const lbl = document.createElement('span');
+    lbl.style.cssText = 'font-size:12px;color:var(--text-muted)';
+    lbl.textContent = 'Exportieren:';
+    bar.appendChild(lbl); bar.appendChild(mk('📄 PDF', 'pdf')); bar.appendChild(mk('📋 LaTeX', 'latex'));
+    host.appendChild(bar);
+  }
+
+  async function _matheExport(format, text) {
+    try {
+      const resp = await fetch(`/api/export/${format}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'document', title: 'Mathe-Lösung', content: text }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'mathe_loesung.' + (format === 'latex' ? 'tex' : 'pdf');
+      a.click(); URL.revokeObjectURL(a.href);
+      showToast(`✓ Als ${format.toUpperCase()} exportiert`);
+    } catch (e) { showToast('Export fehlgeschlagen: ' + e.message); }
+  }
+
+  async function runMathe(task, tutor) {
+    task = (task || '').trim();
+    if (!task) { showToast('Bitte eine Aufgabe angeben, z. B. „/mathe Löse x² − 5x + 6 = 0"'); return; }
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false); isStreaming = true; setBtnSendState(false);
+
+    const head = (tutor ? '🧑‍🏫 Mathe-Tutor: ' : '🧮 Mathe (verifiziert): ') + task;
+    appendMessage('user', head);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const stagesEl = document.createElement('div'); stagesEl.className = 'mathe-stages';
+    content.appendChild(stagesEl);
+    const workingEl = makeWorking(tutor ? '🧑‍🏫 Tutor bereitet die Anleitung vor'
+                                        : '🧮 rechnet und prüft mit SymPy',
+      { hintAfter: 20, hint: 'Grundwahrheit, Lösung und Korrekturrunden sind mehrere Modellaufrufe.' });
+    content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text';
+    content.appendChild(textEl);
+    let cleared = false;
+    const clearWorking = () => { if (!cleared) { cleared = true; workingEl.remove(); } };
+
+    // Modell bewusst NICHT mitsenden: der Server wählt über die Profil-Rolle
+    // (_model_for("coding")/("general")) und coerct im Geheim-/Hartman-Modus lokal.
+    let answer = '';
+    try {
+      if (tutor) answer = await _matheTutor(task, textEl, clearWorking);
+      else       answer = await _matheVerified(task, stagesEl, textEl, clearWorking);
+      if (answer) {
+        renderMarkdown(textEl, answer);
+        if (!tutor) _matheVerifyBadge(textEl, _matheLastDone);
+        _matheExportBar(content, answer);
+        messages.push({ role: 'user', content: head });
+        messages.push({ role: 'assistant', content: answer });
+        _persistConversation(); loadConversationList();
+      }
+    } catch (e) {
+      clearWorking();
+      textEl.innerHTML = `<em style="color:#ef4444">Mathe fehlgeschlagen: ${escHtml(e.message)}</em>`;
+    } finally {
+      clearWorking(); isStreaming = false; setBtnSendState(true);
+    }
+  }
+
+  // Letztes done-Frame des verifizierten Laufs (fürs Abzeichen nach dem Rendern).
+  let _matheLastDone = null;
+
+  function _matheVerifyBadge(el, ev) {
+    if (!el || !ev) return;
+    const badge = document.createElement('div');
+    const kind = ev.verified ? 'ok' : (ev.checkable ? 'warn' : 'info');
+    badge.className = 'mathe-verify-badge ' + kind;
+    badge.textContent = ev.verified ? '✓ Mit SymPy verifiziert'
+      : ev.checkable ? '⚠ Nicht abschließend verifiziert – SymPy-Grundwahrheit siehe oben'
+      : 'ℹ Mit SymPy-Fakten gestützt (nicht strikt prüfbar)';
+    el.appendChild(badge);
+  }
+
+  // Verifizierter Weg: SSE-Stufen (verify|solve|fix) + Endlösung + Abzeichen.
+  async function _matheVerified(task, stagesEl, textEl, clearWorking) {
+    _matheLastDone = null;
+    const resp = await fetch('/api/mathe/solve-verified', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: task }] }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const labels = { solve: '🧮 Lösungsversuch', verify: '🔍 SymPy-Grundwahrheit', fix: '🔧 Korrektur' };
+    const reader = resp.body.getReader(); const dec = new TextDecoder();
+    let buf = '', full = '', cur = null;
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+        if (ev.type === 'stage' && ev.status === 'start') {
+          const det = document.createElement('details');
+          det.className = 'mathe-stage mathe-stage--' + ev.stage;
+          det.open = (ev.stage === 'verify');
+          det.innerHTML = `<summary>${escHtml(labels[ev.stage] || ev.label || ev.stage)}`
+            + ` <span class="mathe-stage-spin">…</span></summary><div class="mathe-stage-body"></div>`;
+          stagesEl.appendChild(det); cur = det; scrollToBottom();
+        } else if (ev.type === 'stage' && ev.status === 'done') {
+          if (!cur) continue;
+          cur.querySelector('.mathe-stage-spin')?.remove();
+          const body = cur.querySelector('.mathe-stage-body');
+          if (ev.stage === 'verify') {
+            const pre = document.createElement('pre');
+            pre.className = 'mathe-stage-pre'; pre.textContent = ev.content || '';
+            body.appendChild(pre);
+          } else {
+            renderMarkdown(body, ev.content || '');
+          }
+          cur = null; scrollToBottom();
+        } else if (ev.type === 'text') {
+          clearWorking(); full = ev.content || full;
+          textEl.textContent = full; scrollToBottom();
+        } else if (ev.type === 'done') {
+          _matheLastDone = ev;
+          if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Mathe');
+        } else if (ev.type === 'error') {
+          throw new Error(ev.content || 'Unbekannter Fehler');
+        }
+      }
+    }
+    clearWorking();
+    return full;
+  }
+
+  // Tutor-Weg: SymPy-Fakten holen (nur intern), dann der mathe_tutor-Agent
+  // über den normalen /api/chat-Strom.
+  async function _matheTutor(task, textEl, clearWorking) {
+    let user = task;
+    try {
+      const gr = await fetch('/api/mathe/ground', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: task }] }),
+      });
+      if (gr.ok) {
+        const { facts, tokens } = await gr.json();
+        if (tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(tokens, 'Mathe');
+        if (facts) {
+          user += '\n\n[Verifizierte Fakten (per SymPy berechnet — intern zum Prüfen und gezielten '
+                + 'Anleiten nutzen, NICHT ungefragt komplett verraten):\n' + facts + ']';
+        }
+      }
+    } catch (_) { /* ohne Fakten weiter (rein sokratisch) */ }
+
+    const resp = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: user }],
+        agent_id: 'mathe_tutor', rag_collections: [], science: false,
+      }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const reader = resp.body.getReader(); const dec = new TextDecoder();
+    let buf = '', full = '';
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+        if (ev.type === 'text') {
+          clearWorking(); full += ev.content; textEl.textContent = full; scrollToBottom();
+        } else if (ev.type === 'image') {
+          clearWorking();
+          const wrap = document.createElement('div'); wrap.style.cssText = 'margin:8px 0';
+          insertImage(wrap, ev.data);
+          textEl.parentElement.insertBefore(wrap, textEl);
+          scrollToBottom();
+        } else if (ev.type === 'done') {
+          if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Mathe');
+        } else if (ev.type === 'error') {
+          throw new Error(ev.content || 'Unbekannter Fehler');
+        }
+      }
+    }
+    clearWorking();
+    return full;
+  }
+
+  // ── /medizin — Medizin-Pipeline im Chat ──────────────────────────────────────
+  // „/medizin <Frage>" fährt dieselbe 2-Modell-Pipeline wie der Medizin-Tab
+  // (/api/medizin/consult): Aufbereiten → Analyse (medizinisches Modell) →
+  // ggf. EINE Rückfrage → Einschätzung. Rückfragen werden in der Karte selbst
+  // beantwortet (eigenes Eingabefeld), damit die Runden-Zählung nicht die
+  // nächste normale Chat-Nachricht vereinnahmt.
+  // Patientenformular, Falldokumente und Patienten-RAG bleiben im Medizin-Tab.
+  function _parseMedizin(text) {
+    const m = text.match(/^\/(medizin|med|arzt)\b\s*([\s\S]*)$/i);
+    if (!m) return null;
+    return { question: (m[2] || '').trim() };
+  }
+
+  async function runMedizin(question) {
+    question = (question || '').trim();
+    if (!question) { showToast('Bitte eine medizinische Frage angeben, z. B. „/medizin anhaltender Husten seit 3 Wochen"'); return; }
+    if (isStreaming) { showToast('Bitte warten, bis die laufende Antwort fertig ist'); return; }
+    showWelcome(false);
+
+    const head = '🩺 Medizin: ' + question;
+    appendMessage('user', head);
+    if (!currentConvId) currentConvId = `conv_${Date.now()}`;
+
+    const row = appendMessage('assistant', '', [], true);
+    const content = row.querySelector('.bubble-content');
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:12px;color:var(--text-muted);margin-bottom:6px';
+    note.textContent = '⚠️ Ersetzt keine ärztliche Beratung, Diagnose oder Behandlung.';
+    content.appendChild(note);
+
+    // Verlauf dieser Konsultation (getrennt vom Chat-Verlauf, wie im Medizin-Tab).
+    const ctx = { history: [{ role: 'user', content: question }], round: 0, head, content, transcript: [] };
+    await _medConsult(ctx);
+  }
+
+  async function _medConsult(ctx) {
+    isStreaming = true; setBtnSendState(false);
+    const stagesEl = document.createElement('div'); stagesEl.className = 'mathe-stages';
+    ctx.content.appendChild(stagesEl);
+    const workingEl = makeWorking('🩺 Pipeline läuft',
+      { hintAfter: 20, hint: 'Aufbereiten, Analyse und Einschätzung sind mehrere Modellaufrufe.' });
+    ctx.content.appendChild(workingEl);
+    const textEl = document.createElement('div'); textEl.className = 'bubble-text';
+    ctx.content.appendChild(textEl);
+    let cleared = false;
+    const clearWorking = () => { if (!cleared) { cleared = true; workingEl.remove(); } };
+
+    const labels = { refine: '📝 Frage aufbereiten', analyze: '🔬 Medizinische Analyse',
+                     formulate: '❓ Rückfrage formulieren', final: '🩺 Einschätzung' };
+    const mFor = (role) => ((typeof Profile !== 'undefined' && Profile.modelFor) ? Profile.modelFor(role) : '') || undefined;
+
+    let final = '', question = '', isQuestion = false, nextRound = ctx.round, cur = null;
+    try {
+      const resp = await fetch('/api/medizin/consult', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: ctx.history.map(m => ({ role: m.role, content: m.content })),
+          round: ctx.round, rag_collections: [], documents: [], patient: {},
+          model_general: mFor('general'), model_medical: mFor('medical'),
+        }),
+      });
+      if (!resp.ok) {
+        let d = 'HTTP ' + resp.status;
+        try { d = (await resp.json()).detail || d; } catch (_) {}
+        throw new Error(d);
+      }
+      const reader = resp.body.getReader(); const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let ev; try { ev = JSON.parse(line.slice(6)); } catch (_) { continue; }
+          if (ev.type === 'stage' && ev.status === 'start') {
+            const det = document.createElement('details');
+            det.className = 'mathe-stage mathe-stage--' + ev.stage;
+            det.innerHTML = `<summary>${escHtml(labels[ev.stage] || ev.label || ev.stage)}`
+              + ` <span class="mathe-stage-spin">…</span></summary><div class="mathe-stage-body"></div>`;
+            stagesEl.appendChild(det); cur = det; scrollToBottom();
+          } else if (ev.type === 'stage' && ev.status === 'done') {
+            if (!cur) continue;
+            cur.querySelector('.mathe-stage-spin')?.remove();
+            if (ev.content) renderMarkdown(cur.querySelector('.mathe-stage-body'), ev.content);
+            cur = null; scrollToBottom();
+          } else if (ev.type === 'question') {
+            clearWorking();
+            isQuestion = true; question = ev.content || '';
+            nextRound = ev.round || (ctx.round + 1);
+            renderMarkdown(textEl, question);
+            textEl.style.borderLeft = '3px solid var(--accent, #3b76ba)';
+            textEl.style.paddingLeft = '8px';
+          } else if (ev.type === 'text') {
+            clearWorking(); final += ev.content; textEl.textContent = final; scrollToBottom();
+          } else if (ev.type === 'done') {
+            if (ev.tokens && typeof TokenMeter !== 'undefined') TokenMeter.add(ev.tokens, 'Medizin');
+            if (typeof ev.round === 'number') nextRound = ev.round;
+            if (ev.needs_followup === false) nextRound = 0;
+          } else if (ev.type === 'error') {
+            throw new Error(ev.content || 'Unbekannter Fehler');
+          }
+        }
+      }
+      clearWorking();
+
+      if (isQuestion) {
+        ctx.history.push({ role: 'assistant', content: question });
+        ctx.transcript.push('**Rückfrage:** ' + question);
+        ctx.round = nextRound;
+        _medAnswerBox(ctx);
+      } else if (final) {
+        renderMarkdown(textEl, final);
+        ctx.history.push({ role: 'assistant', content: final });
+        ctx.transcript.push(final);
+        ctx.round = 0;
+        messages.push({ role: 'user', content: ctx.head });
+        messages.push({ role: 'assistant', content: ctx.transcript.join('\n\n') });
+        _persistConversation(); loadConversationList();
+      }
+    } catch (e) {
+      clearWorking();
+      textEl.innerHTML = `<em style="color:#ef4444">Medizin fehlgeschlagen: ${escHtml(e.message)}</em>`;
+      ctx.round = 0;
+    } finally {
+      clearWorking(); isStreaming = false; setBtnSendState(true);
+    }
+  }
+
+  // Eingabefeld für die Antwort auf eine Pipeline-Rückfrage (bleibt in der Karte).
+  function _medAnswerBox(ctx) {
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;margin:8px 0;align-items:flex-start';
+    const ta = document.createElement('textarea');
+    ta.rows = 2; ta.placeholder = 'Antwort auf die Rückfrage…';
+    ta.style.cssText = 'flex:1;background:var(--bg-input);color:var(--text);border:1px solid var(--border);'
+                     + 'border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;resize:vertical';
+    const btn = document.createElement('button');
+    btn.className = 'export-btn'; btn.textContent = '↑ Senden';
+    const send = () => {
+      const val = ta.value.trim();
+      if (!val) { showToast('Bitte eine Antwort eingeben'); return; }
+      bar.remove();
+      ctx.history.push({ role: 'user', content: val });
+      ctx.transcript.push('**Antwort:** ' + val);
+      const echo = document.createElement('div');
+      echo.style.cssText = 'font-size:13px;margin:4px 0;color:var(--text-dim)';
+      echo.textContent = '↳ ' + val;
+      ctx.content.appendChild(echo);
+      _medConsult(ctx);
+    };
+    btn.onclick = send;
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    bar.appendChild(ta); bar.appendChild(btn);
+    ctx.content.appendChild(bar); scrollToBottom();
+    ta.focus();
+  }
+
   async function runBild(prompt, opts) {
     prompt = (prompt || '').trim();
     opts = opts || {};
@@ -5256,6 +5662,8 @@ const Chat = (() => {
     { key: '/excelvergleich', ins: '/excelvergleich', cmd: '/excelvergleich', desc: 'Excel-Vergleich: zwei Tabellen laden, je Blatt + Schlüsselspalte wählen → neue/entfernte/geänderte Zeilen + KI-Bewertung im Chat (auch /xlsvergleich, /excel)' },
     { key: '/paarvergleich', ins: '/paarvergleich ', cmd: '/paarvergleich [Thema]', desc: 'Schrittweiser Paarvergleich: Merkmal für Merkmal eingeben, Wichtigkeit gegen die vorherigen bewerten (Gewichte + Konsistenzcheck). Auch /entscheidung, /ahp' },
     { key: '/praesentation', ins: '/praesentation ', cmd: '/praesentation …', desc: 'Präsentationsassistent (Interview): OHNE Bilder aus dem Thema (Gliederung + Webrecherche); MIT hochgeladenen Bildern eine Präsentation AUS den Bildern (Vision je Bild, Dateiname-Hinweis, sortierbar) + optional .md/.txt, Mermaid-Diagramme, Sprechernotizen, Start/Abschluss generiert → Canvas' },
+    { key: '/mathe', ins: '/mathe ', cmd: '/mathe <Aufgabe>', desc: 'Mathe verifiziert: SymPy rechnet die Grundwahrheit, das Modell löst, Abweichungen werden in Korrekturrunden behoben (Verifikations-Abzeichen, PDF/LaTeX-Export). „/mathe [tutor] …" leitet stattdessen sokratisch an, statt die Lösung zu verraten. Auch /math' },
+    { key: '/medizin', ins: '/medizin ', cmd: '/medizin <Frage>', desc: 'Medizin-Pipeline (2 Modelle): Frage aufbereiten → medizinische Analyse → ggf. eine Rückfrage (direkt in der Karte beantworten) → Einschätzung. Ersetzt keine ärztliche Beratung. Patientenformular, Falldokumente und Patienten-RAG bleiben im Medizin-Tab. Auch /med, /arzt' },
     { key: '/dd',   ins: '/dd',    cmd: '/dd<N>',  desc: 'Deepdive: N Vertiefungsfragen zur letzten Antwort (z. B. /dd10)' },
     { key: '/ddd',  ins: '/ddd',   cmd: '/ddd<N>', desc: 'Deepdive-Dokument: N Kapitel zur letzten Antwort' },
     { key: '/plan', ins: '/plan ', cmd: '/plan …', desc: 'Strategie → Agenten → Plan → Jury aus dem Verlauf (/planN für Aufgabenzahl)' },

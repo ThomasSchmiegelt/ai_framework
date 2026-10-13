@@ -39,6 +39,7 @@
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
 - [JSON-Editor](#json-editor)
 15. [Diagnose-Logger](#15-diagnose-logger)
+16.0 [Maschinenbau-Assistent](#11-0-maschinenbau-assistent--rechnen-statt-schätzen)
 16. [Agenten](#16-agenten)
 - [Bewertungs-Jurys](#16a-bewertungs-jurys-)
 17. [Gespräche verwalten](#17-gespräche-verwalten)
@@ -247,6 +248,8 @@ Alle Befehle stehen **am Zeilenanfang** einer Chat-Nachricht.
 | `/upscale` · `/hochskalieren` | **Bild hochskalieren (2×, max 2048 px):** Bild wählen und die Methode festlegen — **✨ KI-Detail** rechnet das Bild lokal über Z-Image neu und ergänzt **echte Schärfe/Details** (~30–50 s), **⚡ Schnell** vergrößert nur per Lanczos (sofort, ohne neue Details). Auch als Knopf **🔍 hochskalieren** direkt am Ergebnis von `/bildedit`. Ist kein lokaler Bild-Server aktiv, wird automatisch die schnelle Vergrößerung genutzt (mit Hinweis). |
 | `/bildedit [Anweisung]` · `/bildbearbeiten` | **Bild bearbeiten (img2img):** ein Bild hochladen und in einem kleinen Dialog sagen, **wie** es verändert werden soll (z. B. „Himmel bei Sonnenuntergang", „im Aquarellstil", „das Auto entfernen") – dazu die **Stärke** der Veränderung wählen (leicht/mittel/stark). Läuft **lokal über Z-Image** (crash-sichere Brücke) oder über ein **API-Bildmodell, das Bildbearbeitung kann** (z. B. `gpt-image-1`; `dall-e-3` z. B. **nicht** – dann kommt eine klare Meldung). Mit **✏️ weiter bearbeiten** kannst du das Ergebnis gleich noch einmal verändern. **Nur einen Ausschnitt ändern (Inpainting):** im Dialog **„🖌 Bereich markieren"** anklicken und den Bereich, der sich ändern soll, mit dem Pinsel übermalen (Pinselgröße einstellbar, „🗑 löschen" setzt zurück) — dann wird **nur** der markierte Bereich neu erzeugt, der Rest bleibt. Im Geheim-/Hartman-Modus nur lokal. |
 | `/praesentation <Thema>` · `/vortrag` · `/slides` | **Geführter Präsentationsassistent:** öffnet erst ein kurzes **Interview** (Zielgruppe, Ziel/Zweck, Umfang, Bild-Umfang, Bildwünsche, Webrecherche an/aus). Dann erstellt das System eine **schlüssige Gliederung mit Inhaltsverzeichnis**, **recherchiert zu jedem Punkt im Web** und fasst das als Folieninhalt zusammen. Bebilderung: **Deckblatt flächig** und **Abschlussfolie mit Bild**; Inhaltsfolien bekommen ein Bild, wenn es sinnvoll ist (mit Zufallskomponente) — dann **halb Text, halb Bild**. Alles landet im **Canvas** (PPTX-Export inkl. flächigem Deckblatt). Bild-Umfang im Interview wählbar (KI entscheidet / alle / keine). *Hinweis: über die lokale Z-Image-Brücke dauert jedes Bild ~30–50 s; mit einem API-Bildmodell schnell.* |
+| `/mathe <Aufgabe>` · `/math` | **Mathe mit Selbstprüfung:** löst die Aufgabe über dieselbe geprüfte Rechenkette wie der Mathe-Tab — zuerst berechnet **SymPy** die Grundwahrheit, dann löst das Modell, und weicht es davon ab, rechnet es in bis zu zwei **Korrekturrunden** nach. Die Zwischenschritte sind zum Aufklappen, unter der Lösung steht ein **Abzeichen** („✓ Mit SymPy verifiziert" / „⚠ nicht abschließend verifiziert") und bei Formeln eine Leiste **📄 PDF / 📋 LaTeX**. Setz `[tutor]` davor (`/mathe [tutor] Löse x²−5x+6=0`), dann **verrät die KI die Lösung nicht**, sondern leitet dich Schritt für Schritt hin — sie kennt das SymPy-Ergebnis dabei intern und merkt, wenn du falsch liegst. Der **Mathe-Tab** bleibt unverändert; dort gibt es zusätzlich Plots, Schnell-Prompts und den Dateianhang. |
+| `/medizin <Frage>` · `/med` · `/arzt` | **Medizinische Einschätzung:** fährt dieselbe **Zwei-Modell-Pipeline** wie der Medizin-Tab — die Frage wird erst **aufbereitet**, dann von einem **medizinischen Modell analysiert**, bei Bedarf stellt die KI **eine Rückfrage**, und am Ende steht die Einschätzung. Die Rückfrage beantwortest du **direkt in der Antwort­karte** in einem eigenen Eingabefeld (Enter sendet) — dein normaler Chat bleibt davon unberührt. Die Zwischenschritte sind zum Aufklappen. **Ersetzt keine ärztliche Beratung, Diagnose oder Behandlung.** Patientenformular, Falldokumente und die Patienten-Akte (RAG) gibt es weiterhin nur im **Medizin-Tab**. |
 | `/dd[N] [Zusatz]` · `/deepdive[N]` | **Deepdive:** vertieft die letzte Antwort mit *N* Folgefragen (ohne Zahl = 5), nacheinander recherchiert & beantwortet. |
 | `/ddd[N] [Zusatz]` · `/deepdivedocument[N]` | Wie Deepdive, aber **als Dokument** (Vorwort + Kapitel) im Dokumente-Tab. |
 | `/plan[N] [Zusatz] [/Kürzel …]` | **Strategie & Einsatzplan-Orchestrator:** baut aus dem Gesprächsverlauf eine Vorschau (Strategie + Agenten + Plan + Jury). `N` = Aufgabenzahl (4–60, Standard 12). `/Kürzel` erzwingt vorhandene Agenten. |
@@ -941,6 +944,68 @@ Der voreingestellte Agent **Mathe-Experte** verwendet folgende Tools:
 - *„Plotte f(x) = x^3 − 3x und g(x) = x von −3 bis 3"*
 - *„Berechne das bestimmte Integral von x^2 von 0 bis 3"*
 - *„Eigenwerte der Matrix [[2,1],[1,3]]"*
+
+---
+
+## 11-0. Maschinenbau-Assistent — rechnen statt schätzen
+
+Für alles, was man sonst **mit Papier und Bleistift** rechnet: Festigkeit, Biegung,
+Wellen, Knickung, Verbindungen, Maschinenelemente, Dauerfestigkeit, Antrieb.
+
+**So nutzt du ihn:** Wähle im Chat den Agenten **🔧 Maschinenbau-Assistent**
+(Agenten-Selektor in der Sidebar oder `/Maschinenbau <Frage>` für eine einzelne Frage)
+und frage in normalem Deutsch:
+
+- „Ein Kragarm ist 1 m lang und am Ende mit 1 kN belastet, Rechteck 50×100 mm.
+  Wie groß ist die Biegespannung?"
+- „Welchen Durchmesser braucht eine Welle für 250 Nm bei τ_zul = 40 MPa?"
+- „Wie lange hält ein Kugellager mit C = 20 kN bei P = 4 kN und 1500 1/min?"
+- „Ist eine Rohrstütze 60×50 mm, 2 m lang, beidseitig gelenkig, mit 50 kN knicksicher?"
+
+**Was dabei herauskommt:** Die KI rechnet das **nicht selbst im Kopf**, sondern ruft einen
+festen Rechenkern auf. Du bekommst darum immer **Annahmen → Rechenweg → Ergebnis →
+Auslastung** zu sehen, mit Sicherheit und Ampel (✅/⚠️/❌) — also eine Rechnung, die du
+nachprüfen kannst, keine geratene Zahl.
+
+**Was gerechnet werden kann**
+
+| Bereich | Rechenarten |
+|---|---|
+| Querschnitt & Grundbeanspruchung | Fläche, Flächenträgheits- und Widerstandsmoment (Rechteck, Quadrat, Kreis, Rohr, Hohlkasten, I-Träger); Zug/Druck, Schub, Flächenpressung |
+| Biegung | Biegespannung und Durchbiegung für 6 Standardlastfälle (Kragarm und Träger auf zwei Stützen bzw. beidseitig eingespannt, je Einzel- oder Streckenlast) |
+| Wellen | Torsionsspannung, Verdrehwinkel, erforderlicher Wellendurchmesser, Vergleichsspannung (von Mises / Tresca) |
+| Knickung | Knicknachweis nach **Euler**, bei kleiner Schlankheit nach **Tetmajer**, alle vier Eulerfälle, Schlankheitsgrad und Grenzschlankheit |
+| Verbindungen | Schweißnaht, Passfeder (DIN 6885), Pressverband; **Schrauben nach VDI 2230** über den vorhandenen Schraubenrechner |
+| Maschinenelemente | Druckfeder, Wälzlager-Lebensdauer L10/L10h (ISO 281), Zahnrad-Geometrie und Umfangskraft |
+| Festigkeitsnachweis | Dauerfestigkeit: Wechselfestigkeit, Mittelspannung, Gestaltfestigkeit, Sicherheit |
+| Antrieb | Leistung/Drehmoment/Drehzahl, Getriebestufe, Massenträgheitsmoment und Hochlaufzeit |
+
+**Einheiten:** Schreib sie einfach dazu — `1 kN`, `2 m`, `250 Nm`, `40 MPa`, `1500 1/min`.
+Sie werden umgerechnet; deutsche Dezimalkommas (`7,5 kW`) versteht er auch.
+
+**Wenn etwas fehlt, wird gefragt.** Der Rechenkern erfindet keine Lasten, Maße oder
+Werkstoffe. Fehlt z. B. der Lastfall, kommt eine Rückfrage statt einer Zahl — denn
+zwischen Kragarm und Träger auf zwei Stützen liegt bei gleicher Kraft und Länge der
+**Faktor 4** im Biegemoment. Genauso wird abgelehnt, wenn eine Einheit nicht zur Größe
+passt (ein Drehmoment in Nm kann keine Spannung in MPa sein). Das ist Absicht: **ein
+falsches Ergebnis, das plausibel aussieht, ist schlimmer als eine Rückfrage.**
+
+**Auch mit kleinen Modellen nutzbar.** Der Rechenkern ist bewusst so gebaut, dass ihn
+kleine lokale Modelle bedienen können (getestet mit `qwen3.5:4b` und `granite4.2:3b`).
+`qwen3.5:4b` liefert dabei die zuverlässigeren Aufrufe.
+
+**Grenzen, die der Assistent selbst nennt:** Die Formeln sind nachvollziehbare Hand- und
+Lehrbuchrechnungen für **Auslegung und Vorauswahl**. Dauerfestigkeit, Schweißnähte und
+Zahnradtragfähigkeit sind darin vereinfacht — ein belastbarer Nachweis für ein reales
+Bauteil läuft nach FKM-Richtlinie, EC3-1-9 bzw. DIN 3990/ISO 6336 und braucht einen
+Prüfer. Der Assistent ersetzt keine Freigabe.
+
+**Ohne Chat nutzbar:** Dieselben Rechenkerne gibt es auf der Kommandozeile:
+
+```
+python -m tools.mechanik                      # zeigt alle Rechenarten
+python -m tools.mechanik biegung_kragarm_ende "f=1 kN l=1 m profil=rechteck b=50 h=100 rp=235"
+```
 
 ---
 

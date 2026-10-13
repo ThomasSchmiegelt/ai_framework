@@ -221,6 +221,7 @@ Protokolliert: `chat` (Modell, Dauer, Tools), `tool`, Frontend-Events.
 | `files.py` | Extraktion: PDF (pypdf), DOCX, XLSX/CSV, Text |
 | `export.py` | DOCX/XLSX/PPTX/**PDF**/**LaTeX**-Erzeugung mit Corporate-Design & KI-Kennzeichnung. **PDF** (`to_pdf`) rendert LaTeX-Formeln via matplotlib-mathtext (vorvalidiert, crash-sicher); **LaTeX** (`to_latex`) erzeugt `article`/`beamer`-Quelltext (Markdown→LaTeX, Formeln bleiben Math) |
 | `engineering.py` | Einheiten (Pint), Solver (SymPy), Diagramme aus Wertereihen (`plot_chart`), **Funktionsgraph aus Term** (`plot_function`, SymPy-Lambdify, `^`/implizite Mult./`f(x)=`-Vorsatz, mehrere Funktionen mit `;`), VDI-2230-Schraube |
+| `mechanik.py` | **Maschinenbau-Rechenkerne** (19 Rechenarten, stdlib-only: `math`/`re`/`difflib`): Querschnittswerte, Zug/Druck, Schub, Flächenpressung, Biegung (6 Lastfälle), Torsion, Wellendurchmesser, Vergleichsspannung, Knickung (Euler + Tetmajer), Schweißnaht, Passfeder, Pressverband, Druckfeder, Wälzlager L10, Zahnrad, Dauerfestigkeit, Antrieb, Getriebestufe, Massenträgheitsmoment. Einstieg `calc(kind, params)`, Chat-Tool `mechanik_calc`. Siehe §28 |
 | `materials.py` | ~40 Werkstoffe (Stähle, Alu, Titan, Edelstahl, Kunststoffe) |
 | `report.py` | PDF/DOCX-Reports mit LaTeX-Formelsatz |
 | `routing.py` | Routenplanung: Geocoding (Nominatim) + Routing (OSRM), liefert `{type:"map", …}` für das `route_planner`-Chat-Tool (Internet nötig) |
@@ -1021,3 +1022,95 @@ gekoppelt), am Ende **Synthese**. Frames `workflow_start`/`step_start`/`searchin
   Chat-Tokens**.
 - **Übergabe-Buttons:** „→ Präsentation" (`/api/presentation/from-text`) und „→ Planer"
   (`Planner.openFromText`). Basis-Modellrolle `general` (Geheim/Hartman → lokal), Token „Arbeitsablauf".
+
+---
+
+## 28. Maschinenbau-Rechenkerne (`tools/mechanik.py`, Chat-Tool `mechanik_calc`)
+
+Deterministische Festigkeits- und Maschinenelemente-Rechnungen — „Papier und Bleistift in
+Code". Reine Logik, nur Standardbibliothek (`math`, `re`, `difflib`), MIT; importiert
+bewusst **kein** FastAPI/DB und nichts aus `core` (Projektregel für `tools/*`). Dieselbe
+Haltung wie bei Rechnungen (`Decimal`) und AHP (`tools/decision.py`): **gerechnet wird im
+Code, nie im LLM.**
+
+**Einheiten intern:** Kräfte N, Längen mm, Spannungen MPa (= N/mm²), Momente Nm (Eingabe)
+bzw. Nmm (intern), Drehzahlen 1/min. Jede Ausgabe nennt ihre Einheiten mit.
+
+Schrauben sind absichtlich **nicht** hier: dafür gibt es die vollständige VDI-2230-Rechnung
+in `tools/engineering.bolt_calculator`.
+
+### 28.1 Aufbau
+
+| Baustein | Zweck |
+|---|---|
+| `PROFILE` / `section_properties` / `match_profil` | Querschnittswerte (A, I_y/I_z, W_y/W_z, Trägheitsradien, I_t/W_t) für rechteck, quadrat, kreis, rohr, hohlkasten, i_traeger; `match_profil` toleriert Tippfehler (`difflib`) und Schreibweisen |
+| `BIEGEFAELLE` | 6 Standardlastfälle als Tabelle `{text, m, f, m_formel, f_formel, last}` — M_max und f_max als Lambda, dazu der Formeltext für die Ausgabe |
+| `EULERFAELLE` / `_TETMAJER` | Knicklängenbeiwerte der vier Eulerfälle; Tetmajer-Geraden + Proportionalitätsgrenze je Werkstoff (s235/s355/guss) → Grenzschlankheit λ_g = π·√(E/σ_dP) |
+| `CALCS` | Registry `kind → (Funktion, Beschreibung, Pflichtparameter, optionale)` — Quelle für `catalog()` und die Fehlermeldungen |
+| `_KIND_VORGABE` / `ALLE_KINDS` | Lastfall-/Eulerfall-Varianten als eigene `kind`-Werte (s. 28.3) |
+| `calc(kind, params)` | Einstiegspunkt. `params` darf Dict **oder** String `"f=1 kN l=1 m"` sein. Gibt **immer** Text zurück — im Fehlerfall mit den nötigen Schlüsseln, damit sich der Werkzeug-Loop selbst korrigiert |
+| `_block(...)` / `_auslastung(...)` | Einheitliche Ausgabe **Annahmen → Rechenweg → Ergebnis → Bewertung** mit Sicherheit, Auslastung in % und Ampel ✅/⚠️/❌ |
+
+CLI: `python -m tools.mechanik` (Katalog) bzw.
+`python -m tools.mechanik <kind> "schluessel=wert …"`. Der CLI-Einstieg zwingt stdout auf
+UTF-8 — sonst stirbt er unter Windows-cp1252 am ersten σ/λ (gleiche Falle wie
+`z-image/sd_server.py`, siehe CLAUDE.md).
+
+### 28.2 Chat-Anbindung — EIN Werkzeug, nicht 19
+
+In `TOOL_DEFS` (`routers/chat.py`) steht **ein** Tool `mechanik_calc` mit zwei Parametern:
+
+- `kind` — **Enum mit 27 Werten** (19 Rechenarten, davon Biegung und Knickung als
+  Lastfall-Varianten aufgefächert)
+- `werte` — **String** `"schluessel=wert …"`
+
+Beides ist bewusst so gewählt: 19 einzelne Tool-Schemas sprengen den Kontext kleiner
+lokaler Modelle, und verschachtelte Objekt-Parameter produzieren 3–4B-Modelle unzuverlässig.
+Eine **Auswahl aus einer Enum-Liste** und **ein flacher String** sind genau ihre Stärke.
+Der Executor-Zweig toleriert zusätzlich ein Dict in `params` und einen flachen Aufruf
+(`{"kind": …, "f": 1000}`).
+
+### 28.3 Härtung gegen Fehlgriffe kleiner Modelle
+
+Gemessen gegen `granite4.2:3b` und `qwen3.5:4b` (Ollama, echte Tool-Calls, deutsche
+Ingenieursfragen). Leitgedanke: **eine still falsche Zahl ist schlimmer als ein
+Fehlschlag** — ein Ergebnis, das plausibel aussieht, prüft niemand nach.
+
+| Fehlgriff (gemessen) | Gegenmaßnahme |
+|---|---|
+| `fall` weggelassen → stiller Standard „Träger mittig" bei einer Kragarm-Frage (**Faktor 4** im Biegemoment) | Lastfall steckt **im `kind`** (`biegung_kragarm_ende`, `knickung_gelenkig`, … über `_KIND_VORGABE`); `biegung` **ohne** `fall` rechnet nicht mehr, sondern fragt nach |
+| `tau=250 Nm` bei `vergleichsspannung` → „σ_v = 433 MPa", plausibel und völlig falsch | **Dimensionsprüfung** `_DIM_VON_EINHEIT` + `_DIM_ERWARTET`/`_DIM_ERWARTET_KIND`: passt die Dimension der Einheit nicht zum Parameter, wird **nicht gerechnet** |
+| `p=1500 rpm` überschrieb die Lagerlast `P=4 kN`; `l=250 Nm` legte das Moment auf die Länge | **Einheiten-Inferenz**: rpm → `n`, Nm/kNm → `t` (nur wo `t` ein Moment ist, `_T_IST_MOMENT`), kW → `p` (`_P_IST_LEISTUNG`). Die Einheit ist verlässlicher als der Schlüsselname |
+| Doppelter Schlüssel ging beim Einlesen still verloren | `_parse_pairs` liefert eine **Paarliste** statt Dict; `normalize` meldet echte Kollisionen (`__kollision__`) |
+| `d`/`h` vertauscht (beide mm → Einheitenprüfung blind): Welle 40/Feder 8 wurde zu `d=8 h=12` | **Verwechslungsschutz über die Geometrie**, wo sie es verrät: Passfeder mit `h >= d` wird abgewiesen |
+| Streckenlastfall mit `f` aufgerufen | wird abgewiesen statt still zu `q = F/L` umgerechnet (verdeckte sonst eine falsche Lastfallwahl, Faktor 2) |
+| `profil=i_trafer`, `kind=biegung_trafer_mitte` | Tippfehlertoleranz (`difflib`, cutoff 0.7/0.75) für Profilnamen **und** `kind` |
+| `steg=8`, `kraft=…`, `drehmoment=…`, `7,5 kW` | Synonyme DE/EN in `_SYN_GLOBAL` + **kind-spezifisch** `_SYN_KIND` (nötig, weil `t`/`p`/`m`/`n` je Rechenart verschiedene Größen sind: `t` = Moment **oder** Wanddicke, `p` = Kraft/Druck/Leistung, `m` = Modul/Masse, `n` = Drehzahl/Windungen/Anzahl); Dezimalkomma wird **vor** dem Splitten zum Punkt (sonst zerlegt der Komma-Split „0,25") |
+| `p_last >= c` beim Wälzlager | Plausibilitätswächter mit Hinweis auf vertauschte C/P bzw. eine als `P` angekommene Drehzahl |
+
+**Messergebnis** (8 Fragen, erster Versuch / mit einer Korrekturrunde, wie im echten
+Werkzeug-Loop): `qwen3.5:4b` **7/8 → 8/8**, `granite4.2:3b` **4/8 → 5/8**. Die Streuung
+zwischen Läufen ist spürbar. Wichtiger als die Quote: die Wächter verwandeln stille
+Falschergebnisse in sichtbare Rückfragen — `qwen3.5:4b` korrigierte den
+`vergleichsspannung`-Fehlgriff nach der Dimensionsmeldung selbst zu `torsion` und rechnete
+richtig. **Restrisiko:** zwei Parameter **gleicher Dimension** zu vertauschen kann keine
+Einheitenprüfung sehen; dagegen hilft nur, dass jeder Ergebnisblock seine **Annahmen
+ausdruckt** — dort sieht der Nutzer „Wellendurchmesser d = 8 mm" und erkennt den Tausch.
+Reproduzierbar mit einem kleinen Treiber gegen `/api/chat` von Ollama (Tool-Definition per
+`ast` aus `routers/chat.py` ziehen, Fehlertext als `role:"tool"` zurückgeben).
+
+### 28.4 Agent
+
+`defaults/agents/maschinenbau_assistent.json` (`id` `maschinenbau`, Kategorie Technik)
+bündelt `mechanik_calc` + `bolt_calculator` + `material_lookup` + `unit_convert` +
+`solve_equation` + `calculate` + `plot_function`/`plot_chart` + `generate_report`. Sein
+System-Prompt verbietet Kopfrechnen und erfundene Zahlen, verlangt die Lastfallwahl nach
+der Lagerung, schickt bei fehlenden Werten eine Rückfrage an den Nutzer und nennt die
+Grenzen (FKM / EC3-1-9 / DIN 3990 für belastbare Nachweise).
+
+> Der ältere Platzhalter `defaults/agents/maschinenbauing_assistent.json`
+> (System-Prompt „Du bist ein Maschinenbauingenieur.", `tools: []`) ist davon unberührt und
+> funktionslos — er kann entfernt werden, sobald niemand ihn mehr in `data/agents/` hat.
+
+**Kein TokenMeter-Eintrag nötig:** `mechanik_calc` führt keinen eigenen LLM-Aufruf aus; die
+Tokens des umgebenden Chat-Turns zählt `_chat_generator` wie gewohnt.
