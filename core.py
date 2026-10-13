@@ -1572,10 +1572,17 @@ def _match_catalog(name: str, catalog: list):
 
 # ── Bildgenerierung (lokal SD-WebUI und/oder API) ─────────────────────────────
 # Analog zur TTS oben: im Profil wird ein Bildmodell gewählt.
-#   • ``local::sd``  → lokaler Stable-Diffusion-WebUI-Server (AUTOMATIC1111/Forge),
-#     Endpoint ``/sdapi/v1/txt2img``, URL im Profil (``sd_webui_url``). Vom Nutzer
-#     betrieben – keine neue Abhängigkeit, kein Ollama-VRAM-Guard nötig (separater
-#     Server). Immer erlaubt, auch im Geheim-Modus.
+#   • ``local::sd``  → lokaler Stable-Diffusion-WebUI-Server (AUTOMATIC1111/Forge)
+#     – oder die eigenständige Z-Image-Brücke (``sd_server.py`` in ``z-image/``),
+#     die sich bei Bedarf selbst startet – Endpoint ``/sdapi/v1/txt2img``, URL im
+#     Profil (``sd_webui_url``, Standard-Port 7860). Vom Nutzer betrieben – keine
+#     neue Abhängigkeit, kein Ollama-VRAM-Guard nötig (separater Prozess).
+#   • ``local::qwen`` → eigenständige **Qwen-Image**-Brücke (``qwen-image/``, eigene
+#     venv, ``sd_server.py``, Standard-Port 7861) – liefert dasselbe A1111-Format, das
+#     Backend sieht nur ein Bild. Qwen-Image-2.1 (diffusers, rectified flow, ~50
+#     Schritte, kein CFG/kein negativer Prompt; die Brücke ignoriert die
+#     SD-spezifischen Felder). Ebenfalls ein separater GPU-Prozess.
+#     Beides (Z-Image, Qwen) ist immer erlaubt, auch im Geheim-Modus.
 #   • ``<anbieter>::<modell>`` → OpenAI-kompatibles ``/images/generations``
 #     (z. B. ``openai::dall-e-3`` / ``openai::gpt-image-1``). Im Geheim-Modus gesperrt.
 # Bild ≠ Token-Strom → kein TokenMeter (wie Audio).
@@ -1589,13 +1596,13 @@ _IMAGE_SIZES = {
 
 
 def _image_model() -> str:
-    """Im Profil gewähltes Bildmodell (``local::sd`` / ``anbieter::modell``) oder leer."""
+    """Im Profil gewähltes Bildmodell (``local::sd`` / ``local::qwen`` / ``anbieter::modell``) oder leer."""
     m = str(_load_profile().get("image_model", "") or "").strip()
     return "" if m in _MODEL_PLACEHOLDERS else m
 
 
 def _sd_url() -> str:
-    """URL des lokalen Stable-Diffusion-WebUI-Servers (Profil)."""
+    """URL des lokalen Bild-Servers (SD-WebUI / Z-Image- / Qwen-Brücke, Profil)."""
     return str(_load_profile().get("sd_webui_url", "") or "").strip().rstrip("/")
 
 
@@ -1616,7 +1623,7 @@ async def _sd_reachable() -> bool:
 
 
 def _sd_server_python(d: str) -> Optional[str]:
-    """venv-Python der Z-Image-Brücke im Ordner ``d`` (Windows/Linux)."""
+    """venv-Python der lokalen Bild-Brücke (Z-Image / Qwen-Image) im Ordner ``d`` (Windows/Linux)."""
     for rel in ("venv/Scripts/python.exe", "venv/bin/python"):
         p = os.path.join(d, *rel.split("/"))
         if os.path.exists(p):
@@ -1624,15 +1631,22 @@ def _sd_server_python(d: str) -> Optional[str]:
     return None
 
 
-def _sd_server_dir() -> Optional[str]:
-    """Ordner mit ``sd_server.py`` + eigener venv der Z-Image-Brücke. Reihenfolge:
-    Profil ``sd_server_dir`` → Repo-Ordner ``z-image`` → ``~/z-image`` (Standalone)."""
+def _sd_server_dir(model: Optional[str] = None) -> Optional[str]:
+    """Ordner mit ``sd_server.py`` + eigener venv der lokalen Bild-Brücke.
+    Abhängig vom gewählten Bildmodell:
+      • ``local::qwen`` → Profil ``qwen_server_dir`` → ``qwen-image`` → ``~/qwen-image``
+      • sonst/Z-Image   → Profil ``sd_server_dir``   → ``z-image``    → ``~/z-image``
+    (Standalone-Installation = ``~``-Ordner)."""
+    if (model or "").startswith("local::qwen"):
+        cfg_key, folder = "qwen_server_dir", "qwen-image"
+    else:
+        cfg_key, folder = "sd_server_dir", "z-image"
     cands = []
-    cfg = str(_load_profile().get("sd_server_dir", "") or "").strip()
+    cfg = str(_load_profile().get(cfg_key, "") or "").strip()
     if cfg:
         cands.append(cfg)
-    cands.append(os.path.join(str(APP_DIR), "z-image"))
-    cands.append(os.path.join(os.path.expanduser("~"), "z-image"))
+    cands.append(os.path.join(str(APP_DIR), folder))
+    cands.append(os.path.join(os.path.expanduser("~"), folder))
     for c in cands:
         try:
             if c and os.path.exists(os.path.join(c, "sd_server.py")) and _sd_server_python(c):
@@ -1662,18 +1676,20 @@ def _launch_detached(cmd: list, cwd: Optional[str] = None) -> None:
 _sd_launch_lock = asyncio.Lock()
 
 
-async def _ensure_sd_server() -> bool:
+async def _ensure_sd_server(model: Optional[str] = None) -> bool:
     """Stellt sicher, dass der lokale Bild-Server läuft – **startet ihn bei Bedarf
-    selbst** (crash-sichere Z-Image-Brücke, torch-frei, ~1 s Start; Modell lädt erst
-    pro Bild). Nur wenn eine lokale SD-URL gesetzt ist und Profil ``sd_autostart``
-    (Standard an) nicht abgeschaltet wurde. Rückgabe True, wenn (jetzt) erreichbar."""
+    selbst** (crash-sichere Brücke für Z-Image oder Qwen-Image, torch-frei, ~1 s
+    Start; das Modell lädt erst pro Bild). ``model`` wählt die passende Brücke
+    (``local::qwen`` → ``qwen-image``-Ordner, sonst Z-Image). Nur wenn eine lokale
+    SD-URL gesetzt ist und Profil ``sd_autostart`` (Standard an) nicht abgeschaltet
+    wurde. Rückgabe True, wenn (jetzt) erreichbar."""
     if await _sd_reachable():
         return True
     if not _sd_url():
         return False
     if not bool(_load_profile().get("sd_autostart", True)):
         return False
-    d = _sd_server_dir()
+    d = _sd_server_dir(model)
     if not d:
         return False
     py = _sd_server_python(d)
@@ -1947,12 +1963,15 @@ async def _generate_image_core(prompt: str, negative: str = "", preset: str = "s
         raise HTTPException(400, "Keine Bildgenerierung konfiguriert – im Profil ein "
                                  "Bildmodell (lokal SD-WebUI oder API) wählen.")
 
-    # Geheim-Modus: Remote-API nicht zulassen → auf lokal umleiten.
+    # Geheim-Modus: Remote-API nicht zulassen → auf lokal umleiten (das konfigurierte
+    # lokale Backend Z-Image/Qwen wird beibehalten).
     secret = _secret_local()
     is_local = model.startswith("local::") or not _llm.is_remote(model)
+    pref_local = _image_model()
+    pref_local = pref_local if (pref_local or "").startswith("local::") else "local::sd"
     if secret and not is_local:
         if _sd_url():
-            model, is_local = "local::sd", True
+            model, is_local = pref_local, True
         else:
             raise HTTPException(409, "Im Geheim-Modus ist nur lokale Bildgenerierung "
                                      "erlaubt – bitte SD-WebUI-URL im Profil eintragen.")
@@ -1964,7 +1983,7 @@ async def _generate_image_core(prompt: str, negative: str = "", preset: str = "s
         base = _sd_url()
         if not base:
             raise HTTPException(400, "Keine SD-WebUI-URL im Profil hinterlegt.")
-        await _ensure_sd_server()   # Bild-Server bei Bedarf selbst starten (Z-Image-Brücke)
+        await _ensure_sd_server(model)   # Bild-Server bei Bedarf selbst starten (Z-Image/Qwen-Brücke)
         payload = {
             "prompt": prompt,
             "negative_prompt": negative,
@@ -2068,9 +2087,11 @@ async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
 
     secret = _secret_local()
     is_local = model.startswith("local::") or not _llm.is_remote(model)
+    pref_local = _image_model()
+    pref_local = pref_local if (pref_local or "").startswith("local::") else "local::sd"
     if secret and not is_local:
         if _sd_url():
-            model, is_local = "local::sd", True
+            model, is_local = pref_local, True
         else:
             raise HTTPException(409, "Im Geheim-Modus ist nur lokale Bildbearbeitung "
                                      "erlaubt – bitte SD-WebUI-URL im Profil eintragen.")
@@ -2082,7 +2103,7 @@ async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
         base = _sd_url()
         if not base:
             raise HTTPException(400, "Keine SD-WebUI-URL im Profil hinterlegt.")
-        await _ensure_sd_server()   # Bild-Server bei Bedarf selbst starten
+        await _ensure_sd_server(model)   # Bild-Server bei Bedarf selbst starten (Z-Image/Qwen-Brücke)
         payload = {
             "init_images": [raw_b64], "prompt": prompt,
             "denoising_strength": strength, "width": w, "height": h,

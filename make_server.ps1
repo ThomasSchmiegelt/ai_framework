@@ -97,9 +97,10 @@ Write-OK "venv eingerichtet"
 foreach ($d in @("data\conversations","data\uploads","data\agents","data\reports","data\code","data\plans","data\dossiers","data\profile_assets")) {
     New-Item -ItemType Directory -Path "$SERVER_DIR\$d" -Force | Out-Null
 }
-if (Test-Path "$APP_DIR\data\agents") {
-    Copy-Item "$APP_DIR\data\agents\*" "$SERVER_DIR\data\agents\" -Force -ErrorAction SilentlyContinue
-}
+# Standard-Agenten bewusst NICHT vom Baurechner kopieren: _seed_defaults() in
+# core.py befuellt data\agents beim ersten Start aus defaults\agents\ — aber nur,
+# solange dort keine *.json liegt. Ein Kopieren wuerde das Seeding verhindern und
+# zusaetzlich die angepassten Agenten des Baurechners auf den Server tragen.
 
 # ── config.json für Server ─────────────────────────────────────────────────────
 

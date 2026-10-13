@@ -105,6 +105,24 @@ const Profile = (() => {
     sel.value = current;
     const urlEl = document.getElementById('profile-sd-url');
     if (urlEl) urlEl.value = _data.sd_webui_url || '';
+    // Lokales Backend gewechselt → passende Port vorschlagen (7860 Z-Image/SD, 7861 Qwen),
+    // aber nur wenn die Adresse leer ist oder einer der beiden Standard-Defaultwerte –
+    // eine manuell eingetragene Adresse (Rechner-IP) bleibt unverändert.
+    const _LOCAL_DEFAULTS = {
+      'local::qwen': 'http://127.0.0.1:7861',
+      'local::sd':   'http://127.0.0.1:7860',
+    };
+    if (sel && !sel._boundImageUrl) {
+      sel.addEventListener('change', () => {
+        const def = _LOCAL_DEFAULTS[sel.value];
+        if (!def || !urlEl) return;
+        const v = (urlEl.value || '').trim().toLowerCase();
+        if (v === '' || v === _LOCAL_DEFAULTS['local::sd'] || v === _LOCAL_DEFAULTS['local::qwen']) {
+          urlEl.value = def;
+        }
+      });
+      sel._boundImageUrl = true;
+    }
   }
 
   // Video-Auswahl (Videogenerierung): „Aus" + „Lokal · Wan".

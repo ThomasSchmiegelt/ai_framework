@@ -99,6 +99,15 @@ z-image/venv/
 z-image/hf_token.txt
 
 # Musik-Generator: erzeugte Audiodateien nicht versionieren
+# Qwen-Image (eigenstaendiges, optionales Bild-Werkzeug)
+qwen-image/outputs/
+qwen-image/venv/
+qwen-image/hf_token.txt
+qwen-image/*.log
+qwen-image/*.log.*
+qwen-image/*.pid
+qwen-image/env_before_upgrade.txt
+
 z-music/outputs/
 
 # Wan-Videogenerierung (lokales Videomodell): venv/Ausgaben/Token nicht versionieren.

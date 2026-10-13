@@ -167,6 +167,9 @@ def main():
                     help="Sequenzieller CPU-Offload: minimaler VRAM, am langsamsten")
     ap.add_argument("--min-free", dest="min_free", type=float, default=40.0,
                     help="Ab wie viel freiem VRAM (GB) OHNE Offload geladen wird; sonst automatisch Offload")
+    ap.add_argument("--allow-download", dest="allow_download", action="store_true",
+                    help="Fehlendes Modell online herunterladen (mehrere zehn GB). Standard: AUS - "
+                         "die Erzeugung laedt NICHT von selbst; Gewichte vorab mit download_model holen.")
     ap.add_argument("--keep-ollama", dest="keep_ollama", action="store_true",
                     help="Geladene Ollama-Modelle NICHT automatisch entladen")
     args = ap.parse_args()
@@ -205,8 +208,19 @@ def main():
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         print("Modell im Cache -> arbeite OFFLINE (kein HF-Netzzugriff).")
+    elif args.allow_download:
+        print(f"Modell '{model_id}' nicht im Cache -> lade online herunter (--allow-download).")
     else:
-        print("Modell nicht (vollstaendig) im Cache -> Laden ggf. mit Download (online).")
+        # Riegel gegen versehentliche Riesen-Downloads: die Erzeugung laedt NICHT von
+        # selbst mehrere zehn GB nach. Fehlendes Modell -> klare Meldung + Abbruch.
+        print(f"FEHLER: Modell '{model_id}' fuer Modus '{args.mode}' ist NICHT im lokalen "
+              f"Cache.\n"
+              f"Es wird zum Erzeugen NICHT automatisch heruntergeladen (mehrere zehn GB). "
+              f"Bitte vorab holen:\n"
+              f"    download_model.bat --mode {args.mode}      (Windows)\n"
+              f"    ./download_model.sh --mode {args.mode}     (Linux)\n"
+              f"oder diesen Lauf ausnahmsweise mit --allow-download starten.", file=sys.stderr)
+        sys.exit(2)
 
     # Import erst hier, damit --help ohne geladene Bibliotheken funktioniert.
     import torch

@@ -1,0 +1,12 @@
+# qwen-image — lokale Artefakte / Geheimnisse (NICHT ins Repo)
+venv/
+outputs/
+hf_token.txt
+__pycache__/
+*.pyc
+
+# Laufzeit-/Diagnose-Artefakte (entstehen beim Installieren und Erzeugen)
+*.log
+*.log.*
+*.pid
+env_before_upgrade.txt

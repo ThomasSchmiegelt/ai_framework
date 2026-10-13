@@ -276,6 +276,97 @@ TOOL_DEFS = [
     {
         "type": "function",
         "function": {
+            "name": "mechanik_calc",
+            "description": (
+                "Maschinenbau-Berechnungen, die man sonst mit Papier und Bleistift macht: "
+                "Festigkeit, Biegung, Wellen, Knickung, Verbindungen, Maschinenelemente, "
+                "Dauerfestigkeit, Antrieb. Rechnet deterministisch und gibt Annahmen, "
+                "Formel, Zahlenwerte und Auslastung zurueck. "
+                "Benutze dieses Werkzeug IMMER fuer solche Groessen und rechne sie NIE "
+                "selbst. Schrauben nach VDI 2230 laufen ueber bolt_calculator.\n"
+                "\n"
+                "'werte' ist eine einfache Liste 'schluessel=wert', getrennt durch "
+                "Leerzeichen oder Komma. Einheiten darfst du dazuschreiben (N, kN, mm, m, "
+                "MPa, Nm, kNm, 1/min) — sie werden umgerechnet. Deutsche Namen gehen auch "
+                "(kraft, laenge, durchmesser, drehmoment, streckgrenze, drehzahl).\n"
+                "\n"
+                "Schluessel je kind:\n"
+                "- querschnitt: profil + Masse\n"
+                "- zug_druck: f und a (oder profil + Masse); optional rp, s\n"
+                "- schub: f, a; optional profil, rp\n"
+                "- flaechenpressung: f und a, oder f, d, l; optional p_zul\n"
+                "- biegung_*: l, f (bei *_gleichlast stattdessen q), profil + Masse; "
+                "optional e, rp, s. Waehle die Variante nach der Lagerung:\n"
+                "    biegung_kragarm_ende = einseitig eingespannt, Last am freien Ende\n"
+                "    biegung_kragarm_gleichlast = einseitig eingespannt, Streckenlast\n"
+                "    biegung_traeger_mitte = zwei Stuetzen, Einzellast mittig\n"
+                "    biegung_traeger_gleichlast = zwei Stuetzen, Streckenlast\n"
+                "    biegung_traeger_eingespannt_mitte = beidseitig eingespannt, mittig\n"
+                "    biegung_traeger_eingespannt_gleichlast = beidseitig eingespannt, Streckenlast\n"
+                "- torsion: t, d; optional d_i (Hohlwelle), l, rp\n"
+                "- wellendurchmesser: t, tau_zul\n"
+                "- vergleichsspannung: sigma, tau; optional hypothese, rp\n"
+                "- knickung_*: f, l, profil + Masse; optional werkstoff (s235/s355/guss), s. "
+                "Variante nach der Lagerung:\n"
+                "    knickung_gelenkig = beide Enden gelenkig (Eulerfall 2, haeufigster Fall)\n"
+                "    knickung_eingespannt_frei = ein Ende fest, anderes frei (Fall 1)\n"
+                "    knickung_eingespannt_gelenkig = Fall 3\n"
+                "    knickung_eingespannt_beidseitig = Fall 4\n"
+                "- schweissnaht: f, a (Nahtdicke), l; optional art, n, rp\n"
+                "- passfeder: t, d, h, l; optional b, form, n, p_zul\n"
+                "- pressverband: d, l und p oder t; optional mu\n"
+                "- druckfeder: d, d_m, n (Windungen); optional f oder s, tau_zul\n"
+                "- waelzlager: c (Tragzahl), p (Lagerlast); optional n (Drehzahl), art\n"
+                "- zahnrad: m (Modul), z1; optional z2, b, t\n"
+                "- dauerfestigkeit: sigma_a, rm; optional sigma_m, art, kt\n"
+                "- antrieb: zwei von p (kW), t (Nm), n (1/min)\n"
+                "- getriebestufe: i oder z1+z2; optional n, t, eta\n"
+                "- traegheitsmoment: koerper, m (kg), r oder l; optional n, t\n"
+                "\n"
+                "Profile: rechteck(b,h) quadrat(a) kreis(d) rohr(d,d_i) "
+                "hohlkasten(b,h,t) i_traeger(h,b,t_s,t_f).\n"
+                "\n"
+                "Beispiel: kind='biegung_kragarm_ende', werte='f=1 kN l=1 m "
+                "profil=rechteck b=50 h=100 rp=235'\n"
+                "Fehlt etwas, nennt das Werkzeug die noetigen Schluessel — frage sie dann "
+                "beim Nutzer nach und erfinde keine Zahlen."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "querschnitt", "zug_druck", "schub", "flaechenpressung",
+                            "biegung_kragarm_ende", "biegung_kragarm_gleichlast",
+                            "biegung_traeger_mitte", "biegung_traeger_gleichlast",
+                            "biegung_traeger_eingespannt_mitte",
+                            "biegung_traeger_eingespannt_gleichlast",
+                            "torsion", "wellendurchmesser", "vergleichsspannung",
+                            "knickung_gelenkig", "knickung_eingespannt_frei",
+                            "knickung_eingespannt_gelenkig",
+                            "knickung_eingespannt_beidseitig",
+                            "schweissnaht", "passfeder", "pressverband", "druckfeder",
+                            "waelzlager", "zahnrad", "dauerfestigkeit", "antrieb",
+                            "getriebestufe", "traegheitsmoment",
+                        ],
+                        "description": "Welche Rechenart ausgefuehrt wird",
+                    },
+                    "werte": {
+                        "type": "string",
+                        "description": (
+                            "Eingabewerte als 'schluessel=wert', z. B. "
+                            "'f=1 kN l=1 m profil=rechteck b=50 h=100 rp=235'"
+                        ),
+                    },
+                },
+                "required": ["kind", "werte"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "generate_report",
             "description": (
                 "Erstellt einen formatierten Ingenieurbericht als PDF (LaTeX) oder DOCX. "
@@ -1686,6 +1777,26 @@ async def _execute_tool(name: str, args: dict) -> str:
             material_class=str(args.get("material_class", "8.8")),
             f_transverse=float(args.get("f_transverse", 0)),
         )
+
+    if name == "mechanik_calc":
+        # Maschinenbau-Rechenkerne (tools/mechanik.py): deterministisch, ohne LLM.
+        # calc(...) nimmt String ODER Dict und gibt auch im Fehlerfall Text zurueck
+        # (welche Schluessel fehlen) -> der Werkzeug-Loop korrigiert sich selbst.
+        # Bewusst EIN Werkzeug mit kind-Enum statt 19 Schemas: kleine lokale
+        # Modelle (3-4B) treffen eine Auswahl aus einer Liste, aber keine 19 Tools.
+        from tools.mechanik import calc as _mech_calc
+        _kind = str(args.get("kind", "")).strip()
+        _w = args.get("werte")
+        if _w is None:
+            _w = args.get("params")
+        if isinstance(_w, str):
+            _mp: Any = _w
+        elif isinstance(_w, dict):
+            _mp = _w
+        else:
+            # flacher Aufruf: {"kind": "...", "f": 1000, "l": 1000}
+            _mp = {k: v for k, v in args.items() if k not in ("kind", "werte", "params")}
+        return _mech_calc(_kind, _mp)
 
     if name == "generate_report":
         from tools.report import generate_report

@@ -336,13 +336,14 @@ async def _guided_presentation_generator(body: dict):
     # (statt je Folie zu scheitern).
     if image_mode != "none":
         _im = image_model or _image_model()
-        _is_local_img = _im == "local::sd" or (bool(_im) and not _llm.is_remote(_im))
+        _is_local_img = bool(_im) and (_im.startswith("local::") or not _llm.is_remote(_im))
         if _is_local_img:
             yield _sse({"type": "notice", "message": "Prüfe/­starte den lokalen Bild-Server…"})
-            if not await _ensure_sd_server():
+            if not await _ensure_sd_server(_im):
                 yield _sse({"type": "notice", "message":
-                            "Bild-Server nicht erreichbar und Auto-Start nicht möglich – bitte "
-                            "z-image/sd_server.bat starten (Profil-Adresse: " + (_sd_url() or "—")
+                            "Bild-Server nicht erreichbar und Auto-Start nicht möglich – bitte die "
+                            "lokalen Brücke (z-image/sd_server.bat bzw. qwen-image/sd_server.bat) starten "
+                            "(Profil-Adresse: " + (_sd_url() or "—")
                             + "). Die Folien werden ohne Bilder erstellt."})
                 image_mode = "none"
 
@@ -668,8 +669,8 @@ async def _images_presentation_generator(body: dict):
     if cover_source == "generate":
         # Lokalen Bild-Server bei Bedarf starten (Z-Image-Brücke), sonst Rückfall auf „uploaded"/Text.
         _im = image_model or _image_model()
-        _is_local_img = _im == "local::sd" or (bool(_im) and not _llm.is_remote(_im))
-        if _is_local_img and not await _ensure_sd_server():
+        _is_local_img = bool(_im) and (_im.startswith("local::") or not _llm.is_remote(_im))
+        if _is_local_img and not await _ensure_sd_server(_im):
             yield _sse({"type": "notice", "message": "Bild-Server nicht erreichbar – Start/Abschluss aus hochgeladenen Bildern."})
             cover_source = "uploaded"
 

@@ -49,7 +49,8 @@ async def image_config():
     m = _image_model()
     options = [
         {"value": "", "label": "Aus (keine Bildgenerierung)"},
-        {"value": "local::sd", "label": "Lokal · Stable Diffusion WebUI"},
+        {"value": "local::sd", "label": "Lokal · Stable Diffusion WebUI / Z-Image"},
+        {"value": "local::qwen", "label": "Lokal · Qwen-Image-2.1"},
     ]
     if not _secret_local():
         # Einheitlich wie die Rollen-Modelle: die unter „☁ KI-Anbieter" konfigurierten

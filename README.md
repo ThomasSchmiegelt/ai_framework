@@ -169,6 +169,22 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   hochladen (werden automatisch auf die Sollgröße skaliert)
 - 🖼️ **Bebilderte Präsentation** — Bilderordner wählen; ein Vision-Modell
   beschreibt jedes Bild fachkundig (Analyse-Persona aus der Beschreibung) → Bildfolien
+- 🔧 **Maschinenbau-Assistent** — rechnet, was man sonst mit Papier und Bleistift
+  rechnet: Querschnittswerte, Zug/Druck/Schub, **Flächenpressung**, **Biegung**
+  (6 Standardlastfälle, Spannung *und* Durchbiegung), **Torsion/Wellen**,
+  Vergleichsspannung (von Mises/Tresca), **Knickung** (Euler + Tetmajer, alle vier
+  Eulerfälle), Schweißnaht, **Passfeder** (DIN 6885), Pressverband, Druckfeder,
+  **Wälzlager-Lebensdauer** (L10/L10h, ISO 281), Zahnrad-Geometrie, **Dauerfestigkeit**
+  und Antrieb (Leistung/Drehmoment/Drehzahl, Getriebe, Massenträgheit) — Schrauben
+  weiterhin nach **VDI 2230**. Gerechnet wird **deterministisch im Code**
+  (`tools/mechanik.py`, nur Standardbibliothek), nie vom Sprachmodell: jede Antwort
+  zeigt **Annahmen → Rechenweg → Ergebnis → Auslastung** mit Sicherheit und Ampel.
+  Einheiten dürfen mitgeschrieben werden (`1 kN`, `2 m`, `250 Nm`, `1500 1/min`).
+  Fehlt eine Angabe oder passt eine Einheit nicht zur Größe, kommt eine **Rückfrage
+  statt einer Zahl** — ein plausibel aussehendes falsches Ergebnis wäre schlimmer.
+  Bewusst so gebaut, dass **kleine lokale Modelle** (getestet `qwen3.5:4b`,
+  `granite4.2:3b`) die Berechnungen auslösen können. Auch als CLI:
+  `python -m tools.mechanik`.
 - 🤖 **Agenten** — konfigurierbare System-Prompts und Tool-Sets; per **⭐ Favorit**
   erscheinen ausgewählte Agenten in der Sidebar. Im Chat zwei Schnellauswahl-Buttons
   **📊 Präsentation** und **💻 Programmieren**
