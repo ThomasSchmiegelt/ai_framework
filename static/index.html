@@ -3555,26 +3555,45 @@
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
     <h4 style="margin-bottom:8px">📑 Sichtbare Tabs</h4>
     <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
-      Diese Tabs sind optional und können ausgeblendet werden.
+      Diese Tabs sind optional und können ausgeblendet werden. Chat und Canvas
+      bleiben immer sichtbar (Canvas ist das Ziel der Präsentations-Übergabe).
     </p>
     <div id="profile-tab-vis" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:4px">
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" data-tabs="rag" /> 📚 RAG
+        <input type="checkbox" data-tabs="docgen" /> 📄 Dokumente
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="research" /> 🔬 Recherche
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="matrix" /> 📊 Matrix
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="rfq" /> 📋 Anfrage
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="planner" /> 🗂️ Planer
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="ide" /> 💻 Code
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" data-tabs="mathe" /> 🔢 Mathe
+        <input type="checkbox" data-tabs="agents" /> 🤖 Agenten
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" data-tabs="medizin" /> 🩺 Medizin
+        <input type="checkbox" data-tabs="rag" /> 📚 RAG
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="mail" /> 📧 Mail
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="logs" /> 📋 Logs
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="medizin" /> 🩺 Medizin
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="mathe" /> 🔢 Mathe
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="diranalyse" /> 📁 Verzeichnis
@@ -3595,13 +3614,25 @@
         <input type="checkbox" data-tabs="varianten" /> 🧮 Varianten
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="compare" /> 📊 Excel-Vergleich
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="todo" /> ✅ To-Do
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="transcription" /> 🎙 Transkription
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="morph" /> 🧩 Morph-Kasten
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
         <input type="checkbox" data-tabs="jury" /> ⚖️ Jury
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="bilderkennung" /> 🖼 Bilderkennung
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" data-tabs="video" /> 🎬 Videoerzeugung
       </label>
     </div>
 
@@ -3892,7 +3923,7 @@
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20260902vidtimeout"></script>
+<script src="/js/profile.js?v=20261013tabvis"></script>
 <script src="/js/projects.js?v=20260825links"></script>
 <script src="/js/planner.js?v=20260817workflow"></script>
 <script src="/js/matrix_research.js?v=20260828import"></script>

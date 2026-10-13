@@ -161,10 +161,28 @@ const Profile = (() => {
     }
   }
 
+  // Welche Tabs ueberhaupt ausblendbar sind, steht AUSSCHLIESSLICH in den
+  // data-tabs-Attributen der Checkboxen in index.html (#profile-tab-vis).
+  // Vorher gab es hier eine zweite, kuerzere Liste — „Varianten" und „To-Do"
+  // liessen sich dadurch abhaken, wurden aber nie ausgeblendet. Eine neue
+  // Checkbox im HTML wirkt jetzt sofort, ohne hier nachgepflegt zu werden.
+  // NIE ausblendbar: chat (Kernflaeche) und canvas (Ziel der Praesentations-
+  // Uebergabe — switchTab() verweigert ausgeblendete Tabs, der Aufruf liefe
+  // sonst still ins Leere).
+  const NIE_AUSBLENDBAR = ['chat', 'canvas'];
+
+  function optionalTabKeys() {
+    const keys = new Set();
+    document.querySelectorAll('#profile-tab-vis input[data-tabs]').forEach(cb => {
+      (cb.dataset.tabs || '').split(',').map(t => t.trim()).filter(Boolean)
+        .forEach(t => { if (!NIE_AUSBLENDBAR.includes(t)) keys.add(t); });
+    });
+    return keys;
+  }
+
   function applyTabVisibility(hiddenTabs) {
     hiddenTabs = hiddenTabs || [];
-    const optionalTabs = ['rag', 'ide', 'mail', 'logs', 'medizin', 'mathe', 'diranalyse', 'postfach', 'patente', 'rechnung', 'zeugnis', 'morph', 'jury'];
-    for (const tab of optionalTabs) {
+    for (const tab of optionalTabKeys()) {
       const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
       if (btn) btn.style.display = hiddenTabs.includes(tab) ? 'none' : '';
     }
