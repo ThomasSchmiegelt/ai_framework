@@ -1078,14 +1078,36 @@ Framework-Werkzeug.
 
 Fehlt eines von beidem, sagt dir der Tab genau das und wie du es behebst.
 
+### Der Tab ist zweigeteilt
+
+**Links der Agent, rechts das Ergebnis.** Den Trenner in der Mitte kannst du
+ziehen; die Breite wird gemerkt.
+
+- **Links** siehst du, was der Agent tut: welche Werkzeuge er aufruft
+  (aufklappbar), optional sein Denken — und ganz unten das **Eingabefeld**.
+- **Rechts** stehen nur die fertigen Antworten, untereinander. Ältere bleiben
+  stehen, nichts geht verloren. **📋 kopieren** nimmt die letzte Antwort.
+
+### Er stellt Rückfragen — wo antworte ich?
+
+**Unten links, im selben Eingabefeld.** Sagst du nur „führe eine
+Schraubenberechnung durch", fragt er zurück, welche Werte er nehmen soll.
+Schreib die Antwort einfach dorthin, z. B. `M16, Steigung 2,0 mm, 8 kN
+Axialkraft, Klasse 10.9`, und sende erneut — **der Agent kennt den Verlauf** und
+rechnet damit weiter. Es ist ein Gespräch, kein Einzelauftrag.
+
+**🆕 Neues Gespräch** beginnt von vorn, ohne Verlauf. Das ist sinnvoll, wenn du
+ein völlig anderes Thema anfängst — sonst schleppt der Agent den alten Kontext
+mit.
+
 ### So benutzt du ihn
 
 1. Tab **🤝 Pi-Agent** öffnen.
 2. **Modell wählen.** Oben stehen deine **lokalen Modelle** — nimm ein kleines,
-   schnelles. Vorausgewählt ist das Standardmodell des Frameworks.
-   Darunter stehen die Modelle aus Pis eigenem Katalog; die sind hier meist
-   sehr groß und entsprechend langsam.
-3. Aufgabe eingeben und **▶ Agent starten** (oder Strg+Enter).
+   schnelles; das empfohlene ist mit ★ markiert. Darunter stehen die Modelle aus
+   Pis eigenem Katalog; die sind hier meist sehr groß und entsprechend langsam.
+3. Aufgabe eingeben und **▶ Senden** (oder Strg+Enter).
+4. Fragt er nach: antworten, wieder senden.
 
 Beispiele:
 

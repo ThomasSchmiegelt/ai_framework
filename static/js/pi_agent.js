@@ -1,13 +1,19 @@
 /* pi_agent.js — Pi-Agent-Tab
  *
  * Fährt den externen Agenten-Harness Pi (https://pi.dev) über
- * POST /api/pi/run (SSE) und zeigt live, was er tut: Werkzeugaufrufe,
- * optional sein Denken, am Ende die Antwort.
+ * POST /api/pi/run (SSE).
  *
- * Der Reiz des Tabs ist die Sichtbarkeit: man SIEHT, wie der Agent die
- * Framework-Kommandozeile aufruft (Websuche, Schraubenauslegung, Rechenkerne)
- * statt selbst zu rechnen. Darum wird jeder Werkzeugaufruf als eigener,
- * aufklappbarer Block gezeigt.
+ * Zwei Spalten, weil es zwei verschiedene Dinge sind:
+ *   LINKS  der Agent — was er fragt, was er tut (Werkzeugaufrufe, Denken) und
+ *          das Eingabefeld. Hier ANTWORTET man ihm: der Agent stellt Rückfragen
+ *          („Mit welchen Werten soll ich rechnen?"), und ohne einen Ort dafür
+ *          war der Tab eine Sackgasse.
+ *   RECHTS das Ergebnis — nur die Antworten, zum Lesen und Kopieren, ohne
+ *          Werkzeug-Rauschen.
+ *
+ * Gespräch statt Einzellauf: eine feste `session_id` je Gespräch geht an den
+ * Server, der daraus `--session-id` macht. Pi legt die Sitzung beim ersten Mal
+ * an und setzt danach genau dort fort — der Agent kennt also den Verlauf.
  */
 const PiAgent = (function () {
   'use strict';
@@ -16,10 +22,13 @@ const PiAgent = (function () {
   let _abort = null;
   let _timer = null;
   let _start = 0;
+  let _session = '';
+  let _letzteAntwort = '';
+  const LS_BREITE = 'ai_framework_pi_leftw';
 
   const el = (id) => document.getElementById(id);
 
-  // ── Hilfsdarstellung ──────────────────────────────────────────────────────
+  // ── Darstellung ───────────────────────────────────────────────────────────
 
   function _md(host, text) {
     if (typeof marked !== 'undefined') {
@@ -32,32 +41,36 @@ const PiAgent = (function () {
     }
   }
 
-  function _esc(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const _esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  function _neueSession() {
+    _session = 'tab-' + Date.now().toString(36) + '-'
+      + Math.random().toString(36).slice(2, 8);
   }
 
-  function _out() { return el('pi-out'); }
-
-  function _addBlock(cls) {
-    const d = document.createElement('div');
-    d.className = cls;
-    _out().appendChild(d);
-    return d;
-  }
-
-  function _scroll() {
-    const p = el('pi-panel');
-    if (p) p.scrollTop = p.scrollHeight;
+  function _scrollConv() {
+    const c = el('pi-conv');
+    if (c) c.scrollTop = c.scrollHeight;
   }
 
   function _tick() {
-    const s = Math.round((Date.now() - _start) / 1000);
     const live = el('pi-live');
-    if (live) live.textContent = `läuft … ${s} s`;
+    if (live) live.textContent = `läuft … ${Math.round((Date.now() - _start) / 1000)} s`;
   }
 
-  // ── Konfiguration laden ───────────────────────────────────────────────────
+  /** Zeile im Gesprächsverlauf (links). */
+  function _convBlock(cls, inhalt, stil) {
+    const d = document.createElement('div');
+    if (cls) d.className = cls;
+    if (stil) d.style.cssText = stil;
+    if (inhalt != null) d.textContent = inhalt;
+    el('pi-conv').appendChild(d);
+    _scrollConv();
+    return d;
+  }
+
+  // ── Konfiguration ─────────────────────────────────────────────────────────
 
   async function refresh() {
     try {
@@ -66,7 +79,10 @@ const PiAgent = (function () {
       _cfg = { installed: false, hinweis: 'Konfiguration nicht abrufbar: ' + e.message };
     }
     const st = el('pi-status');
-    const zeig = (id, an) => { const x = el(id); if (x) x.style.display = an ? '' : 'none'; };
+    const zeig = (id, an, anzeige) => {
+      const x = el(id);
+      if (x) x.style.display = an ? (anzeige || '') : 'none';
+    };
 
     if (!_cfg.installed) {
       if (st) st.textContent = 'Pi ist nicht installiert';
@@ -80,9 +96,9 @@ const PiAgent = (function () {
     }
     const stufe = _cfg.zugriff === 'write' ? 'lesen, anlegen und ändern' : 'nur lesen und rechnen';
     if (st) st.textContent = `${_cfg.version || 'Pi'} · Zugriff: ${stufe}`;
-    zeig('pi-missing', false); zeig('pi-off', false); zeig('pi-controls', true);
+    zeig('pi-missing', false); zeig('pi-off', false);
+    zeig('pi-controls', true, 'flex');
 
-    // Modell-Auswahl aus Pis eigenem Katalog (meist der lokale Ollama-Provider)
     const sel = el('pi-model');
     if (sel) {
       const vorher = sel.value;
@@ -91,59 +107,59 @@ const PiAgent = (function () {
       if (!liste.length) {
         sel.innerHTML = '<option value="">— Pi hat kein Modell konfiguriert —</option>';
       } else {
-        // Zwei Gruppen: Pis eigener Katalog und die übrigen lokalen Modelle.
-        // Pi nimmt auch Modelle außerhalb seines Katalogs ("custom model id") —
-        // und gerade die kleinen lokalen sind für den Agenten-Loop die
-        // brauchbaren, während 27B-Modelle hier zu langsam sind.
+        // Zwei Gruppen: Pi nimmt auch Modelle ausserhalb seines Katalogs
+        // ("custom model id") — und gerade die kleinen lokalen sind fuer den
+        // Agenten-Loop die brauchbaren, waehrend grosse Modelle hier zu
+        // langsam sind.
         const gruppe = (label) => {
           const g = document.createElement('optgroup');
-          g.label = label;
-          sel.appendChild(g);
-          return g;
+          g.label = label; sel.appendChild(g); return g;
         };
-        const imKatalog = liste.filter(m => m.katalog);
-        const weitere = liste.filter(m => !m.katalog);
         const fuelle = (g, arr) => arr.forEach(m => {
           const o = document.createElement('option');
           o.value = m.provider + '/' + m.model;
-          o.textContent = m.provider + ' · ' + m.model;
+          o.textContent = m.provider + ' · ' + m.model + (m.empfohlen ? '  ★' : '');
           g.appendChild(o);
         });
-        if (weitere.length) fuelle(gruppe('Lokale Modelle (empfohlen: klein & schnell)'), weitere);
+        const weitere = liste.filter(m => !m.katalog);
+        const imKatalog = liste.filter(m => m.katalog);
+        if (weitere.length) fuelle(gruppe('Lokale Modelle (klein & schnell)'), weitere);
         if (imKatalog.length) fuelle(gruppe('Aus Pis Katalog'), imKatalog);
-        const wunsch = (_cfg.provider && _cfg.model)
-          ? _cfg.provider + '/' + _cfg.model : '';
         const empf = liste.find(m => m.empfohlen);
         const empfWert = empf ? empf.provider + '/' + empf.model : '';
         const alle = [...sel.options].map(o => o.value);
         sel.value = (alle.includes(vorher) && vorher)
-          || (alle.includes(wunsch) && wunsch)
           || (alle.includes(empfWert) && empfWert)
           || alle[0];
       }
     }
+    if (!_session) _neueSession();
   }
 
   // ── Lauf ──────────────────────────────────────────────────────────────────
 
   async function run() {
     const task = (el('pi-task')?.value || '').trim();
-    if (!task) { showToast('Bitte eine Aufgabe eingeben'); return; }
-    if (_abort) { showToast('Es läuft schon ein Agent'); return; }
+    if (!task) { showToast('Bitte etwas eingeben'); return; }
+    if (_abort) { showToast('Der Agent arbeitet noch'); return; }
+    if (!_session) _neueSession();
 
     const wahl = (el('pi-model')?.value || '').trim();
     const i = wahl.indexOf('/');
     const provider = i > 0 ? wahl.slice(0, i) : '';
     const model = i > 0 ? wahl.slice(i + 1) : wahl;
 
-    // Auftrag als eigener Block, damit mehrere Läufe untereinander stehen
-    const auftrag = _addBlock('pi-task-echo');
-    auftrag.style.cssText = 'margin:10px 0 4px;font-size:13px;font-weight:600';
-    auftrag.textContent = '▶ ' + task;
+    // Links: was ich gesagt habe
+    _convBlock('', '▶ ' + task,
+      'margin:10px 0 4px;font-size:13px;font-weight:600;color:var(--text)');
+    el('pi-task').value = '';
+    el('pi-task').placeholder = 'Antwort auf die Rückfrage oder nächste Aufgabe … (Strg+Enter sendet)';
 
-    const schritte = _addBlock('mathe-stages');
-    const antwort = _addBlock('bubble-text');
-    antwort.style.cssText = 'font-size:13.5px;margin:6px 0 14px';
+    const schritte = _convBlock('mathe-stages', null, 'margin-bottom:6px');
+    // Die laufende Antwort erscheint zuerst links (als Lebenszeichen) und
+    // wandert am Ende als fertiger Block nach rechts.
+    const vorschau = _convBlock('', null,
+      'font-size:12.5px;white-space:pre-wrap;color:var(--text-dim);margin-bottom:8px');
 
     let text = '';
     let denkBlock = null, denkText = '';
@@ -161,7 +177,7 @@ const PiAgent = (function () {
         body: JSON.stringify({
           prompt: task, provider, model,
           thinking: el('pi-thinking')?.value || '',
-          continue: !!el('pi-continue')?.checked,
+          session_id: _session,
         }),
       });
       if (!resp.ok) {
@@ -185,7 +201,7 @@ const PiAgent = (function () {
           if (ev.type === 'pi_start') {
             const d = document.createElement('div');
             d.className = 'research-log-line';
-            d.textContent = `🤝 ${ev.model || 'Modell'} · Arbeitsordner ${ev.workspace}`;
+            d.textContent = `🤝 ${ev.model || 'Modell'}`;
             schritte.appendChild(d);
           } else if (ev.type === 'pi_tool') {
             _renderTool(schritte, ev);
@@ -201,7 +217,7 @@ const PiAgent = (function () {
             denkBlock.querySelector('pre').textContent = denkText;
           } else if (ev.type === 'text') {
             text += ev.content || '';
-            antwort.textContent = text;
+            vorschau.textContent = text.slice(-400);
           } else if (ev.type === 'progress') {
             const live = el('pi-live');
             if (live) live.textContent = `läuft … ${ev.seconds} s (Modell denkt)`;
@@ -221,18 +237,26 @@ const PiAgent = (function () {
               TokenMeter.add(ev.tokens, 'Pi-Agent');
             }
           }
-          _scroll();
+          _scrollConv();
         }
       }
-      if (text) _md(antwort, text);
-      if (!text) antwort.innerHTML = '<em class="planner-muted">Keine Antwort erhalten — '
-        + 'die Schritte oben zeigen, wo es hing.</em>';
+
+      vorschau.remove();
+      if (text) {
+        _letzteAntwort = text;
+        _ergebnis(text);
+        // Links nur ein kurzer Verweis — die Antwort steht rechts.
+        _convBlock('', '↳ Antwort steht rechts',
+          'font-size:11.5px;color:var(--text-muted);margin-bottom:4px');
+      } else {
+        _convBlock('', 'Keine Antwort erhalten — die Schritte oben zeigen, wo es hing.',
+          'font-size:12px;color:var(--text-muted)');
+      }
     } catch (e) {
+      vorschau.remove();
       if (e.name !== 'AbortError') {
-        const d = document.createElement('div');
-        d.style.cssText = 'color:#ef4444;font-size:12.5px';
-        d.textContent = 'Abgebrochen: ' + e.message;
-        schritte.appendChild(d);
+        _convBlock('', 'Abgebrochen: ' + e.message,
+          'color:#ef4444;font-size:12.5px');
       }
     } finally {
       clearInterval(_timer); _timer = null;
@@ -241,15 +265,31 @@ const PiAgent = (function () {
       el('pi-stop').style.display = 'none';
       const live = el('pi-live');
       if (live) live.textContent = `fertig (${Math.round((Date.now() - _start) / 1000)} s)`;
-      _scroll();
+      _scrollConv();
     }
+  }
+
+  /** Eine Antwort rechts anhängen (ältere bleiben stehen — nichts geht verloren). */
+  function _ergebnis(text) {
+    const out = el('pi-out');
+    if (out.children.length) {
+      const hr = document.createElement('hr');
+      hr.style.cssText = 'border:none;border-top:1px solid var(--border);margin:14px 0';
+      out.appendChild(hr);
+    }
+    const d = document.createElement('div');
+    d.className = 'bubble-text';
+    d.style.cssText = 'font-size:13.5px';
+    _md(d, text);
+    out.appendChild(d);
+    out.scrollTop = out.scrollHeight;
+    el('pi-copy').style.display = '';
   }
 
   /** Werkzeugaufruf als aufklappbarer Block — das Sichtbarmachen ist der Zweck.
    *
-   * Geschlüsselt wird über die toolCallId, nicht über den Namen: dasselbe
-   * Werkzeug kann mehrfach aufgerufen werden, und Start und Ergebnis kommen
-   * als zwei Frames. Über die ID landen sie zuverlässig im selben Block.
+   * Geschlüsselt über die toolCallId: dasselbe Werkzeug kann mehrfach laufen,
+   * und Start und Ergebnis kommen als zwei Frames.
    */
   function _renderTool(host, ev) {
     const name = ev.name || 'Werkzeug';
@@ -259,7 +299,6 @@ const PiAgent = (function () {
       det = document.createElement('details');
       det.className = 'mathe-stage';
       det.dataset.call = id;
-      // Framework-Werkzeuge hervorheben: genau das soll der Nutzer sehen.
       const istFw = /^fw_/.test(name);
       const marke = istFw ? '🧩' : '🔧';
       const anzeige = istFw ? name.replace(/^fw_/, '') + ' (Framework)' : name;
@@ -288,24 +327,88 @@ const PiAgent = (function () {
     }
   }
 
+  // ── Bedienung ─────────────────────────────────────────────────────────────
+
   function stop() {
     if (_abort) { _abort.abort(); showToast('Agent gestoppt'); }
   }
 
-  function clear() {
-    if (_out()) _out().innerHTML = '';
+  function neu() {
+    if (_abort) { showToast('Erst den laufenden Agenten stoppen'); return; }
+    _neueSession();
+    el('pi-conv').innerHTML = '';
+    el('pi-out').innerHTML = '';
+    el('pi-copy').style.display = 'none';
+    _letzteAntwort = '';
+    el('pi-task').placeholder = 'Aufgabe für den Agenten … (Strg+Enter sendet)';
     const live = el('pi-live'); if (live) live.textContent = '';
+    showToast('Neues Gespräch — der Agent beginnt ohne Verlauf');
+  }
+
+  function clear() {
+    el('pi-out').innerHTML = '';
+    el('pi-copy').style.display = 'none';
+  }
+
+  async function kopieren() {
+    if (!_letzteAntwort) return;
+    try {
+      await navigator.clipboard.writeText(_letzteAntwort);
+      showToast('Ergebnis kopiert');
+    } catch (_) {
+      showToast('Kopieren nicht möglich');
+    }
+  }
+
+  /** Ziehbarer Trenner; Breite bleibt im localStorage. */
+  function _initSplitter() {
+    const sp = el('pi-splitter');
+    const links = el('pi-left');
+    const split = el('pi-split');
+    if (!sp || !links || !split) return;
+    const gespeichert = parseFloat(localStorage.getItem(LS_BREITE) || '');
+    if (gespeichert >= 20 && gespeichert <= 80) links.style.width = gespeichert + '%';
+    let aktiv = false;
+    const bewege = (e) => {
+      if (!aktiv) return;
+      const r = split.getBoundingClientRect();
+      let pct = ((e.clientX - r.left) / r.width) * 100;
+      pct = Math.max(20, Math.min(80, pct));
+      links.style.width = pct + '%';
+    };
+    const ende = () => {
+      if (!aktiv) return;
+      aktiv = false;
+      document.body.style.userSelect = '';
+      try {
+        localStorage.setItem(LS_BREITE, String(parseFloat(links.style.width) || 46));
+      } catch (_) {}
+    };
+    sp.addEventListener('mousedown', (e) => {
+      aktiv = true; e.preventDefault();
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', bewege);
+    document.addEventListener('mouseup', ende);
   }
 
   function init() {
     el('pi-run')?.addEventListener('click', run);
     el('pi-stop')?.addEventListener('click', stop);
+    el('pi-new')?.addEventListener('click', neu);
     el('pi-clear')?.addEventListener('click', clear);
+    el('pi-copy')?.addEventListener('click', kopieren);
+    el('pi-help')?.addEventListener('click', () => {
+      const t = el('pi-intro');
+      if (t) t.style.display = t.style.display === 'none' ? '' : 'none';
+    });
     el('pi-task')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
     });
+    _initSplitter();
+    _neueSession();
     refresh();
   }
 
-  return { init, refresh, run, stop, clear };
+  return { init, refresh, run, stop, neu, clear };
 })();

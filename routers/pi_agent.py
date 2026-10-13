@@ -44,6 +44,9 @@ _APP_DIR = Path(__file__).resolve().parent.parent
 PI_AGENT_DIR = _APP_DIR / "pi-agent"
 #: Arbeitsordner für Pi — bewusst NICHT der Programmordner (s. Modul-Docstring)
 PI_WORKSPACE = DATA_DIR / "pi" / "workspace"
+#: Sitzungen (Gesprächsverläufe). Pi legt sie sonst unter dem Benutzerprofil ab;
+#: hier bleiben sie beim Framework.
+PI_SESSIONS = DATA_DIR / "pi" / "sessions"
 
 #: Obergrenze je Lauf (Sekunden); Profil `pi_timeout` überschreibt
 _PI_TIMEOUT_DEFAULT = 900
@@ -284,7 +287,7 @@ def _inhalt(content) -> str:
 
 
 async def _pi_run_generator(prompt: str, provider: str, model: str,
-                            thinking: str, weiter: bool):
+                            thinking: str, session_id: str):
     """Pi als Unterprozess fahren und seine JSON-Frames auf SSE übersetzen."""
     cmd = _pi_command()
     if not cmd:
@@ -342,8 +345,16 @@ async def _pi_run_generator(prompt: str, provider: str, model: str,
         args += ["--model", model]
     if thinking in ("off", "minimal", "low", "medium", "high", "xhigh", "max"):
         args += ["--thinking", thinking]
-    # Sitzung: fortsetzen oder frisch (dann nichts speichern)
-    args += ["--continue"] if weiter else ["--no-session"]
+    # Sitzung: feste ID je Gespräch im Tab. `--session-id` legt sie an, wenn sie
+    # fehlt, und setzt sonst GENAU dort fort — damit kann der Nutzer eine
+    # Rückfrage des Agenten beantworten und Pi hat den Verlauf.
+    # (Das frühere `--no-session` beim ersten Lauf war ein Fehler: dann gab es
+    # nichts, was ein späteres `--continue` hätte fortsetzen können.)
+    if session_id:
+        PI_SESSIONS.mkdir(parents=True, exist_ok=True)
+        args += ["--session-dir", str(PI_SESSIONS), "--session-id", session_id]
+    else:
+        args += ["--no-session"]
     args += ["--", prompt]
 
     env = dict(os.environ)
@@ -487,8 +498,10 @@ async def pi_run(req: Request):
     provider = str(body.get("provider", "") or prof.get("pi_provider", "") or "").strip()
     model = str(body.get("model", "") or prof.get("pi_model", "") or "").strip()
     thinking = str(body.get("thinking", "") or "").strip().lower()
-    weiter = bool(body.get("continue"))
+    # Gesprächs-ID aus dem Tab. Nur harmlose Zeichen zulassen — der Wert wird als
+    # Dateiname und als Prozessargument benutzt.
+    session_id = re.sub(r"[^A-Za-z0-9_-]", "", str(body.get("session_id", "") or ""))[:64]
     return StreamingResponse(
-        _pi_run_generator(prompt, provider, model, thinking, weiter),
+        _pi_run_generator(prompt, provider, model, thinking, session_id),
         media_type="text/event-stream",
     )

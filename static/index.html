@@ -2717,18 +2717,22 @@
     </div><!-- /video-panel -->
 
     <!-- ── KI-To-Do-Liste mit Wissensgraph ──────────────────────────────────── -->
-    <div id="pi-panel" class="panel" style="overflow:auto;padding:12px 14px">
-      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+    <div id="pi-panel" class="panel" style="display:flex;flex-direction:column;padding:10px 12px;overflow:hidden">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px">
         <h3 style="margin:0">🤝 Pi-Agent</h3>
         <span id="pi-status" class="planner-muted" style="font-size:12px">wird geprüft …</span>
+        <span style="flex:1"></span>
+        <button id="pi-help" class="export-btn" style="font-size:12px">ℹ Was kann er?</button>
       </div>
-      <p class="planner-muted" style="font-size:12px;margin:0 0 10px;max-width:960px">
+
+      <p id="pi-intro" class="planner-muted" style="font-size:12px;margin:0 0 8px;max-width:980px;display:none">
         Ein eigenständiger Agent (<a href="https://pi.dev" target="_blank" rel="noopener noreferrer">Pi</a>,
         MIT) arbeitet <strong>innerhalb</strong> dieses Frameworks: er plant selbst und benutzt dabei
         <strong>alle Werkzeuge</strong> der Anwendung — Websuche, Schraubenauslegung nach VDI&nbsp;2230,
         Festigkeits- und Maschinenelemente-Rechnung, Werkstoffdaten, Einheiten, Diagramme, Routen,
         Berichte, Patentsuche — und liest deinen Bestand (Projekte, Pläne, Aufgaben, Wissensdatenbanken).
-        Gerechnet wird dabei vom Framework, nicht vom Sprachmodell.
+        Gerechnet wird dabei vom Framework, nicht vom Sprachmodell. Fragt er etwas nach, antwortest du
+        <strong>unten links</strong> — er behält den Verlauf.
       </p>
 
       <div id="pi-missing" class="var-sec" style="display:none;margin-bottom:10px">
@@ -2756,10 +2760,10 @@
         </div>
       </div>
 
-      <div id="pi-controls" style="display:none">
+      <div id="pi-controls" style="display:none;flex:1;min-height:0;flex-direction:column">
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
           <label style="font-size:12px">Modell
-            <select id="pi-model" class="sidebar-select" style="min-width:260px;display:block"></select>
+            <select id="pi-model" class="sidebar-select" style="min-width:250px;display:block"></select>
           </label>
           <label style="font-size:12px">Denktiefe
             <select id="pi-thinking" class="sidebar-select" style="display:block">
@@ -2770,23 +2774,40 @@
               <option value="high">hoch</option>
             </select>
           </label>
-          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-            <input type="checkbox" id="pi-continue" /> vorherige Sitzung fortsetzen
-          </label>
-        </div>
-
-        <textarea id="pi-task" rows="3"
-          placeholder="Aufgabe für den Agenten — z. B. „Lege die Schrauben für einen Flansch mit 25 kN Axialkraft aus und prüfe im Internet, welche Festigkeitsklasse dafür üblich ist" oder „Welche meiner Projekte haben offene Aufgaben ohne Zuständigen?""
-          style="width:100%;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font:inherit;font-size:13px;resize:vertical"></textarea>
-
-        <div style="display:flex;gap:8px;align-items:center;margin:8px 0">
-          <button id="pi-run" class="export-btn">▶ Agent starten</button>
-          <button id="pi-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
-          <button id="pi-clear" class="export-btn">🧹 Leeren</button>
+          <button id="pi-new" class="export-btn">🆕 Neues Gespräch</button>
           <span id="pi-live" class="planner-muted" style="font-size:12px"></span>
         </div>
 
-        <div id="pi-out"></div>
+        <div id="pi-split" style="flex:1;min-height:0;display:flex;gap:0">
+          <!-- links: der Agent (Gespräch, Schritte, Eingabe) -->
+          <div id="pi-left" style="width:46%;min-width:260px;display:flex;flex-direction:column;min-height:0">
+            <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:4px">🤝 Agent</div>
+            <div id="pi-conv" style="flex:1;min-height:0;overflow:auto;padding-right:6px"></div>
+            <div style="display:flex;gap:6px;align-items:flex-start;margin-top:8px">
+              <textarea id="pi-task" rows="3"
+                placeholder="Aufgabe für den Agenten — z. B. „Lege die Schrauben für einen Flansch mit 25 kN Axialkraft aus"&#10;Strg+Enter sendet."
+                style="flex:1;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font:inherit;font-size:13px;resize:vertical"></textarea>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button id="pi-run" class="export-btn">▶ Senden</button>
+                <button id="pi-stop" class="export-btn btn-danger-sm" style="display:none">⏹ Stopp</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="pi-splitter" title="Breite ziehen"
+               style="width:6px;cursor:col-resize;flex:0 0 6px;background:var(--border);opacity:.6;margin:0 4px;border-radius:3px"></div>
+
+          <!-- rechts: das Ergebnis -->
+          <div id="pi-right" style="flex:1;min-width:240px;display:flex;flex-direction:column;min-height:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="font-size:11.5px;color:var(--text-muted)">📄 Ergebnis</span>
+              <span style="flex:1"></span>
+              <button id="pi-copy" class="export-btn" style="font-size:11.5px;display:none">📋 kopieren</button>
+              <button id="pi-clear" class="export-btn" style="font-size:11.5px">🧹 leeren</button>
+            </div>
+            <div id="pi-out" style="flex:1;min-height:0;overflow:auto;padding-right:6px"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -4045,7 +4066,7 @@
 <script src="/js/pairing.js?v=20260825reach"></script>
 <script src="/js/bilderkennung.js?v=20260831ask"></script>
 <script src="/js/video.js?v=20260902memsave"></script>
-<script src="/js/pi_agent.js?v=20261013pi2"></script>
+<script src="/js/pi_agent.js?v=20261013pi3"></script>
 <script src="/js/app.js?v=20261013pi"></script>
 
 </body>

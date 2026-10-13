@@ -1275,3 +1275,24 @@ Systemprompt (`_context_prompt()`) nennt die Stufe ausdrücklich.
 Kein `_model_session`/VRAM-Lock — Pi spricht Ollama über seinen eigenen
 Provider an, wie die `z-image`/`z-video`-Brücken. Token aus Pis `usage`-Feldern
 landen im `done`-Frame, Label „Pi-Agent".
+
+### 30.6 Gespräch statt Einzellauf, zweispaltiges Layout
+
+Der Agent stellt Rückfragen („Mit welchen Werten soll ich rechnen?"). Ohne einen
+Ort zum Antworten war der Tab eine Sackgasse — und der erste Entwurf konnte das
+auch technisch nicht: er startete mit `--no-session`, womit ein späteres
+`--continue` nichts zum Fortsetzen hatte.
+
+**Lösung:** das Frontend hält eine `session_id` je Gespräch; der Router macht
+daraus `--session-id <id> --session-dir data/pi/sessions`. Pi legt die Sitzung
+beim ersten Aufruf an und setzt danach genau dort fort. Verifiziert mit zwei
+Läufen („merke dir 4711" → zweiter Lauf antwortet „4711"). Die ID wird
+serverseitig auf `[A-Za-z0-9_-]{,64}` gefiltert — sie wird als Dateiname und als
+Prozessargument benutzt.
+
+**Layout** (`#pi-split`, ziehbarer `#pi-splitter`, Breite in localStorage
+`ai_framework_pi_leftw`): links der Agent (Gespräch + Werkzeug-/Denken-Blöcke +
+Eingabefeld), rechts die Ergebnisse gestapelt. Die Trennung folgt der Nutzung:
+die Schritte sind Arbeitsmaterial, die Antwort ist das Ergebnis zum Lesen und
+Kopieren. Während eines Laufs läuft der Text als gekürzte Vorschau links mit
+(Lebenszeichen) und wandert am Ende als fertiger Markdown-Block nach rechts.
