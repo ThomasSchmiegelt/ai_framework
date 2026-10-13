@@ -121,6 +121,9 @@ $serverConfig = [ordered]@{
     # (fuehrt beliebigen Code auf dem Server aus). Bei Bedarf in config.json auf
     # true setzen.
     allow_python_exec = $false
+    # Ebenso aus: ein externer Agenten-Harness (Pi) hat auf einem Mehrbenutzer-
+    # Server nichts zu suchen. "read"/"write" bewusst nur lokal setzen.
+    pi_agent_access = "off"
 }
 if ($authUser) {
     $serverConfig["auth"] = @{ user = $authUser; pass = $authPass }

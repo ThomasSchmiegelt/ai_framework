@@ -1,0 +1,5 @@
+# pi-agent — lokale Artefakte (NICHT ins Repo)
+__pycache__/
+*.pyc
+*.log
+*.log.*

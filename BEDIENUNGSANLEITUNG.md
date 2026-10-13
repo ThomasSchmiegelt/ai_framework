@@ -39,6 +39,8 @@
 14. [Code-Tab (IDE + JSON-Editor)](#14-code-tab-ide--json-editor)
 - [JSON-Editor](#json-editor)
 15. [Diagnose-Logger](#15-diagnose-logger)
+16.0b [Funktionen beim Installieren abwählen](#11-0b-funktionen-beim-installieren-abwählen)
+16.0c [Pi — externen Agenten mitarbeiten lassen](#11-0c-pi--einen-externen-agenten-mitarbeiten-lassen)
 16.0 [Maschinenbau-Assistent](#11-0-maschinenbau-assistent--rechnen-statt-schätzen)
 16. [Agenten](#16-agenten)
 - [Bewertungs-Jurys](#16a-bewertungs-jurys-)
@@ -1006,6 +1008,84 @@ Prüfer. Der Assistent ersetzt keine Freigabe.
 python -m tools.mechanik                      # zeigt alle Rechenarten
 python -m tools.mechanik biegung_kragarm_ende "f=1 kN l=1 m profil=rechteck b=50 h=100 rp=235"
 ```
+
+---
+
+## 11-0b. Funktionen beim Installieren abwählen
+
+Der Installer (`install.bat` / `install.sh`) fragt nicht nur die optionalen Tabs ab,
+sondern auch drei Fähigkeiten, die du vielleicht gar nicht brauchst:
+
+| Frage | Wirkung bei „Nein" |
+|---|---|
+| **Bildgenerierung aktivieren?** | Keine Bilder aus Text im Chat (`/bild`, 🎨-Haken), keine Bildbearbeitung, keine Präsentationsbilder. Das Profil bietet kein Bildmodell mehr an. |
+| **Videoerzeugung aktivieren?** | Der Tab „🎬 Videoerzeugung" wird ausgeblendet und `/video` liefert nichts mehr. |
+| **Pi-Zugriff [0/1/2]** | `0` = ein externer Agent kommt nicht an das Framework. `1` = er darf lesen und rechnen. `2` = er darf zusätzlich anlegen und ändern. |
+
+Nachträglich ändern kannst du das jederzeit in der `config.json` im Programmordner:
+
+```json
+{
+  "enable_image_generation": false,
+  "enable_video_generation": false,
+  "pi_agent_access": "read"
+}
+```
+
+Bild und Video wirken nach einem **Neustart** der Anwendung, der Pi-Zugriff sofort.
+Die Tab-Sichtbarkeit stellst du außerdem jederzeit im **Profil** unter
+„📑 Sichtbare Tabs" um.
+
+---
+
+## 11-0c. Pi — einen externen Agenten mitarbeiten lassen
+
+**Optional.** Wenn du [Pi](https://pi.dev) benutzt (ein schlanker Agenten-Harness für
+die Kommandozeile), kann er dieses Framework als Werkzeug verwenden: Pi plant und
+entscheidet, das Framework rechnet und verwaltet. Pi wird **nicht** mitgeliefert und
+von keinem Installer installiert.
+
+**Einrichten**
+
+1. Zugriffsstufe setzen — beim Installieren abgefragt, sonst in der `config.json`
+   (`"pi_agent_access": "read"` oder `"write"`).
+2. Die Anwendung starten.
+3. Prüfen, ob es greift:
+
+   ```
+   python pi-agent/framework_cli.py status
+   python pi-agent/framework_cli.py --hilfe
+   ```
+
+   Die Hilfe zeigt alle Befehle und markiert mit `x`, was deine Stufe sperrt.
+4. Pi die Beschreibung geben: `pi-agent/skills/framework-cli.md` in den
+   Skills-Ordner deines Pi-Projekts kopieren oder verlinken (bei Pi meist
+   `.agents/skills/`).
+
+**Was der Agent darf**
+
+- **Stufe `read`:** Projekte, Pläne, Aufgaben, Wissensdatenbanken, Patent-Vorgänge,
+  Variantenvergleiche und Chatverläufe lesen; Web-Recherchen anstoßen; Maschinenbau-
+  Größen, Werkstoffwerte und Einheiten berechnen.
+- **Stufe `write`:** zusätzlich Projekte, Aufgabenlisten und Wissensdatenbanken
+  anlegen und ändern.
+
+**Was er in keiner Stufe darf:** löschen, Mails versenden, Angebote oder Rechnungen
+versenden, Patente einreichen, dein Profil oder die Einstellungen ändern, Python
+ausführen, Aufgaben zurücksetzen. Diese Befehle gibt es nicht — es führt also kein
+Umweg dorthin.
+
+**Zwei Dinge, die du wissen solltest**
+
+- Die Zugriffsstufe ist eine **Leitplanke, keine Sicherheitssperre.** Die
+  Kommandozeile hält sich daran. Sie verhindert nicht, dass ein anderes Programm auf
+  demselben Rechner die lokale Schnittstelle direkt anspricht — das konnte es vorher
+  auch schon. Für eine echte Grenze müsste die Anwendung hinter eine Anmeldung oder
+  Pi in einen Container.
+- Der **Geheim-Modus gilt nicht für Pi.** Er erzwingt lokale Modelle *innerhalb* des
+  Frameworks. Welches Modell Pi selbst benutzt, entscheidet Pis eigene Einstellung.
+  Soll wirklich alles auf deinem Rechner bleiben, muss auch Pis Anbieter auf einen
+  lokalen Server zeigen.
 
 ---
 

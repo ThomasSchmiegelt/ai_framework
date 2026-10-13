@@ -223,8 +223,12 @@ $optTabs = [ordered]@{
     patente='Patente (Patent-Recherche)'; rechnung='Angebote/Rechnungen';
     zeugnis='Arbeitszeugnisse';
     varianten='Variantenvergleich (gewichtete Entscheidung)';
+    matrix='Matrix-Recherche (Tabelle + Wissensgraph)';
+    compare='Excel-Vergleich';
     todo='To-Do-Liste mit Wissensgraph';
-    morph='Morphologischer Kasten'; jury='Jury'
+    transcription='Transkription (Sprache zu Text)';
+    morph='Morphologischer Kasten'; jury='Jury';
+    bilderkennung='Bilderkennung (Objekte im Bild markieren)'
 }
 $hidden = @()
 foreach ($t in $optTabs.Keys) {
@@ -238,10 +242,39 @@ $enableApi = if ($apiAns -match '^[JjYy]') { "true" } else { "false" }
 $pyAns = Read-Host "Python-Code im Code-Tab serverseitig ausfuehren? (lokal empfohlen) [J/N]"
 $allowPy = if ($pyAns -match '^[Nn]') { "false" } else { "true" }
 
+# Bildgenerierung (Chat-Befehle /bild, /bildedit, /upscale, Praesentationsbilder).
+# Abgewaehlt => _image_model() liefert leer, die Faehigkeit entfaellt ueberall.
+Write-Host ""
+Write-Host "  Bildgenerierung: Bilder aus Text im Chat (/bild), Bildbearbeitung und" -ForegroundColor DarkGray
+Write-Host "  Praesentationsbilder. Braucht ein lokales Bildmodell (z-image/qwen-image)" -ForegroundColor DarkGray
+Write-Host "  oder ein API-Bildmodell - beides wird spaeter im Profil gewaehlt." -ForegroundColor DarkGray
+$imgAns = Read-Host "Bildgenerierung aktivieren? [J/N]"
+$enableImg = if ($imgAns -match '^[Nn]') { "false" } else { "true" }
+
+# Videoerzeugung (Tab + /video). Abgewaehlt => Flag false UND Tab ausgeblendet.
+Write-Host ""
+Write-Host "  Videoerzeugung: kurze Videos aus Text oder Bildern (Tab + /video)." -ForegroundColor DarkGray
+Write-Host "  Braucht das optionale Werkzeug z-video (Wan-Gewichte ~30-70 GB, starke GPU)." -ForegroundColor DarkGray
+$vidAns = Read-Host "Videoerzeugung aktivieren? [J/N]"
+$enableVid = if ($vidAns -match '^[Nn]') { "false" } else { "true" }
+if ($enableVid -eq "false") { $hidden += 'video' }
+
+# Zugriff eines externen Agenten-Harness (Pi, pi-agent/framework_cli.py).
+Write-Host ""
+Write-Host "  Pi-Anbindung: ein externer Agenten-Harness (https://pi.dev) kann das" -ForegroundColor DarkGray
+Write-Host "  Framework ueber pi-agent/framework_cli.py benutzen. Loeschen, Versenden" -ForegroundColor DarkGray
+Write-Host "  und Einstellungsaenderungen gibt es dort in KEINER Stufe." -ForegroundColor DarkGray
+Write-Host "    0 = aus (Standard)   1 = nur lesen   2 = lesen, anlegen und aendern" -ForegroundColor DarkGray
+$piAns = Read-Host "Pi-Zugriff [0/1/2]"
+$piAccess = switch -Regex ($piAns) { '^1' { "read" } '^2' { "write" } default { "off" } }
+
 # Robust per venv-Python in config.json schreiben (vermeidet PS-JSON-Eigenheiten)
 $env:HIDDEN_JSON = '[' + (($hidden | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']'
 $env:ENABLE_API  = $enableApi
 $env:ALLOW_PY    = $allowPy
+$env:ENABLE_IMG  = $enableImg
+$env:ENABLE_VID  = $enableVid
+$env:PI_ACCESS   = $piAccess
 $pyMerge = @"
 import json, os, pathlib
 p = pathlib.Path('config.json')
@@ -252,8 +285,12 @@ if p.exists():
 cfg['hidden_tabs_default'] = json.loads(os.environ['HIDDEN_JSON'])
 cfg['enable_api'] = os.environ['ENABLE_API'] == 'true'
 cfg['allow_python_exec'] = os.environ['ALLOW_PY'] == 'true'
+cfg['enable_image_generation'] = os.environ['ENABLE_IMG'] == 'true'
+cfg['enable_video_generation'] = os.environ['ENABLE_VID'] == 'true'
+cfg['pi_agent_access'] = os.environ['PI_ACCESS']
 p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
 print('  ok: hidden_tabs_default=%s enable_api=%s allow_python_exec=%s' % (cfg['hidden_tabs_default'], cfg['enable_api'], cfg['allow_python_exec']))
+print('  ok: bildgenerierung=%s videoerzeugung=%s pi_zugriff=%s' % (cfg['enable_image_generation'], cfg['enable_video_generation'], cfg['pi_agent_access']))
 "@
 if (Test-Path $pyVenv) { $pyMerge | & $pyVenv - } else { $pyMerge | & $pythonCmd - }
 Write-OK "Funktionsauswahl gespeichert"

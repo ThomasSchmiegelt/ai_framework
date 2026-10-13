@@ -53,7 +53,7 @@ if [ -t 0 ]; then
   echo ""
   echo "=== Funktionsauswahl (optionale Tabs) ==="
   echo "Jeweils [j/N]. Diese Tabs sind beim Erststart sonst ausgeblendet."
-  OPT_TABS="rag:Wissensdatenbanken-(RAG) ide:Code-IDE mathe:Mathe medizin:Medizin mail:Mail logs:Logs diranalyse:Verzeichnis-Analyse postfach:Postfach-(PST/Mail,-nur-lokal) patente:Patente-(Patent-Recherche) rechnung:Angebote/Rechnungen zeugnis:Arbeitszeugnisse varianten:Variantenvergleich todo:To-Do-mit-Wissensgraph morph:Morphologischer-Kasten jury:Jury"
+  OPT_TABS="rag:Wissensdatenbanken-(RAG) ide:Code-IDE mathe:Mathe medizin:Medizin mail:Mail logs:Logs diranalyse:Verzeichnis-Analyse postfach:Postfach-(PST/Mail,-nur-lokal) patente:Patente-(Patent-Recherche) rechnung:Angebote/Rechnungen zeugnis:Arbeitszeugnisse varianten:Variantenvergleich matrix:Matrix-Recherche compare:Excel-Vergleich todo:To-Do-mit-Wissensgraph transcription:Transkription morph:Morphologischer-Kasten jury:Jury bilderkennung:Bilderkennung"
   HIDDEN=""
   for entry in $OPT_TABS; do
     tab="${entry%%:*}"; label="${entry#*:}"
@@ -71,9 +71,42 @@ if [ -t 0 ]; then
   read -r -p "Python-Code im Code-Tab serverseitig ausführen? (lokal empfohlen) [J/n] " py_ans || py_ans=""
   case "$py_ans" in [nN]*) ALLOW_PY=false ;; *) ALLOW_PY=true ;; esac
 
+  # Bildgenerierung (Chat /bild, Bildbearbeitung, Präsentationsbilder). Abgewählt
+  # ⇒ _image_model() liefert leer, die Fähigkeit entfällt überall auf einmal.
+  echo ""
+  echo "  Bildgenerierung: Bilder aus Text im Chat (/bild), Bildbearbeitung und"
+  echo "  Präsentationsbilder. Braucht ein lokales Bildmodell (z-image/qwen-image)"
+  echo "  oder ein API-Bildmodell — beides wird später im Profil gewählt."
+  read -r -p "Bildgenerierung aktivieren? [J/n] " img_ans || img_ans=""
+  case "$img_ans" in [nN]*) ENABLE_IMG=false ;; *) ENABLE_IMG=true ;; esac
+
+  # Videoerzeugung (Tab + /video). Abgewählt ⇒ Flag false UND Tab ausgeblendet.
+  echo ""
+  echo "  Videoerzeugung: kurze Videos aus Text oder Bildern (Tab + /video)."
+  echo "  Braucht das optionale Werkzeug z-video (Wan-Gewichte ~30–70 GB, starke GPU)."
+  read -r -p "Videoerzeugung aktivieren? [J/n] " vid_ans || vid_ans=""
+  case "$vid_ans" in
+    [nN]*) ENABLE_VID=false; HIDDEN="$HIDDEN${HIDDEN:+,}\"video\"" ;;
+    *) ENABLE_VID=true ;;
+  esac
+
+  # Zugriff eines externen Agenten-Harness (Pi, pi-agent/framework_cli.py).
+  echo ""
+  echo "  Pi-Anbindung: ein externer Agenten-Harness (https://pi.dev) kann das"
+  echo "  Framework über pi-agent/framework_cli.py benutzen. Löschen, Versenden"
+  echo "  und Einstellungsänderungen gibt es dort in KEINER Stufe."
+  echo "    0 = aus (Standard)   1 = nur lesen   2 = lesen, anlegen und ändern"
+  read -r -p "Pi-Zugriff [0/1/2] " pi_ans || pi_ans=""
+  case "$pi_ans" in
+    1*) PI_ACCESS=read ;;
+    2*) PI_ACCESS=write ;;
+    *) PI_ACCESS=off ;;
+  esac
+
   HIDDEN_JSON="[$HIDDEN]"
   echo "Schreibe Auswahl nach config.json …"
-  HIDDEN_JSON="$HIDDEN_JSON" ENABLE_API="$ENABLE_API" ALLOW_PY="$ALLOW_PY" "$PYTHON" - <<'PYEOF'
+  HIDDEN_JSON="$HIDDEN_JSON" ENABLE_API="$ENABLE_API" ALLOW_PY="$ALLOW_PY" \
+  ENABLE_IMG="$ENABLE_IMG" ENABLE_VID="$ENABLE_VID" PI_ACCESS="$PI_ACCESS" "$PYTHON" - <<'PYEOF'
 import json, os, pathlib
 p = pathlib.Path("config.json")
 cfg = {}
@@ -83,8 +116,12 @@ if p.exists():
 cfg["hidden_tabs_default"] = json.loads(os.environ["HIDDEN_JSON"])
 cfg["enable_api"] = os.environ["ENABLE_API"] == "true"
 cfg["allow_python_exec"] = os.environ["ALLOW_PY"] == "true"
+cfg["enable_image_generation"] = os.environ["ENABLE_IMG"] == "true"
+cfg["enable_video_generation"] = os.environ["ENABLE_VID"] == "true"
+cfg["pi_agent_access"] = os.environ["PI_ACCESS"]
 p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 print("  ok: hidden_tabs_default=%s enable_api=%s allow_python_exec=%s" % (cfg["hidden_tabs_default"], cfg["enable_api"], cfg["allow_python_exec"]))
+print("  ok: bildgenerierung=%s videoerzeugung=%s pi_zugriff=%s" % (cfg["enable_image_generation"], cfg["enable_video_generation"], cfg["pi_agent_access"]))
 PYEOF
 fi
 

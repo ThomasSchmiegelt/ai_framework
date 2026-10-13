@@ -56,6 +56,20 @@ KEEP_ALIVE: str = str(_CONFIG.get("model_keep_alive", "30m"))
 # Python-Ausführung im Code-Tab (serverseitig). Lokal sinnvoll; im Mehrbenutzer-/
 # Servermodus ggf. abschalten (config.json: "allow_python_exec": false).
 ALLOW_PYTHON_EXEC: bool = bool(_CONFIG.get("allow_python_exec", True))
+# Bild- und Videoerzeugung lassen sich beim Installieren abwaehlen
+# (config.json: "enable_image_generation"/"enable_video_generation": false).
+# Beide greifen als Chokepoint in _image_model()/_video_model(): liefern die
+# leer, entfaellt die Faehigkeit ueberall auf einmal -- Profil-Auswahl,
+# Chat-Werkzeug, Workflow-Schritte, Praesentationsbilder. Zusaetzlich riegeln
+# die Kerne selbst ab, da ein Aufrufer ein Modell explizit mitschicken kann.
+ENABLE_IMAGE_GEN: bool = bool(_CONFIG.get("enable_image_generation", True))
+ENABLE_VIDEO_GEN: bool = bool(_CONFIG.get("enable_video_generation", True))
+# Zugriffsstufe des externen Agenten-Harness (pi-agent/framework_cli.py):
+# "off" | "read" | "write". Fehlender Schluessel = "off" -- eine neue
+# Faehigkeit schaltet sich nicht von selbst ein. Durchgesetzt wird sie in der
+# CLI selbst; hier nur als eine Quelle und fuer die Anzeige.
+_pi_acc = str(_CONFIG.get("pi_agent_access", "off") or "off").strip().lower()
+PI_AGENT_ACCESS: str = _pi_acc if _pi_acc in ("off", "read", "write") else "off"
 # Versionsnummer des Frameworks. Quelle ist die Datei VERSION im Programmordner:
 # sie gehört zum Programmcode und wird vom Updater mitgetauscht, während
 # config.json bewusst unberührt bleibt (Nutzerkonfiguration). Stünde die Version
@@ -1596,7 +1610,15 @@ _IMAGE_SIZES = {
 
 
 def _image_model() -> str:
-    """Im Profil gewähltes Bildmodell (``local::sd`` / ``local::qwen`` / ``anbieter::modell``) oder leer."""
+    """Im Profil gewähltes Bildmodell (``local::sd`` / ``local::qwen`` / ``anbieter::modell``) oder leer.
+
+    Liefert **leer**, wenn die Bildgenerierung beim Installieren abgewählt wurde
+    (``ENABLE_IMAGE_GEN``) — ein Chokepoint statt vieler Einzelprüfungen: dann
+    bietet das Profil nichts an, der Assistent-Modus kein ``generate_image``,
+    ``[bild]``-Workflow-Schritte und Präsentationsbilder entfallen.
+    """
+    if not ENABLE_IMAGE_GEN:
+        return ""
     m = str(_load_profile().get("image_model", "") or "").strip()
     return "" if m in _MODEL_PLACEHOLDERS else m
 
@@ -1743,7 +1765,13 @@ _VIDEO_MODES = {
 
 
 def _video_model() -> str:
-    """Im Profil gewähltes Videomodell (``local::wan``) oder leer."""
+    """Im Profil gewähltes Videomodell (``local::wan``) oder leer.
+
+    Liefert **leer**, wenn die Videoerzeugung beim Installieren abgewählt wurde
+    (``ENABLE_VIDEO_GEN``) — siehe ``_image_model`` zum Chokepoint-Prinzip.
+    """
+    if not ENABLE_VIDEO_GEN:
+        return ""
     m = str(_load_profile().get("video_model", "") or "").strip()
     return "" if m in _MODEL_PLACEHOLDERS else m
 
@@ -1858,6 +1886,9 @@ async def _generate_video_core(mode: str, prompt: str = "", first_b64: str = "",
     ``{video_url, mode, prompt, file}``. Wirft HTTPException (503 Brücke nicht
     erreichbar, 400 fehlende Eingaben). Video ist immer lokal → Geheim/Hartman
     unkritisch. **Kein** ``_model_session`` (separater GPU-Prozess)."""
+    if not ENABLE_VIDEO_GEN:
+        raise HTTPException(403, "Die Videoerzeugung ist in dieser Installation "
+                                 "abgeschaltet (config.json: enable_video_generation).")
     opts = opts or {}
     mode = str(mode or "t2v").strip().lower()
     if mode not in _VIDEO_MODES:
@@ -1958,6 +1989,11 @@ async def _generate_image_core(prompt: str, negative: str = "", preset: str = "s
     if preset not in _IMAGE_SIZES:
         preset = "square"
 
+    if not ENABLE_IMAGE_GEN:
+        # Abgewaehlt beim Installieren: auch ein explizit mitgeschicktes Modell
+        # darf den Chokepoint _image_model() nicht umgehen.
+        raise HTTPException(403, "Die Bildgenerierung ist in dieser Installation "
+                                 "abgeschaltet (config.json: enable_image_generation).")
     model = str(model or "").strip() or _image_model()
     if not model or model in _MODEL_PLACEHOLDERS:
         raise HTTPException(400, "Keine Bildgenerierung konfiguriert – im Profil ein "
@@ -2071,6 +2107,11 @@ async def _edit_image_core(prompt: str, image_b64: str, strength: float = 0.55,
     preset = str(preset or "square").strip().lower()
     if preset not in _IMAGE_SIZES:
         preset = "square"
+    if not ENABLE_IMAGE_GEN:
+        # Abgewaehlt beim Installieren: auch ein explizit mitgeschicktes Modell
+        # darf den Chokepoint _image_model() nicht umgehen.
+        raise HTTPException(403, "Die Bildgenerierung ist in dieser Installation "
+                                 "abgeschaltet (config.json: enable_image_generation).")
     model = str(model or "").strip() or _image_model()
     if not model or model in _MODEL_PLACEHOLDERS:
         raise HTTPException(400, "Keine Bildgenerierung konfiguriert – im Profil ein "
@@ -3104,7 +3145,8 @@ __all__ = [
     'APP_DIR', 'AgentDef',
     '_CONFIG_FILE', '_CONFIG', 'OLLAMA_BASE', 'ALLOWED_MODELS',
     'DEFAULT_MODEL', 'CHAT_NUM_CTX', '_ALLOWED_NUM_CTX', 'KEEP_ALIVE',
-    'ALLOW_PYTHON_EXEC', '_read_version', 'APP_VERSION', '_MODEL_PLACEHOLDERS',
+    'ALLOW_PYTHON_EXEC', 'ENABLE_IMAGE_GEN', 'ENABLE_VIDEO_GEN', 'PI_AGENT_ACCESS',
+    '_read_version', 'APP_VERSION', '_MODEL_PLACEHOLDERS',
     '_pick_model', '_raw_data_dir', 'DATA_DIR', 'UPLOADS_DIR',
     'CONVERSATIONS_DIR', 'AGENTS_DIR', 'REPORTS_DIR', 'PLANS_DIR',
     'DOSSIERS_DIR', 'CODE_DIR', 'JURIES_DIR', 'JURY_DOCS_DIR',

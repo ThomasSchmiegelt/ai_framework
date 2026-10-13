@@ -169,6 +169,16 @@ ollama pull <modell>      # danach im Profil unter „Modelle" auswählbar
   hochladen (werden automatisch auf die Sollgröße skaliert)
 - 🖼️ **Bebilderte Präsentation** — Bilderordner wählen; ein Vision-Modell
   beschreibt jedes Bild fachkundig (Analyse-Persona aus der Beschreibung) → Bildfolien
+- 🤝 **Pi-Anbindung (optional)** — ein externer Agenten-Harness ([Pi](https://pi.dev), MIT)
+  kann das Framework über eine Kommandozeile benutzen: `pi-agent/framework_cli.py`.
+  Pi plant, das Framework rechnet und verwaltet. Gebunden wird es als **ein** Werkzeug
+  (CLI + Beschreibung), weil >100 Endpunkte nicht als Tool-Schemas in den Kontext eines
+  lokalen Modells passen. **Zugriffsstufe wird beim Installieren festgelegt:** `off`
+  (Standard), `read` (nur lesen und rechnen) oder `write` (zusätzlich anlegen und
+  ändern). **Löschen, Versenden von Mails/Angeboten/Rechnungen, Patent-Einreichung,
+  Profiländerungen und Python-Ausführung gibt es in keiner Stufe.** Opt-in, ohne
+  Abhängigkeiten (nur Python-Standardbibliothek), hängt nicht am Backend — Pi selbst
+  wird nicht mitgeliefert. Details: `pi-agent/README.md`.
 - 🔧 **Maschinenbau-Assistent** — rechnet, was man sonst mit Papier und Bleistift
   rechnet: Querschnittswerte, Zug/Druck/Schub, **Flächenpressung**, **Biegung**
   (6 Standardlastfälle, Spannung *und* Durchbiegung), **Torsion/Wellen**,

@@ -1114,3 +1114,90 @@ Grenzen (FKM / EC3-1-9 / DIN 3990 für belastbare Nachweise).
 
 **Kein TokenMeter-Eintrag nötig:** `mechanik_calc` führt keinen eigenen LLM-Aufruf aus; die
 Tokens des umgebenden Chat-Turns zählt `_chat_generator` wie gewohnt.
+
+---
+
+## 29. Pi-Anbindung und abwählbare Fähigkeiten (`pi-agent/`, Config-Riegel)
+
+### 29.1 Warum eine CLI statt Tool-Schemas
+
+Das Framework hat ~39 Router mit über hundert Endpunkten. Die passen nicht als
+Tool-Schemas in den Kontext eines lokalen Modells. Darum wird es für einen externen
+Agenten-Harness ([Pi](https://pi.dev), MIT, Node ≥ 22.19) als **ein** Werkzeug
+gebunden: `pi-agent/framework_cli.py` plus `pi-agent/skills/framework-cli.md` als
+Beschreibung, die Pi als Datei liest.
+
+Das ist dasselbe Muster, das auch das `kind`-Enum von `mechanik_calc` geformt hat
+(§28.2): **eine Auswahl aus einer Liste statt vieler Schemas.**
+
+`pi-agent/` ist **opt-in und abhängigkeitsfrei** — nur `urllib` aus der
+Standardbibliothek, keine venv, hängt nicht am Backend (Muster `z-image`/`z-video`/
+`z-music`). Pi selbst wird **nicht** mitgeliefert und von keinem Installer
+installiert: es bringt eine Node-Laufzeit mit, die das Framework sonst nicht braucht.
+
+### 29.2 Zugriffsstufen
+
+`config.json` → `pi_agent_access`: `off` | `read` | `write`. **Fehlender Schlüssel =
+`off`** — eine neue Fähigkeit schaltet sich nicht von selbst ein. Der Installer fragt
+sie ab; `make_server.ps1` setzt sie explizit auf `off` (ein Mehrbenutzer-Server ist
+nicht der Ort für einen Agenten-Harness).
+
+Durchsetzung: Registry `VERBEN` (`verb → (stufe, funktion, kurz)`), Vergleich über
+`_STUFEN_RANG` in `main()`. Exit-Codes `0` ok · `2` Aufruffehler · `3` Zugriff
+gesperrt · `4` Framework nicht erreichbar · `5` sonstiger Fehler. Die Stufe wird bei
+**jedem** Aufruf aus `config.json` gelesen — eine Änderung wirkt ohne Neustart.
+
+| Stufe | Verben |
+|---|---|
+| `read` | `status`, `modelle`, `agenten`, `projekte`, `plaene`, `rag-sammlungen`, `rag-dokumente`, `todo-baum`, `todo-suche`, `todo-agenda`, `todo-frage`, `gespraeche`, `gespraech-suche`, `patente-projekte`, `varianten`, `recherche`, `rechne`, `werkstoff`, `einheit` |
+| `write` | zusätzlich `projekt-neu`, `todo-neu`, `todo-setzen`, `rag-neu`, `rag-notiz` |
+
+`recherche` nutzt SSE `/api/deepresearch` und persistiert nichts. `rechne`,
+`werkstoff` und `einheit` laufen **ohne HTTP**: sie importieren `tools/mechanik.py`,
+`tools/materials.py` und `tools/engineering.py` direkt (deterministisch, kein Modell,
+kein Netz). Alles andere geht über die HTTP-API, damit die Gates des Frameworks
+greifen — die CLI importiert bewusst **nicht** `core` (Import-Nebenwirkungen).
+
+**In keiner Stufe vorhanden:** Löschen, Mail-/Angebots-/Rechnungsversand, Patente
+einreichen, Profil/Einstellungen ändern, Python ausführen, To-Do
+zurücksetzen/importieren. Die Verben existieren nicht; es gibt keinen Umweg über die
+CLI.
+
+### 29.3 Zwei Grenzen, die man nicht überverkaufen darf
+
+1. **`pi_agent_access` ist eine Leitplanke, keine Sicherheitsgrenze.** Die CLI hält
+   sich daran, verhindert aber nicht, dass irgendein Prozess auf demselben Rechner
+   die lokale HTTP-API direkt anspricht — das konnte er vorher auch. Pi hat
+   ausdrücklich **kein** Rechtesystem und empfiehlt für harte Grenzen Container.
+   Eine echte Grenze bräuchte Authentifizierung vor dem Framework.
+2. **Der Geheim-Modus endet an Pi.** `_secret_local()` erzwingt lokale Modelle
+   *innerhalb* des Frameworks, und die CLI umgeht das nicht. Welches Modell **Pi
+   selbst** benutzt, liegt außerhalb. Soll alles lokal bleiben, muss Pis Anbieter auf
+   den lokalen OpenAI-kompatiblen Server zeigen (llama.cpp / LM Studio, siehe §12)
+   und die CLI der einzige Datenpfad sein.
+
+### 29.4 Abwählbare Fähigkeiten: Bild und Video
+
+Zwei Config-Flags, beim Installieren abgefragt, Default `true`:
+
+| Flag | Wirkung |
+|---|---|
+| `enable_image_generation` | `_image_model()` liefert leer |
+| `enable_video_generation` | `_video_model()` liefert leer; der Installer ergänzt außerdem `video` in `hidden_tabs_default` |
+
+**Chokepoint-Prinzip wie beim Geheim-Modus:** statt vieler Einzelprüfungen greift
+der Riegel in den beiden Gettern. Liefern die leer, entfällt die Fähigkeit auf einen
+Schlag — die Profil-Auswahl bietet nichts an, `/api/image/config` meldet „Aus", das
+Assistent-Modus-Werkzeug `generate_image` wird nicht in `active_tools` aufgenommen,
+`[bild]`-Workflow-Schritte und Präsentationsbilder entfallen.
+
+**Zusätzlich ein harter 403-Riegel** am Anfang von `_generate_image_core`,
+`_edit_image_core` und `_generate_video_core`: ein Aufrufer kann ein Modell
+*explizit* mitschicken (`model = str(model or "").strip() or _image_model()`) und
+würde den Chokepoint sonst umgehen. `_upscale_image_core` braucht keinen Riegel — es
+fällt ohne erreichbare Brücke ohnehin auf Lanczos (reines Pillow) zurück.
+
+> Beim Hinzufügen einer weiteren abwählbaren Fähigkeit: Flag in `core.py` neben
+> `ALLOW_PYTHON_EXEC`, in `__all__` aufnehmen, **Chokepoint** in den zentralen Getter
+> legen und die Kerne zusätzlich hart abriegeln. Nicht an den Endpoints einzeln
+> prüfen — das wird beim nächsten Feature vergessen.
