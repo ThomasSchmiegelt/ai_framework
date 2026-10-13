@@ -161,6 +161,30 @@ const Profile = (() => {
     }
   }
 
+  // Installations-Schalter aus config.json (via /api/profile nur zur Anzeige
+  // mitgeliefert). Read-only: ein PUT auf /api/profile ignoriert sie, weil sie
+  // zur Installation gehören und nicht ins Nutzerprofil.
+  const _PI_TEXT = {
+    off:   '\u2014 aus (ein externer Agent kommt nicht an das Framework)',
+    read:  '\u2713 nur lesen und rechnen',
+    write: '\u2713 lesen, anlegen und ändern',
+  };
+
+  function _fillInstallFlags() {
+    const set = (id, txt, gut) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = txt;
+      el.style.color = gut ? 'var(--text)' : 'var(--text-muted)';
+    };
+    const img = _data.enable_image_generation !== false;
+    const vid = _data.enable_video_generation !== false;
+    const pi = String(_data.pi_agent_access || 'off');
+    set('flag-image', img ? '\u2713 aktiv' : '\u2014 beim Installieren abgewählt', img);
+    set('flag-video', vid ? '\u2713 aktiv' : '\u2014 beim Installieren abgewählt', vid);
+    set('flag-pi', _PI_TEXT[pi] || _PI_TEXT.off, pi !== 'off');
+  }
+
   // Welche Tabs ueberhaupt ausblendbar sind, steht AUSSCHLIESSLICH in den
   // data-tabs-Attributen der Checkboxen in index.html (#profile-tab-vis).
   // Vorher gab es hier eine zweite, kuerzere Liste — „Varianten" und „To-Do"
@@ -334,6 +358,10 @@ const Profile = (() => {
     _fillVideoSelect();
     _loadProviders();
     _refreshPreviews();
+    // Installations-Schalter anzeigen (read-only, Quelle ist config.json). Ohne
+    // diese Anzeige wüsste der Nutzer nicht, dass es die Pi-Anbindung gibt bzw.
+    // warum Bild/Video fehlen.
+    _fillInstallFlags();
     // Tab-Sichtbarkeit: ein Häkchen kann mehrere Tabs steuern (data-tabs="ide,mathe").
     // Angehakt = alle zugehörigen Tabs sichtbar (keiner ausgeblendet).
     const hiddenTabs = _data.hidden_tabs || [];

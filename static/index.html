@@ -3553,6 +3553,25 @@
     </div>
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
+    <h4 style="margin-bottom:8px">🔧 Installation</h4>
+    <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
+      Diese drei Schalter werden beim <strong>Installieren</strong> festgelegt und stehen in
+      der <code>config.json</code> im Programmordner — nicht im Profil. Hier nur zur Ansicht.
+    </p>
+    <div id="profile-install-flags" style="font-size:12.5px;display:flex;flex-direction:column;gap:4px">
+      <div>Bildgenerierung: <strong id="flag-image">—</strong></div>
+      <div>Videoerzeugung: <strong id="flag-video">—</strong></div>
+      <div>Pi-Anbindung (externer Agent): <strong id="flag-pi">—</strong></div>
+    </div>
+    <p class="planner-muted" style="font-size:11.5px;margin:8px 0 0">
+      Ändern: Installer erneut laufen lassen oder in <code>config.json</code>
+      <code>enable_image_generation</code>, <code>enable_video_generation</code> bzw.
+      <code>pi_agent_access</code> (<code>off</code>/<code>read</code>/<code>write</code>) setzen.
+      Bild und Video wirken nach einem Neustart, die Pi-Stufe sofort.
+      Anleitung: <code>pi-agent/README.md</code>.
+    </p>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0" />
     <h4 style="margin-bottom:8px">📑 Sichtbare Tabs</h4>
     <p class="planner-muted" style="font-size:11.5px;margin:0 0 10px">
       Diese Tabs sind optional und können ausgeblendet werden. Chat und Canvas
@@ -3923,7 +3942,7 @@
 <script src="/js/doc_generator.js?v=20260610edit"></script>
 <script src="/js/refine.js?v=20260605"></script>
 <script src="/js/mail.js?v=20260604"></script>
-<script src="/js/profile.js?v=20261013tabvis"></script>
+<script src="/js/profile.js?v=20261013piflags"></script>
 <script src="/js/projects.js?v=20260825links"></script>
 <script src="/js/planner.js?v=20260817workflow"></script>
 <script src="/js/matrix_research.js?v=20260828import"></script>

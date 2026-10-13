@@ -61,6 +61,13 @@ async def get_profile():
     p["app_version"] = APP_VERSION
     # Kontextfenster-Default ans Frontend spiegeln, falls noch nichts gewählt wurde.
     p.setdefault("chat_num_ctx", CHAT_NUM_CTX)
+    # Installations-Schalter NUR ZUR ANZEIGE mitgeben (sie stehen in config.json und
+    # werden beim Installieren gesetzt, nicht im Profil). Ohne das wüsste der Nutzer
+    # in der Oberfläche nicht, dass es die Pi-Anbindung gibt bzw. warum Bild/Video
+    # fehlen. Ein PUT auf /api/profile ignoriert diese Felder.
+    p["pi_agent_access"] = _pi_agent_access()   # live: die CLI liest auch live
+    p["enable_image_generation"] = ENABLE_IMAGE_GEN
+    p["enable_video_generation"] = ENABLE_VIDEO_GEN
     return p
 
 

@@ -1045,6 +1045,33 @@ die Kommandozeile), kann er dieses Framework als Werkzeug verwenden: Pi plant un
 entscheidet, das Framework rechnet und verwaltet. Pi wird **nicht** mitgeliefert und
 von keinem Installer installiert.
 
+**Pi installieren und verbinden — der einfache Weg**
+
+Im Programmordner:
+
+```
+pi-agent\install_pi.ps1      (Windows)
+./pi-agent/install_pi.sh      (Linux)
+```
+
+Das Skript prüft, ob Pi schon da ist, installiert es sonst auf Rückfrage (es
+zeigt den Befehl vorher an), legt die Beschreibung in dein Pi-Projekt und fragt
+die Zugriffsstufe ab. Pi selbst braucht **Node.js 22.19 oder neuer**; das
+Framework braucht kein Node — das kommt nur für Pi dazu.
+
+Von Hand ginge es so: Pi über `curl -fsSL https://pi.dev/install.sh | sh` (Linux)
+bzw. `powershell -c "irm https://pi.dev/install.ps1 | iex"` (Windows)
+installieren, dann die Schritte unten.
+
+**Wo finde ich Pi im Framework?**
+
+Pi ist ein **Kommandozeilen-Werkzeug** und hat keine eigene Oberfläche — es gibt
+also keinen Tab dafür. Was du in der Anwendung siehst, ist die eingestellte
+Zugriffsstufe: **Profil → 🔧 Installation**. Dort steht, ob Bildgenerierung,
+Videoerzeugung und die Pi-Anbindung aktiv sind und wo man das ändert. Gearbeitet
+wird mit Pi im Terminal (`pi`), und Pi greift von dort über
+`pi-agent/framework_cli.py` auf das Framework zu.
+
 **Einrichten**
 
 1. Zugriffsstufe setzen — beim Installieren abgefragt, sonst in der `config.json`

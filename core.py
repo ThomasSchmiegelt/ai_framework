@@ -70,6 +70,23 @@ ENABLE_VIDEO_GEN: bool = bool(_CONFIG.get("enable_video_generation", True))
 # CLI selbst; hier nur als eine Quelle und fuer die Anzeige.
 _pi_acc = str(_CONFIG.get("pi_agent_access", "off") or "off").strip().lower()
 PI_AGENT_ACCESS: str = _pi_acc if _pi_acc in ("off", "read", "write") else "off"
+
+
+def _pi_agent_access() -> str:
+    """Pi-Zugriffsstufe **live** aus config.json lesen.
+
+    Anders als ENABLE_IMAGE_GEN/ENABLE_VIDEO_GEN (die beim Import feststehen und
+    daher erst nach einem Neustart wirken) liest die CLI diesen Wert bei jedem
+    Aufruf neu. Die Anzeige im Profil muss deshalb ebenfalls live lesen, sonst
+    zeigt sie den Stand vom Programmstart und widerspricht der CLI.
+    Fällt auf die Import-Konstante zurück, wenn die Datei unlesbar ist.
+    """
+    try:
+        raw = json.loads(_CONFIG_FILE.read_text(encoding="utf-8-sig"))
+        v = str(raw.get("pi_agent_access", "off") or "off").strip().lower()
+        return v if v in ("off", "read", "write") else "off"
+    except Exception:
+        return PI_AGENT_ACCESS
 # Versionsnummer des Frameworks. Quelle ist die Datei VERSION im Programmordner:
 # sie gehört zum Programmcode und wird vom Updater mitgetauscht, während
 # config.json bewusst unberührt bleibt (Nutzerkonfiguration). Stünde die Version
@@ -3146,6 +3163,7 @@ __all__ = [
     '_CONFIG_FILE', '_CONFIG', 'OLLAMA_BASE', 'ALLOWED_MODELS',
     'DEFAULT_MODEL', 'CHAT_NUM_CTX', '_ALLOWED_NUM_CTX', 'KEEP_ALIVE',
     'ALLOW_PYTHON_EXEC', 'ENABLE_IMAGE_GEN', 'ENABLE_VIDEO_GEN', 'PI_AGENT_ACCESS',
+    '_pi_agent_access',
     '_read_version', 'APP_VERSION', '_MODEL_PLACEHOLDERS',
     '_pick_model', '_raw_data_dir', 'DATA_DIR', 'UPLOADS_DIR',
     'CONVERSATIONS_DIR', 'AGENTS_DIR', 'REPORTS_DIR', 'PLANS_DIR',

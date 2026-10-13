@@ -43,25 +43,63 @@ ausdrücklich **kein** Rechtesystem und empfiehlt für harte Grenzen einen
 Container. Wer eine echte Grenze braucht, setzt das Framework hinter
 Authentifizierung oder Pi in einen Container.
 
-## Einrichten
+## Einrichten — der schnelle Weg
 
-1. **Framework starten** (`start.bat` bzw. `start.sh`) — die CLI spricht die
+```powershell
+# Windows
+.\pi-agent\install_pi.ps1
+```
+```bash
+# Linux / Git Bash
+./pi-agent/install_pi.sh
+```
+
+Das Skript prüft, ob Pi schon installiert ist, ruft sonst **nach Rückfrage und mit
+sichtbarem Befehl** den offiziellen Installer von pi.dev auf, legt
+`skills/framework-cli.md` im gewählten Pi-Projekt unter `.agents/skills/` ab,
+setzt `pi_agent_access` und macht am Ende eine Probe (`status`).
+
+Nützliche Schalter: `-NurSkill` / `--nur-skill` (Pi nicht anfassen, nur
+verdrahten), `-Projekt`/`--projekt <pfad>`, `-Zugriff`/`--zugriff read|write|off`.
+
+Pi **konfigurieren** (Modell/Anbieter) macht das Skript nicht — dafür `pi`
+starten und dort `/login`.
+
+## Einrichten — von Hand
+
+1. **Pi installieren** (einer dieser Wege):
+
+   ```bash
+   curl -fsSL https://pi.dev/install.sh | sh                              # Linux/macOS
+   ```
+   ```powershell
+   powershell -c "irm https://pi.dev/install.ps1 | iex"                   # Windows
+   ```
+   ```bash
+   npm install -g --ignore-scripts @earendil-works/pi-coding-agent        # npm
+   nix run github:earendil-works/pi/stable                                # Nix
+   ```
+
+   Pi braucht **Node.js ≥ 22.19**. Das Framework selbst braucht kein Node — es
+   kommt nur für Pi dazu.
+
+2. **Framework starten** (`start.bat` bzw. `start.sh`) — die CLI spricht die
    laufende Anwendung über die in `config.json` eingetragene Adresse an.
 
-2. **Zugriffsstufe setzen**, falls nicht beim Installieren gewählt:
+3. **Zugriffsstufe setzen**, falls nicht beim Installieren gewählt:
 
    ```json
    { "pi_agent_access": "read" }
    ```
 
-3. **Prüfen:**
+4. **Prüfen:**
 
    ```
    python pi-agent/framework_cli.py status
    python pi-agent/framework_cli.py --hilfe
    ```
 
-4. **Pi die Beschreibung geben.** Kopiere oder verlinke
+5. **Pi die Beschreibung geben.** Kopiere oder verlinke
    `pi-agent/skills/framework-cli.md` in den Skills-Ordner deines Pi-Projekts
    (bei Pi üblicherweise `.agents/skills/`):
 
@@ -74,6 +112,14 @@ Authentifizierung oder Pi in einen Container.
    # Linux
    ln -s "$(pwd)/pi-agent/skills/framework-cli.md" <pi-projekt>/.agents/skills/
    ```
+
+## Wo ist Pi in der Oberfläche?
+
+Nirgends — und das ist Absicht. Pi ist ein **Terminal-Werkzeug** und hat keine
+Oberfläche im Framework, also auch keinen Tab. Sichtbar ist in der Anwendung nur
+die eingestellte Zugriffsstufe: **Profil → 🔧 Installation**. Dort steht, ob die
+Pi-Anbindung aktiv ist (und ob Bild-/Videoerzeugung aktiv sind) und wo man das
+ändert. Gearbeitet wird mit `pi` im Terminal; Pi ruft von dort diese CLI auf.
 
 ## Verben
 
@@ -122,6 +168,7 @@ einzige Weg sein, auf dem Pi an die Daten kommt.
 ## Lizenz
 
 Dieser Ordner: MIT, wie das Framework. Pi selbst ist MIT (Earendil Inc.), wird
-aber **nicht** mitgeliefert und nicht von den Installern des Frameworks
-installiert — es bringt eine Node.js-Laufzeit mit, die das Framework sonst nicht
-braucht.
+aber **nicht mitgeliefert**: die Haupt-Installer des Frameworks rühren es nicht
+an, weil es eine Node.js-Laufzeit mitbringt, die das Framework sonst nicht
+braucht. `install_pi.ps1`/`.sh` in diesem Ordner ruft auf Wunsch den offiziellen
+Installer von pi.dev auf — sichtbar und nach Rückfrage, nichts im Hintergrund.

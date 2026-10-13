@@ -1,4 +1,4 @@
-<#
+﻿<#
     AI_Framework_Thomas  -  ACMP-Updatepaket bauen
     ==============================================
 
@@ -55,13 +55,16 @@ New-Item -ItemType Directory -Path $Out -Force | Out-Null
 # Bewusst eine Positivliste: alles Nicht-Aufgefuehrte bleibt draussen. So kann
 # kein Ollama-Ordner, kein venv und keine Nutzerdatei versehentlich mitwandern.
 $rootFiles = @(
-    'main.py', 'core.py', 'db.py', 'requirements.txt', 'test_chat.py', 'VERSION',
+    'main.py', 'core.py', 'db.py', 'requirements.txt', 'VERSION',
+    'test_chat.py', 'test_boot.py', 'test_mechanik.py',
     'LICENSE', 'update.bat',
     'start.bat', 'start_server.bat', 'install.bat', 'install.ps1', 'install.sh',
     'start.sh', 'uninstall.bat', 'uninstall.ps1', 'diagnose.bat', 'test_chat.bat'
 )
 $rootGlobs = @('*.md')
-$dirs      = @('static', 'tools', 'routers', 'docs', 'scripts', 'samples', 'bilder', 'defaults')
+# 'pi-agent' gehoert dazu: es ist Programmcode (CLI + Skill-Beschreibung), keine
+# Nutzerdatei, und ohne den Ordner fehlt die Pi-Anbindung im Updatepaket.
+$dirs      = @('static', 'tools', 'routers', 'docs', 'scripts', 'samples', 'bilder', 'defaults', 'pi-agent')
 
 foreach ($f in $rootFiles) {
     $p = Join-Path $src $f
