@@ -1,0 +1,11 @@
+# Qwen-Image-2.1 — lokale Bildgenerierung (diffusers)
+# PyTorch/TorchVision werden vom Installer installiert (CUDA oder CPU).
+# diffusers muss QwenImagePipeline enthalten (>= 0.34.0); bei Import-Fehlern:
+#   pip install -U diffusers
+diffusers>=0.34.0
+transformers
+accelerate
+safetensors
+numpy<2.3
+Pillow
+huggingface_hub

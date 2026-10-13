@@ -3247,10 +3247,15 @@
           deiner unter <strong>☁ KI-Anbieter</strong> eingetragenen Anbieter (z. B.
           <code>dall-e-3</code>, <code>gpt-image-1</code> oder <code>z-image-turbo</code>). Den
           <strong>Anbieter selbst (Base-URL + API-Schlüssel) trägst du dort ein</strong> — hier wählst
-          du nur das Modell. Das obige URL-Feld ist <strong>ausschließlich</strong> für den
-          <strong>lokalen</strong> Stable-Diffusion-WebUI-Server (AUTOMATIC1111/Forge, mit
-          <code>--api</code> gestartet). Im <strong>Geheim-Modus</strong> sind API-Modelle gesperrt
-          (nur lokal). Nutzung im Chat per 🎨-Haken oder <code>/bild</code> / <code>/bildhelp</code>.</span>
+          du nur das Modell. "Lokal ·" nutzt eigene, in einen separaten Ordner installierte Modelle:
+          <strong>Z-Image</strong> (Ordner <code>z-image</code>, Port 7860) bzw.
+          <strong>Qwen-Image-2.1</strong> (Ordner <code>qwen-image</code>, Port 7861); die
+          Brücke kann sich das Framework bei Bedarf auch selbst starten (Auto-Start im Pro­fil).
+          Alternativ beliebiger <strong>AUTOMATIC1111/Forge</strong>-SD-WebUI-Server (mit
+          <code>--api</code> gestartet) unter der angegebenen URL. Der Port muss zur gewählten
+          Brücke passen (7860 = Z-Image, 7861 = Qwen). Im <strong>Geheim-Modus</strong> sind
+          API-Modelle gesperrt (nur lokal). Nutzung im Chat per 🎨-Haken oder <code>/bild</code>
+          / <code>/bildhelp</code>.</span>
       </div>
       <div class="form-group">
         <label>🎬 Videoerzeugung <span class="planner-muted" style="font-size:11px">Video aus Bildern/Text (lokal)</span></label>

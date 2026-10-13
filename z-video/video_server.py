@@ -33,6 +33,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -52,6 +53,35 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _GEN = os.path.join(_HERE, "generate_video.py")
 _lock = threading.Lock()   # eine Erzeugung zur Zeit (eine GPU)
 _cfg = None                # argparse-Namespace
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# Zeilen, die reine tqdm-Fortschrittsbalken sind (die frueher die ganze Fehlermeldung
+# fuellten und die echte Ursache verdeckten).
+_PROGRESS = re.compile(r"(\d+%\|)|(\d+/\d+ \[)|(it/s\])|(s/it\])|(Loading checkpoint shards)")
+
+
+def _clean_error(stderr, stdout, returncode):
+    """Aus stderr/stdout eine *aussagekraeftige* Fehlermeldung bauen: ANSI-Codes und
+    Carriage-Returns (tqdm ueberschreibt Zeilen mit \\r) entfernen, reine Fortschritts-
+    balken herauswerfen und die letzten echten Meldungszeilen behalten. Erkennt zudem
+    einen harten Kill (negativer Exitcode = Signal) bzw. einen Abbruch ohne Traceback
+    (typisch fuer RAM-/VRAM-Mangel) und haengt einen Hinweis an."""
+    raw = (stderr or "") + "\n" + (stdout or "")
+    raw = _ANSI.sub("", raw).replace("\r", "\n")
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    real = [ln for ln in lines if not _PROGRESS.search(ln)]
+    tail = real[-6:] if real else []
+    msg = " | ".join(tail)
+    killed = returncode is not None and returncode < 0
+    # Kein echter Fehlertext (nur Fortschritt) ODER hart gekillt -> Speicher-Hinweis.
+    if killed or not tail:
+        hint = ("Prozess unerwartet beendet (Exit %s) - meist zu wenig Arbeitsspeicher "
+                "(RAM) oder VRAM beim Laden des Modells. Kleineres Modell/Aufloesung "
+                "waehlen, 'Speicher sparen' aktivieren oder RAM/Auslagerungsdatei "
+                "vergroessern." % returncode)
+        msg = (msg + " | " + hint) if msg else hint
+    return msg or f"Exit {returncode}"
 
 
 def _decode(b):
@@ -112,8 +142,7 @@ def _run_generate(mode, prompt, negative, first_b64, last_b64,
                 raise RuntimeError(f"Zeitueberschreitung nach {to}s "
                                    f"(Modell laedt/erzeugt zu lange)")
             if p.returncode != 0 or not os.path.exists(out):
-                tail = (p.stderr or p.stdout or "").strip().splitlines()
-                msg = " | ".join(t.strip() for t in tail[-4:]) or f"Exit {p.returncode}"
+                msg = _clean_error(p.stderr, p.stdout, p.returncode)
                 raise RuntimeError("Erzeugung fehlgeschlagen: " + msg)
             with open(out, "rb") as f:
                 data = f.read()
